@@ -112,12 +112,15 @@ public sealed partial class SceneCompositor : IDisposable
         }
     }
 
-    public void ClearHandTips()
+    public void ClearHandTips(bool resetInput = true)
     {
         lock (_gate)
         {
             _handTips = [];
-            _boardSession.ResetInput(DateTimeOffset.UtcNow);
+            _handFrameTime = DateTimeOffset.MinValue;
+            // A visual timeout must not reject a still-fresh inference that was
+            // already in flight. Camera/calibration resets still block old input.
+            if (resetInput) _boardSession.ResetInput(DateTimeOffset.UtcNow);
         }
     }
 
@@ -143,8 +146,6 @@ public sealed partial class SceneCompositor : IDisposable
                         {
                             projectedTips.Add(new ProjectedHandCursor(
                                 new Vector2((float)point.X, (float)point.Y), cursor.ExecuteUntil));
-                            if (!_boardSetup && _calibrationTarget < 0 && _boardSurfaceMap is not null)
-                                boardPoint = _boardSurfaceMap.InverseTransform(point);
                         }
                     }
                 }
@@ -153,10 +154,29 @@ public sealed partial class SceneCompositor : IDisposable
                     // A fingertip outside the calibrated plane can lie on its
                     // projective horizon; it has no finite projector position.
                 }
+                // The fingertip still follows the physical hand. Button selection
+                // uses the open pointing position while the finger curls to pinch.
+                // Map it independently, even if the current tip has left the board.
+                var selection = cursor.SelectionPosition ?? tip;
+                try
+                {
+                    if (!_boardSetup && _calibrationTarget < 0 && _boardMediaClip is not null &&
+                        _boardCameraMap is not null && _boardSurfaceMap is not null &&
+                        double.IsFinite(selection.X) && double.IsFinite(selection.Y))
+                    {
+                        var point = _boardCameraMap.Transform(new Point2(selection.X, selection.Y));
+                        boardPoint = _boardSurfaceMap.InverseTransform(point);
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // Invalid or cancelled selection points still consume their
+                    // event below, so a held pinch cannot click a later target.
+                }
                 // Even a pinch outside the board is consumed, so moving a held
                 // red cursor onto a button cannot turn it into a delayed click.
                 boardSamples.Add(new BoardHandSample(boardPoint.X, boardPoint.Y,
-                    cursor.ExecuteUntil, cursor.ExecuteEventId));
+                    cursor.ExecuteUntil, cursor.ExecuteEventId, cursor.SelectionFrameTime));
             }
             _handTips = projectedTips.ToArray();
             _handFrameTime = frameTime;

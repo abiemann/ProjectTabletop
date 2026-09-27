@@ -7,9 +7,13 @@ CheckIndependentHands();
 CheckFreshness();
 CheckResetAndExternalNavigation();
 CheckPhotoCopyNavigation();
+CheckAnchoredSelection();
+CheckAnchorFreshnessAndConsumption();
+CheckAnchorNavigationAndReset();
 CheckPhotoCopySpiral();
 Console.WriteLine("Board interaction verification passed: menu/navigation, shared hit targets, off-target consumption, " +
-    "held-pinch suppression, dropouts, independent hands, freshness, reset, Photo Copy restarts and dense full-board inward spiral placement.");
+    "held-pinch suppression, dropouts, independent hands, freshness, anchored selection and navigation barriers, " +
+    "reset, Photo Copy restarts and dense full-board inward spiral placement.");
 
 static void CheckMenuAndNavigation()
 {
@@ -166,6 +170,114 @@ static void CheckPhotoCopyNavigation()
     Require(session.Revision == 3, "Resetting camera input restarted the application.");
     session.ShowMenu(Time(340));
     Require(session.Screen == BoardScreen.Menu && session.Revision == 4, "External menu navigation did not advance revision.");
+}
+
+static void CheckAnchoredSelection()
+{
+    var session = new BoardSession();
+    BoardButton photo = session.Buttons[1];
+    // The compositor supplies the open-hand selection point even when the
+    // current fingertip curls outside the target during a pinch.
+    BoardHandSample anchored = Over(photo) with { SelectionFrameTime = Time(100) };
+    Require(Update(session, 140, anchored) is null && session.HoveredButtonIds.SequenceEqual([photo.Id]),
+        "The closing hand lost the highlight at its anchored selection point.");
+    Require(Update(session, 200) is null && session.HoveredButtonIds.Count == 0,
+        "A missing hand retained an anchored highlight.");
+    Require(Update(session, 260, anchored with { ExecuteEventId = 1, ExecuteUntil = Time(1260) })?.Current == BoardScreen.PhotoCopy,
+        "A recent selection anchor could not launch Photo Copy after a brief dropout.");
+
+    session = new BoardSession();
+    BoardHandSample offTarget = new(.5, .5, Time(1200), 1, Time(100));
+    Require(Update(session, 200, offTarget) is null && session.HoveredButtonIds.Count == 0,
+        "An off-target anchor navigated or highlighted a target.");
+    Require(Update(session, 240, Over(photo, 1, 200) with { SelectionFrameTime = Time(220) }) is null,
+        "An off-target anchored pinch drifted onto a button and executed.");
+
+    // Each sample carries its own anchor; neither ordering nor an off-target
+    // pinch can transfer another hand's selection or swallow its fresh event.
+    session = new BoardSession();
+    BoardHandSample other = new(.5, .5, DateTimeOffset.MinValue, 0, Time(100));
+    Update(session, 140, anchored, other);
+    Require(Update(session, 260,
+        other with { ExecuteEventId = 1, ExecuteUntil = Time(1260) },
+        anchored with { ExecuteEventId = 2, ExecuteUntil = Time(1260) })?.Current == BoardScreen.PhotoCopy,
+        "Reordering two hands lost the pinching hand's independent selection anchor.");
+}
+
+static void CheckAnchorFreshnessAndConsumption()
+{
+    foreach ((int anchorTime, int frameTime, int now) in new[]
+        { (0, 751, 751), (201, 200, 200), (225, 200, 250) })
+    {
+        var session = new BoardSession();
+        BoardButton photo = session.Buttons[1];
+        BoardHandSample invalid = Over(photo, 1, now) with { SelectionFrameTime = Time(anchorTime) };
+        Require(session.Update([invalid], Time(frameTime), Time(now)) is null && session.HoveredButtonIds.Count == 0,
+            "An expired or future selection anchor navigated or hovered a target.");
+        Require(Update(session, now + 40,
+            Over(photo, 1, now) with { SelectionFrameTime = Time(now + 20) }) is null,
+            "An event rejected for its anchor replayed after the anchor became valid.");
+        Require(Update(session, now + 80,
+            Over(photo, 2, now + 80) with { SelectionFrameTime = Time(now + 60) })?.Current == BoardScreen.PhotoCopy,
+            "Rejecting an invalid anchor prevented a later fresh pinch.");
+    }
+
+    var boundary = new BoardSession();
+    // Inference latency does not consume the source-time selection window;
+    // frame freshness still independently requires an observation under 350 ms.
+    Require(boundary.Update([Over(boundary.Buttons[1], 1, 1000) with { SelectionFrameTime = Time(0) }],
+        Time(750), Time(1000))?.Current == BoardScreen.PhotoCopy,
+        "A valid 750 ms anchor was expired by inference latency.");
+}
+
+static void CheckAnchorNavigationAndReset()
+{
+    var session = new BoardSession();
+    Update(session, 200, Over(session.Buttons[1], 1, 200) with { SelectionFrameTime = Time(100) });
+    BoardButton back = session.Buttons[0];
+    Require(Update(session, 300, Over(back, 2, 300) with { SelectionFrameTime = Time(150) }) is null &&
+        session.HoveredButtonIds.Count == 0,
+        "Another hand's pre-navigation anchor activated or highlighted the new Back button.");
+    Require(Update(session, 340, Over(back, 2, 300) with { SelectionFrameTime = Time(320) }) is null,
+        "A consumed pre-navigation anchored event replayed with a new anchor.");
+    Require(Update(session, 380, Over(back, 3, 380) with { SelectionFrameTime = Time(350) })?.Current == BoardScreen.Menu,
+        "A fresh anchor could not return to the menu.");
+    Require(Update(session, 420, Over(session.Buttons[1], 4, 420) with { SelectionFrameTime = Time(370) }) is null,
+        "A pre-Back anchor survived the return to menu.");
+
+    // Every explicit screen change invalidates existing anchors, including
+    // showing the same application and returning from media.
+    Action<BoardSession, DateTimeOffset>[] show =
+    [
+        (board, time) => board.ShowMenu(time),
+        (board, time) => board.ShowHandTrackingTest(time),
+        (board, time) => board.ShowPhotoCopy(time),
+        (board, time) => { board.ShowMedia(time); board.ShowMenu(time); }
+    ];
+    foreach (var navigate in show)
+    {
+        session = new BoardSession();
+        navigate(session, Time(200));
+        BoardButton target = session.Buttons[0];
+        Require(Update(session, 300, Over(target, 1, 300) with { SelectionFrameTime = Time(200) }) is null &&
+            session.HoveredButtonIds.Count == 0,
+            "Explicit navigation retained an old selection anchor.");
+        Require(Update(session, 400, Over(target, 2, 400) with { SelectionFrameTime = Time(350) }) is not null,
+            "Explicit navigation blocked a new selection anchor.");
+    }
+
+    session = new BoardSession();
+    session.ShowPhotoCopy(Time(100));
+    BoardButton captureAgain = session.Buttons.Single(button => button.Id == "capture-again");
+    Require(Update(session, 200, Over(captureAgain, 1, 200) with { SelectionFrameTime = Time(150) }) is
+        { Previous: BoardScreen.PhotoCopy, Current: BoardScreen.PhotoCopy }, "An anchored Capture again failed.");
+    Require(Update(session, 260, Over(captureAgain, 2, 260) with { SelectionFrameTime = Time(180) }) is null,
+        "Capture again retained another hand's anchor across the restart.");
+    session.ResetInput(Time(300));
+    Require(Update(session, 350, Over(captureAgain, 3, 350) with { SelectionFrameTime = Time(280) }) is null &&
+        session.HoveredButtonIds.Count == 0, "Camera/calibration reset retained an old selection anchor.");
+    Require(Update(session, 420, Over(captureAgain, 4, 420) with { SelectionFrameTime = Time(380) }) is not null,
+        "Camera/calibration reset blocked a fresh selection anchor.");
 }
 
 static void CheckPhotoCopySpiral()

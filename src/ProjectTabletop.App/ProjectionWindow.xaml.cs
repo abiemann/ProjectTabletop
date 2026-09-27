@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
@@ -16,13 +18,26 @@ public sealed partial class ProjectionWindow : Window
     private Microsoft.UI.DisplayId? _targetDisplayId;
     private WindowId? _controlWindowId;
     private readonly SemaphoreSlim _placementOperation = new(1, 1);
+    private readonly DisplayAreaWatcher _displayWatcher;
     private bool _closed;
 
     public ProjectionWindow(SceneCompositor scene)
     {
         _scene = scene;
         InitializeComponent();
-        Closed += (_, _) => _closed = true;
+        _displayWatcher = DisplayArea.CreateWatcher();
+        _displayWatcher.Removed += (_, _) => QueuePlacementCheck();
+        _displayWatcher.Updated += (_, _) => QueuePlacementCheck();
+        _displayWatcher.Start();
+        AppWindow.Changed += (_, args) =>
+        {
+            if (args.DidPositionChange || args.DidSizeChange) QueuePlacementCheck();
+        };
+        Closed += (_, _) =>
+        {
+            _closed = true;
+            _displayWatcher.Stop();
+        };
         Content.KeyDown += (_, args) =>
         {
             if (args.Key != VirtualKey.Escape) return;
@@ -32,6 +47,9 @@ public sealed partial class ProjectionWindow : Window
     }
 
     public bool IsFullScreen => AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen;
+
+    public bool IsAlwaysOnTop => !_closed &&
+        (GetWindowLongPtr(WinRT.Interop.WindowNative.GetWindowHandle(this), -20).ToInt64() & 0x8) != 0;
 
     public string? ActualDisplayId =>
         DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.None)?.DisplayId.Value
@@ -64,6 +82,7 @@ public sealed partial class ProjectionWindow : Window
         {
             ThrowIfClosed();
             AppWindow.Hide();
+            SetAlwaysOnTop(false);
             var target = ResolveTargetDisplay();
             AppWindow.SetPresenter(AppWindowPresenterKind.Default);
             await WaitUntilAsync(() => AppWindow.Presenter.Kind == AppWindowPresenterKind.Overlapped,
@@ -82,6 +101,10 @@ public sealed partial class ProjectionWindow : Window
             await WaitUntilAsync(() => AppWindow.IsVisible && AppWindow.Presenter.Kind == requested,
                 fullScreen ? "enter fullscreen on the projector" : "restore windowed output");
             VerifyPlacement();
+            // Keep ordinary laptop window edges behind the projector without
+            // activating it or changing its verified bounds. Windowed output
+            // returns to ordinary stacking order.
+            SetAlwaysOnTop(fullScreen);
         }
         catch
         {
@@ -115,6 +138,37 @@ public sealed partial class ProjectionWindow : Window
     {
         if (_closed) throw new InvalidOperationException("The projection window was closed.");
     }
+
+    private void QueuePlacementCheck() => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (_closed || !AppWindow.IsVisible || _placementOperation.CurrentCount == 0) return;
+        try { VerifyPlacement(); }
+        catch (InvalidOperationException)
+        {
+            // Windows can move a window to the laptop when a display disappears.
+            // Closing also invalidates board alignment through the normal handler.
+            AppWindow.Hide();
+            Close();
+        }
+    });
+
+    private void SetAlwaysOnTop(bool enabled)
+    {
+        const uint noSizeMoveActivateOrOwnerOrder = 0x0001 | 0x0002 | 0x0010 | 0x0200;
+        if (!SetWindowPos(WinRT.Interop.WindowNative.GetWindowHandle(this),
+                new IntPtr(enabled ? -1 : -2), 0, 0, 0, 0, noSizeMoveActivateOrOwnerOrder))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not set the projector window stacking order.");
+        if (IsAlwaysOnTop != enabled)
+            throw new InvalidOperationException("Windows did not apply the projector window stacking order.");
+    }
+
+    [DllImport("user32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter,
+        int x, int y, int width, int height, uint flags);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", ExactSpelling = true)]
+    private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
 
     public void VerifyTargetDisplay() => VerifyPlacement();
 

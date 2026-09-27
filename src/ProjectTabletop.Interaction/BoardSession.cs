@@ -13,13 +13,15 @@ public readonly record struct BoardRect(double X, double Y, double Width, double
 public sealed record BoardButton(string Id, string Label, BoardRect Bounds, BoardScreen Destination);
 
 /// <summary>
-/// A current hand observation mapped to board coordinates. Preserve samples that
-/// cannot be mapped, using NaN coordinates, so their execution events are consumed.
+/// A hand selection position mapped to board coordinates. SelectionFrameTime
+/// identifies an optional open-hand anchor retained while the fingers close;
+/// otherwise U/V are the current fingertip. Preserve samples that cannot be
+/// mapped, using NaN coordinates, so their execution events are consumed.
 /// ExecuteEventId identifies one pinch and remains unchanged throughout its pulse.
 /// ExecuteUntil is exactly one second after that event, as produced by HandGestureTracker.
 /// </summary>
 public readonly record struct BoardHandSample(double U, double V, DateTimeOffset ExecuteUntil,
-    long ExecuteEventId);
+    long ExecuteEventId, DateTimeOffset? SelectionFrameTime = null);
 
 public sealed record BoardNavigation(BoardScreen Previous, BoardScreen Current, string ButtonId);
 
@@ -31,6 +33,7 @@ public sealed record BoardNavigation(BoardScreen Previous, BoardScreen Current, 
 public sealed class BoardSession
 {
     private static readonly TimeSpan ObservationLifetime = TimeSpan.FromMilliseconds(350);
+    private static readonly TimeSpan SelectionLifetime = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan ExecuteDuration = TimeSpan.FromSeconds(1);
     private static readonly IReadOnlyList<BoardButton> MenuButtons = Array.AsReadOnly(new[]
     {
@@ -54,6 +57,7 @@ public sealed class BoardSession
     private DateTimeOffset? _lastNow;
     private DateTimeOffset _ignoreExecutionsThrough = DateTimeOffset.MinValue;
     private DateTimeOffset _ignoreFramesThrough = DateTimeOffset.MinValue;
+    private DateTimeOffset _ignoreSelectionsThrough = DateTimeOffset.MinValue;
     private long _consumedEventId;
 
     public BoardScreen Screen { get; private set; } = BoardScreen.Menu;
@@ -93,7 +97,8 @@ public sealed class BoardSession
         _lastFrameTime = frameTime;
 
         var buttons = Buttons;
-        HoveredButtonIds = buttons.Where(button => hands.Any(hand => button.Bounds.Contains(hand.U, hand.V)))
+        HoveredButtonIds = buttons.Where(button => hands.Any(hand =>
+                SelectionIsCurrent(hand, frameTime) && button.Bounds.Contains(hand.U, hand.V)))
             .Select(button => button.Id).ToArray();
 
         // IDs come from a monotonically increasing event sequence, never reset by
@@ -108,12 +113,14 @@ public sealed class BoardSession
         {
             if (!examinedEvents.Add(hand.ExecuteEventId) || hand.ExecuteEventId <= previouslyConsumed || hand.ExecuteUntil <= now ||
                 hand.ExecuteUntil - now > ExecuteDuration ||
-                hand.ExecuteUntil - ExecuteDuration <= _ignoreExecutionsThrough) continue;
+                hand.ExecuteUntil - ExecuteDuration <= _ignoreExecutionsThrough ||
+                !SelectionIsCurrent(hand, frameTime)) continue;
             BoardButton? selected = buttons.FirstOrDefault(button => button.Bounds.Contains(hand.U, hand.V));
             if (selected is null) continue;
             var result = new BoardNavigation(Screen, selected.Destination, selected.Id);
             Screen = selected.Destination;
             Revision++;
+            _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);
             HoveredButtonIds = Array.Empty<string>();
             return result;
         }
@@ -131,6 +138,7 @@ public sealed class BoardSession
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreFramesThrough = Later(_ignoreFramesThrough, now);
+        _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);
         _lastFrameTime = null;
         _lastNow = now;
         // Keep the high-water mark: clearing visual state must never replay a pinch.
@@ -142,7 +150,13 @@ public sealed class BoardSession
         Revision++;
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
+        _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);
     }
+
+    private bool SelectionIsCurrent(BoardHandSample hand, DateTimeOffset frameTime) =>
+        hand.SelectionFrameTime is not { } selectionTime ||
+        selectionTime > _ignoreSelectionsThrough && selectionTime <= frameTime &&
+        frameTime - selectionTime <= SelectionLifetime;
 
     private static DateTimeOffset Later(DateTimeOffset first, DateTimeOffset second) => first > second ? first : second;
 }

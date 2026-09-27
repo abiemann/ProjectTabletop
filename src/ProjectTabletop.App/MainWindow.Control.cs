@@ -29,6 +29,10 @@ public sealed partial class MainWindow
         switch (method)
         {
 #if DEBUG
+            case "verify_projection_window":
+                return await VerifyProjectionWindowAsync();
+            case "verify_hand_tracking_input":
+                return VerifyHandTrackingInput();
             case "verify_photo_copy_render":
                 return await VerifyPhotoCopyRenderAsync();
 #endif
@@ -47,6 +51,7 @@ public sealed partial class MainWindow
                     outputOpen = _output is not null,
                     outputVisible = _output?.AppWindow.IsVisible ?? false,
                     outputFullScreen = _output?.IsFullScreen ?? false,
+                    outputAlwaysOnTop = _output?.IsAlwaysOnTop ?? false,
                     outputDisplayId = _output?.ActualDisplayId,
                     controlDisplayId = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(
                         AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.None)?.DisplayId.Value
@@ -58,8 +63,10 @@ public sealed partial class MainWindow
                     handTrackingStatus = HandTrackingControlStatus,
                     handCount = TrackedHandCount,
                     handExecuteActive = ExecutingHandCount > 0,
+                    lastHandDetection = _lastHandDetection,
                     boardApp = _scene.CurrentBoardScreen.ToString(),
                     boardAppTitle = _scene.CurrentBoardTitle,
+                    hoveredBoardButtons = _scene.HoveredBoardButtons,
                     photoCopyStatus = _scene.PhotoCopyStatus,
                     photoCopyCount = _scene.PhotoCopyCount,
                     lastPhotoCopyCapture = _lastPhotoCopyCapture,

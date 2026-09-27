@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using OpenCvSharp;
 using ProjectTabletop.Vision;
@@ -70,6 +71,7 @@ internal static class HandTrackingRegression
             $"{Distance(pair[1].IndexTip, secondExpected):F2}px");
 
         CheckBoardScaleHands(engine, pointing, reference);
+        CheckTrackedSequence(engine, pointing, reference);
 
         foreach (byte brightness in new byte[] { 0, 128, 255 })
         {
@@ -88,7 +90,7 @@ internal static class HandTrackingRegression
             CheckNoHands(engine, name, board);
         }
         Console.WriteLine("Hand tracking regression: real pointing finger, rotation, " +
-            "landscape mapping, padded stride, two hands and board-scale reacquisition passed; " +
+            "landscape mapping, padded stride, two hands, temporal tracking and board-scale reacquisition passed; " +
             "blank and board frames rejected.");
     }
 
@@ -198,6 +200,9 @@ internal static class HandTrackingRegression
         int width, int height, int stride, byte[] pixels, PixelPoint expected,
         double tolerance)
     {
+        // These independent coordinate checks intentionally exercise acquisition.
+        // Temporal behavior is verified separately with unbroken frame sequences.
+        engine.ResetTracking();
         IReadOnlyList<HandDetection> hands = engine.Detect(width, height, stride, pixels);
         if (hands.Count != 1)
             throw new Exception($"{name}: expected one hand, detected {hands.Count}.");
@@ -215,6 +220,102 @@ internal static class HandTrackingRegression
             throw new Exception($"{name}: fingertip reference error {error:F2}px " +
                 $"exceeded {tolerance:F0}px.");
         return hand;
+    }
+
+    private static void CheckTrackedSequence(HandTrackingEngine engine, Mat source,
+        PixelPoint reference)
+    {
+        engine.ResetTracking();
+        double maximumError = 0;
+        for (int frame = 0; frame < 24; frame++)
+        {
+            using Mat scene = BoardScaleFrame(source, reference, new Size(233, 244),
+                720 + frame * 12, 0, out PixelPoint expected);
+            IReadOnlyList<HandDetection> hands = engine.Detect(scene.Width, scene.Height,
+                scene.Width * 4, Bytes(scene));
+            if (hands.Count != 1)
+                throw new Exception($"Tracked moving hand frame {frame}: expected one hand, got {hands.Count}.");
+            maximumError = Math.Max(maximumError, Distance(hands[0].IndexTip, expected));
+        }
+        if (maximumError > 18)
+            throw new Exception($"Tracked moving hand drifted {maximumError:F2}px from the reference.");
+
+        using Mat rotatingSource = BoardScaleFrame(source, reference, new Size(233, 244),
+            960, 0, out PixelPoint rotatingTip);
+        engine.ResetTracking();
+        double rotationError = 0;
+        for (int degrees = -60; degrees <= 60; degrees += 5)
+        {
+            using Mat rotation = Cv2.GetRotationMatrix2D(new Point2f(960, 540), degrees, 1);
+            using Mat scene = new();
+            Cv2.WarpAffine(rotatingSource, scene, rotation, rotatingSource.Size(),
+                borderValue: new Scalar(128, 128, 128, 255));
+            PixelPoint expected = new(
+                rotation.At<double>(0, 0) * rotatingTip.X + rotation.At<double>(0, 1) * rotatingTip.Y + rotation.At<double>(0, 2),
+                rotation.At<double>(1, 0) * rotatingTip.X + rotation.At<double>(1, 1) * rotatingTip.Y + rotation.At<double>(1, 2));
+            IReadOnlyList<HandDetection> hands = engine.Detect(scene.Width, scene.Height,
+                scene.Width * 4, Bytes(scene));
+            if (hands.Count != 1)
+                throw new Exception($"Tracked rotating hand at {degrees} degrees: expected one hand, got {hands.Count}.");
+            rotationError = Math.Max(rotationError, Distance(hands[0].IndexTip, expected));
+        }
+        if (rotationError > 18)
+            throw new Exception($"Tracked rotating hand drifted {rotationError:F2}px from the reference.");
+
+        using Mat single = BoardScaleFrame(source, reference, new Size(233, 244),
+            230, 0, out PixelPoint leftExpected);
+        using Mat pair = single.Clone();
+        using Mat mirrored = new();
+        Cv2.Flip(single, mirrored, FlipMode.Y);
+        using (var right = new Mat(mirrored, new Rect(960, 0, 960, 1080)))
+        using (var destination = new Mat(pair, new Rect(960, 0, 960, 1080)))
+            right.CopyTo(destination);
+        PixelPoint rightExpected = new(pair.Width - 1 - leftExpected.X, leftExpected.Y);
+        byte[] singlePixels = Bytes(single), pairPixels = Bytes(pair);
+        engine.ResetTracking();
+        engine.Detect(single.Width, single.Height, single.Width * 4, singlePixels);
+        int discoveryFrame = 0;
+        for (int frame = 1; frame <= 6; frame++)
+        {
+            HandDetection[] hands = engine.Detect(pair.Width, pair.Height,
+                pair.Width * 4, pairPixels).OrderBy(hand => hand.IndexTip.X).ToArray();
+            if (hands.Length != 2) continue;
+            if (Distance(hands[0].IndexTip, leftExpected) > 18 ||
+                Distance(hands[1].IndexTip, rightExpected) > 18)
+                throw new Exception("Second hand discovery produced incorrect fingertip coordinates.");
+            discoveryFrame = frame;
+            break;
+        }
+        if (discoveryFrame == 0)
+            throw new Exception("Tracked first hand prevented acquisition of an arriving second hand.");
+        IReadOnlyList<HandDetection> remaining = engine.Detect(single.Width, single.Height,
+            single.Width * 4, singlePixels);
+        if (remaining.Count != 1 || Distance(remaining[0].IndexTip, leftExpected) > 18)
+            throw new Exception("A disappearing second hand left a stale or misplaced tracked fingertip.");
+
+        // Report cadence on the same camera-sized image, including every sixth
+        // frame's second-hand search. Avoid brittle machine-dependent thresholds.
+        var watch = Stopwatch.StartNew();
+        for (int frame = 0; frame < 12; frame++)
+        {
+            engine.ResetTracking();
+            engine.Detect(single.Width, single.Height, single.Width * 4, singlePixels);
+        }
+        double acquisitionMs = watch.Elapsed.TotalMilliseconds / 12;
+        watch.Restart();
+        for (int frame = 0; frame < 36; frame++)
+            engine.Detect(single.Width, single.Height, single.Width * 4, singlePixels);
+        double trackingMs = watch.Elapsed.TotalMilliseconds / 36;
+        using Mat blank = new(1080, 1920, MatType.CV_8UC4, new Scalar(128, 128, 128, 255));
+        CheckNoHands(engine, "tracked hand disappears", blank);
+        for (int frame = 0; frame < 3; frame++)
+            engine.Detect(single.Width, single.Height, single.Width * 4, singlePixels);
+        using Mat board = ReadFixture("moved-cardboard-projected-grid.png");
+        CheckNoHands(engine, "tracked hand disappears into a projected grid", board);
+        Console.WriteLine($"Temporal hand tracking: max moving-tip error {maximumError:F2}px; " +
+            $"max rotating-tip error {rotationError:F2}px; " +
+            $"second hand acquired after {discoveryFrame} frames; full acquisition {acquisitionMs:F1}ms, " +
+            $"tracked average {trackingMs:F1}ms (including periodic searches).");
     }
 
     private static void CheckNoHands(HandTrackingEngine engine, string name, Mat frame)

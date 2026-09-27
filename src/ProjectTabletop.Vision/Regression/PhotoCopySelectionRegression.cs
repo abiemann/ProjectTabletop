@@ -10,6 +10,9 @@ internal static class PhotoCopySelectionRegression
             "Photo Copy did not select the other, non-pinching hand.");
         Require(PhotoCopyHandSelector.TrySelect([pinch, open], cursor, out selected) && ReferenceEquals(selected, open),
             "Reordering detections changed which hand Photo Copy selected.");
+        Require(PhotoCopyHandSelector.TrySelect([open, pinch], cursor with
+            { SelectionPosition = open.IndexTip, SelectionFrameTime = DateTimeOffset.UtcNow }, out selected) &&
+            ReferenceEquals(selected, open), "A button selection anchor replaced the real pinching fingertip during photo capture.");
         Require(!PhotoCopyHandSelector.TrySelect([Hand(.2), pinch], cursor, out _),
             "Two simultaneous pinches selected a hand to photograph.");
         Require(!PhotoCopyHandSelector.TrySelect([pinch], cursor, out _),

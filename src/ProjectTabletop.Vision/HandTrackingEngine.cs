@@ -26,6 +26,8 @@ public sealed class HandTrackingEngine : IDisposable
     private readonly object _gate = new();
     private readonly Net _palmNet;
     private readonly Net _handNet;
+    private IReadOnlyList<HandDetection> _previousHands = [];
+    private int _previousWidth, _previousHeight, _framesSincePalmSearch;
     private bool _disposed;
 
     public HandTrackingEngine(string modelDirectory)
@@ -57,34 +59,29 @@ public sealed class HandTrackingEngine : IDisposable
             using var rgb = new Mat();
             Cv2.CvtColor(frame, rgb, ColorConversionCodes.BGRA2RGB);
             var hands = new List<HandDetection>(2);
-            foreach (Palm palm in DetectPalms(rgb))
+            if (width == _previousWidth && height == _previousHeight)
             {
-                HandDetection? hand = DetectHand(rgb, palm);
-                if (hand is not null) hands.Add(hand);
+                // Once acquired, a hand's own palm landmarks provide a much
+                // larger, steadier crop than locating its tiny palm afresh in
+                // every 192-pixel full-frame scan. Still infer ALL landmarks
+                // from this image: these are crop hints, never stale results.
+                foreach (HandDetection previous in _previousHands)
+                {
+                    HandDetection? hand = DetectHand(rgb, PalmFromHand(previous));
+                    if (hand is not null &&
+                        IntersectionOverUnion(HandBounds(previous), HandBounds(hand)) >= 0.2)
+                        hands.Add(hand);
+                }
             }
 
-            // Letterboxing a wide webcam image into 192 pixels makes a tabletop
-            // hand very small. Recheck overlapping square views when acquisition
-            // fails or the observed hand is small relative to the whole image.
-            // Refine on the original image so a tile boundary cannot cut off fingers.
-            int side = Math.Min(width, height), longest = Math.Max(width, height);
-            if (longest > side * 1.25 && (hands.Count == 0 ||
-                hands.Any(hand => HandExtent(hand) < longest * 0.35)))
+            // Periodically search for an arriving second hand. A lost track
+            // triggers acquisition immediately, including on this very frame.
+            bool search = hands.Count == 0 || hands.Count < _previousHands.Count ||
+                ++_framesSincePalmSearch >= 6;
+            if (search)
             {
-                foreach (int offset in new[] { 0, (longest - side) / 2, longest - side }.Distinct())
-                {
-                    int x = width > height ? offset : 0, y = height > width ? offset : 0;
-                    using var tile = new Mat(rgb, new Rect(x, y, side, side));
-                    foreach (Palm local in DetectPalms(tile))
-                    {
-                        var palm = new Palm(new Rect2d(local.Bounds.X + x, local.Bounds.Y + y,
-                            local.Bounds.Width, local.Bounds.Height),
-                            local.Landmarks.Select(point => new PixelPoint(point.X + x, point.Y + y)).ToArray(),
-                            local.Score);
-                        HandDetection? hand = DetectHand(rgb, palm);
-                        if (hand is not null) hands.Add(hand);
-                    }
-                }
+                _framesSincePalmSearch = 0;
+                FindHands(rgb, hands);
             }
 
             // Several views can find the same hand. Compare successful hand fits,
@@ -97,7 +94,62 @@ public sealed class HandTrackingEngine : IDisposable
                 selected.Add(hand);
                 if (selected.Count == 2) break;
             }
+            _previousHands = selected;
+            _previousWidth = width;
+            _previousHeight = height;
             return selected;
+        }
+    }
+
+    /// <summary>Forget crop hints after a camera change, interruption, or scene reset.</summary>
+    public void ResetTracking()
+    {
+        lock (_gate)
+        {
+            _previousHands = [];
+            _previousWidth = _previousHeight = _framesSincePalmSearch = 0;
+        }
+    }
+
+    private static Palm PalmFromHand(HandDetection hand)
+    {
+        PixelPoint[] points = new[] { 0, 5, 9, 13, 17, 1, 2 }
+            .Select(index => hand.Landmarks[index]).ToArray();
+        double left = points.Min(point => point.X), top = points.Min(point => point.Y);
+        return new Palm(new Rect2d(left, top, points.Max(point => point.X) - left,
+            points.Max(point => point.Y) - top), points, hand.Confidence);
+    }
+
+    private void FindHands(Mat rgb, List<HandDetection> hands)
+    {
+        foreach (Palm palm in DetectPalms(rgb))
+        {
+            HandDetection? hand = DetectHand(rgb, palm);
+            if (hand is not null) hands.Add(hand);
+        }
+
+        // Letterboxing a wide webcam image into 192 pixels makes a tabletop
+        // hand very small. Recheck overlapping square views when acquisition
+        // fails or the observed hand is small relative to the whole image.
+        // Refine on the original image so a tile boundary cannot cut off fingers.
+        int side = Math.Min(rgb.Width, rgb.Height), longest = Math.Max(rgb.Width, rgb.Height);
+        if (longest > side * 1.25 && (hands.Count == 0 ||
+            hands.Any(hand => HandExtent(hand) < longest * 0.35)))
+        {
+            foreach (int offset in new[] { 0, (longest - side) / 2, longest - side }.Distinct())
+            {
+                int x = rgb.Width > rgb.Height ? offset : 0, y = rgb.Height > rgb.Width ? offset : 0;
+                using var tile = new Mat(rgb, new Rect(x, y, side, side));
+                foreach (Palm local in DetectPalms(tile))
+                {
+                    var palm = new Palm(new Rect2d(local.Bounds.X + x, local.Bounds.Y + y,
+                        local.Bounds.Width, local.Bounds.Height),
+                        local.Landmarks.Select(point => new PixelPoint(point.X + x, point.Y + y)).ToArray(),
+                        local.Score);
+                    HandDetection? hand = DetectHand(rgb, palm);
+                    if (hand is not null) hands.Add(hand);
+                }
+            }
         }
     }
 

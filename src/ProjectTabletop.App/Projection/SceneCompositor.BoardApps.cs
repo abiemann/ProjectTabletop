@@ -33,6 +33,16 @@ public sealed partial class SceneCompositor
         get { lock (_gate) return _boardSession.Title; }
     }
 
+    public IReadOnlyList<string> HoveredBoardButtons
+    {
+        get
+        {
+            lock (_gate)
+                return DateTimeOffset.UtcNow - _handFrameTime <= TimeSpan.FromMilliseconds(350)
+                    ? _boardSession.HoveredButtonIds.ToArray() : Array.Empty<string>();
+        }
+    }
+
     public void ShowBoardMenu()
     {
         lock (_gate)
@@ -137,7 +147,7 @@ public sealed partial class SceneCompositor
             {
                 surface.DrawText("PROJECT TABLETOP", 80, 57, Colors.Cyan, small);
                 surface.DrawText("Choose a board", 76, 97, Colors.White, heading);
-                surface.DrawText("Point at a button. Pinch to select.", 80, 186, muted, body);
+                surface.DrawText("Point to highlight a button. Then pinch.", 80, 186, muted, body);
                 foreach (var button in _boardSession.Buttons)
                 {
                     var hovered = handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id);

@@ -13,10 +13,15 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     private static readonly TimeSpan HandDetectionInterval = TimeSpan.FromMilliseconds(80);
+    private static readonly TimeSpan TrackedHandInterval = TimeSpan.FromMilliseconds(33);
     private static readonly TimeSpan HandMarkerLifetime = TimeSpan.FromMilliseconds(350);
     private readonly object _handGate = new();
     private readonly HandGestureTracker _handGestures = new();
     private HandTrackingEngine? _handEngine;
+    // Accessed only by the single inference worker. Reset its cropped hand
+    // history there, so camera/UI resets never wait for a network inference.
+    private long _handEngineGeneration = -1;
+    private DateTimeOffset? _lastHandEngineFrameTime;
     private Task? _handDetectionTask;
     private DispatcherQueueTimer? _handStatusTimer;
     private HandPreview? _handPreview;
@@ -26,8 +31,13 @@ public sealed partial class MainWindow
     private long _lastHandDetectionTick;
     private string? _handTrackingError;
     private string? _handLatencyWarning;
+    private HandDetectionDiagnostics? _lastHandDetection;
 
     private sealed record HandPreview(HandCursor[] Cursors, int Width, int Height, DateTimeOffset Timestamp);
+    private sealed record HandObservationDiagnostics(double Confidence, PixelPoint IndexTip, double PinchRatio);
+    private sealed record HandDetectionDiagnostics(DateTimeOffset FrameTime, double InferenceMilliseconds,
+        double ResultAgeMilliseconds, double? FrameIntervalMilliseconds, bool DiscardedAsStale,
+        HandObservationDiagnostics[] Hands);
 
     internal bool HandTrackingEnabled => _handTrackingEnabled;
     internal string HandTrackingControlStatus => HandTrackingStatusText.Text;
@@ -70,7 +80,7 @@ public sealed partial class MainWindow
                 if (_handPreview is { } preview && DateTimeOffset.UtcNow - preview.Timestamp > HandMarkerLifetime)
                 {
                     _handPreview = null;
-                    _scene.ClearHandTips();
+                    _scene.ClearHandTips(resetInput: false);
                     expired = true;
                 }
             }
@@ -107,6 +117,7 @@ public sealed partial class MainWindow
             _handPreview = null;
             _handGestures.Reset();
             _handLatencyWarning = null;
+            _lastHandDetection = null;
             _lastHandDetectionTick = 0;
             _scene.ClearHandTips();
             _scene.InvalidatePhotoCopyCapture();
@@ -123,8 +134,11 @@ public sealed partial class MainWindow
                 Volatile.Read(ref _cameraHealthWarning) ||
                 !_handTrackingEnabled || _handTrackingError is not null ||
                 IsBoardScanMeasuring || _handDetecting) return;
+            var interval = _handPreview is { Cursors.Length: > 0 } preview &&
+                frame.Timestamp - preview.Timestamp <= HandMarkerLifetime
+                ? TrackedHandInterval : HandDetectionInterval;
             if (_lastHandDetectionTick != 0 &&
-                Stopwatch.GetElapsedTime(_lastHandDetectionTick, tick) < HandDetectionInterval) return;
+                Stopwatch.GetElapsedTime(_lastHandDetectionTick, tick) < interval) return;
             _lastHandDetectionTick = tick;
             _handDetecting = true;
             var generation = _handGeneration;
@@ -133,7 +147,17 @@ public sealed partial class MainWindow
                 try
                 {
                     _handEngine ??= new HandTrackingEngine(Path.Combine(AppContext.BaseDirectory, "Models", "Hands"));
+                    double? frameInterval = _lastHandEngineFrameTime is { } previousFrame
+                        ? (frame.Timestamp - previousFrame).TotalMilliseconds : null;
+                    if (_handEngineGeneration != generation || frameInterval is <= 0 or > 350)
+                    {
+                        _handEngine.ResetTracking();
+                        _handEngineGeneration = generation;
+                    }
+                    _lastHandEngineFrameTime = frame.Timestamp;
+                    var detectionStarted = Stopwatch.GetTimestamp();
                     var hands = _handEngine.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra);
+                    var inferenceMilliseconds = Stopwatch.GetElapsedTime(detectionStarted).TotalMilliseconds;
                     var visibleHands = hands.Where(hand =>
                             double.IsFinite(hand.IndexTip.X) && double.IsFinite(hand.IndexTip.Y) &&
                             hand.IndexTip.X >= 0 && hand.IndexTip.X < frame.Width &&
@@ -147,10 +171,13 @@ public sealed partial class MainWindow
                                 !_cameraWanted || !_camera.IsRunning ||
                                 Volatile.Read(ref _cameraHealthWarning) || IsBoardScanMeasuring) return;
                             var age = DateTimeOffset.UtcNow - frame.Timestamp;
+                            _lastHandDetection = new(frame.Timestamp, inferenceMilliseconds,
+                                age.TotalMilliseconds, frameInterval, age > HandMarkerLifetime,
+                                visibleHands.Select(DescribeHandObservation).ToArray());
                             if (age > HandMarkerLifetime)
                             {
                                 _handPreview = null;
-                                _scene.ClearHandTips();
+                                _scene.ClearHandTips(resetInput: false);
                                 _handLatencyWarning = $"Hand tracking result was {age.TotalMilliseconds:F0} ms old. " +
                                     "Waiting for a result under 350 ms before showing the circle.";
                             }
@@ -185,6 +212,15 @@ public sealed partial class MainWindow
                 finally { lock (_handGate) _handDetecting = false; }
             });
         }
+    }
+
+    private static HandObservationDiagnostics DescribeHandObservation(HandDetection hand)
+    {
+        static double Distance(PixelPoint a, PixelPoint b) =>
+            Math.Sqrt(Math.Pow(a.X - b.X, 2) + Math.Pow(a.Y - b.Y, 2));
+        var points = hand.Landmarks;
+        var scale = Math.Max(Distance(points[0], points[9]), Distance(points[5], points[17]));
+        return new(hand.Confidence, hand.IndexTip, scale > 1 ? Distance(points[4], points[8]) / scale : 0);
     }
 
     private void UpdateHandTrackingStatus()

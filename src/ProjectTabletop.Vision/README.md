@@ -11,11 +11,24 @@ camera-pixel landmarks, confidence, a model handedness score, and `IndexTip`
 (landmark 8). Up to two hands are returned. Dispose the engine after inference
 has stopped. No training samples or network service are needed.
 
+The engine uses the previous hand's palm landmarks as crop hints for fresh
+landmark inference, avoiding full-image palm searches on every tracked frame.
+A lost fit searches immediately, and periodic searches acquire arriving hands.
+Call `ResetTracking()` after a camera/scene interruption; changing dimensions
+also invalidates crop hints. Old landmarks are never returned as current results.
+
 The app schedules one inference at a time off the UI thread and maps the index
-tip through the completed board scan for the projector cursor. Predicted hand
-landmarks do not establish board contact. Button hit testing and press/release
-gestures are not implemented. Performance under the physical projector remains
-to be checked. [Model sources, checksums, and licenses](Models/Hands/README.md)
+tip through the completed board scan for the projector cursor and board buttons.
+`HandGestureTracker` confirms a thumb/index pinch using observed dwell, tolerates
+bounded landmark noise and brief missed detections, and debounces release before
+allowing another execute event. Each event produces a one-second red pulse.
+`HandCursor.Position` always carries the actual fingertip for drawing and
+Photo Copy hand matching. Optional `SelectionPosition` and `SelectionFrameTime`
+retain the same hand's recent open pointing pose while the fingers close. An
+expired or moved anchor is non-finite until release; consumers must reject it,
+and must reject anchors from before a screen change or camera reset.
+These image landmarks do not establish physical board contact. See the root
+README for verification status. [Model sources, checksums, and licenses](Models/Hands/README.md)
 are bundled with the models.
 
 ## Card recognition baseline

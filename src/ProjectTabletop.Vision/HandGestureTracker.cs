@@ -9,10 +9,15 @@ namespace ProjectTabletop.Vision;
 public sealed class HandGestureTracker
 {
     private const double PinchThreshold = 0.25;
+    private const double PinchHoldThreshold = 0.35;
     private const double ReleaseThreshold = 0.45;
     private const double MaximumMatchDistance = 1.5;
     private static readonly TimeSpan PinchDwell = TimeSpan.FromMilliseconds(120);
+    private static readonly TimeSpan ReleaseDwell = TimeSpan.FromMilliseconds(60);
+    private static readonly TimeSpan CandidateDropoutGrace = TimeSpan.FromMilliseconds(160);
     private static readonly TimeSpan ObservationLifetime = TimeSpan.FromMilliseconds(350);
+    private static readonly TimeSpan OpenSelectionLifetime = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan SelectionLifetime = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan ExecuteDuration = TimeSpan.FromSeconds(1);
     private static long s_nextExecuteEventId;
     private readonly List<Track> _tracks = new(2);
@@ -26,10 +31,13 @@ public sealed class HandGestureTracker
         if (_lastNow is { } previousNow && now < previousNow)
             return Array.Empty<HandCursor>();
         _lastNow = now;
-        _tracks.RemoveAll(track => now - track.LastSeen > ObservationLifetime);
         if (frameTime > now || now - frameTime > ObservationLifetime ||
             (_lastFrameTime is { } previousFrame && frameTime <= previousFrame))
             return Array.Empty<HandCursor>();
+        // Identity follows camera time. Comparing a previous frame with the
+        // completion time would count inference latency as a detection gap and
+        // erase a live pinch even when successive source frames are fresh.
+        _tracks.RemoveAll(track => frameTime - track.LastSeen > ObservationLifetime);
         _lastFrameTime = frameTime;
 
         var observations = new List<Observation>(2);
@@ -44,10 +52,15 @@ public sealed class HandGestureTracker
         foreach (var track in _tracks)
         {
             if (assignments.Contains(track)) continue;
-            // A missing observation cannot contribute to a pending dwell, but
-            // keeps an already-fired pinch latched through a brief detection miss.
-            track.CloseStarted = null;
-            track.CloseSamples = 0;
+            // Brief misses pause the accumulated evidence instead of making a
+            // user start the pinch over. Missing frames never add dwell time or
+            // release an already-fired pinch.
+            if (track.CloseLastObserved is { } last && frameTime - last > CandidateDropoutGrace)
+                ResetCandidate(track);
+            else
+                track.CandidateWasMissing = true;
+            track.ReleaseStarted = null;
+            track.ReleaseSamples = 0;
         }
 
         var active = new List<Track>(2);
@@ -74,8 +87,10 @@ public sealed class HandGestureTracker
             track.PalmScale = observation.PalmScale;
             track.LastSeen = frameTime;
             UpdatePinch(track, observation.PinchRatio, frameTime, now);
+            UpdateSelection(track, observation, frameTime);
             active.Add(track);
-            cursors.Add(new HandCursor(observation.IndexTip, track.ExecuteUntil, track.ExecuteEventId));
+            cursors.Add(new HandCursor(observation.IndexTip, track.ExecuteUntil, track.ExecuteEventId,
+                track.SelectionPosition, track.SelectionFrameTime));
         }
         return cursors;
     }
@@ -90,28 +105,94 @@ public sealed class HandGestureTracker
     private static void UpdatePinch(Track track, double ratio, DateTimeOffset frameTime,
         DateTimeOffset now)
     {
-        if (ratio >= ReleaseThreshold)
+        if (track.Latched)
         {
-            track.Latched = false;
-            track.CloseStarted = null;
-            track.CloseSamples = 0;
+            // A single open-looking landmark error must not rearm a held pinch.
+            if (ratio >= ReleaseThreshold)
+            {
+                track.ReleaseStarted ??= frameTime;
+                track.ReleaseSamples = Math.Min(2, track.ReleaseSamples + 1);
+                if (track.ReleaseSamples >= 2 && frameTime - track.ReleaseStarted.Value >= ReleaseDwell)
+                    track.Latched = false;
+            }
+            else
+            {
+                track.ReleaseStarted = null;
+                track.ReleaseSamples = 0;
+            }
             return;
         }
-        if (track.Latched) return;
-        if (ratio > PinchThreshold)
+        if (ratio > PinchHoldThreshold)
         {
-            track.CloseStarted = null;
-            track.CloseSamples = 0;
+            ResetCandidate(track);
             return;
         }
-        track.CloseStarted ??= frameTime;
-        track.CloseSamples = Math.Min(2, track.CloseSamples + 1);
-        if (track.CloseSamples < 2 || frameTime - track.CloseStarted.Value < PinchDwell) return;
+        if (track.CandidateWasMissing && track.CloseLastObserved is { } previous &&
+            frameTime - previous > CandidateDropoutGrace)
+            ResetCandidate(track);
+        if (track.CloseLastObserved is null)
+        {
+            // The wider holding band cannot start a pinch on its own.
+            if (ratio > PinchThreshold) return;
+            track.CloseSamples = 1;
+        }
+        else
+        {
+            if (!track.CandidateWasMissing)
+                track.CloseEvidence += frameTime - track.CloseLastObserved.Value;
+            if (ratio <= PinchThreshold)
+                track.CloseSamples = Math.Min(2, track.CloseSamples + 1);
+        }
+        track.CloseLastObserved = frameTime;
+        track.CandidateWasMissing = false;
+        // Jitter may preserve evidence, but execution still needs a currently
+        // closed pinch and at least two distinct closed observations.
+        if (ratio > PinchThreshold || track.CloseSamples < 2 || track.CloseEvidence < PinchDwell) return;
         track.ExecuteUntil = now + ExecuteDuration;
         track.ExecuteEventId = Interlocked.Increment(ref s_nextExecuteEventId);
         track.Latched = true;
-        track.CloseStarted = null;
+        track.ReleaseStarted = null;
+        track.ReleaseSamples = 0;
+        ResetCandidate(track);
+    }
+
+    private static void ResetCandidate(Track track)
+    {
+        track.CloseLastObserved = null;
+        track.CloseEvidence = TimeSpan.Zero;
         track.CloseSamples = 0;
+        track.CandidateWasMissing = false;
+    }
+
+    private static void UpdateSelection(Track track, Observation observation, DateTimeOffset frameTime)
+    {
+        if (!track.Latched && observation.PinchRatio >= ReleaseThreshold)
+        {
+            track.OpenPose = observation;
+            track.OpenFrameTime = frameTime;
+            track.SelectionPosition = null;
+            track.SelectionFrameTime = null;
+            return;
+        }
+        if (track.SelectionFrameTime is null && observation.PinchRatio < ReleaseThreshold &&
+            track.OpenPose is { } openPose && track.OpenFrameTime is { } openTime &&
+            frameTime - openTime <= OpenSelectionLifetime)
+        {
+            // Closing the index finger changes its tip position. Preserve the
+            // preceding pointing position before the tighter pinch threshold.
+            track.SelectionPosition = openPose.IndexTip;
+            track.SelectionFrameTime = openTime;
+        }
+        if (track.SelectionFrameTime is not { } selectionTime || track.OpenPose is not { } origin) return;
+        if (frameTime - selectionTime > SelectionLifetime ||
+            Distance(observation.Wrist, origin.Wrist) > origin.PalmScale ||
+            Distance(observation.PalmCenter, origin.PalmCenter) > origin.PalmScale)
+        {
+            // Retain the cancelled anchor instead of falling back to the curled
+            // fingertip and potentially clicking a different button. It remains
+            // cancelled until the user opens their hand again.
+            track.SelectionPosition = new PixelPoint(double.NaN, double.NaN);
+        }
     }
 
     private Track?[] Match(IReadOnlyList<Observation> observations)
@@ -183,9 +264,17 @@ public sealed class HandGestureTracker
         public PixelPoint PalmCenter;
         public double PalmScale;
         public DateTimeOffset LastSeen;
-        public DateTimeOffset? CloseStarted;
+        public DateTimeOffset? CloseLastObserved;
+        public TimeSpan CloseEvidence;
         public int CloseSamples;
+        public bool CandidateWasMissing;
+        public DateTimeOffset? ReleaseStarted;
+        public int ReleaseSamples;
         public bool Latched;
+        public Observation? OpenPose;
+        public DateTimeOffset? OpenFrameTime;
+        public PixelPoint? SelectionPosition;
+        public DateTimeOffset? SelectionFrameTime;
         public DateTimeOffset ExecuteUntil = DateTimeOffset.MinValue;
         public long ExecuteEventId;
     }
