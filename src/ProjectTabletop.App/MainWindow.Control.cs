@@ -41,12 +41,28 @@ public sealed partial class MainWindow
                     cameraHealthWarning = _cameraHealthWarning,
                     display = SelectedDisplay?.ToString(),
                     outputOpen = _output is not null,
+                    outputVisible = _output?.AppWindow.IsVisible ?? false,
                     outputFullScreen = _output?.IsFullScreen ?? false,
+                    outputDisplayId = _output?.ActualDisplayId,
+                    controlDisplayId = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(
+                        AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.None)?.DisplayId.Value
+                        .ToString(System.Globalization.CultureInfo.InvariantCulture),
                     boardSetupActive = Volatile.Read(ref _boardSetupActive),
                     boardClipReady = _scene.HasBoardMediaClip,
                     boardSetupStatus = BoardSetupControlStatus,
+                    handTrackingEnabled = HandTrackingEnabled,
+                    handTrackingStatus = HandTrackingControlStatus,
+                    handCount = TrackedHandCount,
+                    renderStatus = RenderStatusText.Text,
                     status = StatusText.Text
                 };
+            case "set_hand_tracking":
+                if (!parameters.TryGetProperty("enabled", out var handEnabled) ||
+                    handEnabled.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    throw new ArgumentException("Provide enabled as a JSON boolean.");
+                SetHandTrackingEnabled(handEnabled.GetBoolean());
+                return new { handTrackingEnabled = HandTrackingEnabled,
+                    handTrackingStatus = HandTrackingControlStatus, handCount = TrackedHandCount };
             case "start_board_scan":
                 await StartBoardSetupAsync();
                 return new { status = BoardSetupControlStatus };

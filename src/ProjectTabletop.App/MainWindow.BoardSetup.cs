@@ -76,17 +76,11 @@ public sealed partial class MainWindow
     {
         if (Volatile.Read(ref _boardSetupActive)) return;
 
-        if (SelectedDisplay is null)
+        // Re-resolve and verify the actual output display before starting the
+        // black ambient scan, even when a projection window already exists.
+        if (!OpenProjectionOutput())
         {
-            BoardSetupStatusText.Text = "Select the projector display first.";
-            return;
-        }
-
-        if (_output is null || !_output.IsFullScreen || _outputDisplayId != SelectedDisplay.Id)
-            OpenOutput_Click(this, new RoutedEventArgs());
-        if (_output is null || !_output.IsFullScreen || _outputDisplayId != SelectedDisplay.Id)
-        {
-            BoardSetupStatusText.Text = "Open the selected projector display in full screen first.";
+            BoardSetupStatusText.Text = StatusText.Text;
             return;
         }
 
@@ -127,7 +121,9 @@ public sealed partial class MainWindow
 
     internal void ShowBlackOutputForControl()
     {
+        RequireProjectionOutput();
         StopBoardSetup();
+        ClearHandTracking();
         _scene.ClearBoardMediaClip();
         _scene.SetBlackOutput(true);
         SetStatus("Projector output is black for an ambient webcam capture. Start board scan to restore white illumination.");
@@ -138,6 +134,14 @@ public sealed partial class MainWindow
     internal void RescanBoardSetup()
     {
         if (!Volatile.Read(ref _boardSetupActive)) return;
+        try { RequireProjectionOutput(); }
+        catch (Exception ex)
+        {
+            _output?.Close();
+            BoardSetupStatusText.Text = "Cannot rescan: " + ex.Message;
+            SetStatus(BoardSetupStatusText.Text);
+            return;
+        }
         ClearBoardPreview();
         BoardSetupStatusText.Text = "Projector is black. Finding the physical cardboard again.";
     }
@@ -146,6 +150,7 @@ public sealed partial class MainWindow
 
     private void ClearBoardPreview()
     {
+        ClearHandTracking();
         if (_trustedBoardPrior is { } trusted &&
             (SelectedCamera?.Device.Id != trusted.CameraDeviceId ||
              SelectedDisplay?.Id != trusted.DisplayId))
@@ -522,7 +527,7 @@ public sealed partial class MainWindow
                 return new Vector2((float)projected.X, (float)projected.Y);
             }).ToArray();
             _boardProjectionWarning = ProjectionBoundaryWarning(corners);
-            _boardGridInset = _scene.SetDetectedBoardGrid(corners);
+            _boardGridInset = _scene.SetDetectedBoardGrid(corners, map);
             Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.GridReady);
             if (_ambientBoard is not null && !_ambientRecoveredFromPrior &&
                 _camera.ActiveDeviceId is { } cameraId && _outputDisplayId is { } displayId)

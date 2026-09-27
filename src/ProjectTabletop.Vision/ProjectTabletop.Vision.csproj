@@ -10,5 +10,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="Regression/**/*.cs" />
+    <Content Include="Models/Hands/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

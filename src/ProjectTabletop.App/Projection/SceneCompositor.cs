@@ -34,6 +34,9 @@ public sealed class SceneCompositor : IDisposable
     private bool _blackOutput;
     private BoardGrid? _boardGrid;
     private ProjectionClipRegion? _boardMediaClip;
+    private Homography? _boardCameraMap;
+    private Vector2[] _handTips = [];
+    private DateTimeOffset _handFrameTime;
     private int _boardCalibrationSpot = -1;
     private Vector2? _customBoardCalibrationSpot;
     private DateTimeOffset _boardSetupStarted;
@@ -94,7 +97,44 @@ public sealed class SceneCompositor : IDisposable
 
     public void ClearBoardMediaClip()
     {
-        lock (_gate) _boardMediaClip = null;
+        lock (_gate)
+        {
+            _boardMediaClip = null;
+            _boardCameraMap = null;
+            _handTips = [];
+        }
+    }
+
+    public void ClearHandTips()
+    {
+        lock (_gate) _handTips = [];
+    }
+
+    public void SetHandTips(IReadOnlyList<PixelPoint> tips, DateTimeOffset frameTime)
+    {
+        lock (_gate)
+        {
+            _handTips = [];
+            if (_boardMediaClip is null || _boardCameraMap is null) return;
+            var projectedTips = new List<Vector2>();
+            foreach (var tip in tips)
+            {
+                if (!double.IsFinite(tip.X) || !double.IsFinite(tip.Y)) continue;
+                try
+                {
+                    var point = _boardCameraMap.Transform(new Point2(tip.X, tip.Y));
+                    if (point.X >= 0 && point.X <= 1 && point.Y >= 0 && point.Y <= 1)
+                        projectedTips.Add(new Vector2((float)point.X, (float)point.Y));
+                }
+                catch (InvalidOperationException)
+                {
+                    // A fingertip outside the calibrated plane can lie on its
+                    // projective horizon; it has no finite projector position.
+                }
+            }
+            _handTips = projectedTips.ToArray();
+            _handFrameTime = frameTime;
+        }
     }
 
     public MediaAsset? FindAssetByPath(string path)
@@ -127,7 +167,7 @@ public sealed class SceneCompositor : IDisposable
         lock (_gate)
         {
             if (enabled && !_boardSetup) _boardSetupStarted = DateTimeOffset.UtcNow;
-            if (enabled) _boardMediaClip = null;
+            if (enabled) ClearBoardMediaClip();
             _boardSetup = enabled;
             _blackOutput = false;
             _boardGrid = null;
@@ -186,9 +226,10 @@ public sealed class SceneCompositor : IDisposable
     /// Replaces the white scan with a grid inside the four physical board corners.
     /// Corners are normalized projector coordinates in perimeter order.
     /// </summary>
-    public float SetDetectedBoardGrid(IReadOnlyList<Vector2> projectorCorners)
+    public float SetDetectedBoardGrid(IReadOnlyList<Vector2> projectorCorners, Homography cameraMap)
     {
         ArgumentNullException.ThrowIfNull(projectorCorners);
+        ArgumentNullException.ThrowIfNull(cameraMap);
         var grid = BoardGrid.Create(projectorCorners);
         var mediaClip = ProjectionClipRegion.FromCorners(grid.GridCorners
             .Select(point => new Point2(point.X, point.Y)).ToArray());
@@ -197,6 +238,8 @@ public sealed class SceneCompositor : IDisposable
             if (!_boardSetup) throw new InvalidOperationException("Board setup is not active.");
             _boardGrid = grid;
             _boardMediaClip = mediaClip;
+            _boardCameraMap = cameraMap;
+            _handTips = [];
             _boardSetupStarted = DateTimeOffset.UtcNow;
         }
         return grid.InsetFraction;
@@ -307,6 +350,7 @@ public sealed class SceneCompositor : IDisposable
                     else
                         DrawDetectedBoardGrid(ds, output, grid,
                             DateTimeOffset.UtcNow - _boardSetupStarted);
+                    DrawHandCursor(ds, output);
                 }
                 else
                 {
@@ -364,14 +408,36 @@ public sealed class SceneCompositor : IDisposable
                     _calibrationTarget + 1, _calibrationTargetTop);
             }
 
-            if (_topPlaneMap is null || DateTimeOffset.UtcNow - _detectionTime > TimeSpan.FromMilliseconds(350)) return;
-            foreach (var detection in _detections)
+            if (_topPlaneMap is not null && DateTimeOffset.UtcNow - _detectionTime <= TimeSpan.FromMilliseconds(350))
             {
-                if (!_overlays.TryGetValue(detection.PieceId, out var media)) continue;
-                var frame = media.GetFrame(ds.Device);
-                if (frame is null || detection.Outline.Count < 3) continue;
-                DrawOverlay(ds, output, mediaRect, detection, frame, _topPlaneMap);
+                foreach (var detection in _detections)
+                {
+                    if (!_overlays.TryGetValue(detection.PieceId, out var media)) continue;
+                    var frame = media.GetFrame(ds.Device);
+                    if (frame is null || detection.Outline.Count < 3) continue;
+                    DrawOverlay(ds, output, mediaRect, detection, frame, _topPlaneMap);
+                }
             }
+            DrawHandCursor(ds, output);
+        }
+    }
+
+    private void DrawHandCursor(CanvasDrawingSession ds, Rect output)
+    {
+        if (_boardMediaClip is not { } clip || _boardCameraMap is null ||
+            _handTips.Length == 0 || DateTimeOffset.UtcNow - _handFrameTime > TimeSpan.FromMilliseconds(350)) return;
+        var clipPoints = clip.Corners.Select(point => new Vector2(
+            (float)(output.X + point.X * output.Width),
+            (float)(output.Y + point.Y * output.Height))).ToArray();
+        using var geometry = CanvasGeometry.CreatePolygon(ds.Device, clipPoints);
+        using var layer = ds.CreateLayer(1, geometry);
+        var radius = Math.Max(6, (float)Math.Min(output.Width, output.Height) * 0.018f);
+        foreach (var tip in _handTips)
+        {
+            var center = new Vector2((float)(output.X + tip.X * output.Width),
+                                    (float)(output.Y + tip.Y * output.Height));
+            ds.DrawCircle(center, radius, Colors.Black, Math.Max(4, radius * 0.35f));
+            ds.DrawCircle(center, radius, Colors.Cyan, Math.Max(2, radius * 0.17f));
         }
     }
 

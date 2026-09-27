@@ -8,6 +8,7 @@ using ProjectTabletop.App.Camera;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Vision;
+using Windows.Graphics;
 
 namespace ProjectTabletop.App;
 
@@ -67,6 +68,7 @@ public sealed partial class MainWindow : Window
         _statusTimer.Tick += StatusTimer_Tick;
         _statusTimer.Start();
         _initialized = true;
+        StartHandTrackingStatus();
         RefreshDisplays();
         _ = RefreshCamerasAsync();
         UpdateTrainingStatus();
@@ -82,17 +84,22 @@ public sealed partial class MainWindow : Window
 
     private sealed record DisplayChoice(DisplayArea Area, int Number)
     {
-        public string Id => Area.DisplayId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // DisplayArea objects can outlive a display-topology change. Keep the
+        // picker coherent and resolve the ID again immediately before output.
+        public Microsoft.UI.DisplayId DisplayId { get; } = Area.DisplayId;
+        public string Id { get; } = Area.DisplayId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        public RectInt32 Bounds { get; } = Area.OuterBounds;
+        public bool IsPrimary { get; } = Area.IsPrimary;
         public DisplayModeInfo? PhysicalMode { get; } = DisplayModeInfo.ForArea(Area);
         // Layout dimensions are used by AppWindow and fullscreen Win2D canvas mapping.
-        public int Width => Area.OuterBounds.Width;
-        public int Height => Area.OuterBounds.Height;
+        public int Width => Bounds.Width;
+        public int Height => Bounds.Height;
         public override string ToString() =>
             $"Display {Number}: " + (PhysicalMode is { } mode
                 ? $"{mode.Width} × {mode.Height} @ {mode.RefreshHertz} Hz physical"
                 : "physical mode unavailable") +
             $" ({Width} × {Height} layout)" +
-            (Area.IsPrimary ? " (laptop / primary)" : " (secondary)");
+            (IsPrimary ? " (primary)" : " (secondary)");
     }
 
     private enum AnnotationMode { None, PieceOutline, PieceFront, BoardCalibration, TopCalibration }
@@ -113,12 +120,37 @@ public sealed partial class MainWindow : Window
         var displays = new DisplayChoice[areas.Count];
         for (var index = 0; index < areas.Count; index++)
             displays[index] = new DisplayChoice(areas[index], index + 1);
+        var controlDisplay = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.None);
         DisplayComboBox.Items.Clear();
         foreach (var display in displays) DisplayComboBox.Items.Add(display);
         DisplayComboBox.SelectedItem = displays.FirstOrDefault(item => item.Id == previousId)
-            ?? displays.FirstOrDefault(item => !item.Area.IsPrimary)
-            ?? displays.FirstOrDefault();
-        if (displays.Length == 0) SetStatus("Windows reports no projection display. Check the HDMI connection.");
+            ?? displays.FirstOrDefault(item => item.Width > 0 && item.Height > 0 &&
+                (controlDisplay is not null ? item.DisplayId.Value != controlDisplay.DisplayId.Value : !item.IsPrimary));
+        if (SelectedDisplay is null)
+            SetStatus("Connect a separate projector display and use Windows Extend mode, then refresh displays.");
+    }
+
+    private DisplayChoice ResolveProjectionDisplay()
+    {
+        var selected = SelectedDisplay ?? throw new InvalidOperationException(
+            "Select a separate projector display. Use Windows Extend mode, then refresh displays.");
+        var area = DisplayArea.GetFromDisplayId(selected.DisplayId);
+        if (area is null || area.DisplayId.Value != selected.DisplayId.Value)
+            throw new InvalidOperationException("The selected projector is no longer connected. Refresh displays and select it again.");
+        var current = new DisplayChoice(area, selected.Number);
+        if (current.Width <= 0 || current.Height <= 0)
+            throw new InvalidOperationException("The projector reports an empty display area. Check its connection, use Windows Extend mode, then refresh displays.");
+        var controls = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.None);
+        if (controls is null || controls.DisplayId.Value == current.DisplayId.Value)
+            throw new InvalidOperationException("Choose a projector display separate from the laptop controls. Output was not opened over the controls.");
+        if (current.Bounds.X != selected.Bounds.X || current.Bounds.Y != selected.Bounds.Y ||
+            current.Width != selected.Width || current.Height != selected.Height)
+        {
+            var index = DisplayComboBox.Items.IndexOf(selected);
+            if (index >= 0) DisplayComboBox.Items[index] = current;
+            DisplayComboBox.SelectedItem = current;
+        }
+        return current;
     }
 
     private void DisplayComboBox_SelectionChanged(object sender,
@@ -126,6 +158,7 @@ public sealed partial class MainWindow : Window
     {
         if (!_initialized || SelectedDisplay is not { } display) return;
         if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
+        ClearHandTracking();
         _scene.ClearBoardMediaClip();
         _scene.SetDisplayAspect((double)display.Width / display.Height);
         InvalidateCalibration("Projection display changed. Recalibrate both planes.");
@@ -176,6 +209,7 @@ public sealed partial class MainWindow : Window
         if (_closing) return;
         _closing = true;
         _statusTimer.Stop();
+        await DisposeHandTrackingAsync();
         if (_controlHost is not null) await _controlHost.DisposeAsync();
         _output?.Close();
         _camera.FrameReceived -= Camera_FrameReceived;

@@ -20,7 +20,7 @@ if (args.Length == 0)
 
 if (args.Length < 2 || args[0] != "--once" || args.Length > 3)
 {
-    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|stop_scan|start_camera|stop_camera|open_output|set_background_media|show_test_grid|shutdown> [JSON object]");
+    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|show_test_grid|shutdown> [JSON object]");
     return 2;
 }
 
@@ -36,12 +36,19 @@ static async Task RunMcpAsync()
                 Name = "set_background_media",
                 Description = "Load an image or video from an absolute local path as the board-clipped background."
             });
+    static McpServerTool HandTrackingTool() =>
+        McpServerTool.Create((Func<bool, Task<string>>)SetHandTrackingAsync,
+            new McpServerToolCreateOptions
+            {
+                Name = "set_hand_tracking",
+                Description = "Enable or disable index-fingertip circles in the camera preview and registered board projection."
+            });
     var options = new McpServerOptions
     {
         ServerInfo = new Implementation { Name = "ProjectTabletop.ControlMcp", Version = "0.1.0" },
         ToolCollection =
         [
-            Tool("get_status", "Read camera, output, and cardboard scan status from the local ProjectTabletop app."),
+            Tool("get_status", "Read camera, output, cardboard scan, and fingertip tracking status from the local ProjectTabletop app."),
             Tool("start_board_scan", "Show the white projector scan and begin detecting the physical cardboard."),
             Tool("rescan_board", "Restart white-flood cardboard detection and projector registration while board setup is active."),
             Tool("black_output", "Show full black on the existing projector output while keeping the webcam running."),
@@ -51,6 +58,7 @@ static async Task RunMcpAsync()
             Tool("stop_camera", "Stop the webcam."),
             Tool("open_output", "Open the projector output on the selected display."),
             BackgroundMediaTool(),
+            HandTrackingTool(),
             Tool("show_test_grid", "Show the board-clipped test grid on the projector."),
             Tool("shutdown", "Close the local ProjectTabletop app cleanly.")
         ]
@@ -61,6 +69,9 @@ static async Task RunMcpAsync()
 
 static Task<string> SetBackgroundMediaAsync(string path) =>
     CallToolAsync("set_background_media", JsonSerializer.SerializeToElement(new { path }));
+
+static Task<string> SetHandTrackingAsync(bool enabled) =>
+    CallToolAsync("set_hand_tracking", JsonSerializer.SerializeToElement(new { enabled }));
 
 static async Task<string> CallToolAsync(string method, JsonElement? parameters = null)
 {

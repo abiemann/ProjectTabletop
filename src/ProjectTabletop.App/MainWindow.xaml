@@ -13,7 +13,7 @@
         <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Padding="18" Spacing="12">
                 <TextBlock Text="PROJECT TABLETOP" FontSize="23" FontWeight="Bold" />
-                <TextBlock x:Name="StatusText" Text="Ready. Choose a webcam and media files." TextWrapping="Wrap" />
+                <TextBlock x:Name="StatusText" Text="Ready. Start the webcam, scan the board, and point with your index finger." TextWrapping="Wrap" />
 
                 <TextBlock Text="1  Webcam" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
                 <ComboBox x:Name="CameraComboBox" PlaceholderText="Select webcam" HorizontalAlignment="Stretch" SelectionChanged="CameraComboBox_SelectionChanged" />
@@ -46,67 +46,77 @@
                 </StackPanel>
                 <TextBlock x:Name="BoardSetupStatusText" Text="Board setup first finds the cardboard under black output, then uses white projection and nine alignment spots to fit its grid." TextWrapping="Wrap" />
 
-                <TextBlock Text="4  Learn a physical piece" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
-                <TextBox x:Name="PieceIdTextBox" Header="Piece ID" PlaceholderText="e.g. boat-1" Text="piece-1" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Capture snapshot" Click="CaptureSnapshot_Click" />
-                    <Button Content="Save raw PNG" Click="SaveRawSnapshot_Click" />
-                    <Button Content="Resume live" Click="ResumeLive_Click" />
-                    <Button Content="Clear marks" Click="ClearMarks_Click" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Outline" Click="OutlineMode_Click" />
-                    <Button Content="Front point" Click="FrontMode_Click" />
-                    <Button Content="Add labeled sample" Click="AddSample_Click" />
-                </StackPanel>
-                <TextBlock Text="On a frozen camera frame, click around one piece's top in order, then click its front point. Label other visible pieces on the same frame; capture more views and orientations for training." TextWrapping="Wrap" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Train" Click="Train_Click" />
-                    <Button Content="Save models" Click="SaveModels_Click" />
-                    <Button Content="Load models" Click="LoadModels_Click" />
-                </StackPanel>
-                <TextBlock x:Name="TrainingStatusText" Text="Untrained: no labeled samples." TextWrapping="Wrap" />
-                <TextBlock Text="Vision tuning" FontWeight="SemiBold" Margin="0,4,0,0" />
-                <ComboBox x:Name="VisionSegmentationComboBox" Header="Find candidate cards by" HorizontalAlignment="Stretch">
-                    <ComboBoxItem Content="Fixed brightness" />
-                    <ComboBoxItem Content="Automatic brightness (Otsu)" />
-                    <ComboBoxItem Content="Empty-board difference" />
-                </ComboBox>
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <NumberBox x:Name="VisionBrightnessThresholdBox" Header="Brightness cutoff" Minimum="0" Maximum="255" Value="205" Width="180" SmallChange="1" />
-                    <NumberBox x:Name="VisionDifferenceThresholdBox" Header="Difference cutoff" Minimum="0" Maximum="255" Value="35" Width="180" SmallChange="1" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <NumberBox x:Name="VisionMinimumAreaBox" Header="Min area (pixels²)" Minimum="1" Maximum="1000000" Value="300" Width="180" SmallChange="10" />
-                    <NumberBox x:Name="VisionPatternThresholdBox" Header="Pattern cutoff" Minimum="0" Maximum="255" Value="225" Width="180" SmallChange="1" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button x:Name="ApplyVisionSettingsButton" Content="Apply tuning" Click="ApplyVisionSettings_Click" />
-                    <Button x:Name="CaptureEmptyBoardButton" Content="Capture empty board" Click="CaptureEmptyBoard_Click" />
-                </StackPanel>
-                <TextBlock x:Name="VisionReferenceStatusText" Text="No empty-board reference saved." TextWrapping="Wrap" />
-                <TextBlock Text="Empty-board difference needs a card-free frame and a fixed projected image. Moving video changes the background every frame." TextWrapping="Wrap" />
+                <TextBlock Text="4  Hand tracking" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
+                <ToggleSwitch x:Name="HandTrackingToggle" Header="Index fingertip circle" IsOn="True" Toggled="HandTrackingToggle_Toggled" />
+                <TextBlock x:Name="HandTrackingStatusText" Text="Start the webcam to track your index fingertip." TextWrapping="Wrap" />
+                <TextBlock Text="The camera circle works immediately. After board setup, the circle also follows your fingertip on the board. Keep your fingertip close to the board surface; lifting it causes projection offset. No piece training or raised-top calibration is needed." TextWrapping="Wrap" />
+                <TextBlock Text="This circle does not press buttons or trigger actions." TextWrapping="Wrap" />
+                <Button Content="Save raw camera PNG" Click="SaveRawSnapshot_Click" />
 
-                <TextBlock Text="5  Assign media to a piece" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
-                <ComboBox x:Name="OverlayPieceComboBox" PlaceholderText="Choose trained piece" HorizontalAlignment="Stretch" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Choose overlay" Click="ChooseOverlay_Click" />
-                    <Button Content="Remove overlay" Click="RemoveOverlay_Click" />
-                </StackPanel>
-                <TextBlock x:Name="OverlayMappingsText" Text="No overlays assigned." TextWrapping="Wrap" />
+                <Expander Header="Physical pieces (optional / later)" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="Learn a physical piece" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
+                        <TextBox x:Name="PieceIdTextBox" Header="Piece ID" PlaceholderText="e.g. boat-1" Text="piece-1" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Capture snapshot" Click="CaptureSnapshot_Click" />
+                            <Button Content="Resume live" Click="ResumeLive_Click" />
+                        </StackPanel>
+                        <Button Content="Clear marks" Click="ClearMarks_Click" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Outline" Click="OutlineMode_Click" />
+                            <Button Content="Front point" Click="FrontMode_Click" />
+                            <Button Content="Add labeled sample" Click="AddSample_Click" />
+                        </StackPanel>
+                        <TextBlock Text="On a frozen camera frame, click around one piece's top in order, then click its front point. Label other visible pieces on the same frame; capture more views and orientations for training." TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Train" Click="Train_Click" />
+                            <Button Content="Save models" Click="SaveModels_Click" />
+                            <Button Content="Load models" Click="LoadModels_Click" />
+                        </StackPanel>
+                        <TextBlock x:Name="TrainingStatusText" Text="Untrained: no labeled samples." TextWrapping="Wrap" />
+                        <TextBlock Text="Vision tuning" FontWeight="SemiBold" Margin="0,4,0,0" />
+                        <ComboBox x:Name="VisionSegmentationComboBox" Header="Find candidate cards by" HorizontalAlignment="Stretch">
+                            <ComboBoxItem Content="Fixed brightness" />
+                            <ComboBoxItem Content="Automatic brightness (Otsu)" />
+                            <ComboBoxItem Content="Empty-board difference" />
+                        </ComboBox>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <NumberBox x:Name="VisionBrightnessThresholdBox" Header="Brightness cutoff" Minimum="0" Maximum="255" Value="205" Width="150" SmallChange="1" />
+                            <NumberBox x:Name="VisionDifferenceThresholdBox" Header="Difference cutoff" Minimum="0" Maximum="255" Value="35" Width="150" SmallChange="1" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <NumberBox x:Name="VisionMinimumAreaBox" Header="Min area (pixels²)" Minimum="1" Maximum="1000000" Value="300" Width="150" SmallChange="10" />
+                            <NumberBox x:Name="VisionPatternThresholdBox" Header="Pattern cutoff" Minimum="0" Maximum="255" Value="225" Width="150" SmallChange="1" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="ApplyVisionSettingsButton" Content="Apply tuning" Click="ApplyVisionSettings_Click" />
+                            <Button x:Name="CaptureEmptyBoardButton" Content="Capture empty board" Click="CaptureEmptyBoard_Click" />
+                        </StackPanel>
+                        <TextBlock x:Name="VisionReferenceStatusText" Text="No empty-board reference saved." TextWrapping="Wrap" />
+                        <TextBlock Text="Empty-board difference needs a card-free frame and a fixed projected image. Moving video changes the background every frame." TextWrapping="Wrap" />
 
-                <TextBlock Text="6  Registration" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Board corners" Click="BoardCorners_Click" />
-                    <Button Content="Raised top points" Click="TopPoints_Click" />
-                </StackPanel>
-                <NumberBox x:Name="PieceHeightNumberBox" Header="Measured piece top height above board (mm)" Minimum="0.1" Maximum="100" Value="5" ValueChanged="PieceHeightNumberBox_ValueChanged" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Save calibration" Click="SaveCalibration_Click" />
-                    <Button Content="Load calibration" Click="LoadCalibration_Click" />
-                </StackPanel>
-                <TextBlock Text="For board: click the four projected corner targets in the camera view. For raised top: move a piece until each projected target lands on its top center, then click that center in the camera view. The app advances the target after each click." TextWrapping="Wrap" />
-                <TextBlock x:Name="CalibrationStatusText" Text="Registration needed before overlays can align." TextWrapping="Wrap" />
+                        <TextBlock Text="Assign media to a piece" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
+                        <ComboBox x:Name="OverlayPieceComboBox" PlaceholderText="Choose trained piece" HorizontalAlignment="Stretch" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Choose overlay" Click="ChooseOverlay_Click" />
+                            <Button Content="Remove overlay" Click="RemoveOverlay_Click" />
+                        </StackPanel>
+                        <TextBlock x:Name="OverlayMappingsText" Text="No overlays assigned." TextWrapping="Wrap" />
+
+                        <TextBlock Text="Raised-piece registration" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Board corners" Click="BoardCorners_Click" />
+                            <Button Content="Raised top points" Click="TopPoints_Click" />
+                        </StackPanel>
+                        <NumberBox x:Name="PieceHeightNumberBox" Header="Measured piece top height above board (mm)" Minimum="0.1" Maximum="100" Value="5" ValueChanged="PieceHeightNumberBox_ValueChanged" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Save calibration" Click="SaveCalibration_Click" />
+                            <Button Content="Load calibration" Click="LoadCalibration_Click" />
+                        </StackPanel>
+                        <TextBlock Text="For board: click the four projected corner targets in the camera view. For raised top: move a piece until each projected target lands on its top center, then click that center in the camera view. The app advances the target after each click." TextWrapping="Wrap" />
+                        <TextBlock x:Name="CalibrationStatusText" Text="Registration needed before overlays can align." TextWrapping="Wrap" />
+                    </StackPanel>
+                </Expander>
                 <TextBlock Text="Media decoding and 4K/60 performance must be checked on the connected laptop and projector." TextWrapping="Wrap" FontStyle="Italic" Margin="0,8,0,12" />
             </StackPanel>
         </ScrollViewer>
@@ -117,7 +127,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <TextBlock Grid.Row="0" Text="CAMERA  ·  snapshot annotation and live detections" FontWeight="SemiBold" />
+            <TextBlock Grid.Row="0" Text="CAMERA  ·  live fingertip tracking" FontWeight="SemiBold" />
             <Border Grid.Row="1" Background="#070B11" CornerRadius="4">
                 <canvas:CanvasControl x:Name="CameraCanvas" UseSharedDevice="True" Draw="CameraCanvas_Draw" PointerPressed="CameraCanvas_PointerPressed" />
             </Border>

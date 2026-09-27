@@ -49,6 +49,7 @@ public sealed partial class MainWindow
 
     private void SuspendBoardScanForCameraOutage()
     {
+        ClearHandTracking();
         var hadMediaClip = _scene.HasBoardMediaClip;
         _scene.ClearBoardMediaClip();
         if (hadMediaClip && !Volatile.Read(ref _boardSetupActive))
@@ -216,6 +217,7 @@ public sealed partial class MainWindow
         if (!_initialized || SelectedCamera is not { } selected ||
             _selectedCameraId == selected.Device.Id) return;
         _selectedCameraId = selected.Device.Id;
+        ClearHandTracking();
         _scene.ClearBoardMediaClip();
         if (_cameraWantedDeviceId is not null && _cameraWantedDeviceId != selected.Device.Id)
         {
@@ -256,6 +258,7 @@ public sealed partial class MainWindow
         try
         {
             if (_closing || !_cameraWanted || version != _cameraOperationVersion) return false;
+            ClearHandTracking();
             _scene.ClearBoardMediaClip();
             ResetCameraHealth(preserveBoardScanSuspension:
                 _boardScanSuspendedForCameraOutage && Volatile.Read(ref _boardSetupActive));
@@ -300,6 +303,7 @@ public sealed partial class MainWindow
     internal async Task StopCameraAsync()
     {
         _cameraWanted = false;
+        ClearHandTracking();
         _cameraWantedDeviceId = null;
         Interlocked.Increment(ref _cameraOperationVersion);
         _cameraReconnectAttempts = 0;
@@ -327,6 +331,7 @@ public sealed partial class MainWindow
     {
         if (_camera.IsRunning) return;
         var version = Interlocked.Read(ref _cameraOperationVersion);
+        ClearHandTracking();
         _scene.ClearBoardMediaClip();
         _scene.SetDetections(Array.Empty<PieceDetection>(), DateTimeOffset.MinValue);
         Volatile.Write(ref _latestCameraFrame, null);
@@ -370,9 +375,11 @@ public sealed partial class MainWindow
         {
             if (!_boardScanSuspendedForCameraOutage)
                 QueueBoardDetection(frame, now);
+            if (!IsBoardScanMeasuring) QueueHandDetection(frame, now);
             return;
         }
 
+        QueueHandDetection(frame, now);
         bool trained;
         lock (_visionGate) trained = _vision.IsTrained;
         if (!trained || Interlocked.CompareExchange(ref _detecting, 1, 0) != 0) return;
@@ -526,6 +533,7 @@ public sealed partial class MainWindow
         if (_frozenFrame is null)
         {
             DrawBoardPreview(ds, frame, rect);
+            DrawHandPreview(ds, frame, rect);
             if (!Volatile.Read(ref _boardSetupActive)) foreach (var detection in Volatile.Read(ref _latestDetections))
             {
                 var corners = detection.Outline.Select(View).ToArray();

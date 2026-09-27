@@ -8,5 +8,6 @@
   <ItemGroup>
     <ProjectReference Include="../ProjectTabletop.Vision.csproj" />
     <Content Include="Fixtures/*.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Fixtures/*.jpg;Fixtures/*LICENSE*.txt;Fixtures/*.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

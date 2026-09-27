@@ -1,0 +1,209 @@
+using System.Diagnostics;
+using System.Numerics;
+using Microsoft.Graphics.Canvas;
+using Microsoft.UI;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
+using ProjectTabletop.App.Camera;
+using ProjectTabletop.Vision;
+using Windows.Foundation;
+
+namespace ProjectTabletop.App;
+
+public sealed partial class MainWindow
+{
+    private static readonly TimeSpan HandDetectionInterval = TimeSpan.FromMilliseconds(80);
+    private static readonly TimeSpan HandMarkerLifetime = TimeSpan.FromMilliseconds(350);
+    private readonly object _handGate = new();
+    private HandTrackingEngine? _handEngine;
+    private Task? _handDetectionTask;
+    private DispatcherQueueTimer? _handStatusTimer;
+    private HandPreview? _handPreview;
+    private volatile bool _handTrackingEnabled = true;
+    private bool _handDetecting;
+    private long _handGeneration;
+    private long _lastHandDetectionTick;
+    private string? _handTrackingError;
+    private string? _handLatencyWarning;
+
+    private sealed record HandPreview(PixelPoint[] Tips, int Width, int Height, DateTimeOffset Timestamp);
+
+    internal bool HandTrackingEnabled => _handTrackingEnabled;
+    internal string HandTrackingControlStatus => HandTrackingStatusText.Text;
+    internal int TrackedHandCount
+    {
+        get
+        {
+            lock (_handGate) return _handPreview is { } preview &&
+                DateTimeOffset.UtcNow - preview.Timestamp <= HandMarkerLifetime ? preview.Tips.Length : 0;
+        }
+    }
+
+    private bool IsBoardScanMeasuring => Volatile.Read(ref _boardSetupActive) &&
+        (BoardSetupPhase)Volatile.Read(ref _boardSetupPhase) != BoardSetupPhase.GridReady;
+
+    private void StartHandTrackingStatus()
+    {
+        _handStatusTimer = DispatcherQueue.CreateTimer();
+        _handStatusTimer.Interval = TimeSpan.FromMilliseconds(100);
+        _handStatusTimer.Tick += (_, _) =>
+        {
+            var expired = false;
+            lock (_handGate)
+            {
+                if (_handPreview is { } preview && DateTimeOffset.UtcNow - preview.Timestamp > HandMarkerLifetime)
+                {
+                    _handPreview = null;
+                    _scene.ClearHandTips();
+                    expired = true;
+                }
+            }
+            if (expired && !_closing) CameraCanvas.Invalidate();
+            UpdateHandTrackingStatus();
+        };
+        _handStatusTimer.Start();
+        UpdateHandTrackingStatus();
+    }
+
+    private void HandTrackingToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_initialized && _handTrackingEnabled != HandTrackingToggle.IsOn)
+            SetHandTrackingEnabled(HandTrackingToggle.IsOn);
+    }
+
+    internal void SetHandTrackingEnabled(bool enabled)
+    {
+        _handTrackingEnabled = enabled;
+        if (HandTrackingToggle.IsOn != enabled) HandTrackingToggle.IsOn = enabled;
+        _handTrackingError = null;
+        ClearHandTracking();
+        CameraCanvas.Invalidate();
+        UpdateHandTrackingStatus();
+    }
+
+    // Called before any camera or board-state change. A result already in flight
+    // can finish, but cannot publish into the new camera/registration generation.
+    private void ClearHandTracking()
+    {
+        lock (_handGate)
+        {
+            _handGeneration++;
+            _handPreview = null;
+            _handLatencyWarning = null;
+            _lastHandDetectionTick = 0;
+            _scene.ClearHandTips();
+        }
+        if (_initialized && !_closing)
+            DispatcherQueue.TryEnqueue(() => { if (!_closing) CameraCanvas.Invalidate(); });
+    }
+
+    private void QueueHandDetection(CameraFrame frame, long tick)
+    {
+        lock (_handGate)
+        {
+            if (_closing || !_cameraWanted || !_camera.IsRunning || _cameraOperation.CurrentCount == 0 ||
+                Volatile.Read(ref _cameraHealthWarning) ||
+                !_handTrackingEnabled || _handTrackingError is not null ||
+                IsBoardScanMeasuring || _handDetecting) return;
+            if (_lastHandDetectionTick != 0 &&
+                Stopwatch.GetElapsedTime(_lastHandDetectionTick, tick) < HandDetectionInterval) return;
+            _lastHandDetectionTick = tick;
+            _handDetecting = true;
+            var generation = _handGeneration;
+            _handDetectionTask = Task.Run(() =>
+            {
+                try
+                {
+                    _handEngine ??= new HandTrackingEngine(Path.Combine(AppContext.BaseDirectory, "Models", "Hands"));
+                    var hands = _handEngine.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra);
+                    var tips = hands.Select(hand => hand.IndexTip)
+                        .Where(point => double.IsFinite(point.X) && double.IsFinite(point.Y) &&
+                            point.X >= 0 && point.X < frame.Width && point.Y >= 0 && point.Y < frame.Height)
+                        .ToArray();
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        lock (_handGate)
+                        {
+                            if (_closing || generation != _handGeneration || !_handTrackingEnabled ||
+                                !_cameraWanted || !_camera.IsRunning ||
+                                Volatile.Read(ref _cameraHealthWarning) || IsBoardScanMeasuring) return;
+                            var age = DateTimeOffset.UtcNow - frame.Timestamp;
+                            if (age > HandMarkerLifetime)
+                            {
+                                _handPreview = null;
+                                _scene.ClearHandTips();
+                                _handLatencyWarning = $"Hand tracking result was {age.TotalMilliseconds:F0} ms old. " +
+                                    "Waiting for a result under 350 ms before showing the circle.";
+                            }
+                            else
+                            {
+                                _handLatencyWarning = null;
+                                _handPreview = new HandPreview(tips, frame.Width, frame.Height, frame.Timestamp);
+                                _scene.SetHandTips(tips, frame.Timestamp);
+                            }
+                        }
+                        if (_frozenFrame is null) CameraCanvas.Invalidate();
+                        UpdateHandTrackingStatus();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        lock (_handGate)
+                        {
+                            if (_closing || generation != _handGeneration) return;
+                            _handTrackingError = "Hand tracking unavailable: " + ex.Message;
+                            ClearHandTracking();
+                        }
+                        CameraCanvas.Invalidate();
+                        UpdateHandTrackingStatus();
+                    });
+                }
+                finally { lock (_handGate) _handDetecting = false; }
+            });
+        }
+    }
+
+    private void UpdateHandTrackingStatus()
+    {
+        if (_closing) return;
+        HandTrackingStatusText.Text = !_handTrackingEnabled ? "Hand tracking is off." :
+            _handTrackingError ??
+            (IsBoardScanMeasuring ? "Hand tracking pauses while the board is being scanned." :
+             !_cameraWanted || !_camera.IsRunning ? "Start the webcam to track your index fingertip." :
+             _cameraHealthWarning ? "Waiting for fresh webcam video before tracking your fingertip." :
+             _handLatencyWarning is not null ? _handLatencyWarning :
+             TrackedHandCount == 0 ? "Looking for a hand. Show your hand clearly in the camera view." :
+             $"Tracking {TrackedHandCount} index fingertip{(TrackedHandCount == 1 ? "" : "s")}. " +
+                 (_scene.HasBoardMediaClip ? "The circle is also projected on the board." :
+                     "Complete board setup to project the circle."));
+    }
+
+    private void DrawHandPreview(CanvasDrawingSession ds, CameraFrame frame, Rect rect)
+    {
+        HandPreview? preview;
+        lock (_handGate) preview = _handPreview;
+        if (!_handTrackingEnabled || IsBoardScanMeasuring || preview is null ||
+            preview.Width != frame.Width || preview.Height != frame.Height ||
+            DateTimeOffset.UtcNow - preview.Timestamp > HandMarkerLifetime) return;
+        foreach (var tip in preview.Tips)
+        {
+            var center = new Vector2((float)(rect.X + tip.X / frame.Width * rect.Width),
+                                    (float)(rect.Y + tip.Y / frame.Height * rect.Height));
+            ds.DrawCircle(center, 12, Colors.Black, 6);
+            ds.DrawCircle(center, 12, Colors.Cyan, 3);
+        }
+    }
+
+    private async Task DisposeHandTrackingAsync()
+    {
+        _handStatusTimer?.Stop();
+        ClearHandTracking();
+        Task? pending;
+        lock (_handGate) pending = _handDetectionTask;
+        if (pending is not null) await pending;
+        _handEngine?.Dispose();
+        _handEngine = null;
+    }
+}

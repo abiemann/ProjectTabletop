@@ -10,13 +10,15 @@ public sealed partial class MainWindow
 {
     private void OpenOutput_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedDisplay is not { } display)
-        {
-            SetStatus("Choose an HDMI display before opening the projection window.");
-            return;
-        }
+        OpenProjectionOutput();
+    }
+
+    private bool OpenProjectionOutput()
+    {
         try
         {
+            var display = ResolveProjectionDisplay();
+            ClearHandTracking();
             _scene.ClearBoardMediaClip();
             if (_output is null)
             {
@@ -25,20 +27,27 @@ public sealed partial class MainWindow
                 {
                     _output = null;
                     _outputDisplayId = null;
+                    ClearHandTracking();
                     _scene.ClearBoardMediaClip();
                     FullscreenButton.Content = "Full screen";
                     if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
                 };
             }
             _scene.SetDisplayAspect((double)display.Width / display.Height);
-            _output.ShowOn(display.Area);
-            _output.SetFullScreen(true);
-            _outputDisplayId = display.Id;
+            _output.ShowOn(display.Area, AppWindow.Id);
+            _outputDisplayId = _output.ActualDisplayId;
             FullscreenButton.Content = "Windowed";
             if (Volatile.Read(ref _boardSetupActive)) RescanBoardSetup();
             SetStatus($"Projection output opened on {display}. Confirm hardware video decode on this laptop.");
+            return true;
         }
-        catch (Exception ex) { SetStatus("Could not open projection output: " + ex.Message); }
+        catch (Exception ex)
+        {
+            _output?.Close();
+            _outputDisplayId = null;
+            SetStatus("Could not open projection output: " + ex.Message);
+            return false;
+        }
     }
 
     private void Fullscreen_Click(object sender, RoutedEventArgs e)
@@ -47,12 +56,27 @@ public sealed partial class MainWindow
         try
         {
             if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
+            ClearHandTracking();
             _scene.ClearBoardMediaClip();
             _output.SetFullScreen(!_output.IsFullScreen);
             FullscreenButton.Content = _output.IsFullScreen ? "Windowed" : "Full screen";
             InvalidateCalibration("Output window mode changed. Recalibrate in full screen.");
         }
-        catch (Exception ex) { SetStatus("Could not change output window mode: " + ex.Message); }
+        catch (Exception ex)
+        {
+            _output?.Close();
+            _outputDisplayId = null;
+            SetStatus("Could not change output window mode: " + ex.Message);
+        }
+    }
+
+    private void RequireProjectionOutput()
+    {
+        var display = ResolveProjectionDisplay();
+        if (_output is null || !_output.AppWindow.IsVisible || !_output.IsFullScreen ||
+            _output.ActualDisplayId != display.Id)
+            throw new InvalidOperationException("Open the selected projector display in full screen first.");
+        _output.VerifyTargetDisplay();
     }
 
     private async void ChooseBackground_Click(object sender, RoutedEventArgs e)

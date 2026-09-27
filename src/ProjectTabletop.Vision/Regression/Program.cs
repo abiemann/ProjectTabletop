@@ -2,6 +2,11 @@ using System.Runtime.InteropServices;
 using OpenCvSharp;
 using ProjectTabletop.Vision;
 
+if (args is ["--hands"])
+{
+    HandTrackingRegression.Run();
+    return;
+}
 if (args is ["--markers"])
 {
     CheckProjectedCornerMarkers();
@@ -83,6 +88,7 @@ CheckHardwareAmbientScan(whiteHardwareBoard);
 CheckMovedHardwareFrames(whiteHardwareBoard);
 CheckProjectedCornerMarkers();
 CheckCalibrationSpot();
+HandTrackingRegression.Run();
 if (args.Length == 1)
 {
     using Mat actual = Cv2.ImRead(args[0], ImreadModes.Unchanged);

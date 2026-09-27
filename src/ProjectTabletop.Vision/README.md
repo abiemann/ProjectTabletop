@@ -1,5 +1,25 @@
 # ProjectTabletop.Vision
 
+## Hand interaction prototype
+
+The current app priority is hand interaction before card recognition.
+`HandTrackingEngine` uses bundled OpenCV Zoo MediaPipe ONNX palm and hand models
+through OpenCvSharp DNN on the CPU. Construct it with the `Models/Hands` directory
+from the build output and pass top-down BGRA8 images to
+`Detect(width, height, stride, bgra)`. Each returned `HandDetection` contains 21
+camera-pixel landmarks, confidence, a model handedness score, and `IndexTip`
+(landmark 8). Up to two hands are returned. Dispose the engine after inference
+has stopped. No training samples or network service are needed.
+
+The app schedules one inference at a time off the UI thread and maps the index
+tip through the completed board scan for the projector cursor. Predicted hand
+landmarks do not establish board contact. Button hit testing and press/release
+gestures are not implemented. Performance under the physical projector remains
+to be checked. [Model sources, checksums, and licenses](Models/Hands/README.md)
+are bundled with the models.
+
+## Card recognition baseline
+
 This .NET 10 library is the first local vision baseline for several white cards with
 camera-visible patterns. It uses OpenCvSharp 4.13.0.20260627 to segment candidate
 outlines, trains a multiclass SVM on rotation-invariant shape and brightness-pattern
@@ -100,6 +120,13 @@ and compatibility. It requires a separately visible board contour outside a
 smaller grid and is not the full-white physical-cardboard scan.
 
 ## Regression and hardware checks
+
+The default regression also runs the bundled hand models against an independently
+annotated MediaPipe pointing-hand image, its rotation, an off-center landscape
+placement, padded camera rows, and a two-hand original/mirrored composite. Blank
+images and saved board photographs check no-hand rejection. These are offline
+model and coordinate checks, not proof of live projected-hand tracking. Run only
+these cases with `-- --hands`; see the [fixture provenance](Regression/Fixtures/HAND-FIXTURE.md).
 
 Run:
 
