@@ -630,7 +630,6 @@ public sealed partial class SceneCompositor : IDisposable
             ds.DrawLine(x, (float)stage.Y, x, (float)(stage.Y + stage.Height), AppPalette.GridLine, i is 0 or 10 or 5 ? 2 : 1);
             ds.DrawLine((float)stage.X, y, (float)(stage.X + stage.Width), y, AppPalette.GridLine, i is 0 or 10 or 5 ? 2 : 1);
         }
-        ds.DrawText("21 in × 21 in", (float)stage.X + 16, (float)stage.Y + 12, AppPalette.MutedText);
     }
 
     private static void DrawDetectedBoardGrid(CanvasDrawingSession ds, Rect output,

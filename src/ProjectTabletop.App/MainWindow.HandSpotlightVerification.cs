@@ -22,6 +22,7 @@ public sealed partial class MainWindow
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
         scene.SetBoardSetup(false);
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96);
+        long gestureEvent = 0;
         byte[] Draw()
         {
             using (var drawing = target.CreateDrawingSession())
@@ -47,6 +48,7 @@ public sealed partial class MainWindow
             Require(WhiteAt(pinchIlluminated, point), "The opaque white core lost finger coverage during a pinch.");
 
         HandDetection left = Hand(.3, .6), right = Hand(.7, .6);
+        scene.ClearHandTips(); // Begin an independent fixture rather than retaining the preceding hand's hold.
         scene.SetHandSpotlights([left, right], DateTimeOffset.UtcNow);
         var both = Draw();
         Require(scene.ActiveHandSpotlightCount == 2 && WhiteAt(both, new(.3, .6)) && WhiteAt(both, new(.7, .6)),
@@ -54,11 +56,13 @@ public sealed partial class MainWindow
 
         // The hand's circle crosses the left board edge; clipped output must
         // still be black even where that circle would otherwise illuminate it.
+        scene.ClearHandTips();
         scene.SetHandSpotlights([Hand(.13, .6)], DateTimeOffset.UtcNow);
         var clipped = Draw();
         Require(WhiteAt(clipped, new(.16, .6)) && BlackAt(clipped, new(.08, .6)),
             "A spotlight failed to reach the board edge or spilled outside the board clip.");
 
+        scene.ClearHandTips();
         scene.SetHandSpotlights([left], DateTimeOffset.UtcNow);
         var currentTime = DateTimeOffset.UtcNow;
         scene.SetHandSpotlights([left], currentTime);
@@ -95,6 +99,60 @@ public sealed partial class MainWindow
         await Task.Delay(630);
         Require(scene.ActiveHandSpotlightCount == 0 && !WhiteAt(Draw(), new(.3, .6)),
             "Empty observations refreshed lighting beyond its 700 ms source-frame lifetime.");
+
+        // Live reproduction: one hand has executed and remains suppressed,
+        // while the other hand briefly drops out of inference. Seeing the
+        // suppressed hand must neither erase nor indefinitely refresh the other
+        // hand's cached illumination.
+        scene.ShowHandTrackingTest();
+        Draw();
+        const long normalId = 4101, suppressedId = 4102, recoveredId = 4103;
+        void Observe((HandDetection Hand, long Id)[] observations, bool executeOther = false)
+        {
+            var sourceTime = DateTimeOffset.UtcNow;
+            long eventId = executeOther ? ++gestureEvent : 0;
+            scene.SetHandCursors(observations.Select(item => new HandCursor(item.Hand.IndexTip,
+                executeOther && item.Id == suppressedId ? sourceTime.AddSeconds(1) : DateTimeOffset.MinValue,
+                executeOther && item.Id == suppressedId ? eventId : 0) { TrackingId = item.Id }).ToArray(), sourceTime);
+            scene.SetHandSpotlights(observations.Select(item => item.Hand).ToArray(), sourceTime);
+        }
+        Observe([(left, normalId), (right, suppressedId)]);
+        Require(scene.ActiveHandSpotlightCount == 2, "Per-hand dropout fixture did not start with two lights.");
+        Observe([(left, normalId), (right, suppressedId)], executeOther: true);
+        Require(scene.ActiveHandSpotlightCount == 1 &&
+            scene.GetHandLightingDiagnostics().SuppressedHandIds.Contains(suppressedId),
+            "The second hand's execute did not extinguish only its own light.");
+        await Task.Delay(120);
+        Observe([(right, suppressedId)]);
+        Require(scene.ActiveHandSpotlightCount == 1 && WhiteAt(Draw(), new(.3, .6)),
+            "Seeing only a suppressed hand erased another hand's 120 ms dropout hold.");
+        await Task.Delay(180);
+        Observe([(right, suppressedId)]);
+        Require(scene.ActiveHandSpotlightCount == 1 && WhiteAt(Draw(), new(.3, .6)) &&
+            scene.HoveredBoardButtons.Count == 0 && scene.CurrentBoardScreen == BoardScreen.HandTracking,
+            "A second hand erased the 300 ms light hold or held illumination generated input.");
+        HandDetection recovered = Hand(.305, .603);
+        Observe([(recovered, recoveredId), (right, suppressedId)]);
+        Require(scene.ActiveHandSpotlightCount == 1 && WhiteAt(Draw(), new(.305, .603)),
+            "A returning physical hand with a new tracker ID created duplicate cached lights.");
+        var recoveredSourceTime = scene.GetHandLightingDiagnostics().LightLifetimes.Single().SourceFrameTime;
+        // The already-known suppressed hand now approaches the missing hand's
+        // last position. Its stable identity must prevent proximity matching
+        // from claiming or refreshing the other hand's cached illumination.
+        HandDetection nearbySuppressed = Hand(.355, .603);
+        for (int sample = 0; sample < 8; sample++)
+        {
+            await Task.Delay(100);
+            Observe([(nearbySuppressed, suppressedId)]);
+            if (sample == 1)
+                Require(scene.ActiveHandSpotlightCount == 1 && WhiteAt(Draw(), new(.305, .603)) &&
+                    scene.GetHandLightingDiagnostics().LightLifetimes.Single().SourceFrameTime == recoveredSourceTime,
+                    "A nearby known suppressed hand claimed or refreshed another hand's retained light.");
+        }
+        Require(scene.ActiveHandSpotlightCount == 0 && !WhiteAt(Draw(), new(.305, .603)) &&
+            scene.GetHandLightingDiagnostics().SuppressedHandIds.Contains(suppressedId),
+            "A different hand refreshed expired illumination or lost its execute suppression.");
+        scene.ClearHandTips();
 
         scene.SetHandSpotlights([left], DateTimeOffset.UtcNow);
         scene.ShowPhotoCopy();
@@ -215,7 +273,6 @@ public sealed partial class MainWindow
 
         // Render confirmed pinch input into every kind of projector scene. Only
         // the gesture tester may add red pixels; menu navigation still operates.
-        long gestureEvent = 0;
         var probeTip = BoardPoint(.5, .65); // Clear of all menu and app controls.
         void CheckPinchRendering(bool showCircle)
         {
@@ -255,6 +312,9 @@ public sealed partial class MainWindow
 
         return new { passed = true, opaqueFingerCoverage = true, boardClipping = true, twoHands = true,
             sourceFrameOrdering = true, lightingDoesNotGenerateInput = true, resetRejectsOldFrames = true,
+            perHandDropoutHold = true, suppressedOtherHandDoesNotCancelHold = true,
+            recoveredTrackingIdDoesNotDuplicateLight = true, independentLightExpiry = true,
+            knownSuppressedHandCannotClaimOtherHold = true,
             sourceLifetimeMilliseconds = 700, photoCopyIndependentLights = true, photoCopyHandCoversTopControls = true,
             photoCopyHandBoardClipping = true,
             photoCopyObjectLockLifecycle = true, rotatedRectangularObjectLight = true,

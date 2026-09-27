@@ -88,6 +88,7 @@ public sealed partial class MainWindow
         Require(scene.ActiveHandSpotlightCount == 2 && WhiteAt(Draw(), new(.3, .6)), "A genuinely returned hand did not regain its light.");
 
         scene.ShowBoardMenu();
+        scene.ClearHandTips(); // Start an unrelated selection fixture without the prior hands' dropout holds.
         Draw();
         var middle = BoardPoint(.28, .33);
         var selecting = Hand(middle.X, middle.Y + .1);
