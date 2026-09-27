@@ -17,6 +17,58 @@ A lost fit searches immediately, and periodic searches acquire arriving hands.
 Call `ResetTracking()` after a camera/scene interruption; changing dimensions
 also invalidates crop hints. Old landmarks are never returned as current results.
 
+`Detect` also accepts optional `HandTrackingBounds` camera search regions. On
+acquisition and periodic-search frames it tries at most two valid, deduplicated,
+in-frame square crops, then preserves the ordinary full-frame and tiled searches.
+Palm proposals are translated to camera coordinates and hand landmarks are
+inferred from the original frame. These hints do not bypass either model threshold
+or turn movement into a hand detection. Diagnostics label these attempts `motion-roi`
+(the hints can come from foreground, motion, or scheduled control-area searches).
+If all ordinary fits fail, at most two focused palm thumbnails get a bounded
+colour-cast correction estimated from bright, modest-chroma pixels. Correction
+needs sufficient reference pixels and a material colour imbalance; its channel
+gains stay within .75-1.35. Diagnostics label these attempts
+`motion-roi-normalized` and report the gains and reference-pixel count. Only the
+palm-search thumbnail changes: landmark inference, previews, captures and copied
+images use the original camera pixels. Existing model confidence cutoffs remain.
+Run `-- --hand-color-correction` for recovery, raw-tracking continuity, neutral
+input and empty-frame checks.
+
+`HandAcquisitionMotionTracker` finds local luminance changes inside a supplied
+camera polygon. It uses equal sampling scale on both axes, compensates for global
+brightness shifts, rejects noise/broad changes, and returns at most two bounded
+square search crops plus suggested light geometry. A hint expires after 450 ms
+without new movement. Call `Reset` after changes to the expected scene or lighting;
+the app does so around Blackjack redraws and exploratory illumination. These hints
+are acquisition aids only; they never supply gesture observations.
+
+`HandAcquisitionPresenceTracker` accepts an immutable `HandAcquisitionSceneImage`
+containing the generated BGRA board surface and native-camera-to-board-UV mapping.
+It samples expected colours without deforming camera images, fits a robust camera
+RGB mixing response and illumination gradient, retains dark controls while trimming
+outliers, and uses distributed matching colours to correct remaining camera response.
+It rejects narrow projected edges and small residuals,
+and returns up to two stationary foreground regions. It can start with a hand
+already present and does not absorb that hand into its background. A fixed camera
+reference is available only as a fallback without a usable rendered scene and
+cannot identify objects already present in that reference. Reset on scene,
+calibration or camera changes, not on search-light toggles. During exploratory
+illumination, the tracker excludes that light from template fitting and checks
+its white core separately after settling. Fresh foreground can retain the light;
+an empty core or lack of fresh evidence cannot. These regions are acquisition
+hints, never semantic hand recognition. A uniform occluder matching the exact footprint
+of a uniquely coloured control can be ambiguous; the app also searches the control
+area directly with the hand model. The app waits 900 ms after turning a
+search light off before permitting another foreground-triggered light, because
+camera timestamps describe CPU arrival rather than physical exposure.
+Run `-- --hand-acquisition` for motion, stationary foreground, own-light feedback,
+focused-search and colour-correction regressions.
+
+DEBUG local control `capture_hand_acquisition` saves the immutable native camera
+and rendered-reference BGRA buffers with dimensions, mapping, source UTC and
+diagnostics under the app's `HandAcquisitionSnapshots` directory. These private
+captures support exact replay and are not repository fixtures.
+
 During duplicate suppression, a fresh tracked fit with confidence at least .90
 and previous-bounds IoU at least .65 takes precedence over an overlapping search
 fit with at most .01 greater confidence. The original confidence and landmarks

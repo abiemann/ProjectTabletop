@@ -41,6 +41,10 @@ public sealed partial class MainWindow
                 return await VerifyHandSpotlightSelectionAsync();
             case "verify_hand_visual_smoothing":
                 return await VerifyHandVisualSmoothingAsync();
+            case "verify_hand_acquisition":
+                return await VerifyHandAcquisitionAsync();
+            case "capture_hand_acquisition":
+                return await SaveHandAcquisitionSnapshotAsync();
             case "verify_hand_detection_log":
                 return await HandDetectionLogVerification.RunAsync(Path.Combine(_appDataDirectory,
                     "LogVerification", Guid.NewGuid().ToString("N")));
@@ -101,6 +105,8 @@ public sealed partial class MainWindow
                     handDetectionLog = _handDetectionLog?.Status,
                     handVideoRecording = _handVideoRecorder?.Status,
                     handLighting = _scene.GetHandLightingDiagnostics(),
+                    handAcquisition = new { lighting = _scene.GetHandAcquisitionDiagnostics(),
+                        lastDetection = _lastHandAcquisitionDetection },
                     boardApp = _scene.CurrentBoardScreen.ToString(),
                     boardAppTitle = _scene.CurrentBoardTitle,
                     blackjack = _scene.BlackjackState,

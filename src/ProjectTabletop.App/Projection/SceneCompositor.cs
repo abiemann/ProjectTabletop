@@ -561,6 +561,7 @@ public sealed partial class SceneCompositor : IDisposable
                 DrawOverlay(ds, output, mediaRect, detection, frame, _topPlaneMap);
             }
         }
+        DrawHandAcquisitionLight(ds, output);
         DrawHandSpotlights(ds, output);
         DrawHandCursor(ds, output);
     }

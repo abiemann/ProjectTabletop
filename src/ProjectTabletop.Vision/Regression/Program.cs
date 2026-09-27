@@ -2,6 +2,24 @@ using System.Runtime.InteropServices;
 using OpenCvSharp;
 using ProjectTabletop.Vision;
 
+if (args is ["--hand-acquisition"])
+{
+    HandAcquisitionMotionRegression.Run();
+    HandAcquisitionPresenceRegression.Run();
+    HandTrackingSearchRegionsRegression.Run();
+    HandPalmColorCorrectionRegression.Run();
+    return;
+}
+if (args is ["--hand-color-correction"])
+{
+    HandPalmColorCorrectionRegression.Run();
+    return;
+}
+if (args is ["--hand-search-regions"])
+{
+    HandTrackingSearchRegionsRegression.Run();
+    return;
+}
 if (args is ["--hand-candidates"])
 {
     HandCandidateContinuityRegression.Run();
@@ -24,6 +42,10 @@ if (args is ["--photo-copy"])
 }
 if (args is ["--hands"])
 {
+    HandAcquisitionMotionRegression.Run();
+    HandAcquisitionPresenceRegression.Run();
+    HandTrackingSearchRegionsRegression.Run();
+    HandPalmColorCorrectionRegression.Run();
     HandCandidateContinuityRegression.Run();
     HandTrackingRegression.Run();
     HandSpreadRegression.Run();
@@ -144,6 +166,10 @@ CheckHardwareAmbientScan(whiteHardwareBoard);
 CheckMovedHardwareFrames(whiteHardwareBoard);
 CheckProjectedCornerMarkers();
 CheckCalibrationSpot();
+HandAcquisitionMotionRegression.Run();
+HandAcquisitionPresenceRegression.Run();
+HandTrackingSearchRegionsRegression.Run();
+HandPalmColorCorrectionRegression.Run();
 HandCandidateContinuityRegression.Run();
 HandTrackingRegression.Run();
 HandSpreadRegression.Run();

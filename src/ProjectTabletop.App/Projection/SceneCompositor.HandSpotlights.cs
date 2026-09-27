@@ -151,6 +151,9 @@ public sealed partial class SceneCompositor
 
     private void ClearHandSpotlights()
     {
+        ClearAcquisitionLight();
+        _acquisitionScene = null;
+        _acquisitionExpectedScene = null;
         _handSpotlights = [];
         _spotlightFrameTime = DateTimeOffset.MinValue;
         _spotlightObservationFrameTime = DateTimeOffset.MinValue;

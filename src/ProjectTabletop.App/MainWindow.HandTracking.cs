@@ -151,6 +151,7 @@ public sealed partial class MainWindow
             _handVisuals.Reset();
             _handLatencyWarning = null;
             _lastHandDetection = null;
+            _lastHandAcquisitionDetection = null;
             _lastHandDetectionTick = 0;
             _scene.ClearHandTips();
             _scene.InvalidatePhotoCopyCapture();
@@ -175,6 +176,7 @@ public sealed partial class MainWindow
                 ? TrackedHandInterval : HandDetectionInterval;
             if (_lastHandDetectionTick != 0 &&
                 Stopwatch.GetElapsedTime(_lastHandDetectionTick, tick) < interval) return;
+            var acquisitionContext = _scene.GetHandAcquisitionContext(frame.Timestamp);
             _lastHandDetectionTick = tick;
             _handDetecting = true;
             var generation = _handGeneration;
@@ -185,7 +187,7 @@ public sealed partial class MainWindow
                 try
                 {
                     _handEngine ??= new HandTrackingEngine(Path.Combine(AppContext.BaseDirectory, "Models", "Hands"));
-                    _handEngine.CaptureDiagnostics = requestedInTester;
+                    _handEngine.CaptureDiagnostics = requestedInTester || acquisitionContext is not null;
                     double? frameInterval = _lastHandEngineFrameTime is { } previousFrame
                         ? (frame.Timestamp - previousFrame).TotalMilliseconds : null;
                     var engineReset = _handEngineGeneration != generation || frameInterval is <= 0 or > 350;
@@ -196,7 +198,9 @@ public sealed partial class MainWindow
                     }
                     _lastHandEngineFrameTime = frame.Timestamp;
                     var detectionStarted = Stopwatch.GetTimestamp();
-                    var hands = _handEngine.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra);
+                    var acquisitionHints = FindHandAcquisitionHints(frame, acquisitionContext, engineReset);
+                    var hands = _handEngine.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
+                        acquisitionHints.SearchRegions);
                     var detectorTrace = _handEngine.LastDiagnostics;
                     var inferenceMilliseconds = Stopwatch.GetElapsedTime(detectionStarted).TotalMilliseconds;
                     var visibleHands = hands.Where(hand =>
@@ -243,6 +247,9 @@ public sealed partial class MainWindow
                                 _handPreview = new HandPreview(cursors, visualCursors, frame.Width, frame.Height, frame.Timestamp);
                                 _scene.SetHandCursors(cursors, frame.Timestamp, _photoCopyTask is { IsCompleted: false }, visualCursors);
                                 _scene.SetHandSpotlights(visibleHands, frame.Timestamp);
+                                _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.Hints, visibleHands, frame.Timestamp,
+                                    acquisitionHints.Presence?.IlluminatedPresence);
+                                DescribeHandAcquisition(frame, acquisitionContext, acquisitionHints, detectorTrace, visibleHands.Length);
                                 LogHandDetection(sequence, requestedInTester, frame, generation, engineReset,
                                     inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, cursors, "accepted");
                                 QueuePhotoCopyObservation(frame, visibleHands);

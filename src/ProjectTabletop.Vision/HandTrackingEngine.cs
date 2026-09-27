@@ -58,7 +58,14 @@ public sealed class HandTrackingEngine : IDisposable
         }
     }
 
-    public IReadOnlyList<HandDetection> Detect(int width, int height, int stride, byte[] bgra)
+    /// <param name="searchRegions">Optional square crop hints in native camera pixels.
+    /// On normal acquisition/periodic-search frames, at most two distinct valid
+    /// in-frame regions of at least 32 pixels are searched before normal fallback.
+    /// If all raw fits fail, those regions may receive a bounded palm-only color
+    /// correction retry. Landmark inference always uses the original RGB frame.
+    /// Invalid hints are ignored; hints never produce or retain a detection.</param>
+    public IReadOnlyList<HandDetection> Detect(int width, int height, int stride, byte[] bgra,
+        IReadOnlyList<HandTrackingBounds>? searchRegions = null)
     {
         lock (_gate)
         {
@@ -114,7 +121,7 @@ public sealed class HandTrackingEngine : IDisposable
             if (search)
             {
                 _framesSincePalmSearch = 0;
-                FindHands(rgb, hands, diagnostics);
+                FindHands(rgb, hands, diagnostics, searchRegions);
             }
             diagnostics?.RecordPreNms(hands);
 
@@ -151,8 +158,14 @@ public sealed class HandTrackingEngine : IDisposable
             points.Max(point => point.Y) - top), points, hand.Confidence);
     }
 
-    private void FindHands(Mat rgb, List<HandDetection> hands, DetectionTrace? diagnostics)
+    private void FindHands(Mat rgb, List<HandDetection> hands, DetectionTrace? diagnostics,
+        IReadOnlyList<HandTrackingBounds>? searchRegions)
     {
+        var focusedHands = new List<HandDetection>(2);
+        var focusedRegions = ValidSearchRegions(searchRegions, rgb.Width, rgb.Height);
+        foreach (var region in focusedRegions)
+            FindHandsInView(rgb, region, "motion-roi", focusedHands, diagnostics);
+
         var fullProposals = DetectPalms(rgb);
         diagnostics?.Searches.Add(new("full-frame", new(0, 0, rgb.Width, rgb.Height), fullProposals.Count));
         foreach (Palm palm in fullProposals)
@@ -173,21 +186,65 @@ public sealed class HandTrackingEngine : IDisposable
             foreach (int offset in new[] { 0, (longest - side) / 2, longest - side }.Distinct())
             {
                 int x = rgb.Width > rgb.Height ? offset : 0, y = rgb.Height > rgb.Width ? offset : 0;
-                using var tile = new Mat(rgb, new Rect(x, y, side, side));
-                var tileProposals = DetectPalms(tile);
-                diagnostics?.Searches.Add(new("tile", new(x, y, side, side), tileProposals.Count));
-                foreach (Palm local in tileProposals)
-                {
-                    var palm = new Palm(new Rect2d(local.Bounds.X + x, local.Bounds.Y + y,
-                        local.Bounds.Width, local.Bounds.Height),
-                        local.Landmarks.Select(point => new PixelPoint(point.X + x, point.Y + y)).ToArray(),
-                        local.Score);
-                    HandDetection? hand = DetectHand(rgb, palm, diagnostics?.Begin("tile", palm,
-                        searchView: new(x, y, side, side)));
-                    if (hand is not null) hands.Add(hand);
-                }
+                FindHandsInView(rgb, new(x, y, side, side), "tile", hands, diagnostics);
             }
         }
+        // Do not let a focused crop's success disable the ordinary tile-search
+        // condition: another hand may have arrived outside all supplied hints.
+        hands.AddRange(focusedHands);
+        // Projected white light can have a strong camera color cast that hides
+        // a palm from acquisition. Retry only after every ordinary fit failed,
+        // on the same bounded hints. Pose inference still sees the original RGB.
+        if (hands.Count == 0)
+            foreach (var region in focusedRegions)
+            {
+                FindHandsInView(rgb, region, "motion-roi-normalized", hands, diagnostics, normalizeProjection: true);
+                if (hands.Count > 0) break;
+            }
+    }
+
+    private void FindHandsInView(Mat rgb, Rect view, string source, List<HandDetection> hands,
+        DetectionTrace? diagnostics, bool normalizeProjection = false)
+    {
+        using var crop = new Mat(rgb, view);
+        var proposals = DetectPalms(crop, normalizeProjection, out var correction);
+        if (normalizeProjection && correction is null) return;
+        var bounds = new HandTrackingBounds(view.X, view.Y, view.Width, view.Height);
+        diagnostics?.Searches.Add(new(source, bounds, proposals.Count, correction));
+        foreach (Palm local in proposals)
+        {
+            var palm = new Palm(new Rect2d(local.Bounds.X + view.X, local.Bounds.Y + view.Y,
+                local.Bounds.Width, local.Bounds.Height),
+                local.Landmarks.Select(point => new PixelPoint(point.X + view.X, point.Y + view.Y)).ToArray(),
+                local.Score);
+            // Hints affect palm acquisition only. Refine from the original frame
+            // so fingers outside a hint boundary are neither cropped nor stretched.
+            HandDetection? hand = DetectHand(rgb, palm, diagnostics?.Begin(source, palm, searchView: bounds));
+            if (hand is not null) hands.Add(hand);
+        }
+    }
+
+    private static IReadOnlyList<Rect> ValidSearchRegions(IReadOnlyList<HandTrackingBounds>? regions,
+        int width, int height)
+    {
+        var selected = new List<Rect>(2);
+        if (regions is null) return selected;
+        foreach (var region in regions)
+        {
+            if (!double.IsFinite(region.X) || !double.IsFinite(region.Y) ||
+                !double.IsFinite(region.Width) || !double.IsFinite(region.Height) ||
+                region.X < 0 || region.Y < 0 || region.Width < 32 ||
+                Math.Abs(region.Width - region.Height) > 1e-6 ||
+                region.X + region.Width > width || region.Y + region.Height > height) continue;
+            int side = (int)Math.Floor(region.Width);
+            var rect = new Rect((int)Math.Floor(region.X), (int)Math.Floor(region.Y), side, side);
+            var bounds = new Rect2d(rect.X, rect.Y, side, side);
+            if (selected.Any(other => IntersectionOverUnion(bounds,
+                new(other.X, other.Y, other.Width, other.Height)) >= 0.75)) continue;
+            selected.Add(rect);
+            if (selected.Count == 2) break;
+        }
+        return selected;
     }
 
     private static Rect2d HandBounds(HandDetection hand)
@@ -203,8 +260,12 @@ public sealed class HandTrackingEngine : IDisposable
         return Math.Max(bounds.Width, bounds.Height);
     }
 
-    private IReadOnlyList<Palm> DetectPalms(Mat rgb)
+    private IReadOnlyList<Palm> DetectPalms(Mat rgb) => DetectPalms(rgb, false, out _);
+
+    private IReadOnlyList<Palm> DetectPalms(Mat rgb, bool normalizeProjection,
+        out HandTrackingColorCorrection? correction)
     {
+        correction = null;
         double ratio = PalmSize / (double)Math.Max(rgb.Width, rgb.Height);
         int resizedWidth = Math.Max(1, (int)(rgb.Width * ratio));
         int resizedHeight = Math.Max(1, (int)(rgb.Height * ratio));
@@ -215,7 +276,10 @@ public sealed class HandTrackingEngine : IDisposable
         Cv2.Resize(rgb, resized, new Size(resizedWidth, resizedHeight));
         Cv2.CopyMakeBorder(resized, padded, top, PalmSize - resizedHeight - top,
             left, PalmSize - resizedWidth - left, BorderTypes.Constant, Scalar.Black);
-        using Mat blob = ToNhwcBlob(padded);
+        Mat? corrected = null;
+        if (normalizeProjection && !PalmProjectionColorCorrection.TryCreate(padded, out corrected, out correction)) return [];
+        using var correctedInput = corrected;
+        using Mat blob = ToNhwcBlob(correctedInput ?? padded);
         float[][] output = Forward(_palmNet, blob, [AnchorCount * 18, AnchorCount]);
         float[] boxes = output[0], scores = output[1];
         double scale = Math.Max(rgb.Width, rgb.Height);
