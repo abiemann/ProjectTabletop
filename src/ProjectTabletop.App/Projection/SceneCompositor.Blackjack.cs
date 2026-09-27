@@ -19,7 +19,8 @@ public sealed partial class SceneCompositor
 
     /// <summary>One perspective-correct table; card and button positions use the same board coordinates.</summary>
     private static void DrawBlackjackTable(CanvasDrawingSession ds, BlackjackSnapshot game,
-        IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered)
+        IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
+        IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback)
     {
         DrawCasinoFelt(ds);
 
@@ -105,17 +106,21 @@ public sealed partial class SceneCompositor
         }
 
         bool betting = game.Phase is BlackjackPhase.Betting or BlackjackPhase.RoundOver;
-        CasinoText(ds, betting ? $"NEXT BET  {CasinoAmount(game.SelectedBet)}" : "YOUR MOVE",
+        CasinoText(ds, FingerSelectionCaption(selectionFeedback, betting
+                ? $"BET {CasinoAmount(game.SelectedBet)} · Bring fingers together" : "Bring fingers together"),
             new Rect(80, 742, 840, 24), 15, CasinoGold, "Bahnschrift", true);
         foreach (var button in buttons)
+        {
             DrawCasinoButton(ds, button, game.AvailableActions.Contains(button.Id) || button.Id == "menu",
                 hovered.Contains(button.Id), game.SelectedBet);
+            DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, CasinoGold);
+        }
 
         CasinoText(ds, "PRACTICE TABLE  ·  NO REAL MONEY", new Rect(80, 887, 840, 23), 15, CasinoGold,
             "Bahnschrift", true);
         CasinoText(ds, "Dealer stands on soft 17  ·  One split  ·  No insurance or surrender",
             new Rect(65, 911, 870, 24), 16, CasinoMuted);
-        CasinoText(ds, "Point at a control, then pinch. Release before your next move.",
+        CasinoText(ds, "Four fingers together. Aim with middle; move index sideways. Or pinch.",
             new Rect(75, 934, 850, 19), 14, CasinoMuted);
     }
 

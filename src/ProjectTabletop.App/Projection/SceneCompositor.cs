@@ -49,7 +49,8 @@ public sealed partial class SceneCompositor : IDisposable
     private long _previewSlowFrames;
     private long _mediaRevision;
 
-    private readonly record struct ProjectedHandCursor(Vector2 Position, DateTimeOffset ExecuteUntil, bool IsSpreadOut);
+    private readonly record struct ProjectedHandCursor(Vector2 Position, DateTimeOffset ExecuteUntil,
+        bool IsSpreadOut, bool FourFingersExtended, Vector2[] FingerPositions);
 
     public string BackgroundLabel { get; private set; } = "Test grid";
 
@@ -146,23 +147,35 @@ public sealed partial class SceneCompositor : IDisposable
             {
                 var boardPoint = new Point2(double.NaN, double.NaN);
                 var tip = cursor.Position;
-                try
+                if (acceptVisual && _boardMediaClip is not null && _boardCameraMap is not null)
                 {
-                    if (acceptVisual && _boardMediaClip is not null && _boardCameraMap is not null &&
-                        double.IsFinite(tip.X) && double.IsFinite(tip.Y))
+                    var cameraMap = _boardCameraMap;
+                    var point = ProjectFinger(tip);
+                    var fingers = cursor.HasFourExtendedFingers && cursor.FingerTips.Count == 4
+                        ? cursor.FingerTips.Select(ProjectFinger).ToArray() : Array.Empty<Vector2>();
+                    // Middle-tip aiming is independent of the old index cursor.
+                    // Preserve finger order even when one point is outside the
+                    // projective plane, so the middle marker never shifts fingers.
+                    if (OnProjector(point) || fingers.Length == 4 && OnProjector(fingers[1]))
                     {
-                        var point = _boardCameraMap.Transform(new Point2(tip.X, tip.Y));
-                        if (point.X >= 0 && point.X <= 1 && point.Y >= 0 && point.Y <= 1)
-                        {
-                            projectedTips.Add(new ProjectedHandCursor(
-                                new Vector2((float)point.X, (float)point.Y), cursor.ExecuteUntil, cursor.IsSpreadOut));
-                        }
+                        projectedTips.Add(new ProjectedHandCursor(point, cursor.ExecuteUntil, cursor.IsSpreadOut,
+                            cursor.HasFourExtendedFingers, fingers));
                     }
-                }
-                catch (InvalidOperationException)
-                {
-                    // A fingertip outside the calibrated plane can lie on its
-                    // projective horizon; it has no finite projector position.
+
+                    Vector2 ProjectFinger(PixelPoint finger)
+                    {
+                        if (double.IsFinite(finger.X) && double.IsFinite(finger.Y))
+                        {
+                            try
+                            {
+                                var mapped = cameraMap.Transform(new Point2(finger.X, finger.Y));
+                                return new Vector2((float)mapped.X, (float)mapped.Y);
+                            }
+                            catch (InvalidOperationException) { /* This individual finger is on the projective horizon. */ }
+                        }
+                        return new Vector2(float.NaN, float.NaN);
+                    }
+                    static bool OnProjector(Vector2 point) => point.X is >= 0 and <= 1 && point.Y is >= 0 and <= 1;
                 }
                 // The fingertip still follows the physical hand. Button selection
                 // uses the open pointing position while the finger curls to pinch.
@@ -185,8 +198,30 @@ public sealed partial class SceneCompositor : IDisposable
                 }
                 // Even a pinch outside the board is consumed, so moving a held
                 // red cursor onto a button cannot turn it into a delayed click.
+                BoardAim? middleAim = null;
+                if (!_blackOutput && !_boardSetup && _calibrationTarget < 0 && _boardMediaClip is not null &&
+                    _boardCameraMap is not null && _boardSurfaceMap is not null &&
+                    cursor.FingerTips.Count == 4 &&
+                    double.IsFinite(cursor.FingerTips[1].X) && double.IsFinite(cursor.FingerTips[1].Y))
+                {
+                    try
+                    {
+                        var middle = cursor.FingerTips[1];
+                        var projected = _boardCameraMap.Transform(new Point2(middle.X, middle.Y));
+                        var aim = _boardSurfaceMap.InverseTransform(projected);
+                        if (double.IsFinite(aim.X) && double.IsFinite(aim.Y)) middleAim = new(aim.X, aim.Y);
+                    }
+                    catch (InvalidOperationException) { /* Off-plane points have no usable board position. */ }
+                }
                 boardSamples.Add(new BoardHandSample(boardPoint.X, boardPoint.Y,
-                    cursor.ExecuteUntil, cursor.ExecuteEventId, cursor.SelectionFrameTime));
+                    cursor.ExecuteUntil, cursor.ExecuteEventId, cursor.SelectionFrameTime)
+                {
+                    TrackingId = cursor.TrackingId,
+                    FingerAim = middleAim,
+                    FourFingersExtended = cursor.HasFourExtendedFingers,
+                    FingersTogether = cursor.FingersTogether,
+                    IndexFingerSeparated = cursor.IndexFingerSeparated
+                });
             }
             _handTips = projectedTips.ToArray();
             _handFrameTime = acceptVisual ? frameTime : DateTimeOffset.MinValue;
@@ -511,9 +546,9 @@ public sealed partial class SceneCompositor : IDisposable
 
     private void DrawHandCursor(CanvasDrawingSession ds, Rect output)
     {
-        // Pinch feedback belongs to the gesture tester. Other boards still
-        // receive the same gesture input without projecting a red marker.
-        if (_boardSession.Screen != BoardScreen.HandTracking || _boardSetup || _calibrationTarget >= 0) return;
+        // Four-finger aiming is visible on each board. Red pinch feedback stays
+        // confined to the gesture tester.
+        if (_boardSetup || _calibrationTarget >= 0) return;
         var now = DateTimeOffset.UtcNow;
         if (_boardMediaClip is not { } clip || _boardCameraMap is null ||
             _handTips.Length == 0 || _handFrameTime > now ||
@@ -526,8 +561,22 @@ public sealed partial class SceneCompositor : IDisposable
         var radius = Math.Max(6, (float)Math.Min(output.Width, output.Height) * 0.018f);
         foreach (var cursor in _handTips)
         {
-            if (now >= cursor.ExecuteUntil) continue;
+            if (cursor.FourFingersExtended && cursor.FingerPositions.Length == 4)
+            {
+                for (int index = 0; index < cursor.FingerPositions.Length; index++)
+                {
+                    var finger = cursor.FingerPositions[index];
+                    if (!float.IsFinite(finger.X) || !float.IsFinite(finger.Y)) continue;
+                    var point = new Vector2((float)(output.X + finger.X * output.Width),
+                        (float)(output.Y + finger.Y * output.Height));
+                    float fingerRadius = index == 1 ? radius * .55f : radius * .22f;
+                    ds.DrawCircle(point, fingerRadius, Colors.Black, 4);
+                    ds.DrawCircle(point, fingerRadius, index == 1 ? Color.FromArgb(255, 244, 207, 111) : Colors.White, 2);
+                }
+            }
+            if (_boardSession.Screen != BoardScreen.HandTracking || now >= cursor.ExecuteUntil) continue;
             var tip = cursor.Position;
+            if (!float.IsFinite(tip.X) || !float.IsFinite(tip.Y)) continue;
             var center = new Vector2((float)(output.X + tip.X * output.Width),
                                     (float)(output.Y + tip.Y * output.Height));
             ds.DrawCircle(center, radius, Colors.Black, Math.Max(4, radius * 0.35f));

@@ -91,14 +91,19 @@ public sealed partial class MainWindow
                 visible = visibleHands.Contains(hand),
                 pinchRatio = hand.Landmarks.Count == 21 ? DescribeHandObservation(hand).PinchRatio : (double?)null,
                 spreadOutPose = HandPoseClassifier.IsSpreadOut(hand),
+                fourFingersExtended = HandPoseClassifier.AreFourFingersExtended(hand),
+                fingerSelection = HandPoseClassifier.DescribeFingerSelection(hand),
                 landmarks = hand.Landmarks.ToArray()
             }).ToArray(),
             cursors = cursors.Select(cursor => new
             {
                 cursor.Position, cursor.ExecuteEventId, cursor.ExecuteUntil,
+                cursor.TrackingId, cursor.FingerTips, cursor.HasFourExtendedFingers,
+                cursor.FingersTogether, cursor.IndexFingerSeparated,
                 executing = cursor.IsExecuting(now), cursor.IsSpreadOut, cursor.SelectionPosition, cursor.SelectionFrameTime
             }).ToArray(),
             hoveredButtons = _scene.HoveredBoardButtons,
+            fingerSelection = _scene.CurrentFingerSelectionFeedback,
             lighting = _scene.GetHandLightingDiagnostics()
         });
     }

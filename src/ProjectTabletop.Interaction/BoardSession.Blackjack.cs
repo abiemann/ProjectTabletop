@@ -18,6 +18,7 @@ public sealed partial class BoardSession
             _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
             _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);
             HoveredButtonIds = Array.Empty<string>();
+            InvalidateFingerSelection(now);
         }
         return true;
     }
@@ -44,6 +45,7 @@ public sealed partial class BoardSession
         }
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);
         HoveredButtonIds = Array.Empty<string>();
+        InvalidateFingerSelection(now);
         return true;
     }
 

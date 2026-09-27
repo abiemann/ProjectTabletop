@@ -20,7 +20,7 @@ public sealed partial class MainWindow
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
         SetStatus(_scene.HasBoardMediaClip
-            ? "Board menu ready. Point at a button and pinch to open it."
+            ? "Board menu ready. Aim with four fingers together, then separate your index finger sideways to select. Pinch also works."
             : "Board menu selected. Start board setup to project it.");
     }
 
@@ -32,7 +32,7 @@ public sealed partial class MainWindow
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
         SetStatus(_scene.HasBoardMediaClip
-            ? "Hand-Tracking test ready. Spread your fingers to show Spread out hand, or pinch for a one-second red circle."
+            ? "Hand-Tracking test ready. Aim with the middle fingertip, bring four fingers together, then move the index sideways to select a button. Pinch still shows the red circle."
             : "Hand-Tracking test selected. Start the camera and scan the board to project it.");
     }
 
@@ -49,7 +49,7 @@ public sealed partial class MainWindow
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :
              _scene.CurrentBoardScreen == BoardScreen.PhotoCopy ? _scene.PhotoCopyStatus :
-             "Point and pinch to select. Release before selecting again.");
+             "Aim with the middle fingertip and four fingers together, then move the index sideways to select. Pinch also works.");
     }
 
     private void ShowPhotoCopy()

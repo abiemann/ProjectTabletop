@@ -14,10 +14,19 @@ if (args is ["--hands"])
 {
     HandTrackingRegression.Run();
     HandSpreadRegression.Run();
+    FourFingerPoseRegression.Run();
     return;
 }
 if (args is ["--hand-poses"])
 {
+    HandSpreadRegression.Run();
+    HandGestureRegression.Run();
+    FourFingerPoseRegression.Run();
+    return;
+}
+if (args is ["--four-fingers"] or ["--finger-selection"])
+{
+    FourFingerPoseRegression.Run();
     HandSpreadRegression.Run();
     HandGestureRegression.Run();
     return;
@@ -122,6 +131,7 @@ CheckProjectedCornerMarkers();
 CheckCalibrationSpot();
 HandTrackingRegression.Run();
 HandSpreadRegression.Run();
+FourFingerPoseRegression.Run();
 HandSpotlightRegression.Run();
 PhotoCopyRegression.Run();
 PhotoObjectRegression.Run();

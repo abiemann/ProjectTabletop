@@ -19,7 +19,7 @@ public sealed partial class SceneCompositor
     private CanvasRenderTarget? _boardApplicationTarget;
     private BoardSurfaceState? _renderedBoardState;
 
-    private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int HandStatus,
+    private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision);
 
     public SceneCompositor(BlackjackGame? blackjack = null) => _boardSession = new BoardSession(blackjack);
@@ -45,13 +45,15 @@ public sealed partial class SceneCompositor
         if (_handFrameTime > now || now - _handFrameTime > TimeSpan.FromMilliseconds(350) || _handTips.Length == 0)
             return 0;
         if (_handTips.Any(cursor => cursor.IsSpreadOut)) return 3;
-        return _handTips.Any(cursor => now < cursor.ExecuteUntil) ? 2 : 1;
+        if (_handTips.Any(cursor => now < cursor.ExecuteUntil)) return 2;
+        return _handTips.Any(cursor => cursor.FourFingersExtended) ? 4 : 1;
     }
 
     private static string HandTestCaption(int status) => status switch
     {
         3 => "Spread out hand",
         2 => "PINCH DETECTED",
+        4 => "Together, then separate index",
         1 => "Pinch: red circle for one second",
         _ => "Waiting for a hand"
     };
@@ -117,12 +119,14 @@ public sealed partial class SceneCompositor
             MarkPhotoCopySurfacePresented(now);
         var handsFresh = _handFrameTime <= now &&
             now - _handFrameTime <= TimeSpan.FromMilliseconds(350);
+        IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback = handsFresh
+            ? _boardSession.FingerSelectionFeedback : Array.Empty<BoardFingerSelectionFeedback>();
         var handStatus = HandStatusAt(now);
         var hoverMask = 0;
         for (var index = 0; index < _boardSession.Buttons.Count; index++)
             if (handsFresh && _boardSession.HoveredButtonIds.Contains(_boardSession.Buttons[index].Id))
                 hoverMask |= 1 << index;
-        var state = new BoardSurfaceState(_boardSession.Screen, hoverMask,
+        var state = new BoardSurfaceState(_boardSession.Screen, hoverMask, FingerSelectionRenderStep(selectionFeedback),
             handStatus,
             photoCopy ? PhotoCopyStampCount(now) : 0,
             photoCopy ? PhotoCopyDisplayStatus(now) : null,
@@ -173,7 +177,7 @@ public sealed partial class SceneCompositor
             if (_boardSession.Screen == BoardScreen.Blackjack)
             {
                 DrawBlackjackTable(surface, _boardSession.BlackjackState, _boardSession.Buttons,
-                    handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>());
+                    handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback);
             }
             else if (_boardSession.Screen == BoardScreen.Menu)
             {
@@ -181,22 +185,22 @@ public sealed partial class SceneCompositor
                 surface.DrawText("PROJECT TABLETOP", 125, 51, AppPalette.MutedText, small);
                 surface.DrawText("06  /  BOARDS", 771, 54, AppPalette.AccentSecondary, small);
                 surface.DrawText("Choose a board", 76, 99, AppPalette.Text, heading);
-                surface.DrawText("Point at a panel. Pinch when its edge lights up.", 80, 182, muted, body);
+                surface.DrawText("Four fingers together. Aim, then move index sideways.", 80, 182, muted, body);
                 for (int index = 0; index < _boardSession.Buttons.Count; index++)
                 {
                     var button = _boardSession.Buttons[index];
                     var hovered = handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id);
-                    DrawMenuButton(surface, button, hovered, label, small, index + 1);
+                    DrawMenuButton(surface, button, hovered, label, small, index + 1, selectionFeedback);
                 }
                 surface.FillCircle(new Vector2(88, 894), 4, AppPalette.IndicatorOn);
-                surface.DrawText("Point. Pinch. Play.", 105, 877, AppPalette.Text, body);
-                surface.DrawText("Release your fingers before the next selection.", 80, 923, muted, small);
+                surface.DrawText(FingerSelectionCaption(selectionFeedback, "Bring fingers together"), 105, 877, AppPalette.Text, body);
+                surface.DrawText("Aim with your middle fingertip. Bring fingers together to select again.", 80, 923, muted, small);
             }
             else
             {
                 foreach (var button in _boardSession.Buttons)
                     DrawBoardButton(surface, button,
-                        handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id), label, small);
+                        handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id), label, small, selectionFeedback);
 
                 if (photoCopy)
                 {
@@ -266,7 +270,8 @@ public sealed partial class SceneCompositor
     }
 
     private static void DrawMenuButton(CanvasDrawingSession ds, BoardButton button,
-        bool hovered, CanvasTextFormat label, CanvasTextFormat small, int number)
+        bool hovered, CanvasTextFormat label, CanvasTextFormat small, int number,
+        IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback)
     {
         var bounds = button.Bounds;
         var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
@@ -293,10 +298,12 @@ public sealed partial class SceneCompositor
         ds.DrawLine(arrowX - 12, arrowY, arrowX, arrowY, hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 2);
         ds.DrawLine(arrowX - 6, arrowY - 6, arrowX, arrowY, hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 2);
         ds.DrawLine(arrowX - 6, arrowY + 6, arrowX, arrowY, hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 2);
+        DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, AppPalette.IndicatorOn);
     }
 
     private static void DrawBoardButton(CanvasDrawingSession ds, BoardButton button,
-        bool hovered, CanvasTextFormat label, CanvasTextFormat small, string? description = null)
+        bool hovered, CanvasTextFormat label, CanvasTextFormat small, IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback,
+        string? description = null)
     {
         var bounds = button.Bounds;
         var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
@@ -308,6 +315,7 @@ public sealed partial class SceneCompositor
         if (description is not null)
             ds.DrawText(description, x, (float)rect.Y + 100,
                 AppPalette.ButtonText, small);
+        DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, AppPalette.IndicatorOn, showCaption: description is null);
     }
 
 }

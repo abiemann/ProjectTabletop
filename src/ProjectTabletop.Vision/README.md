@@ -18,7 +18,7 @@ Call `ResetTracking()` after a camera/scene interruption; changing dimensions
 also invalidates crop hints. Old landmarks are never returned as current results.
 
 The app schedules one inference at a time off the UI thread and maps the index
-tip through the completed board scan for the projector cursor and board buttons.
+tip through the completed board scan for the pinch cursor and board buttons.
 `HandGestureTracker` confirms a thumb/index pinch using observed dwell, tolerates
 bounded landmark noise and brief missed detections, and debounces release before
 allowing another execute event. Each event produces a one-second red pulse.
@@ -31,6 +31,28 @@ These image landmarks do not establish physical board contact. See the root
 README for verification status. [Model sources, checksums, and licenses](Models/Hands/README.md)
 are bundled with the models.
 
+`HandPoseClassifier.AreFourFingersExtended` recognizes an extended index,
+middle, ring and little finger without requiring a spread thumb.
+`HandCursor` publishes `HasFourExtendedFingers`, an immutable four-point
+`FingerTips` snapshot (landmarks 8, 12, 16 and 20), and a matched `TrackingId`
+that is not reused after reset. `HandPoseClassifier.DescribeFingerSelection`
+reports `Together`, `IndexSeparated`, `OtherFingersGrouped` and nullable
+palm-normalized gaps between adjacent fingers. Invalid or non-extended poses
+have null gaps. Cursor flags `FingersTogether` and `IndexFingerSeparated` carry
+the accepted current-frame geometry; the other three fingers must remain
+extended and grouped while the index moves sideways. The app maps the
+**middle fingertip** to a board button; all four tips do
+not need to fit inside it. `BoardSession` first confirms fingers together over
+the target, then requires a fresh index-separation transition to select. Holding
+a static grouped or separated pose does not activate a button. Bringing the
+fingers together rearms the gesture; stale results and wall time cannot complete
+it. The camera and projector show four fingertip markers with the middle aim
+marker in gold. Button feedback advances through **Bring fingers together**,
+**Ready · separate index**, **Selecting**, and **Selected · bring fingers
+together**. Thumb/index pinch selection remains available. Photo Copy's actual
+shutter remains pinch-only; its menu and reset buttons also accept index
+separation.
+
 `HandPoseClassifier.IsSpreadOut` classifies the current 21 landmarks: all four
 fingers must be extended and laterally separated, with an extended, open thumb.
 Its palm-normalized geometry is invariant to two-dimensional scaling, mirroring
@@ -39,11 +61,18 @@ resolved. Invalid or degenerate landmarks are rejected.
 `HandGestureTracker` requires 120 ms of source-frame observations before setting
 `HandCursor.IsSpreadOut`. A folded pose or missing hand clears that evidence;
 an observation gap over 350 ms restarts its dwell, and stale results older than
-350 ms or resets clear it. It never creates an execute event. In Hand-Tracking,
+350 ms or resets clear it. It never creates a pinch execute event. The separate
+button gesture requires fingers together followed by lateral index separation;
+a static spread hand does not select a button.
+In Hand-Tracking,
 the confirmed pose displays **Spread out hand** on the board and laptop; it takes
 caption priority over a lingering pinch pulse without altering that pulse.
 Diagnostic records retain raw `spreadOutPose` and confirmed cursor `isSpreadOut`
 values, while local status exposes `spreadOutHandCount` and `handTestStatus`.
+Records also include raw `fourFingersExtended`, cursor `trackingId`, `fingerTips`
+and `hasFourExtendedFingers`, grouping/separation flags and button selection
+feedback. Local status adds `fourFingerHandCount` and `fingerSelectionFeedback`;
+`lastHandDetection` contains the current four-tip geometry and pose result.
 The user confirmed reliable recognition in the live tester on the current board;
 broader pose and lighting accuracy remains unmeasured.
 
@@ -160,6 +189,31 @@ the snapshot with pinch and spotlight geometry to local JSONL logs. Run
 
 Run `dotnet run --project src/ProjectTabletop.Vision/Regression/ProjectTabletop.Vision.Regression.csproj -- --hand-poses`
 for focused spread-hand pose and gesture-state regressions.
+
+Run the same command with `-- --finger-selection` (also accepted as
+`-- --four-fingers`) for four-finger grouping and index-separation geometry and
+cursor contract checks, alongside spread and existing pinch regressions.
+The interaction verification project's `BoardFingerSelectionRegression` checks
+the grouped-to-separated sequence, rearming and rejection of a static pose. The app's isolated DEBUG
+`--once verify_finger_selection` check covers selection and visual feedback.
+The full solution's Debug x64 build passes with zero warnings/errors. `--finger-selection`
+passes the new geometry plus existing pinch/spread checks. Full interaction
+verification passes the selection suite, 400 deterministic Blackjack rounds and
+the split-hand bust-then-repeat-Hit case. Isolated app checks
+`verify_finger_selection`, `verify_blackjack`, `verify_hand_spotlights` and
+`verify_hand_pose_feedback` pass; menu and casino Ready-state screenshots have
+been visually inspected. The first live trial reached **Ready** but did not
+select. Its normalized index/middle gap measured about 0.15–0.27 together and
+0.45–0.55 apart, below the original 0.56 separation cutoff. The classifier now
+uses a together cutoff of 0.35 and a separated cutoff of 0.44, retaining a 0.09
+neutral band and removing knuckle-spacing bias. Added 0.20-together,
+0.39-neutral and 0.48-separated fixtures pass, including transformed versions
+and existing pinch/spread regressions. After alignment was restored, a live
+trace showed Ready at a 0.235 gap, a 50-credit wager selected at 0.483, no repeat
+while the index stayed apart, and rearming after rejoining at 0.267. The user
+confirmed that selection now works. Smaller openings around 0.40–0.43 remained
+neutral; broader lighting, positions, orientations and motion ranges remain
+unmeasured.
 
 Photo Copy uses `PhotoCopyHandSelector.TrySelectShutter` to match a fresh pinch
 cursor to the hand making the command. One or two hands may be visible; only

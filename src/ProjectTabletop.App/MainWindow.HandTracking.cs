@@ -6,6 +6,7 @@ using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using ProjectTabletop.App.Camera;
+using ProjectTabletop.Interaction;
 using ProjectTabletop.Vision;
 using Windows.Foundation;
 
@@ -35,7 +36,8 @@ public sealed partial class MainWindow
     private HandDetectionDiagnostics? _lastHandDetection;
 
     private sealed record HandPreview(HandCursor[] Cursors, int Width, int Height, DateTimeOffset Timestamp);
-    private sealed record HandObservationDiagnostics(double Confidence, PixelPoint IndexTip, double PinchRatio, bool IsSpreadOut);
+    private sealed record HandObservationDiagnostics(double Confidence, PixelPoint IndexTip, double PinchRatio,
+        bool IsSpreadOut, bool HasFourExtendedFingers, PixelPoint[] FingerTips, FingerSelectionPose FingerSelection);
     private sealed record HandDetectionDiagnostics(DateTimeOffset FrameTime, double InferenceMilliseconds,
         double ResultAgeMilliseconds, double? FrameIntervalMilliseconds, bool DiscardedAsStale,
         HandObservationDiagnostics[] Hands);
@@ -73,6 +75,19 @@ public sealed partial class MainWindow
                 var now = DateTimeOffset.UtcNow;
                 return _handPreview is { } preview && preview.Timestamp <= now && now - preview.Timestamp <= HandMarkerLifetime
                     ? preview.Cursors.Count(cursor => cursor.IsSpreadOut) : 0;
+            }
+        }
+    }
+
+    internal int FourFingerHandCount
+    {
+        get
+        {
+            lock (_handGate)
+            {
+                var now = DateTimeOffset.UtcNow;
+                return _handPreview is { } preview && preview.Timestamp <= now && now - preview.Timestamp <= HandMarkerLifetime
+                    ? preview.Cursors.Count(cursor => cursor.HasFourExtendedFingers) : 0;
             }
         }
     }
@@ -263,27 +278,33 @@ public sealed partial class MainWindow
         var points = hand.Landmarks;
         var scale = Math.Max(Distance(points[0], points[9]), Distance(points[5], points[17]));
         return new(hand.Confidence, hand.IndexTip, scale > 1 ? Distance(points[4], points[8]) / scale : 0,
-            HandPoseClassifier.IsSpreadOut(hand));
+            HandPoseClassifier.IsSpreadOut(hand), HandPoseClassifier.AreFourFingersExtended(hand),
+            new[] { points[8], points[12], points[16], points[20] }, HandPoseClassifier.DescribeFingerSelection(hand));
     }
 
     private void UpdateHandTrackingStatus()
     {
         if (_closing) return;
         UpdateHandDetectionLogStatus();
+        var selection = _scene.CurrentFingerSelectionFeedback.FirstOrDefault();
         HandTrackingStatusText.Text = !_handTrackingEnabled ? "Hand tracking is off." :
             _handTrackingError ??
             (IsBoardScanMeasuring ? "Hand tracking pauses while the board is being scanned." :
-             !_cameraWanted || !_camera.IsRunning ? "Start the webcam to track your index fingertip." :
+             !_cameraWanted || !_camera.IsRunning ? "Start the webcam to track your fingers." :
              _cameraHealthWarning ? "Waiting for fresh webcam video before tracking your fingertip." :
              _handLatencyWarning is not null ? _handLatencyWarning :
              TrackedHandCount == 0 ? "Looking for a hand. Show your hand clearly in the camera view." :
+             selection is { Stage: BoardFingerSelectionStage.Armed } ? "Ready: move your index finger sideways to select the highlighted button." :
+             selection is { Stage: BoardFingerSelectionStage.Separating } ? "Selecting the highlighted button…" :
+             selection is { Stage: BoardFingerSelectionStage.Selected } ? "Selected. Bring your index finger back beside the other three to select again." :
              IsHandTrackingTester && SpreadOutHandCount > 0 ? "Spread out hand" :
              ExecutingHandCount > 0 ? "Pinch detected: execute signal. " +
                  (IsHandTrackingTester ? "Red circle for one second. " : "") +
                  "Separate thumb and index finger before the next pinch." :
-             $"Tracking {TrackedHandCount} index fingertip{(TrackedHandCount == 1 ? "" : "s")}. " +
+             FourFingerHandCount > 0 ? "Aim with your middle fingertip and bring the four fingers together. When ready, move your index finger sideways to select. Bring it back to select again." :
+             $"Tracking {TrackedHandCount} hand{(TrackedHandCount == 1 ? "" : "s")}. " +
                  (_scene.HasBoardMediaClip ? "A white spotlight illuminates each detected hand." :
-                     "Complete board setup to illuminate your hand.") + " Point at a button and pinch to select, or open Hand-Tracking to test gestures.");
+                     "Complete board setup to illuminate your hand.") + " Aim with four fingers together, then separate your index finger to select. Pinch also works.");
     }
 
     private void DrawHandPreview(CanvasDrawingSession ds, CameraFrame frame, Rect rect)
@@ -296,6 +317,19 @@ public sealed partial class MainWindow
         var now = DateTimeOffset.UtcNow;
         foreach (var cursor in preview.Cursors)
         {
+            if (cursor.HasFourExtendedFingers && cursor.FingerTips.Count == 4)
+            {
+                for (int index = 0; index < cursor.FingerTips.Count; index++)
+                {
+                    var finger = cursor.FingerTips[index];
+                    var point = new Vector2((float)(rect.X + finger.X / frame.Width * rect.Width),
+                        (float)(rect.Y + finger.Y / frame.Height * rect.Height));
+                    ds.DrawCircle(point, index == 1 ? 12 : 5, Colors.Black, 5);
+                    ds.DrawCircle(point, index == 1 ? 12 : 5,
+                        index == 1 ? Windows.UI.Color.FromArgb(255, 244, 207, 111) : Colors.White, 2);
+                }
+                if (!IsHandTrackingTester || !cursor.IsExecuting(now)) continue;
+            }
             var tip = cursor.Position;
             var center = new Vector2((float)(rect.X + tip.X / frame.Width * rect.Width),
                                     (float)(rect.Y + tip.Y / frame.Height * rect.Height));

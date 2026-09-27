@@ -21,14 +21,27 @@ public sealed record BoardButton(string Id, string Label, BoardRect Bounds, Boar
 /// ExecuteUntil is exactly one second after that event, as produced by HandGestureTracker.
 /// </summary>
 public readonly record struct BoardHandSample(double U, double V, DateTimeOffset ExecuteUntil,
-    long ExecuteEventId, DateTimeOffset? SelectionFrameTime = null);
+    long ExecuteEventId, DateTimeOffset? SelectionFrameTime = null)
+{
+    /// <summary>Stable identity of this observed hand; zero disables finger selection.</summary>
+    public long TrackingId { get; init; }
+    /// <summary>The current middle fingertip, independent of the index pinch anchor.</summary>
+    public BoardAim? FingerAim { get; init; }
+    public bool FourFingersExtended { get; init; }
+    public bool FingersTogether { get; init; }
+    public bool IndexFingerSeparated { get; init; }
+}
+
+public readonly record struct BoardAim(double U, double V);
+public enum BoardFingerSelectionStage { Arming, Armed, Separating, Selected }
+public sealed record BoardFingerSelectionFeedback(string ButtonId, BoardFingerSelectionStage Stage, double Progress);
 
 public sealed record BoardNavigation(BoardScreen Previous, BoardScreen Current, string ButtonId);
 
 /// <summary>
 /// Board application navigation shared by rendering and gesture hit testing.
-/// Call from one thread. Each pinch can activate one target only, including when
-/// hands disappear briefly, change order, move to another target, or switch screens.
+/// Call from one thread. Each pinch or together-to-separated finger gesture can activate
+/// one target only, including when hands disappear, change order or switch screens.
 /// </summary>
 public sealed partial class BoardSession
 {
@@ -90,16 +103,28 @@ public sealed partial class BoardSession
     {
         ArgumentNullException.ThrowIfNull(hands);
         HoveredButtonIds = Array.Empty<string>();
-        if (_lastNow is { } previousNow && now < previousNow) return null;
+        FingerSelectionFeedback = Array.Empty<BoardFingerSelectionFeedback>();
+        if (_lastNow is { } previousNow && now < previousNow)
+        {
+            PauseFingerSelection();
+            return null;
+        }
         _lastNow = now;
         if (frameTime > now || now - frameTime > ObservationLifetime ||
             frameTime <= _ignoreFramesThrough ||
-            (_lastFrameTime is { } previousFrame && frameTime <= previousFrame)) return null;
+            (_lastFrameTime is { } previousFrame && frameTime <= previousFrame))
+        {
+            PauseFingerSelection();
+            return null;
+        }
         _lastFrameTime = frameTime;
 
         var buttons = Buttons;
+        FingerSelectionCandidate? fingerSelection = UpdateFingerSelection(hands, buttons, frameTime);
         HoveredButtonIds = buttons.Where(button => button.Enabled && hands.Any(hand =>
-                SelectionIsCurrent(hand, frameTime) && button.Bounds.Contains(hand.U, hand.V)))
+                (hand.TrackingId > 0 && hand.FourFingersExtended
+                    ? FingerHoverTarget(hand, buttons)?.Id == button.Id
+                    : SelectionIsCurrent(hand, frameTime) && button.Bounds.Contains(hand.U, hand.V))))
             .Select(button => button.Id).ToArray();
 
         // IDs come from a monotonically increasing event sequence, never reset by
@@ -122,6 +147,16 @@ public sealed partial class BoardSession
             if (!SelectButton(selected, now)) continue;
             return result;
         }
+        if (fingerSelection is not null)
+        {
+            var selected = fingerSelection.Button;
+            var result = new BoardNavigation(Screen, selected.Destination, selected.Id);
+            if (SelectButton(selected, now))
+            {
+                MarkFingerSelection(fingerSelection, frameTime);
+                return result;
+            }
+        }
         return null;
     }
 
@@ -140,6 +175,7 @@ public sealed partial class BoardSession
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);
         _lastFrameTime = null;
         _lastNow = now;
+        InvalidateFingerSelection(now);
         // Keep the high-water mark: clearing visual state must never replay a pinch.
     }
 
@@ -150,6 +186,7 @@ public sealed partial class BoardSession
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);
+        InvalidateFingerSelection(now);
     }
 
     private bool SelectionIsCurrent(BoardHandSample hand, DateTimeOffset frameTime) =>

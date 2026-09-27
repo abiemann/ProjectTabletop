@@ -16,7 +16,7 @@ public sealed partial class MainWindow
         _scene.ShowBlackjack();
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
-        SetStatus("Blackjack ready. Choose a chip value and Deal. Click the laptop table or point and pinch on the aligned board.");
+        SetStatus("Blackjack ready. Aim with the middle fingertip and four fingers together; move your index finger sideways to select. Bring it back before selecting again. Pinch or laptop clicks also work.");
     }
 
     private void BlackjackPreview_Draw(ICanvasAnimatedControl sender, CanvasAnimatedDrawEventArgs args) =>

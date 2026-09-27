@@ -1,8 +1,8 @@
 namespace ProjectTabletop.Vision;
 
 /// <summary>
-/// Recognizes a thumb/index pinch and a separate spread-hand pose from current
-/// camera landmarks. Only a pinch creates execute feedback. Distances are
+/// Recognizes a thumb/index pinch, spread-hand pose and grouped/open-index finger
+/// geometry from current camera landmarks. Only a pinch creates execute feedback. Distances are
 /// normalized by the observed palm, so thresholds are image-space heuristics,
 /// not measurements of physical contact. This class performs no commands.
 /// Call Update and Reset on the same thread.
@@ -22,6 +22,7 @@ public sealed class HandGestureTracker
     private static readonly TimeSpan SelectionLifetime = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan ExecuteDuration = TimeSpan.FromSeconds(1);
     private static long s_nextExecuteEventId;
+    private static long s_nextTrackingId;
     private readonly List<Track> _tracks = new(2);
     private DateTimeOffset? _lastFrameTime;
     private DateTimeOffset? _lastNow;
@@ -101,6 +102,11 @@ public sealed class HandGestureTracker
             cursors.Add(new HandCursor(observation.IndexTip, track.ExecuteUntil, track.ExecuteEventId,
                 track.SelectionPosition, track.SelectionFrameTime)
             {
+                TrackingId = track.TrackingId,
+                FingerTips = observation.FingerTips,
+                HasFourExtendedFingers = observation.HasFourExtendedFingers,
+                FingersTogether = observation.FingerSelection.Together,
+                IndexFingerSeparated = observation.FingerSelection.IndexSeparated,
                 IsSpreadOut = UpdateSpread(track, observation.IsSpreadOut, frameTime)
             });
         }
@@ -285,17 +291,22 @@ public sealed class HandGestureTracker
             (points[0].Y + points[5].Y + points[9].Y + points[13].Y + points[17].Y) / 5);
         var pinchRatio = Distance(points[4], points[8]) / scale;
         if (!double.IsFinite(center.X) || !double.IsFinite(center.Y) || !double.IsFinite(pinchRatio)) return null;
-        return new Observation(points[0], center, scale, points[8], pinchRatio, HandPoseClassifier.IsSpreadOut(hand));
+        var fingerTips = Array.AsReadOnly(new[] { points[8], points[12], points[16], points[20] });
+        return new Observation(points[0], center, scale, points[8], pinchRatio,
+            HandPoseClassifier.IsSpreadOut(hand), HandPoseClassifier.AreFourFingersExtended(hand), fingerTips,
+            HandPoseClassifier.DescribeFingerSelection(hand));
     }
 
     private static double Distance(PixelPoint first, PixelPoint second) =>
         Math.Sqrt(Math.Pow(first.X - second.X, 2) + Math.Pow(first.Y - second.Y, 2));
 
     private sealed record Observation(PixelPoint Wrist, PixelPoint PalmCenter,
-        double PalmScale, PixelPoint IndexTip, double PinchRatio, bool IsSpreadOut);
+        double PalmScale, PixelPoint IndexTip, double PinchRatio, bool IsSpreadOut,
+        bool HasFourExtendedFingers, IReadOnlyList<PixelPoint> FingerTips, FingerSelectionPose FingerSelection);
 
     private sealed class Track
     {
+        public readonly long TrackingId = Interlocked.Increment(ref s_nextTrackingId);
         public PixelPoint Wrist;
         public PixelPoint PalmCenter;
         public double PalmScale;

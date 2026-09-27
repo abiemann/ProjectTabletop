@@ -47,6 +47,8 @@ public sealed partial class MainWindow
                 return await VerifyThemeAsync();
             case "verify_blackjack":
                 return await VerifyBlackjackAsync();
+            case "verify_finger_selection":
+                return await VerifyFingerSelectionAsync();
             case "verify_photo_copy_render":
                 return await VerifyPhotoCopyRenderAsync();
 #endif
@@ -79,6 +81,8 @@ public sealed partial class MainWindow
                     handCount = TrackedHandCount,
                     handExecuteActive = ExecutingHandCount > 0,
                     spreadOutHandCount = SpreadOutHandCount,
+                    fourFingerHandCount = FourFingerHandCount,
+                    fingerSelectionFeedback = _scene.CurrentFingerSelectionFeedback,
                     handTestStatus = _scene.HandTrackingTestStatus,
                     lastHandDetection = _lastHandDetection,
                     handDetectionLog = _handDetectionLog?.Status,
