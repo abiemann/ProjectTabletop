@@ -120,6 +120,11 @@ public sealed partial class MainWindow
         Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null },
             "An old scene's result survived the deal redraw.");
         now += TimeSpan.FromMilliseconds(600);
+        Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null },
+            "Opening cards allowed acquisition before the final landing.");
+        now += TimeSpan.FromMilliseconds(1200);
+        scene.GetHandAcquisitionContext(now);
+        now += TimeSpan.FromMilliseconds(600);
         ready = scene.GetHandAcquisitionContext(now)!;
         scene.CompleteHandAcquisition(ready, [hint with { ObservedAt = now }], [], now);
         Require(IsWhite(Draw(), center), "Player-turn controls did not allow assistance.");

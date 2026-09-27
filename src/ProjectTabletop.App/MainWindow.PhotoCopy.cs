@@ -1,6 +1,7 @@
 using ProjectTabletop.App.Camera;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Vision;
+using ProjectTabletop.Interaction;
 
 namespace ProjectTabletop.App;
 
@@ -9,6 +10,9 @@ public sealed partial class MainWindow
     private long _photoCopyConsumedEventId;
     private Task? _photoCopyTask;
     private PhotoCopyCaptureDiagnostics? _lastPhotoCopyCapture;
+    private PhotoCopyObservation? _latestPhotoCopyFrame;
+    private string? _lastSavedPhotoPath;
+    private sealed record PhotoCopyObservation(CameraFrame Frame, HandDetection[] Hands, long Generation);
 
     private sealed record PhotoCopyCaptureDiagnostics(DateTimeOffset FrameTime, int Width, int Height,
         int TransparentPixels, int PartialAlphaPixels, bool TransparentBorder, bool NativeCameraPixels);
@@ -18,44 +22,86 @@ public sealed partial class MainWindow
     private void QueuePhotoCopyCapture(CameraFrame frame, IReadOnlyList<HandDetection> hands,
         IReadOnlyList<HandCursor> cursors)
     {
+        _latestPhotoCopyFrame = new(frame, hands.ToArray(), _handGeneration);
         var previousEvent = _photoCopyConsumedEventId;
         foreach (var cursor in cursors)
             _photoCopyConsumedEventId = Math.Max(_photoCopyConsumedEventId, cursor.ExecuteEventId);
         var now = DateTimeOffset.UtcNow;
-        var gestureHandId = _scene.TryTakePhotoCopyGestureShutter(frame.Timestamp, out var selectedHandId)
-            ? selectedHandId : 0;
-        var shutters = cursors.Where(cursor => cursor.ExecuteEventId > previousEvent &&
-            cursor.IsExecuting(now) || gestureHandId > 0 && cursor.TrackingId == gestureHandId).ToArray();
+        bool explicitRequest = _scene.TryTakePhotoCopyCaptureRequest(frame.Timestamp, out var request);
+        // An accepted button request wins over the same raw pinch, so Copy cannot also Swirl.
+        var shutters = explicitRequest
+            ? cursors.Where(cursor => cursor.TrackingId == request.TrackingId).ToArray()
+            : cursors.Where(cursor => cursor.ExecuteEventId > previousEvent && cursor.IsExecuting(now)).ToArray();
         if (shutters.Length == 0 || _photoCopyTask is { IsCompleted: false } ||
             !_scene.TryGetPhotoCopyCaptureContext(out var context) ||
             frame.Timestamp < context.ReadyAfter || frame.Timestamp > now ||
             now - frame.Timestamp > HandMarkerLifetime) return;
 
         HandDetection? shutter = null;
-        bool selected = shutters.Length == 1 && (gestureHandId > 0 && shutters[0].TrackingId == gestureHandId
+        bool fingerGesture = explicitRequest && request.Gesture == BoardSelectionGesture.IndexSeparation;
+        bool selected = shutters.Length == 1 && (fingerGesture
             ? PhotoCopyHandSelector.TrySelectGestureShutter(hands, shutters[0], out shutter)
             : PhotoCopyHandSelector.TrySelectShutter(hands, shutters[0], out shutter));
         if (!selected || shutter is null)
         {
-            _scene.SetPhotoCopyStatus("Select with one visible hand: fingers together, then index sideways. Keep a gap from the subject.", context.Revision);
+            _scene.SetPhotoCopyStatus("Select with one visible hand. Keep a gap between your hand and the subject.", context.Revision);
             return;
         }
 
-        if (context.Target is null && hands.Count < 2)
+        var action = explicitRequest ? request.Action : PhotoCopyAction.Swirl;
+        if (context.Target is null && (hands.Count < 2 || action == PhotoCopyAction.TimedCopy))
         {
             _scene.SetPhotoCopyStatus("First place an object on grey and lift your hand briefly to lock its light.",
                 context.Revision);
             return;
         }
 
-        _scene.SetPhotoCopyStatus("Taking a photo of the object...", context.Revision);
-        _photoCopyTask = CapturePhotoCopyAsync(frame, shutter,
-            hands.Where(hand => !ReferenceEquals(hand, shutter)).ToArray(), context);
+        if (action == PhotoCopyAction.TimedCopy)
+            _photoCopyTask = CaptureDelayedPhotoCopyAsync(context, _handGeneration);
+        else
+        {
+            _scene.BeginPhotoCopyCapture(context);
+            _photoCopyTask = CapturePhotoCopyAsync(frame, shutter,
+                hands.Where(hand => !ReferenceEquals(hand, shutter)).ToArray(), context, action);
+        }
     }
 
-    private async Task CapturePhotoCopyAsync(CameraFrame frame, HandDetection shutter,
+    private async Task CaptureDelayedPhotoCopyAsync(SceneCompositor.PhotoCopyCaptureContext context, long generation)
+    {
+        DateTimeOffset due = DateTimeOffset.UtcNow.AddSeconds(3);
+        if (!_scene.BeginPhotoCopyCountdown(context, due)) return;
+        try
+        {
+            // Use an observation captured AFTER the countdown, never the button-selection photo.
+            // Poll only while this short operation is pending; camera inference supplies frame + hands together.
+            while (!_closing && generation == _handGeneration && _scene.IsPhotoCopyCaptureCurrent(context))
+            {
+                var now = DateTimeOffset.UtcNow;
+                if (_latestPhotoCopyFrame is { } observation && observation.Generation == generation &&
+                    TimedPhotoFrameReady(observation.Frame.Timestamp, due, now))
+                {
+                    _scene.EndPhotoCopyCountdown(context.Revision);
+                    _scene.BeginPhotoCopyCapture(context);
+                    await CapturePhotoCopyAsync(observation.Frame, null, observation.Hands, context, PhotoCopyAction.Copy);
+                    return;
+                }
+                if (now >= due.AddSeconds(2))
+                {
+                    _scene.SetPhotoCopyStatus("No fresh camera image. Check the webcam and select Copy again.", context.Revision);
+                    return;
+                }
+                await Task.Delay(50);
+            }
+        }
+        finally { _scene.EndPhotoCopyCountdown(context.Revision); }
+    }
+
+    private static bool TimedPhotoFrameReady(DateTimeOffset frameTime, DateTimeOffset due, DateTimeOffset now) =>
+        now >= due && frameTime >= due && frameTime <= now && now - frameTime <= HandMarkerLifetime;
+
+    private async Task CapturePhotoCopyAsync(CameraFrame frame, HandDetection? shutter,
         IReadOnlyList<HandDetection> otherHands,
-        SceneCompositor.PhotoCopyCaptureContext context)
+        SceneCompositor.PhotoCopyCaptureContext context, PhotoCopyAction action = PhotoCopyAction.Swirl)
     {
         try
         {
@@ -84,18 +130,33 @@ public sealed partial class MainWindow
                 }
                 return (Cutout: cutout, Failure: failure);
             });
-            if (_closing) return;
+            if (_closing || !_scene.IsPhotoCopyCaptureCurrent(context)) return;
             if (result.Cutout is null)
                 _scene.SetPhotoCopyStatus(result.Failure ?? "Keep the lit object still, then select beside it again.", context.Revision);
-            else if (_scene.SetPhotoCopyCapture(result.Cutout, context.Revision, context.Target))
+            else if (action == PhotoCopyAction.Swirl)
+            {
+                if (_scene.SetPhotoCopyCapture(result.Cutout, context.Revision, context.Target))
+                    _lastPhotoCopyCapture = DescribeCutout(result.Cutout, frame.Timestamp);
+            }
+            else if (_scene.IsPhotoCopyCaptureCurrent(context))
+            {
+                // The frozen photo was accepted against this session/target before I/O.
+                // Navigation during saving cannot show a stale success message on another board.
+                var path = await PhotoCopyImageStore.SaveAsync(result.Cutout);
+                _lastSavedPhotoPath = path;
                 _lastPhotoCopyCapture = DescribeCutout(result.Cutout, frame.Timestamp);
+                if (!_closing) _scene.SetPhotoCopyImageSaved(context);
+            }
+            if (_closing) return;
             UpdateBoardAppStatus();
         }
         catch (Exception ex)
         {
             if (!_closing)
             {
-                _scene.SetPhotoCopyStatus("Photo capture failed. Bring fingers together, then move index sideways away from the object.", context.Revision);
+                _scene.SetPhotoCopyStatus(action == PhotoCopyAction.Swirl
+                    ? "Photo capture failed. Keep the subject still and select Swirl again."
+                    : "Image could not be saved. Check the Pictures folder and select Copy again.", context.Revision);
                 AppLog.Write("Photo Copy capture", ex);
             }
         }

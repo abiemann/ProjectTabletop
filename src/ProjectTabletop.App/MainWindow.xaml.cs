@@ -72,6 +72,7 @@ public sealed partial class MainWindow : Window
         _initialized = true;
         StartHandTrackingStatus();
         RefreshDisplays();
+        InitializeProjectionSettings();
         _ = RefreshCamerasAsync();
         UpdateTrainingStatus();
         SyncVisionSettingsControls();
@@ -97,7 +98,7 @@ public sealed partial class MainWindow : Window
         public int Width => Bounds.Width;
         public int Height => Bounds.Height;
         public override string ToString() =>
-            $"Display {Number}: " + (PhysicalMode is { } mode
+            $"{PhysicalMode?.FriendlyName ?? $"Display {Number}"}: " + (PhysicalMode is { } mode
                 ? $"{mode.Width} × {mode.Height} @ {mode.RefreshHertz} Hz physical"
                 : "physical mode unavailable") +
             $" ({Width} × {Height} layout)" +
@@ -158,12 +159,19 @@ public sealed partial class MainWindow : Window
     private void DisplayComboBox_SelectionChanged(object sender,
         Microsoft.UI.Xaml.Controls.SelectionChangedEventArgs e)
     {
-        if (!_initialized || SelectedDisplay is not { } display) return;
+        if (!_initialized) return;
+        if (SelectedDisplay is not { } display)
+        {
+            _scene.ClearBoardMediaClip();
+            ProjectionSettingsDisplayChanged();
+            return;
+        }
         if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
         ClearHandTracking();
         _scene.ClearBoardMediaClip();
         _scene.SetDisplayAspect((double)display.Width / display.Height);
         InvalidateCalibration("Projection display changed. Recalibrate both planes.");
+        ProjectionSettingsDisplayChanged();
         SetStatus($"Selected {display}. " + (_output is null || _outputDisplayId == display.Id
             ? "Calibration follows the fullscreen canvas layout size."
             : "Press Open output to move the projector window before calibrating."));
@@ -198,6 +206,7 @@ public sealed partial class MainWindow : Window
         UpdateCameraHealth();
         UpdateBoardSetupStatus();
         UpdateBoardAppStatus();
+        UpdateBoardSizeEstimate();
         RenderStatusText.Text = $"Draw callbacks: {outputFps:F1}/s output ({outputSlowDelta} slow), " +
             $"{previewFps:F1}/s preview ({previewSlowDelta} slow). " +
             (videoAssets == 0 ? "No video assets loaded. " :

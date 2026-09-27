@@ -53,6 +53,9 @@ public sealed partial class MainWindow
             playerState.DealerHoleCardHidden && playerState.DealerCards[1] is null && playerState.DealerTotal == 6,
             "The opening hand or concealed dealer snapshot is incorrect.");
         scene.ClearHandTips(resetInput: false);
+        // Gesture timestamps use the real camera clock; wait for all four landings
+        // before testing another real-time gesture. The animation verifier uses a fake clock.
+        await Task.Delay(1850);
         var player = DrawPreview(scene);
         Require(DifferentPixels(betting, player) > 1000, "Dealing did not redraw the cached table.");
         Require(BrightPixels(player, new(.08, .23, .84, .50)) > 5000,

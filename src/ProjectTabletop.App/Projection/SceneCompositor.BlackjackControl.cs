@@ -64,6 +64,7 @@ public sealed partial class SceneCompositor
             var now = _blackjackClock();
             TickBlackjackVisuals(now);
             var flights = GetBlackjackFlights(now);
+            var deal = GetBlackjackDealFrame(now);
             if (_blackjackPreviewTarget is null || _blackjackPreviewTarget.Device != ds.Device)
             {
                 _blackjackPreviewTarget?.Dispose();
@@ -80,7 +81,8 @@ public sealed partial class SceneCompositor
                 _blackjackPreviewFlightRevision != _blackjackFlightRevision)
             {
                 using var surface = _blackjackPreviewTarget.CreateDrawingSession();
-                DrawBlackjackTable(surface, game, _boardSession.Buttons, hovered, selectionFeedback, HiddenBlackjackCards(flights));
+                DrawBlackjackTable(surface, game, _boardSession.Buttons, hovered, selectionFeedback,
+                    HiddenBlackjackCards(flights), deal);
                 _blackjackPreviewRevision = game.Revision;
                 _blackjackPreviewHover = hoverKey;
                 _blackjackPreviewFingerSelectionStep = selectionStep;
@@ -89,7 +91,7 @@ public sealed partial class SceneCompositor
             float size = Math.Min(width, height);
             ds.DrawImage(_blackjackPreviewTarget, new Rect((width - size) / 2, (height - size) / 2, size, size),
                 new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
-            if (DrawBlackjackFlightLayer(ds.Device, flights) is { } flightLayer)
+            if (DrawBlackjackFlightLayer(ds.Device, flights, deal) is { } flightLayer)
                 ds.DrawImage(flightLayer, new Rect((width - size) / 2, (height - size) / 2, size, size),
                     new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
         }

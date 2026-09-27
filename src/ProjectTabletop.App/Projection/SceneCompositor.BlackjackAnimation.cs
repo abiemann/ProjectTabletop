@@ -27,8 +27,24 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
-            var flights = GetBlackjackFlights(_blackjackClock());
+            var now = _blackjackClock();
+            var flights = GetBlackjackFlights(now);
+            var deal = GetBlackjackDealFrame(now);
             return new { durationMilliseconds = BlackjackFlightDuration.TotalMilliseconds,
+                dealCardMilliseconds = BlackjackDealCardDuration.TotalMilliseconds,
+                sweepMilliseconds = BlackjackSweepDuration.TotalMilliseconds,
+                deal = deal is null ? null : new
+                {
+                    deal.Phase, deal.LandedCards,
+                    cards = deal.Cards.Select(frame => new
+                    {
+                        frame.Dealer, frame.HandIndex, frame.CardIndex, frame.Departing, frame.Progress,
+                        center = new { x = frame.Center.X, y = frame.Center.Y },
+                        rotationDegrees = frame.Rotation * 180 / MathF.PI,
+                        destination = new { frame.Destination.X, frame.Destination.Y,
+                            frame.Destination.Width, frame.Destination.Height }
+                    }).ToArray()
+                },
                 flights = flights.Select(frame => new
                 {
                     frame.Hit.Sequence, frame.Hit.HandIndex, frame.Hit.CardIndex, frame.Progress,
@@ -55,8 +71,10 @@ public sealed partial class SceneCompositor
         if (_blackjackFlightNavigationRevision != _boardSession.Revision ||
             _boardSession.Screen != BoardScreen.Blackjack)
         {
-            if (_blackjackFlights.Count > 0) _blackjackFlightRevision++;
+            if (_blackjackFlights.Count > 0 || _blackjackDeal is not null) _blackjackFlightRevision++;
             _blackjackFlights.Clear();
+            _blackjackDeal = null;
+            _blackjackDealStage = -1;
             _blackjackFlightNavigationRevision = _boardSession.Revision;
         }
         if (_blackjackFlights.RemoveAll(hit => now - hit.StartedAt >= BlackjackFlightDuration ||
@@ -64,13 +82,14 @@ public sealed partial class SceneCompositor
             hit.CardIndex >= game.Hands[hit.HandIndex].Cards.Count ||
             game.Hands[hit.HandIndex].Cards[hit.CardIndex] != hit.Card) > 0)
             _blackjackFlightRevision++;
+        SynchronizeBlackjackDeal(now);
     }
 
     private bool TickBlackjackVisuals(DateTimeOffset now)
     {
         SynchronizeBlackjackFlights(now);
         // Let the last player card land before the dealer reveals or draws.
-        return _blackjackFlights.Count == 0 && _boardSession.TickBlackjack(now);
+        return _blackjackFlights.Count == 0 && _blackjackDeal is null && _boardSession.TickBlackjack(now);
     }
 
     private BlackjackFlightFrame[] GetBlackjackFlights(DateTimeOffset now)
@@ -83,18 +102,8 @@ public sealed partial class SceneCompositor
             var destination = CasinoCardLayout(game.Hands[hit.HandIndex].Cards.Count, lane)[hit.CardIndex];
             float progress = Math.Clamp((float)((now - hit.StartedAt).TotalMilliseconds /
                 BlackjackFlightDuration.TotalMilliseconds), 0, 1);
-            float t = 1 - MathF.Pow(1 - progress, 2); // Fast departure, gentle landing.
-            var start = new Vector2(500, -160); // Entire rotated card begins above TABLETOP and outside the board.
-            var end = new Vector2((float)(destination.X + destination.Width / 2),
-                (float)(destination.Y + destination.Height / 2));
-            float bend = end.X >= 500 ? 70 : -70;
-            var first = new Vector2(500 + bend, 115);
-            var second = new Vector2(end.X + bend, end.Y - 190);
-            float remaining = 1 - t;
-            var center = remaining * remaining * remaining * start + 3 * remaining * remaining * t * first +
-                3 * remaining * t * t * second + t * t * t * end;
-            float rotation = -MathF.PI * 1.25f * remaining * remaining;
-            return new BlackjackFlightFrame(hit, destination, center, rotation, progress);
+            var pose = BlackjackFlightPose(destination, progress);
+            return new BlackjackFlightFrame(hit, destination, pose.Center, pose.Rotation, progress);
         }).ToArray();
     }
 
@@ -104,9 +113,10 @@ public sealed partial class SceneCompositor
 
     // Only moving cards redraw each frame. The expensive felt, labels, controls
     // and settled cards remain cached on both the projector and laptop.
-    private CanvasRenderTarget? DrawBlackjackFlightLayer(CanvasDevice device, IReadOnlyList<BlackjackFlightFrame> flights)
+    private CanvasRenderTarget? DrawBlackjackFlightLayer(CanvasDevice device, IReadOnlyList<BlackjackFlightFrame> flights,
+        BlackjackDealFrame? deal)
     {
-        if (flights.Count == 0) return null;
+        if (flights.Count == 0 && deal is null) return null;
         if (_blackjackFlightTarget is null || _blackjackFlightTarget.Device != device)
         {
             _blackjackFlightTarget?.Dispose();
@@ -114,14 +124,17 @@ public sealed partial class SceneCompositor
         }
         using var drawing = _blackjackFlightTarget.CreateDrawingSession();
         drawing.Clear(Colors.Transparent);
-        foreach (var frame in flights)
+        var cards = flights.Select(frame => new BlackjackMovingCard(frame.Hit.Card, false,
+            frame.Hit.HandIndex, frame.Hit.CardIndex, frame.Destination, frame.Center, frame.Rotation,
+            frame.Progress, false)).Concat(deal?.Cards ?? Array.Empty<BlackjackMovingCard>());
+        foreach (var frame in cards)
         {
             var transform = drawing.Transform;
             drawing.Transform = Matrix3x2.CreateRotation(frame.Rotation) *
                 Matrix3x2.CreateTranslation(frame.Center) * transform;
             try
             {
-                DrawCasinoCard(drawing, frame.Hit.Card,
+                DrawCasinoCard(drawing, frame.Card,
                     new Rect(-frame.Destination.Width / 2, -frame.Destination.Height / 2,
                         frame.Destination.Width, frame.Destination.Height));
             }

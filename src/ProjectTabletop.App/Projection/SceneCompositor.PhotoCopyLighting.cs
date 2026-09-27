@@ -27,7 +27,8 @@ public sealed partial class SceneCompositor
                     center = target?.Center, radius = target?.SpotlightRadius,
                     spotlight = light is null ? null : new { shape = light.Shape.ToString(), light.Center,
                         light.Width, light.Height, light.RotationRadians, light.CornerRadius, light.Shear },
-                    shownAt = _photoCopyObjectShownAt, foregroundArea = target?.ForegroundArea };
+                    shownAt = _photoCopyObjectShownAt, foregroundArea = target?.ForegroundArea,
+                    recoveredSurface = target?.HasRecoveredSurface ?? false };
             }
         }
     }
@@ -50,7 +51,7 @@ public sealed partial class SceneCompositor
                 _photoCopyCutout is not null || _photoCopyObjectTarget is not null) return false;
             _photoCopyObjectTarget = target;
             _photoCopyObjectShownAt = DateTimeOffset.MinValue;
-            _photoCopyStatus = "Object locked and lit. Beside it: four fingers together, then index sideways to copy.";
+            _photoCopyStatus = "Object ready. Select Swirl, Copy, or Copy with the clock for a 3-second delay.";
             _renderedBoardState = null;
             return true;
         }

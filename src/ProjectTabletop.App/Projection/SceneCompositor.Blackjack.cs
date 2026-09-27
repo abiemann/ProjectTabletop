@@ -21,7 +21,7 @@ public sealed partial class SceneCompositor
     private static void DrawBlackjackTable(CanvasDrawingSession ds, BlackjackSnapshot game,
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
         IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback,
-        IReadOnlyDictionary<int, IReadOnlySet<int>>? flyingPlayerCards = null)
+        IReadOnlyDictionary<int, IReadOnlySet<int>>? flyingPlayerCards = null, BlackjackDealFrame? deal = null)
     {
         DrawCasinoFelt(ds);
 
@@ -40,13 +40,14 @@ public sealed partial class SceneCompositor
             "Bahnschrift", true);
 
         bool dealt = game.DealerCards.Count != 0;
-        var dealerLabel = !dealt ? "DEALER" : game.DealerHoleCardHidden
+        var dealerLabel = !dealt || deal is not null ? "DEALER" : game.DealerHoleCardHidden
             ? $"DEALER  ·  {game.DealerTotal} SHOWING"
             : $"DEALER  ·  {game.DealerTotal}{(game.DealerIsSoft ? " SOFT" : "")}";
         CasinoText(ds, dealerLabel, new Rect(260, 181, 480, 29), 19, CasinoMuted,
             "Bahnschrift", true);
         if (dealt)
-            DrawCasinoCards(ds, game.DealerCards, new Rect(215, 224, 570, 159));
+            DrawCasinoCards(ds, game.DealerCards, new Rect(215, 224, 570, 159), deal is null ? null :
+                Enumerable.Range(0, game.DealerCards.Count).Where(index => index * 2 + 1 >= deal.LandedCards).ToHashSet());
         else
         {
             DrawCasinoCardWell(ds, new Rect(377, 224, 112, 154));
@@ -67,7 +68,8 @@ public sealed partial class SceneCompositor
             VerticalAlignment = CanvasVerticalAlignment.Center,
             WordWrapping = CanvasWordWrapping.Wrap
         })
-            ds.DrawText(game.Status, new Rect(112, 441, 776, 62), statusColor, statusFormat);
+            ds.DrawText(deal is null ? game.Status : deal.Phase == "clearing" ? "Clearing the table…" : "Dealing…",
+                new Rect(112, 441, 776, 62), statusColor, statusFormat);
 
         if (game.Hands.Count == 0)
         {
@@ -84,7 +86,7 @@ public sealed partial class SceneCompositor
             {
                 var hand = game.Hands[index];
                 var lane = CasinoPlayerLane(index, game.Hands.Count);
-                if (hand.IsActive)
+                if (hand.IsActive && deal is null)
                 {
                     ds.FillRoundedRectangle(new Rect(lane.X - 6, 516, lane.Width + 12, 226),
                         20, 20, ThemeColor(110, 192, 139, 10));
@@ -94,6 +96,9 @@ public sealed partial class SceneCompositor
                 }
                 var hidden = flyingPlayerCards is not null && flyingPlayerCards.TryGetValue(index, out var indices)
                     ? indices : null;
+                if (deal is not null)
+                    hidden = Enumerable.Range(0, hand.Cards.Count)
+                        .Where(cardIndex => cardIndex * 2 >= deal.LandedCards).ToHashSet();
                 DrawCasinoCards(ds, hand.Cards.Select(card => (BlackjackCard?)card).ToArray(), lane, hidden);
                 string total = hand.IsBust ? $"BUST · {hand.Total}"
                     : hand.IsNatural ? "BLACKJACK" : $"{hand.Total}{(hand.IsSoft ? " SOFT" : "")}";
@@ -101,7 +106,7 @@ public sealed partial class SceneCompositor
                 string caption = game.Phase == BlackjackPhase.RoundOver && !string.IsNullOrWhiteSpace(hand.Result)
                     ? $"{(hand.IsNatural ? handName : total)}  ·  {hand.Result.ToUpperInvariant()}"
                     : $"{handName}  ·  {total}  ·  BET {CasinoAmount(hand.Bet)}";
-                CasinoText(ds, caption, new Rect(lane.X + 18, 704, lane.Width - 36, 31),
+                CasinoText(ds, deal is null ? caption : "YOUR HAND", new Rect(lane.X + 18, 704, lane.Width - 36, 31),
                     split ? 17 : 20, hand.IsBust ? ThemeColor(246, 161, 147) : CasinoIvory,
                     "Bahnschrift", true);
             }
@@ -113,16 +118,14 @@ public sealed partial class SceneCompositor
             new Rect(80, 742, 840, 24), 15, CasinoGold, "Bahnschrift", true);
         foreach (var button in buttons)
         {
-            DrawCasinoButton(ds, button, game.AvailableActions.Contains(button.Id) || button.Id == "menu",
+            DrawCasinoButton(ds, button, button.Enabled,
                 hovered.Contains(button.Id), game.SelectedBet);
             DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, CasinoGold);
         }
 
-        CasinoText(ds, "PRACTICE TABLE  ·  NO REAL MONEY", new Rect(80, 887, 840, 23), 15, CasinoGold,
-            "Bahnschrift", true);
         CasinoText(ds, "Dealer stands on soft 17  ·  One split  ·  No insurance or surrender",
             new Rect(65, 911, 870, 24), 16, CasinoMuted);
-        CasinoText(ds, "Four fingers together. Aim with middle; move index sideways. Or pinch.",
+        CasinoText(ds, "Four fingers together. Aim with middle; move index sideways.",
             new Rect(75, 934, 850, 19), 14, CasinoMuted);
     }
 

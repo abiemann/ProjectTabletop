@@ -43,7 +43,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border Style="{StaticResource WorkstationPanelStyle}">
+                <Border x:Name="ProjectionOutputPanel" Style="{StaticResource WorkstationPanelStyle}">
                     <StackPanel Spacing="12">
                         <TextBlock Text="02 / PROJECTION OUTPUT" Style="{StaticResource SectionTitleStyle}" />
                         <ComboBox x:Name="DisplayComboBox" PlaceholderText="Select projector display" HorizontalAlignment="Stretch" SelectionChanged="DisplayComboBox_SelectionChanged" />
@@ -52,6 +52,32 @@
                             <Button x:Name="OpenOutputButton" Content="Open output" Click="OpenOutput_Click" />
                             <Button x:Name="FullscreenButton" Content="Full screen" Click="Fullscreen_Click" />
                         </StackPanel>
+                        <TextBlock x:Name="ProjectionPropertiesText" Text="Reading output display properties."
+                                   TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <NumberBox x:Name="ProjectorLensHeightNumberBox" Header="Lens height above board (cm, optional)"
+                                   Minimum="0.1" Maximum="10000" SmallChange="1" PlaceholderText="Height in cm"
+                                   SpinButtonPlacementMode="Compact" ValueChanged="ProjectorSize_ValueChanged" />
+                        <NumberBox x:Name="ProjectorThrowRatioNumberBox" Header="Throw ratio (optional)"
+                                   Minimum="0.01" Maximum="100" SmallChange="0.01" PlaceholderText="From your projector's specifications"
+                                   SpinButtonPlacementMode="Compact" ValueChanged="ProjectorSize_ValueChanged" />
+                        <TextBlock Text="Enter the ratio before :1. Estimates assume the lens points straight down and the full native image has no zoom or keystone correction."
+                                   TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <Expander x:Name="MeasuredBoardSizeExpander" Header="Measured board size (optional)" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <StackPanel Spacing="10">
+                                <NumberBox x:Name="MeasuredBoardShortSideNumberBox" Header="Short side (cm)"
+                                           Minimum="0.1" Maximum="10000" SmallChange="0.1" PlaceholderText="Measured with a ruler"
+                                           SpinButtonPlacementMode="Compact" ValueChanged="ProjectorSize_ValueChanged" />
+                                <NumberBox x:Name="MeasuredBoardLongSideNumberBox" Header="Long side (cm)"
+                                           Minimum="0.1" Maximum="10000" SmallChange="0.1" PlaceholderText="Measured with a ruler"
+                                           SpinButtonPlacementMode="Compact" ValueChanged="ProjectorSize_ValueChanged" />
+                                <TextBlock Text="Both measurements take priority over the optical estimate. Update or clear them when you change boards."
+                                           TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                            </StackPanel>
+                        </Expander>
+                        <TextBlock x:Name="BoardSizeEstimateText" Text="Optional: enter both values to show estimated dimensions on Hand-Tracking."
+                                   TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <TextBlock x:Name="ProjectionSettingsStatusText" TextWrapping="Wrap" Visibility="Collapsed"
+                                   Foreground="{StaticResource TabletopMutedBrush}" />
                         <TextBlock Text="Projection stays black until board setup completes, then fills the detected board." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <TextBlock x:Name="RenderStatusText" Text="Waiting for projection diagnostics." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                     </StackPanel>
@@ -73,7 +99,7 @@
                         <TextBlock x:Name="BoardAppStatusText" Text="Board menu. Complete board setup to project it." TextWrapping="Wrap" />
                         <TextBlock Text="Bring your four fingers together and aim with the middle fingertip. When the button says Ready, move your index finger sideways to select. Bring it back to select again. Point and pinch also works." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Photo Copy" Click="PhotoCopy_Click" />
-                        <TextBlock Text="Place one object on grey, then lift your hands briefly to lock its light. Beside it, bring four fingers together until Ready appears, then move your index sideways to copy. Pinch also works. Use your other hand for a hand photo. After selecting, remove your hand for about a second and return to restore its spotlight." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <TextBlock Text="Place an object on grey, then lift your hands to lock its light. Select Swirl to fill the board, Copy to save a PNG, or Copy with the clock to wait 3 seconds first. Bring four fingers together until Ready, then move your index sideways. Saved images go to Pictures / Project Tabletop." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Blackjack" Click="Blackjack_Click" />
                         <TextBlock Text="Play the dealer with virtual chips. Aim with four fingers together, then move your index finger sideways to select, or click the laptop table. The laptop table works with the projector off." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Border Height="1" Background="{StaticResource TabletopPanelBorderBrush}" Margin="0,2" />

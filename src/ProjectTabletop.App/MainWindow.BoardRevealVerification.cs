@@ -37,6 +37,13 @@ public sealed partial class MainWindow
             "The reveal fixture did not begin on the last white-field center dot.");
         await Save(target, "00-final-calibration-dot");
         scene.CompleteBoardSetup(corners, cameraMap);
+        var physicalCorners = corners.Select(point => new Point2(point.X, point.Y)).ToArray();
+        Require(scene.GetDetectedBoardCorners() is { } measuredCorners && measuredCorners.SequenceEqual(physicalCorners),
+            "Completing setup lost the physical board edges or replaced them with the safety inset.");
+        var copiedCorners = scene.GetDetectedBoardCorners()!;
+        copiedCorners[0] = new(0, 0);
+        Require(scene.GetDetectedBoardCorners()!.SequenceEqual(physicalCorners),
+            "A measurement caller changed the saved physical board edges.");
         Require(scene.BoardRevealActive && scene.GetBoardRevealDiagnostics().DurationMilliseconds == duration,
             "Successful setup did not start the expected reveal.");
         byte[] first = Draw(scene);
@@ -123,6 +130,12 @@ public sealed partial class MainWindow
                 default: canceled.ShowBoardMenu(); break;
             }
             Require(!canceled.BoardRevealActive, cancellation + " did not cancel the pending reveal.");
+            if (cancellation is "clear-clip" or "new-scan")
+                Require(canceled.GetDetectedBoardCorners() is null,
+                    cancellation + " retained stale board-size measurements.");
+            else if (cancellation == "menu")
+                Require(canceled.GetDetectedBoardCorners()!.SequenceEqual(physicalCorners),
+                    "Navigating to the menu discarded the physical board measurement.");
             byte[] immediate = Draw(canceled);
             now = now.AddSeconds(2);
             byte[] later = Draw(canceled);

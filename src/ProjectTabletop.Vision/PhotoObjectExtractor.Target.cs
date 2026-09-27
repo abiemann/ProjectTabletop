@@ -6,16 +6,17 @@ public static partial class PhotoObjectExtractor
     /// Photograph current camera pixels through a previously acquired silhouette.
     /// Never resegments the projected white light. A moved, hidden or no longer
     /// contrasting object is refused, rather than copying stale background/hand.
+    /// A timed capture may omit a departed shutter hand; still supply every
+    /// currently detected hand in otherHands so target occlusion is rejected.
     /// </summary>
     public static PhotoHandCutout? ExtractTarget(int width, int height, int stride, byte[] bgra,
-        HandDetection shutter, IReadOnlyList<double> cameraToBoard, PhotoObjectTarget target,
+        HandDetection? shutter, IReadOnlyList<double> cameraToBoard, PhotoObjectTarget target,
         out string? failure, IReadOnlyList<HandDetection>? otherHands = null)
     {
-        ArgumentNullException.ThrowIfNull(shutter);
         ArgumentNullException.ThrowIfNull(target);
         if (!PhotoObjectLocator.TryRectify(width, height, stride, bgra, cameraToBoard,
             out var photo, out var h, out failure)) return null;
-        HandDetection[] hands = [shutter, .. otherHands ?? []];
+        IReadOnlyList<HandDetection> hands = shutter is null ? otherHands ?? [] : [shutter, .. otherHands ?? []];
         if (PhotoObjectLocator.ObserveRectified(photo, h, target, hands, out failure) != PhotoObjectTargetState.Present)
             return null;
         byte[] result = new byte[target.Width * target.Height * 4];

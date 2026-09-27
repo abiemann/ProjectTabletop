@@ -45,6 +45,7 @@ public sealed partial class MainWindow
     private async Task ObservePhotoCopyObjectAsync(CameraFrame frame, HandDetection[] hands,
         Projection.SceneCompositor.PhotoCopyCaptureContext context, long generation)
     {
+        var captureAtStart = _photoCopyTask;
         try
         {
             var observation = await Task.Run(() =>
@@ -60,12 +61,17 @@ public sealed partial class MainWindow
                 return (Target: candidate, State: PhotoObjectTargetState.Unavailable, Failure: message);
             });
             if (_closing || generation != _handGeneration ||
+                !PhotoCopyObservationMayApply(captureAtStart, _photoCopyTask) ||
                 !_scene.TryGetPhotoCopyCaptureContext(out var current) || current.Revision != context.Revision ||
                 !ReferenceEquals(current.Target, context.Target)) return;
             _lastPhotoCopyObservation = new { frameTime = frame.Timestamp, context.Revision,
                 state = context.Target is null ? observation.Target is null ? "searching" : "candidate" : observation.State.ToString(),
                 observation.Failure, cameraToBoard = context.CameraToBoard,
                 center = observation.Target?.Center, area = observation.Target?.ForegroundArea };
+#if DEBUG
+            if (context.Target is not null && observation.State == PhotoObjectTargetState.MissingOrMoved)
+                _lastPhotoCopyFailure = new(frame, hands, context, observation.Failure);
+#endif
             if (context.Target is { } locked)
             {
                 if (observation.State == PhotoObjectTargetState.MissingOrMoved)
@@ -103,10 +109,17 @@ public sealed partial class MainWindow
         }
         catch (Exception error)
         {
-            if (_closing) return;
+            if (_closing || generation != _handGeneration ||
+                !PhotoCopyObservationMayApply(captureAtStart, _photoCopyTask)) return;
             _scene.SetPhotoCopyStatus("Object scan could not finish. Keep one object still on grey and try again.",
                 context.Revision);
             AppLog.Write("Photo Copy object lighting", error);
         }
     }
+
+    // A scan begun before a capture cannot change its locked target or status,
+    // even if the capture finishes before this worker returns. Capture validates
+    // its own fresh image; later background scans resume from the completed task.
+    private static bool PhotoCopyObservationMayApply(Task? captureAtStart, Task? currentCapture) =>
+        ReferenceEquals(captureAtStart, currentCapture) && currentCapture is not { IsCompleted: false };
 }

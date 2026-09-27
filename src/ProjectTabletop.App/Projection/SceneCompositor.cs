@@ -34,6 +34,7 @@ public sealed partial class SceneCompositor : IDisposable
     private bool _boardSetup;
     private bool _blackOutput;
     private BoardGrid? _boardGrid;
+    private Point2[]? _detectedBoardCorners;
     private ProjectionClipRegion? _boardMediaClip;
     private Homography? _boardCameraMap;
     private Homography? _boardSurfaceMap;
@@ -101,18 +102,28 @@ public sealed partial class SceneCompositor : IDisposable
         get { lock (_gate) return _boardMediaClip is not null; }
     }
 
+    // Physical edges before the safety inset: measuring the media clip would
+    // systematically underestimate the cardboard's dimensions.
+    internal Point2[]? GetDetectedBoardCorners()
+    {
+        lock (_gate) return _boardMediaClip is not null ? _detectedBoardCorners?.ToArray() : null;
+    }
+
     public void ClearBoardMediaClip()
     {
         lock (_gate)
         {
             CancelBoardReveal();
             _boardMediaClip = null;
+            SetEstimatedBoardSize(null);
+            _detectedBoardCorners = null;
             _boardCameraMap = null;
             _boardSurfaceMap = null;
             _handTips = [];
             _handVisualResetThrough = DateTimeOffset.UtcNow;
             ClearHandSpotlights();
             _boardSession.ResetInput(DateTimeOffset.UtcNow);
+            CancelBlackjackDeal();
             InvalidatePhotoCopyCapture();
         }
     }
@@ -130,6 +141,7 @@ public sealed partial class SceneCompositor : IDisposable
                 _handVisualResetThrough = DateTimeOffset.UtcNow;
                 ClearHandSpotlights();
                 _boardSession.ResetInput(DateTimeOffset.UtcNow);
+                CancelBlackjackDeal();
             }
         }
     }
@@ -236,6 +248,10 @@ public sealed partial class SceneCompositor : IDisposable
             var selectionResult = _boardSession.Update(boardSamples, frameTime, now);
             if (selectionResult is { ButtonId: "photo-shutter" } && shutterContext is not null)
                 _photoCopyGestureShutter = new(selectionResult.TrackingId, frameTime, shutterContext);
+            else if (selectionResult is not null && shutterContext is not null &&
+                BoardSession.TryGetPhotoCopyAction(selectionResult.ButtonId, out var photoAction))
+                _photoCopyGestureShutter = new(selectionResult.TrackingId, frameTime, shutterContext,
+                    photoAction, selectionResult.Gesture);
             if (acceptVisual) ObserveHandLightingCommands(cursors, frameTime, now, selectionResult);
             SyncPhotoCopySession();
         }
@@ -352,6 +368,7 @@ public sealed partial class SceneCompositor : IDisposable
         {
             if (!_boardSetup) throw new InvalidOperationException("Board setup is not active.");
             _boardGrid = grid;
+            _detectedBoardCorners = grid.BoardCorners.Select(point => new Point2(point.X, point.Y)).ToArray();
             _boardMediaClip = mediaClip;
             _boardCameraMap = cameraMap;
             _boardSurfaceMap = Homography.FromFourPoints(
@@ -360,6 +377,7 @@ public sealed partial class SceneCompositor : IDisposable
             _handVisualResetThrough = DateTimeOffset.UtcNow;
             ClearHandSpotlights();
             _boardSession.ResetInput(DateTimeOffset.UtcNow);
+            CancelBlackjackDeal();
             InvalidatePhotoCopyCapture();
             _boardSetupStarted = DateTimeOffset.UtcNow;
         }
@@ -821,7 +839,9 @@ public sealed partial class SceneCompositor : IDisposable
             _blackjackFlightTarget?.Dispose();
             _blackjackFlightTarget = null;
             _blackjackFlights.Clear();
+            _blackjackDeal = null;
             _boardSession.BlackjackHitOccurred -= OnBlackjackHit;
+            _boardSession.BlackjackDealOccurred -= OnBlackjackDeal;
             _photoCopyBitmap?.Dispose();
             _photoCopyBitmap = null;
             _photoCopyCameraTarget?.Dispose();

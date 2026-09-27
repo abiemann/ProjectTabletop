@@ -9,8 +9,29 @@ namespace ProjectTabletop.App.Projection;
 /// </summary>
 internal sealed record DisplayModeInfo(string DeviceName, int Width, int Height, int RefreshHertz)
 {
+    /// <summary>The selected monitor's Windows/EDID name, when the driver supplies it.</summary>
+    public string? FriendlyName { get; init; }
+
+    /// <summary>
+    /// Windows monitor device interface path. Unlike DISPLAY1/2, this identifies
+    /// the monitor connection; changing its port or adapter can change the path.
+    /// Null when Windows cannot identify one unambiguous target (including cloning).
+    /// </summary>
+    public string? MonitorDevicePath { get; init; }
+
+    /// <summary>
+    /// Windows' preferred target pixel mode, not a measurement of the projected image.
+    /// Keep separate from the active Width/Height; account for RotationDegrees when comparing aspect ratios.
+    /// </summary>
+    public int? PreferredPixelWidth { get; init; }
+    public int? PreferredPixelHeight { get; init; }
+
+    /// <summary>Active Windows orientation counter-clockwise from the default, when reported by the driver.</summary>
+    public int? RotationDegrees { get; init; }
+
     private const uint MonitorDefaultToNull = 0;
     private const int CurrentSettings = -1;
+    private const uint DisplayOrientationField = 0x80;
 
     public static DisplayModeInfo? ForArea(DisplayArea area)
     {
@@ -24,8 +45,17 @@ internal sealed record DisplayModeInfo(string DeviceName, int Width, int Height,
 
         var mode = new DevMode { Size = (ushort)Marshal.SizeOf<DevMode>() };
         if (!EnumDisplaySettings(info.DeviceName, CurrentSettings, ref mode)) return null;
+        var metadata = NativeDisplayMetadata.ForSource(info.DeviceName);
         return mode.Width > 0 && mode.Height > 0
             ? new DisplayModeInfo(info.DeviceName, (int)mode.Width, (int)mode.Height, (int)mode.RefreshHertz)
+            {
+                FriendlyName = metadata?.FriendlyName,
+                MonitorDevicePath = metadata?.MonitorDevicePath,
+                PreferredPixelWidth = metadata?.PreferredPixelWidth,
+                PreferredPixelHeight = metadata?.PreferredPixelHeight,
+                RotationDegrees = (mode.Fields & DisplayOrientationField) != 0 && mode.Orientation <= 3
+                    ? (int)mode.Orientation * 90 : null
+            }
             : null;
     }
 
@@ -57,6 +87,8 @@ internal sealed record DisplayModeInfo(string DeviceName, int Width, int Height,
     private struct DevMode
     {
         [FieldOffset(68)] public ushort Size;
+        [FieldOffset(72)] public uint Fields;
+        [FieldOffset(84)] public uint Orientation;
         [FieldOffset(172)] public uint Width;
         [FieldOffset(176)] public uint Height;
         [FieldOffset(184)] public uint RefreshHertz;

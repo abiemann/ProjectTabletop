@@ -17,7 +17,7 @@ public sealed partial class SceneCompositor
     private static readonly TimeSpan PhotoCopySurfaceSettle = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan PhotoCopyRemoveHandDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan PhotoCopyStampInterval = TimeSpan.FromMilliseconds(25);
-    private const string PhotoCopyReadyMessage = "Place an object on grey; lift your hand to lock its light. Together, then index sideways to copy.";
+    private const string PhotoCopyReadyMessage = "Place an object on grey and lift your hand. Select Swirl, Copy, or Copy with the clock.";
     private long _photoCopySessionRevision = -1;
     private long _photoCopyRevision;
     private DateTimeOffset _photoCopySurfaceShownAt;
@@ -29,6 +29,7 @@ public sealed partial class SceneCompositor
     private bool _photoCopyRenderFailed;
     private IReadOnlyList<PhotoCopyPlacement> _photoCopyPlacements = Array.Empty<PhotoCopyPlacement>();
     private string _photoCopyStatus = PhotoCopyReadyMessage;
+    private DateTimeOffset _photoCopySavedUntil, _photoCopyCountdownUntil;
 
     public string PhotoCopyStatus
     {
@@ -40,6 +41,11 @@ public sealed partial class SceneCompositor
                 return PhotoCopyDisplayStatus(DateTimeOffset.UtcNow);
             }
         }
+    }
+
+    internal string GetPhotoCopyDisplayStatus(DateTimeOffset now)
+    {
+        lock (_gate) { SyncPhotoCopySession(); return PhotoCopyDisplayStatus(now); }
     }
 
     public int PhotoCopyCount
@@ -79,6 +85,7 @@ public sealed partial class SceneCompositor
             _photoCopyObjectTarget = null;
             _photoCopyObjectShownAt = DateTimeOffset.MinValue;
             _photoCopyAnimationStarts = DateTimeOffset.MinValue;
+            _photoCopySavedUntil = _photoCopyCountdownUntil = DateTimeOffset.MinValue;
             _photoCopyStatus = PhotoCopyReadyMessage;
             _renderedBoardState = null;
         }
@@ -142,6 +149,7 @@ public sealed partial class SceneCompositor
                 return false;
             var placements = PhotoCopyLayout.Create(cutout.Width / (double)cutout.Height);
             _photoCopyCutout = cutout;
+            _photoCopySavedUntil = _photoCopyCountdownUntil = DateTimeOffset.MinValue;
             _photoCopyObjectTarget = null;
             _photoCopyObjectShownAt = DateTimeOffset.MinValue;
             _photoCopyPremultipliedPixels = PhotoCopyBitmapPixels.Premultiply(cutout.BgraPixels);
@@ -162,6 +170,55 @@ public sealed partial class SceneCompositor
         }
     }
 
+    public bool BeginPhotoCopyCountdown(PhotoCopyCaptureContext context, DateTimeOffset due)
+    {
+        lock (_gate)
+        {
+            if (!IsPhotoCopyCaptureCurrent(context) || context.Target is null) return false;
+            _photoCopySavedUntil = DateTimeOffset.MinValue;
+            _photoCopyCountdownUntil = due;
+            _renderedBoardState = null;
+            return true;
+        }
+    }
+
+    public bool BeginPhotoCopyCapture(PhotoCopyCaptureContext context)
+    {
+        lock (_gate)
+        {
+            if (!IsPhotoCopyCaptureCurrent(context)) return false;
+            _photoCopySavedUntil = DateTimeOffset.MinValue;
+            _photoCopyStatus = "Taking a photo of the object…";
+            _renderedBoardState = null;
+            return true;
+        }
+    }
+
+    public void EndPhotoCopyCountdown(long revision)
+    {
+        lock (_gate)
+        {
+            SyncPhotoCopySession();
+            if (_photoCopyRevision != revision) return;
+            _photoCopyCountdownUntil = DateTimeOffset.MinValue;
+            _renderedBoardState = null;
+        }
+    }
+
+    // Called only after the final PNG has been written successfully.
+    public bool SetPhotoCopyImageSaved(PhotoCopyCaptureContext context, DateTimeOffset? savedAt = null)
+    {
+        lock (_gate)
+        {
+            if (!IsPhotoCopyCaptureCurrent(context)) return false;
+            _photoCopyCountdownUntil = DateTimeOffset.MinValue;
+            _photoCopySavedUntil = (savedAt ?? DateTimeOffset.UtcNow).AddSeconds(3);
+            _photoCopyStatus = PhotoCopyReadyMessage;
+            _renderedBoardState = null;
+            return true;
+        }
+    }
+
     private int PhotoCopyStampCount(DateTimeOffset now)
     {
         if (_photoCopyRenderFailed || _photoCopyCutout is null || now < _photoCopyAnimationStarts) return 0;
@@ -171,6 +228,12 @@ public sealed partial class SceneCompositor
 
     private string PhotoCopyDisplayStatus(DateTimeOffset now)
     {
+        if (now < _photoCopySavedUntil) return "Image Saved";
+        if (_photoCopyCountdownUntil != DateTimeOffset.MinValue)
+        {
+            int seconds = Math.Max(0, (int)Math.Ceiling((_photoCopyCountdownUntil - now).TotalSeconds));
+            return seconds > 0 ? $"Copy in {seconds}… Move your hand away." : "Taking photo…";
+        }
         if (_photoCopyRenderFailed) return _photoCopyStatus;
         if (_photoCopyCutout is null)
         {

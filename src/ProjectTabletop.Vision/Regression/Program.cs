@@ -2,6 +2,24 @@ using System.Runtime.InteropServices;
 using OpenCvSharp;
 using ProjectTabletop.Vision;
 
+if (args is ["--boards"])
+{
+    CheckBoardDetection();
+    CheckProjectorFieldIsNotBoard();
+    CheckUniformIllumination();
+    BoardDetection white = CheckHardwareWhiteScan();
+    CheckHardwareAmbientScan(white);
+    CheckMovedHardwareFrames(white);
+    CheckProjectedCornerMarkers();
+    CheckCalibrationSpot();
+    AmbientBoardEdgeSupportRegression.Run();
+    return;
+}
+if (args is ["--ambient-edges"])
+{
+    AmbientBoardEdgeSupportRegression.Run();
+    return;
+}
 if (args is ["--hand-acquisition"])
 {
     HandAcquisitionMotionRegression.Run();
@@ -166,6 +184,7 @@ CheckHardwareAmbientScan(whiteHardwareBoard);
 CheckMovedHardwareFrames(whiteHardwareBoard);
 CheckProjectedCornerMarkers();
 CheckCalibrationSpot();
+AmbientBoardEdgeSupportRegression.Run();
 HandAcquisitionMotionRegression.Run();
 HandAcquisitionPresenceRegression.Run();
 HandTrackingSearchRegionsRegression.Run();

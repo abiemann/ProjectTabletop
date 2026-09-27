@@ -54,7 +54,7 @@ public sealed partial class SceneCompositor
                 _acquisitionReason = "inactive";
                 return null;
             }
-            var flights = GetBlackjackFlights(now);
+            var animating = HasBlackjackCardAnimation(now);
             var state = new AcquisitionSceneState(_boardSession.Revision, _boardSession.BlackjackState.Revision,
                 _blackjackFlightRevision, _spotlightResetCount);
             if (_acquisitionScene != state)
@@ -82,11 +82,11 @@ public sealed partial class SceneCompositor
                 return new(_acquisitionRevision, observe, polygon, illuminated,
                     _acquisitionExpectedScene, _acquisitionLightStarted, centers);
             }
-            if (flights.Length > 0 || HasAcquiredHandOrSuppression(now))
+            if (animating || HasAcquiredHandOrSuppression(now))
             {
                 ClearAcquisitionLight();
                 _acquisitionQuietUntil = now + AcquisitionSettle;
-                _acquisitionReason = flights.Length > 0 ? "table-animation" : "hand-or-execute-suppression";
+                _acquisitionReason = animating ? "table-animation" : "hand-or-execute-suppression";
                 return Context(false, null);
             }
             if (_acquisitionHint is not null && now < _acquisitionLightUntil)
@@ -238,7 +238,7 @@ public sealed partial class SceneCompositor
             now >= _acquisitionLightUntil || _acquisitionLight is not { } light ||
             _acquisitionScene is not { } state || state.Navigation != _boardSession.Revision ||
             state.Game != _boardSession.BlackjackState.Revision || state.LightReset != _spotlightResetCount ||
-            GetBlackjackFlights(now).Length > 0) return;
+            HasBlackjackCardAnimation(now)) return;
         var center = new Vector2((float)(output.X + light.Center.X * output.Width),
             (float)(output.Y + light.Center.Y * output.Height));
         float radius = (float)(light.Radius * output.Height);

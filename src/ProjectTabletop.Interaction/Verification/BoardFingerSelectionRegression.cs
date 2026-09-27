@@ -77,7 +77,7 @@ internal static class BoardFingerSelectionRegression
 
         board = PhotoCopy(); var hand = Together(Button(board, "capture-again"));
         At(board, 100, hand); At(board, 200, hand);
-        var moved = Apart(hand) with { FingerAim = new(.85, .1075) };
+        var moved = Apart(hand) with { FingerAim = new(hand.FingerAim!.Value.U + .06, hand.FingerAim.Value.V) };
         Require(At(board, 300, moved) is null && At(board, 380, moved) is null,
             "Moving over .04 board units while opening retained the old anchor.");
         var other = Together(Button(board, "menu"));

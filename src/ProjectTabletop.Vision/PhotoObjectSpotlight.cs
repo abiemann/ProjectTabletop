@@ -75,7 +75,7 @@ public sealed record PhotoObjectSpotlight(PhotoObjectSpotlightShape Shape, Pixel
             maxU - minU + 1 + 56 * Math.Sqrt(1 + shear * shear), maxV - minV + 1 + 56, angle, 8, shear);
     }
 
-    private static bool TryParallelEdges(Point[] corners, Point[] hull, double area,
+    internal static bool TryParallelEdges(Point[] corners, Point[] hull, double area,
         out double angle, out double shear)
     {
         angle = shear = 0;

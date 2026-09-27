@@ -124,4 +124,5 @@ finally
     if (File.Exists(file)) File.Delete(file);
 }
 
+BoardSizeEstimateRegression.Run();
 Console.WriteLine("Calibration verification passed.");

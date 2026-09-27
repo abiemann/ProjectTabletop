@@ -7,9 +7,11 @@ internal static class PhotoCopyShutterRegression
         CheckShutterAndRearm();
         CheckReadiness();
         CheckAreaAndControls();
+        CheckCaptureActions();
         CheckFreshnessAndIdentity();
         Console.WriteLine("Photo Copy shutter verification passed: shared index-separation timing, capture-only event, " +
-            "hidden capture target, readiness barriers, top controls, held gestures, freshness and independent hands.");
+            "hidden capture target, Swirl/Copy/timed Copy controls, pointer/pinch/index actions, readiness barriers, " +
+            "top controls, held gestures, freshness and independent hands.");
     }
 
     private static void CheckShutterAndRearm()
@@ -102,7 +104,8 @@ internal static class PhotoCopyShutterRegression
     private static void CheckAreaAndControls()
     {
         var board = PhotoCopy();
-        Require(board.Buttons.Select(item => item.Id).SequenceEqual(["menu", "capture-again"]) &&
+        Require(board.Buttons.Select(item => item.Id).SequenceEqual(
+                ["menu", "photo-swirl", "photo-copy-once", "photo-copy-timer", "capture-again"]) &&
             !board.ActivateButton("photo-shutter", Time(10)),
             "The hidden shutter appeared as a rendered or pointer-accessible button.");
         Require(BoardSession.PhotoCopyShutterBounds == new BoardRect(.01, .23, .98, .76),
@@ -111,7 +114,7 @@ internal static class PhotoCopyShutterRegression
             Require(Select(PhotoCopy(), Together(aim.U, aim.V), 100)?.ButtonId == "photo-shutter",
                 "A valid capture-area position could not execute the shutter.");
         foreach (var aim in new[] { new BoardAim(.005, .6), new(.995, .6), new(.5, .22), new(.5, .995),
-                     new(.5, .1), new(double.NaN, .6), new(.5, double.PositiveInfinity) })
+                     new(.445, .1), new(double.NaN, .6), new(.5, double.PositiveInfinity) })
             Require(Select(PhotoCopy(), Together(aim.U, aim.V), 100) is null,
                 "The shutter executed outside its capture area or from an invalid aim.");
 
@@ -181,6 +184,89 @@ internal static class PhotoCopyShutterRegression
         var zero = PhotoCopy();
         Require(Select(zero, hand with { TrackingId = 0 }, 100) is null,
             "A hand without a stable identity triggered the shutter.");
+    }
+
+    private static void CheckCaptureActions()
+    {
+        (string Id, PhotoCopyAction Action, BoardRect Bounds)[] actions =
+        [
+            ("photo-swirl", PhotoCopyAction.Swirl, new(.31, .055, .13, .105)),
+            ("photo-copy-once", PhotoCopyAction.Copy, new(.45, .055, .13, .105)),
+            ("photo-copy-timer", PhotoCopyAction.TimedCopy, new(.59, .055, .15, .105))
+        ];
+        Require(BoardSession.TryGetPhotoCopyAction("photo-shutter", out var fieldAction) && fieldAction == PhotoCopyAction.Swirl &&
+            !BoardSession.TryGetPhotoCopyAction("menu", out _) && !BoardSession.TryGetPhotoCopyAction("capture-again", out _) &&
+            !BoardSession.TryGetPhotoCopyAction("unknown", out _), "Photo Copy action IDs were mapped incorrectly.");
+        var layout = PhotoCopy().Buttons;
+        Require(layout.Single(button => button.Id == "menu").Bounds == new BoardRect(.06, .055, .24, .105) &&
+            layout.Single(button => button.Id == "capture-again").Bounds == new BoardRect(.75, .055, .19, .105),
+            "Photo Copy did not retain its navigation/reset controls in their intended slots.");
+        foreach (var button in layout)
+            Require(layout.Count(other => other.Bounds.Contains(button.Bounds.X + button.Bounds.Width / 2,
+                button.Bounds.Y + button.Bounds.Height / 2)) == 1, "Photo Copy top controls overlap.");
+        var otherBoard = new BoardSession(); otherBoard.ShowHandTrackingTest(Time(0));
+        Require(otherBoard.Buttons.Single().Bounds == new BoardRect(.06, .055, .30, .105),
+            "The compact Photo Copy menu button changed other boards' navigation targets.");
+
+        foreach (var action in actions)
+        {
+            var board = new BoardSession(); board.ShowPhotoCopy(Time(0));
+            var button = board.Buttons.Single(item => item.Id == action.Id);
+            var hand = Together(button.Bounds.X + button.Bounds.Width / 2, button.Bounds.Y + button.Bounds.Height / 2);
+            var pinch = new BoardHandSample(hand.FingerAim!.Value.U, hand.FingerAim.Value.V, Time(1400), 1)
+                { TrackingId = 2 };
+            long revision = board.Revision;
+            Require(button.Bounds == action.Bounds && !button.Enabled &&
+                BoardSession.TryGetPhotoCopyAction(action.Id, out var mapped) && mapped == action.Action &&
+                !board.ActivateButton(action.Id, Time(20)) && Select(board, hand, 100) is null &&
+                board.FingerSelectionFeedback.Count == 0 && board.HoveredButtonIds.Count == 0,
+                action.Id + " was enabled or armed without capture readiness.");
+            Require(At(board, 400, pinch) is null, "A disabled Photo Copy control accepted a pinch.");
+            board.PhotoCopyShutterEnabled = true;
+            Require(board.Buttons.Single(item => item.Id == action.Id).Enabled && At(board, 420, pinch) is null &&
+                At(board, 430, Apart(hand)) is null && At(board, 510, Apart(hand)) is null,
+                "Enabling capture replayed a disabled-period pinch or separated fingers.");
+            Require(Select(board, hand, 600) is { Previous: BoardScreen.PhotoCopy, Current: BoardScreen.PhotoCopy,
+                TrackingId: 1, Gesture: BoardSelectionGesture.IndexSeparation } selected && selected.ButtonId == action.Id &&
+                board.Revision == revision, action.Id + " did not select once without restarting capture.");
+            Require(At(board, 980, Apart(hand)) is null && At(board, 1080, Apart(hand)) is null,
+                "A held index repeated an explicit capture action.");
+            board.PhotoCopyShutterEnabled = false;
+            Require(!board.ActivateButton(action.Id, Time(1100)), "Pointer capture ignored readiness after a previous selection.");
+
+            // Every explicit button shares normal pinch consumption and action barriers.
+            board = PhotoCopy(); revision = board.Revision;
+            pinch = pinch with { ExecuteUntil = Time(1100) };
+            Require(At(board, 100, pinch) is { TrackingId: 2, Gesture: BoardSelectionGesture.Pinch } pinched &&
+                pinched.ButtonId == action.Id && At(board, 140, pinch) is null && board.Revision == revision,
+                action.Id + " pinch did not remain a single same-session action.");
+            Require(At(board, 200, pinch with { ExecuteUntil = Time(1200), ExecuteEventId = 2 })?.ButtonId == action.Id &&
+                board.Screen == BoardScreen.PhotoCopy && board.Revision == revision,
+                "A fresh Photo Copy pinch was blocked after the previous pulse.");
+
+            board = PhotoCopy(); revision = board.Revision;
+            Require(board.ActivateButton(action.Id, Time(100)) && board.Screen == BoardScreen.PhotoCopy &&
+                board.Revision == revision && board.HoveredButtonIds.Count == 0 && board.FingerSelectionFeedback.Count == 0,
+                action.Id + " pointer action navigated, reset capture, or left input feedback.");
+            Require(At(board, 200, pinch with { ExecuteUntil = Time(1090) }) is null,
+                "A pre-pointer camera pulse replayed after explicit capture.");
+
+            foreach (int stageTime in new[] { 100, 200, 300 })
+            {
+                board = PhotoCopy();
+                At(board, 100, hand);
+                if (stageTime >= 200) At(board, 200, hand);
+                if (stageTime >= 300) At(board, 300, Apart(hand));
+                board.PhotoCopyShutterEnabled = false;
+                Require(board.HoveredButtonIds.Count == 0 && board.FingerSelectionFeedback.Count == 0,
+                    "Capture becoming busy retained an action's hover/arming feedback.");
+                board.PhotoCopyShutterEnabled = true;
+                Require(At(board, 400, Apart(hand)) is null && At(board, 480, Apart(hand)) is null,
+                    "An explicit capture action retained gesture evidence through disabled readiness.");
+                Require(Select(board, hand, 600)?.ButtonId == action.Id,
+                    "Fresh fingers could not rearm after the capture action became ready.");
+            }
+        }
     }
 
     private static BoardSession PhotoCopy()

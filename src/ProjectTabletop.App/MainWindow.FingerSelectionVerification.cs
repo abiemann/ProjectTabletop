@@ -62,6 +62,9 @@ public sealed partial class MainWindow
             PointAt(dealBounds.X + dealBounds.Width * .4, dealBounds.Y + dealBounds.Height - .007), 5, false) > 12,
             "The ready-state gold indicator did not redraw on the casino table.");
         await Select(deal, () => scene.BlackjackState.Phase == BlackjackPhase.PlayerTurn);
+        // Keep source-frame timestamps real while the opening presentation finishes.
+        await Task.Delay(1850);
+        Draw(casinoImage);
         // Split replaces Deal at the same position. Continued separation cannot click it.
         for (int i = 0; i < 4; i++) await Send(Separate(deal));
         Require(scene.BlackjackState.Hands.Count == 1, "Held separation clicked the newly drawn Split control.");

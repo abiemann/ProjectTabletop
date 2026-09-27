@@ -10,7 +10,7 @@ namespace ProjectTabletop.Vision;
 /// spotlights have left the acquisition area and the camera exposure has settled.
 /// No semantic object recognition or empty-board reference is required.
 /// </summary>
-public static class PhotoObjectLocator
+public static partial class PhotoObjectLocator
 {
     private const int BoardSize = PhotoHandCutout.BoardPixels;
     private static readonly Rect Capture = new(PhotoObjectTarget.CaptureLeft, PhotoObjectTarget.CaptureTop,
@@ -51,20 +51,36 @@ public static class PhotoObjectLocator
                     touchesEdge[id] = true;
             }
         int[] candidates = Enumerable.Range(1, count - 1).Where(id => area[id] >= 400).ToArray();
+        byte[]? contrastEvidence = null;
+        int foregroundArea;
         if (candidates.Length != 1)
         {
-            failure = candidates.Length == 0
-                ? "Place one contrasting object on the grey area, then move your hands away."
-                : "Leave just one object in the grey capture area.";
-            return null;
+            if (candidates.Length > 1 && TryRecoverPrintedSurface(photo, pixels, ids, candidates, area, touchesEdge,
+                    out var recovered, out var evidence))
+            {
+                Array.Copy(recovered, pixels, pixels.Length);
+                contrastEvidence = evidence;
+                foregroundArea = pixels.Count(value => value != 0);
+            }
+            else
+            {
+                failure = candidates.Length == 0
+                    ? "Place one contrasting object on the grey area, then move your hands away."
+                    : "Leave just one object in the grey capture area.";
+                return null;
+            }
         }
-        int selected = candidates[0];
-        if (touchesEdge[selected] || area[selected] > Capture.Width * Capture.Height * .45)
+        else
         {
-            failure = "Move the whole object inside the grey area and leave space around its edges.";
-            return null;
+            int selected = candidates[0];
+            if (touchesEdge[selected] || area[selected] > Capture.Width * Capture.Height * .45)
+            {
+                failure = "Move the whole object inside the grey area and leave space around its edges.";
+                return null;
+            }
+            foregroundArea = area[selected];
+            for (int index = 0; index < pixels.Length; index++) pixels[index] = ids[index] == selected ? (byte)255 : (byte)0;
         }
-        for (int index = 0; index < pixels.Length; index++) pixels[index] = ids[index] == selected ? (byte)255 : (byte)0;
         Marshal.Copy(pixels, 0, mask.Data, pixels.Length);
         using Mat feather = new();
         Cv2.GaussianBlur(mask, feather, new Size(3, 3), .65);
@@ -81,10 +97,15 @@ public static class PhotoObjectLocator
         left -= 2; top -= 2; right += 2; bottom += 2;
         int targetWidth = right - left + 1, targetHeight = bottom - top + 1;
         byte[] alpha = new byte[targetWidth * targetHeight];
+        byte[]? croppedEvidence = contrastEvidence is null ? null : new byte[alpha.Length];
         for (int y = 0; y < targetHeight; y++)
+        {
             Array.Copy(fullAlpha, (top + y) * BoardSize + left, alpha, y * targetWidth, targetWidth);
+            if (croppedEvidence is not null)
+                Array.Copy(contrastEvidence!, (top + y) * BoardSize + left, croppedEvidence, y * targetWidth, targetWidth);
+        }
         failure = null;
-        return new(left, top, targetWidth, targetHeight, alpha, area[selected]);
+        return new(left, top, targetWidth, targetHeight, alpha, foregroundArea, croppedEvidence);
     }
 
     /// <summary>
@@ -106,6 +127,7 @@ public static class PhotoObjectLocator
         IReadOnlyList<HandDetection>? hands, out string? failure)
     {
         using Mat mask = TargetMask(target);
+        using Mat evidence = TargetMask(target, target.ContrastEvidence);
         using Mat exclusion = new(BoardSize, BoardSize, MatType.CV_8UC1, Scalar.Black);
         foreach (HandDetection hand in hands ?? [])
         {
@@ -134,8 +156,9 @@ public static class PhotoObjectLocator
         using Mat erodeKernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(11, 11));
         Cv2.Dilate(mask, outside, outerKernel);
         Cv2.Dilate(mask, innerMargin, marginKernel);
-        Cv2.Erode(mask, eroded, erodeKernel);
-        byte[] outer = Bytes(outside, 1), margin = Bytes(innerMargin, 1), inside = Bytes(eroded, 1);
+        Cv2.Erode(evidence, eroded, erodeKernel);
+        byte[] outer = Bytes(outside, 1), margin = Bytes(innerMargin, 1), inside = Bytes(eroded, 1),
+            evidencePixels = Bytes(evidence, 1);
         var samples = new List<BackgroundSample>();
         int x0 = Math.Max(Capture.Left, target.Left - 23), x1 = Math.Min(Capture.Right, target.Left + target.Width + 23);
         int y0 = Math.Max(Capture.Top, target.Top - 23), y1 = Math.Min(Capture.Bottom, target.Top + target.Height + 23);
@@ -161,6 +184,7 @@ public static class PhotoObjectLocator
                 bool foreground = Difference(photo, index, background, x, y) > threshold;
                 if (silhouette[index] != 0)
                 {
+                    if (evidencePixels[index] == 0) continue;
                     body++; if (foreground) bodySeen++;
                     if (inside[index] == 0) { edge++; if (foreground) edgeSeen++; }
                 }
@@ -169,8 +193,9 @@ public static class PhotoObjectLocator
                     spill++; if (foreground) spillSeen++;
                 }
             }
-        // Both sides of the stored boundary must still agree. An occupancy-only
-        // check would accept a shifted object while copying background on one side.
+        // Verify the acquired contrast features and the clear outer margin. On
+        // pale printed surfaces the face itself may match the white light, but
+        // its ink and edges must remain at their acquired positions.
         if (body == 0 || edge == 0 || bodySeen < body * .72 || edgeSeen < edge * .65 ||
             spill > 0 && spillSeen > spill * .24)
         {
@@ -211,12 +236,13 @@ public static class PhotoObjectLocator
         photo = Bytes(board, 4); failure = null; return true;
     }
 
-    private static Mat TargetMask(PhotoObjectTarget target)
+    private static Mat TargetMask(PhotoObjectTarget target, IReadOnlyList<byte>? alpha = null)
     {
+        alpha ??= target.Alpha;
         byte[] mask = new byte[BoardSize * BoardSize];
         for (int y = 0; y < target.Height; y++)
             for (int x = 0; x < target.Width; x++)
-                if (target.Alpha[y * target.Width + x] >= 200)
+                if (alpha[y * target.Width + x] >= 200)
                     mask[(target.Top + y) * BoardSize + target.Left + x] = 255;
         using Mat data = Mat.FromPixelData(BoardSize, BoardSize, MatType.CV_8UC1, mask);
         return data.Clone();

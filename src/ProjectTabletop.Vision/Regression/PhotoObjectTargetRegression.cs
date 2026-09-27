@@ -27,14 +27,18 @@ internal static class PhotoObjectTargetRegression
             Require(target.Alpha is not byte[], "The locked alpha exposes its mutable backing array.");
         }
         CheckCurrentPixelsAndPresence();
+        CheckCaptureAfterShutterLeaves();
         CheckRejectionsAndPadding();
         CheckPerspectiveAndGradient();
         CheckGlareAndSmallObjects();
         CheckCaptureBoundary();
         CheckSpotlightShape();
         CheckNonSquareBoardSpotlights();
+        PhotoPrintedSurfaceRegression.Run();
+        PhotoPrintedSurfaceAcquisitionRegression.Run();
+        PhotoPrintedSurfaceAffineRegression.Run();
         Console.WriteLine("Photo object target regression: grey dark/light/color acquisition, holes and immutable mask, " +
-            "current illuminated pixels, stationary/moved/removed/occluded checks, ambiguous/edge/invalid rejection, " +
+            "current illuminated pixels, timed capture after shutter departure, stationary/moved/removed/occluded checks, ambiguous/edge/invalid rejection, " +
             "perspective, gradients, local glare without discarding small real objects, padded rows, " +
             "rotated rectangular and rounded remote lights, non-square board geometry with sampling-band coverage, " +
             "and circular/irregular fallbacks passed.");
@@ -85,6 +89,34 @@ internal static class PhotoObjectTargetRegression
         using Mat noContrast = LitScene(target); DrawSubject(noContrast, new Scalar(235, 235, 235, 255), lit: true);
         Require(Observe(noContrast, target) == PhotoObjectTargetState.MissingOrMoved,
             "An unverifiable white-on-white subject was silently accepted.");
+    }
+
+    private static void CheckCaptureAfterShutterLeaves()
+    {
+        using Mat grey = Scene(); DrawSubject(grey, ObjectColor);
+        var target = Locate(grey);
+        using Mat lit = LitScene(target); DrawSubject(lit, new Scalar(70, 150, 205, 255), lit: true);
+        var withShutter = PhotoObjectExtractor.ExtractTarget(Size, Size, Size * 4, Bytes(lit), Shutter,
+            BoardMap, target, out _);
+        var departed = PhotoObjectExtractor.ExtractTarget(Size, Size, Size * 4, Bytes(lit), null,
+            BoardMap, target, out var failure);
+        Require(departed is not null && withShutter is not null && failure is null &&
+            departed.BoardOrigin == withShutter.BoardOrigin && departed.BgraPixels.SequenceEqual(withShutter.BgraPixels),
+            "A timed capture without a shutter hand lost current pixels, alpha or locked geometry: " + failure);
+        Require(PhotoObjectExtractor.ExtractTarget(Size, Size, Size * 4, Bytes(lit), null,
+            BoardMap, target, out failure, [Shutter]) is not null,
+            "A remaining hand beside the object blocked capture after the shutter left: " + failure);
+
+        using Mat moved = LitScene(target); DrawSubject(moved, ObjectColor, lit: true, offsetX: 20);
+        using Mat removed = LitScene(target);
+        foreach (var changed in new[] { moved, removed })
+            Require(PhotoObjectExtractor.ExtractTarget(Size, Size, Size * 4, Bytes(changed), null,
+                BoardMap, target, out failure) is null && failure is not null,
+                "Omitting the shutter bypassed current-frame checks for a moved or removed object.");
+        var overlap = Shutter with { Landmarks = Shutter.Landmarks.Select(p => new PixelPoint(p.X - 230, p.Y)).ToArray() };
+        Require(PhotoObjectExtractor.ExtractTarget(Size, Size, Size * 4, Bytes(lit), null,
+            BoardMap, target, out failure, [overlap]) is null && failure is not null,
+            "A remaining hand covering the object was ignored when the shutter had left.");
     }
 
     private static void CheckRejectionsAndPadding()

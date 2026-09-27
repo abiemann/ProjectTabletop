@@ -28,7 +28,7 @@ public static partial class BoardDetector
     public static BoardDetection? DetectAmbientBoard(int width, int height, int stride, byte[] bgra)
     {
         using ScanFrame scan = new(width, height, stride, bgra);
-        ScanQuad? board = FindDominantBrightQuad(scan);
+        ScanQuad? board = FindDominantBrightQuad(scan, requireEverySide: true);
         return board is null ? null : ToDetection(board, scan, 0.55 + 0.4 * board.EdgeSupport,
             refinePhysicalEdges: true);
     }
@@ -78,12 +78,15 @@ public static partial class BoardDetector
             point.Y * scan.SourceHeight / (double)scan.Gray.Height)).ToArray(),
         Math.Clamp(confidence, 0, 1));
 
-    private static ScanQuad? FindDominantBrightQuad(ScanFrame scan) => scan.Quads
+    private static ScanQuad? FindDominantBrightQuad(ScanFrame scan, bool requireEverySide = false) => scan.Quads
         .Where(candidate => candidate.Area >= scan.Gray.Width * scan.Gray.Height * 0.20 &&
             candidate.Area <= scan.Gray.Width * scan.Gray.Height * 0.93 &&
             candidate.MeanContrast >= 12 &&
             candidate.SideContrasts.All(side => side >= 5) &&
-            candidate.EdgeSupport >= 0.55)
+            candidate.EdgeSupport >= 0.55 &&
+            // A floor seam can extend one ambient contour corner beyond the
+            // cardboard. Three sound edges must not hide an unsupported fourth.
+            (!requireEverySide || EdgeSupport(scan.Edges, candidate.Corners, weakestSide: true) >= 0.55))
         .OrderByDescending(candidate => candidate.Area)
         .ThenByDescending(candidate => candidate.EdgeSupport)
         .FirstOrDefault();

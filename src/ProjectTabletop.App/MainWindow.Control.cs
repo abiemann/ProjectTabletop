@@ -28,7 +28,17 @@ public sealed partial class MainWindow
         if (_closing) throw new InvalidOperationException("The app is closing.");
         switch (method)
         {
+            case "set_projection_size":
+                return SetProjectionSize(parameters);
 #if DEBUG
+            case "capture_photo_copy_diagnostics":
+                return await SavePhotoCopyDiagnosticsAsync();
+            case "capture_photo_copy_now":
+                return await CapturePhotoCopyForVerificationAsync();
+            case "capture_projection_settings":
+                string settingsSnapshots = Path.Combine(_appDataDirectory, "ProjectionSettingsSnapshots", Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(settingsSnapshots);
+                return await SaveLaptopThemeSnapshotAsync(settingsSnapshots, ProjectionOutputPanel);
             case "verify_projection_window":
                 return await VerifyProjectionWindowAsync();
             case "verify_hand_tracking_input":
@@ -59,10 +69,18 @@ public sealed partial class MainWindow
                 return await VerifyBlackjackAnimationAsync();
             case "verify_board_reveal":
                 return await VerifyBoardRevealAsync();
+            case "verify_board_size":
+                return await VerifyBoardSizeAsync();
+            case "verify_projection_sizing":
+                return VerifyProjectionSizing();
             case "verify_finger_selection":
                 return await VerifyFingerSelectionAsync();
             case "verify_photo_copy_render":
                 return await VerifyPhotoCopyRenderAsync();
+            case "verify_photo_copy_save":
+                return await VerifyPhotoCopySaveAsync();
+            case "verify_photo_copy_actions":
+                return await VerifyPhotoCopyActionsAsync();
             case "verify_photo_copy_gestures":
                 return await VerifyPhotoCopyGesturesAsync();
             case "verify_photo_copy_proportions":
@@ -80,6 +98,19 @@ public sealed partial class MainWindow
                     cameraHeight = frame?.Height,
                     cameraHealthWarning = _cameraHealthWarning,
                     display = SelectedDisplay?.ToString(),
+                    projectionSetup = new
+                    {
+                        displayProperties = SelectedDisplay?.PhysicalMode,
+                        lensHeightCentimeters = EnteredProjectionProfile().LensHeightCentimeters,
+                        throwRatio = EnteredProjectionProfile().ThrowRatio,
+                        measuredBoardShortSideCentimeters = EnteredProjectionProfile().MeasuredBoardShortSideCentimeters,
+                        measuredBoardLongSideCentimeters = EnteredProjectionProfile().MeasuredBoardLongSideCentimeters,
+                        profileSavedPerOutput = ProjectTabletop.App.Projection.ProjectionSizeProfile.PersistentKey(SelectedDisplay?.PhysicalMode) is not null,
+                        estimateSource = BoardSizeSource,
+                        boardSizeEstimate = CurrentBoardSizeEstimate(),
+                        opticalBoardSizeEstimate = CurrentOpticalBoardSizeEstimate(),
+                        status = BoardSizeEstimateText.Text
+                    },
                     outputOpen = _output is not null,
                     outputVisible = _output?.AppWindow.IsVisible ?? false,
                     outputFullScreen = _output?.IsFullScreen ?? false,
@@ -117,6 +148,8 @@ public sealed partial class MainWindow
                     photoCopyObservation = _lastPhotoCopyObservation,
                     photoCopyCount = _scene.PhotoCopyCount,
                     lastPhotoCopyCapture = _lastPhotoCopyCapture,
+                    lastSavedPhotoPath = _lastSavedPhotoPath,
+                    photoCopySaveDirectory = PhotoCopyImageStore.DefaultDirectory,
                     renderStatus = RenderStatusText.Text,
                     status = StatusText.Text
                 };

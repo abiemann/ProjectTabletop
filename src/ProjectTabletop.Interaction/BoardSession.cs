@@ -70,8 +70,11 @@ public sealed partial class BoardSession
     });
     private static readonly IReadOnlyList<BoardButton> PhotoCopyButtons = Array.AsReadOnly(new[]
     {
-        AppButtons[0],
-        new BoardButton("capture-again", "Capture again", new(.64, .055, .30, .105), BoardScreen.PhotoCopy)
+        new BoardButton("menu", "Back to menu", new(.06, .055, .24, .105), BoardScreen.Menu),
+        new BoardButton("photo-swirl", "Swirl", new(.31, .055, .13, .105), BoardScreen.PhotoCopy),
+        new BoardButton("photo-copy-once", "Copy", new(.45, .055, .13, .105), BoardScreen.PhotoCopy),
+        new BoardButton("photo-copy-timer", "Copy", new(.59, .055, .15, .105), BoardScreen.PhotoCopy),
+        new BoardButton("capture-again", "Capture again", new(.75, .055, .19, .105), BoardScreen.PhotoCopy)
     });
     private DateTimeOffset? _lastFrameTime;
     private DateTimeOffset? _lastNow;
@@ -98,7 +101,7 @@ public sealed partial class BoardSession
     public IReadOnlyList<BoardButton> Buttons => Screen switch
     {
         BoardScreen.Menu => MenuButtons,
-        BoardScreen.PhotoCopy => PhotoCopyButtons,
+        BoardScreen.PhotoCopy => CurrentPhotoCopyButtons(),
         BoardScreen.Blackjack => BlackjackButtons(),
         BoardScreen.Media => Array.Empty<BoardButton>(),
         _ => AppButtons
@@ -117,6 +120,7 @@ public sealed partial class BoardSession
             return null;
         }
         _lastNow = now;
+        AdvanceBlackjackPresentation(now);
         if (frameTime > now || now - frameTime > ObservationLifetime ||
             frameTime <= _ignoreFramesThrough ||
             (_lastFrameTime is { } previousFrame && frameTime <= previousFrame))
@@ -179,6 +183,8 @@ public sealed partial class BoardSession
     /// <summary>Clear hover and reject observations/pulses that predate a camera or calibration reset.</summary>
     public void ResetInput(DateTimeOffset now)
     {
+        ClearBlackjackPresentationHold();
+        AdvanceBlackjackPresentation(now);
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreFramesThrough = Later(_ignoreFramesThrough, now);
@@ -191,6 +197,8 @@ public sealed partial class BoardSession
 
     private void Show(BoardScreen screen, DateTimeOffset now)
     {
+        ClearBlackjackPresentationHold();
+        AdvanceBlackjackPresentation(now);
         Screen = screen;
         Revision++;
         HoveredButtonIds = Array.Empty<string>();

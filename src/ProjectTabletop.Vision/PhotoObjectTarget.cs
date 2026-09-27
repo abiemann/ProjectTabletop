@@ -28,11 +28,23 @@ public sealed class PhotoObjectTarget
     public PhotoObjectSpotlight Spotlight { get; }
     public int ForegroundArea { get; }
     public IReadOnlyList<byte> Alpha => _alpha;
+    // Pale printed surfaces can have a visible perimeter while their blank face
+    // matches the board. Keep their measured ink/edge evidence separate from the
+    // photographed silhouette, so white light alone can never prove presence.
+    public IReadOnlyList<byte>? ContrastEvidence { get; }
+    public bool HasRecoveredSurface => ContrastEvidence is not null;
 
-    internal PhotoObjectTarget(int left, int top, int width, int height, byte[] alpha, int foregroundArea)
+    internal PhotoObjectTarget(int left, int top, int width, int height, byte[] alpha, int foregroundArea,
+        byte[]? contrastEvidence = null)
     {
         Left = left; Top = top; Width = width; Height = height;
         _alpha = Array.AsReadOnly((byte[])alpha.Clone());
+        if (contrastEvidence is not null)
+        {
+            if (contrastEvidence.Length != alpha.Length)
+                throw new ArgumentException("Contrast evidence must match the silhouette dimensions.", nameof(contrastEvidence));
+            ContrastEvidence = Array.AsReadOnly((byte[])contrastEvidence.Clone());
+        }
         ForegroundArea = foregroundArea;
         Center = new(left + (width - 1) / 2.0, top + (height - 1) / 2.0);
         SpotlightRadius = Math.Sqrt(width * width + height * height) / 2 + 28;

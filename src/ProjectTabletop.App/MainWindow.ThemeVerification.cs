@@ -81,9 +81,10 @@ public sealed partial class MainWindow
         }
     }
 
-    private async Task<object> SaveLaptopThemeSnapshotAsync(string directory)
+    private async Task<object> SaveLaptopThemeSnapshotAsync(string directory, FrameworkElement? element = null)
     {
-        if (Content is not FrameworkElement root || root.ActualWidth <= 0 || root.ActualHeight <= 0)
+        var root = element ?? Content as FrameworkElement;
+        if (root is null || root.ActualWidth <= 0 || root.ActualHeight <= 0)
             throw new InvalidOperationException("The laptop window has no arranged content to capture.");
         root.UpdateLayout();
         var rendered = new RenderTargetBitmap();

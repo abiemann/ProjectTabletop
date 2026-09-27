@@ -74,6 +74,7 @@ internal static class BlackjackBoardRegression
         Require(settling.Update([Sample(nextDeal, 22, 1700)], Time(1700), Time(1700)) is not null &&
             settling.BlackjackState.RoundNumber == 2, "Settlement barriers blocked a fresh Deal.");
         CheckHitEvents();
+        BlackjackDealRegression.Run();
         Console.WriteLine("Blackjack board verification passed: launch, shared targets, held/disabled pinch consumption, " +
             "game/navigation revisions, split, menu continuity, reset and laptop/gesture input barriers; " +
             "HIT event payloads, advancing split hands, unique sequences and non-HIT suppression.");

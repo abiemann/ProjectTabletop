@@ -4,19 +4,45 @@ namespace ProjectTabletop.Interaction;
 public sealed record BlackjackHit(long Sequence, int RoundNumber, int HandIndex, int CardIndex,
     BlackjackCard Card, DateTimeOffset StartedAt);
 
+/// <summary>An accepted DEAL, with the public game snapshots before and after the action.</summary>
+public sealed record BlackjackDeal(long Sequence, BlackjackSnapshot Previous, BlackjackSnapshot Current,
+    DateTimeOffset StartedAt);
+
 public sealed partial class BoardSession
 {
     private readonly BlackjackGame _blackjack;
     private long _blackjackHitSequence;
+    private long _blackjackDealSequence;
+    private DateTimeOffset? _blackjackPresentationUntil;
+    private DateTimeOffset _blackjackPresentationObservedAt = DateTimeOffset.MinValue;
 
     /// <summary>Raised once for each successful HIT from any input route; sequence numbers survive resets.</summary>
     public event Action<BlackjackHit>? BlackjackHitOccurred;
 
+    /// <summary>Raised after DEAL state and input barriers are committed, once per accepted action.</summary>
+    public event Action<BlackjackDeal>? BlackjackDealOccurred;
+
     public BoardSession(BlackjackGame? blackjack = null) => _blackjack = blackjack ?? new BlackjackGame();
     public BlackjackSnapshot BlackjackState => _blackjack.Snapshot;
+
+    /// <summary>
+    /// Temporarily disables game controls and dealer progress while a presentation runs.
+    /// Navigation remains available. The hold expires using the next Update, ActivateButton or
+    /// TickBlackjack supplied time; an additional hold can extend, but never shorten, its deadline.
+    /// </summary>
+    public void HoldBlackjackPresentationUntil(DateTimeOffset until)
+    {
+        if (Screen != BoardScreen.Blackjack || until <= _blackjackPresentationObservedAt) return;
+        _blackjackPresentationUntil = _blackjackPresentationUntil is { } previous ? Later(previous, until) : until;
+        HoveredButtonIds = Array.Empty<string>();
+        InvalidateFingerSelection(_blackjackPresentationObservedAt);
+    }
+
     public bool TickBlackjack(DateTimeOffset now)
     {
+        AdvanceBlackjackPresentation(now);
         if (Screen != BoardScreen.Blackjack) return false;
+        if (_blackjackPresentationUntil is not null) return false;
         var phase = _blackjack.Snapshot.Phase;
         if (!_blackjack.Tick(now)) return false;
         if (_blackjack.Snapshot.Phase != phase)
@@ -34,22 +60,29 @@ public sealed partial class BoardSession
     // Mouse/touch and pinch selections share the same enabled targets and rules.
     public bool ActivateButton(string id, DateTimeOffset now)
     {
+        AdvanceBlackjackPresentation(now);
         var button = Buttons.FirstOrDefault(item => item.Id == id && item.Enabled);
         return button is not null && SelectButton(button, now, pointerAction: true);
     }
 
     private bool SelectButton(BoardButton button, DateTimeOffset now, bool pointerAction = false)
     {
+        AdvanceBlackjackPresentation(now);
         BlackjackHit? hit = null;
-        if (button.Id == PhotoCopyShutter.Id)
+        BlackjackDeal? deal = null;
+        if (TryGetPhotoCopyAction(button.Id, out _))
         {
             if (Screen != BoardScreen.PhotoCopy || !PhotoCopyShutterEnabled) return false;
             // Taking a photo must not navigate or restart the capture session.
         }
         else if (Screen == BoardScreen.Blackjack && button.Id != "menu")
         {
+            if (_blackjackPresentationUntil is not null) return false;
+            var beforeDeal = button.Id == "bj-deal" ? _blackjack.Snapshot : null;
             int hitHandIndex = button.Id == "bj-hit" ? _blackjack.Snapshot.ActiveHandIndex : -1;
             if (!_blackjack.HandleAction(button.Id, now)) return false;
+            if (beforeDeal is not null)
+                deal = new(++_blackjackDealSequence, beforeDeal, _blackjack.Snapshot, now);
             if (hitHandIndex >= 0)
             {
                 var after = _blackjack.Snapshot;
@@ -59,6 +92,7 @@ public sealed partial class BoardSession
         }
         else
         {
+            ClearBlackjackPresentationHold();
             Screen = button.Destination;
             Revision++;
         }
@@ -67,8 +101,25 @@ public sealed partial class BoardSession
         InvalidateFingerSelection(now);
         if (pointerAction) _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         if (hit is not null) BlackjackHitOccurred?.Invoke(hit);
+        if (deal is not null) BlackjackDealOccurred?.Invoke(deal);
         return true;
     }
+
+    private void AdvanceBlackjackPresentation(DateTimeOffset now)
+    {
+        _blackjackPresentationObservedAt = Later(_blackjackPresentationObservedAt, now);
+        if (_blackjackPresentationUntil is not { } until || now < until) return;
+        _blackjackPresentationUntil = null;
+        // A delayed camera pulse or old pointing anchor cannot become a click when
+        // controls reappear. Finger selection must also acquire a fresh together pose.
+        _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, until);
+        _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, until);
+        _ignoreFramesThrough = Later(_ignoreFramesThrough, until);
+        HoveredButtonIds = Array.Empty<string>();
+        InvalidateFingerSelection(until);
+    }
+
+    private void ClearBlackjackPresentationHold() => _blackjackPresentationUntil = null;
 
     private IReadOnlyList<BoardButton> BlackjackButtons()
     {
@@ -95,6 +146,6 @@ public sealed partial class BoardSession
         return result.AsReadOnly();
 
         void Add(string id, string label, BoardRect bounds) => result.Add(new(id, label, bounds,
-            BoardScreen.Blackjack, game.AvailableActions.Contains(id)));
+            BoardScreen.Blackjack, _blackjackPresentationUntil is null && game.AvailableActions.Contains(id)));
     }
 }

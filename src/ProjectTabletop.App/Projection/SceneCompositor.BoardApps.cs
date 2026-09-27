@@ -29,6 +29,7 @@ public sealed partial class SceneCompositor
         _blackjackClock = blackjackClock ?? (() => DateTimeOffset.UtcNow);
         _boardRevealClock = boardRevealClock ?? (() => DateTimeOffset.UtcNow);
         _boardSession.BlackjackHitOccurred += OnBlackjackHit;
+        _boardSession.BlackjackDealOccurred += OnBlackjackDeal;
     }
 
     public BoardScreen CurrentBoardScreen
@@ -125,6 +126,7 @@ public sealed partial class SceneCompositor
         var blackjackNow = _blackjackClock();
         TickBlackjackVisuals(blackjackNow);
         var flights = GetBlackjackFlights(blackjackNow);
+        var deal = GetBlackjackDealFrame(blackjackNow);
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
         if (photoCopy && !preview && PhotoCopyCaptureAllowed)
             MarkPhotoCopySurfacePresented(now);
@@ -190,7 +192,7 @@ public sealed partial class SceneCompositor
             {
                 DrawBlackjackTable(surface, _boardSession.BlackjackState, _boardSession.Buttons,
                     handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback,
-                    HiddenBlackjackCards(flights));
+                    HiddenBlackjackCards(flights), deal);
             }
             else if (_boardSession.Screen == BoardScreen.Menu)
             {
@@ -212,20 +214,22 @@ public sealed partial class SceneCompositor
             else
             {
                 foreach (var button in _boardSession.Buttons)
-                    DrawBoardButton(surface, button,
-                        handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id), label, small, selectionFeedback);
+                    if (photoCopy)
+                        DrawPhotoCopyButton(surface, button, handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id),
+                            small, selectionFeedback);
+                    else
+                        DrawBoardButton(surface, button,
+                            handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id), label, small, selectionFeedback);
 
                 if (photoCopy)
                 {
                     // Opaque panels keep copied images below the controls.
                     // Hand illumination is drawn later, across the whole board.
-                    DrawGlassPanel(surface, new Rect(380, 55, 240, 105));
-                    surface.DrawText("Photo Copy", 400, 84, AppPalette.Text, label);
-                    surface.DrawLine(401, 140, 440, 140, AppPalette.AccentSecondary, 2);
+                    surface.DrawText("PHOTO COPY", 61, 18, AppPalette.AccentSecondary, small);
                     using var photoStatus = new CanvasTextFormat
                     {
                         FontFamily = "Segoe UI",
-                        FontSize = 19,
+                        FontSize = state.PhotoStatus == "Image Saved" ? 27 : 19,
                         WordWrapping = CanvasWordWrapping.Wrap
                     };
                     DrawGlassPanel(surface, new Rect(50, 165, 900, 50));
@@ -241,6 +245,7 @@ public sealed partial class SceneCompositor
                     var statusColor = state.HandStatus == 2 ? Colors.Red : AppPalette.IndicatorOn;
                     var status = HandTestCaption(state.HandStatus);
                     surface.DrawText(status, 414, 113, statusColor, small);
+                    DrawEstimatedBoardSize(surface, body, small);
                 }
                 else
                 {
@@ -280,7 +285,7 @@ public sealed partial class SceneCompositor
             BorderMode = EffectBorderMode.Soft
         };
         ds.DrawImage(perspective);
-        if (DrawBlackjackFlightLayer(ds.Device, flights) is { } flightLayer)
+        if (DrawBlackjackFlightLayer(ds.Device, flights, deal) is { } flightLayer)
         {
             using var moving = new Transform3DEffect
             {

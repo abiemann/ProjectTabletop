@@ -111,11 +111,13 @@ public static partial class BoardDetector
         return [upper[0], upper[1], lower[1], lower[0]];
     }
 
-    private static double EdgeSupport(Mat edges, Point[] corners)
+    private static double EdgeSupport(Mat edges, Point[] corners, bool weakestSide = false)
     {
         int hits = 0, total = 0;
+        double minimum = 1;
         for (int side = 0; side < 4; side++)
         {
+            int priorHits = hits, priorTotal = total;
             Point first = corners[side], last = corners[(side + 1) % 4];
             for (int step = 1; step <= 24; step++)
             {
@@ -131,8 +133,9 @@ public static partial class BoardDetector
                             found = true;
                 if (found) hits++;
             }
+            minimum = Math.Min(minimum, (hits - priorHits) / (double)(total - priorTotal));
         }
-        return hits / (double)total;
+        return weakestSide ? minimum : hits / (double)total;
     }
 
     private static bool Similar(Point[] first, Point[] second) =>
