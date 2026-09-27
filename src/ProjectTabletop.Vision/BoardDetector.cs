@@ -11,13 +11,13 @@ namespace ProjectTabletop.Vision;
 public sealed record BoardDetection(PixelPoint[] Corners, double Confidence);
 
 /// <summary>
-/// Finds the outer board during grid setup. The projected grid itself is a
-/// prominent inner quadrilateral, so the detector accepts only a larger,
-/// complete quadrilateral containing it. This deliberately returns null when
-/// an outer board edge is clipped or obscured instead of calling the grid the
-/// physical board.
+/// Finds the physical board only when its complete edge is visible outside a
+/// smaller projected grid. A grid that fills the board has no independent
+/// board contour in a projected camera frame; in that case this detector
+/// returns null rather than calling the projection or its 16:9 light field
+/// the board.
 /// </summary>
-public static class BoardDetector
+public static partial class BoardDetector
 {
     private const int WorkingWidth = 960;
     private const double MinimumAreaFraction = 0.12;
@@ -73,7 +73,9 @@ public static class BoardDetector
             double bottom = Distance(ordered[2], ordered[3]);
             double left = Distance(ordered[3], ordered[0]);
             double aspect = (top + bottom) / (right + left);
-            if (aspect < 0.55 || aspect > 1.8 ||
+            // The physical play board is square. A 16:9 projector light field
+            // can surround the square grid and otherwise masquerade as a board.
+            if (aspect < 0.64 || aspect > 1.55 ||
                 Math.Min(Math.Min(top, right), Math.Min(bottom, left)) <
                     Math.Min(reduced.Width, reduced.Height) * 0.25)
                 continue;
@@ -83,8 +85,8 @@ public static class BoardDetector
             candidates.Add(new Quad(ordered, area, edgeSupport));
         }
 
-        // The board surrounds the grid in this installation. A single bright
-        // rectangle is insufficient evidence: it could be only the projection.
+        // Require an independently visible board around the projected grid.
+        // A single bright rectangle could be only the projection.
         Quad? board = candidates
             .Where(outer => candidates.Any(inner =>
                 !ReferenceEquals(inner, outer) &&

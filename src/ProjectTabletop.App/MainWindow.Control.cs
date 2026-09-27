@@ -1,0 +1,86 @@
+using ProjectTabletop.App.Control;
+
+namespace ProjectTabletop.App;
+
+public sealed partial class MainWindow
+{
+    private ControlPipeHost? _controlHost;
+
+    private void StartControlHost() =>
+        _controlHost ??= new ControlPipeHost(DispatchControlAsync);
+
+    private Task<object?> DispatchControlAsync(string method, CancellationToken token)
+    {
+        var completion = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!DispatcherQueue.TryEnqueue(async () =>
+            {
+                try { completion.TrySetResult(await HandleControlOnUiAsync(method)); }
+                catch (Exception ex) { completion.TrySetException(ex); }
+            }))
+            completion.TrySetException(new InvalidOperationException("The app UI is unavailable."));
+        return completion.Task.WaitAsync(token);
+    }
+
+    private async Task<object?> HandleControlOnUiAsync(string method)
+    {
+        if (_closing) throw new InvalidOperationException("The app is closing.");
+        switch (method)
+        {
+            case "get_status":
+                var frame = Volatile.Read(ref _latestCameraFrame);
+                return new
+                {
+                    cameraRunning = _camera.IsRunning,
+                    cameraStatus = CameraStatusText.Text,
+                    cameraDevice = SelectedCamera?.Device.DisplayName,
+                    cameraFrameUtc = frame?.Timestamp,
+                    cameraWidth = frame?.Width,
+                    cameraHeight = frame?.Height,
+                    cameraHealthWarning = _cameraHealthWarning,
+                    display = SelectedDisplay?.ToString(),
+                    outputOpen = _output is not null,
+                    outputFullScreen = _output?.IsFullScreen ?? false,
+                    boardSetupActive = Volatile.Read(ref _boardSetupActive),
+                    boardSetupStatus = BoardSetupControlStatus,
+                    status = StatusText.Text
+                };
+            case "start_board_scan":
+                await StartBoardSetupAsync();
+                return new { status = BoardSetupControlStatus };
+            case "rescan_board":
+                if (Volatile.Read(ref _boardSetupActive)) RescanBoardSetup();
+                else await StartBoardSetupAsync();
+                return new { status = BoardSetupControlStatus };
+            case "black_output":
+                if (_output is null || !_output.IsFullScreen || _outputDisplayId != SelectedDisplay?.Id)
+                    throw new InvalidOperationException("Open the selected projector output in full screen first.");
+                ShowBlackOutputForControl();
+                return new { outputOpen = _output is not null, outputFullScreen = _output?.IsFullScreen ?? false,
+                    cameraRunning = _camera.IsRunning, status = StatusText.Text };
+            case "stop_scan":
+                StopBoardSetup();
+                return new { status = BoardSetupControlStatus };
+            case "capture_raw_frame":
+                return new { path = await SaveRawSnapshotAsync() };
+            case "start_camera":
+                return new { started = await StartSelectedCameraAsync(), status = CameraStatusText.Text };
+            case "stop_camera":
+                await StopCameraAsync();
+                return new { status = CameraStatusText.Text };
+            case "open_output":
+                OpenOutput_Click(this, new Microsoft.UI.Xaml.RoutedEventArgs());
+                return new { outputOpen = _output is not null, outputFullScreen = _output?.IsFullScreen ?? false,
+                    status = StatusText.Text };
+            case "shutdown":
+                var queue = DispatcherQueue;
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(350);
+                    queue.TryEnqueue(() => Close());
+                });
+                return new { status = "App shutdown scheduled." };
+            default:
+                throw new ArgumentException("Unknown control method: " + method);
+        }
+    }
+}

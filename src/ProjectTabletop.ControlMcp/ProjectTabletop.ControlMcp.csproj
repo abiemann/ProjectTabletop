@@ -6,7 +6,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../ProjectTabletop.Vision.csproj" />
-    <Content Include="Fixtures/*.png" CopyToOutputDirectory="PreserveNewest" />
+    <PackageReference Include="ModelContextProtocol.Core" Version="2.0.0" />
   </ItemGroup>
 </Project>

@@ -1,9 +1,9 @@
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Geometry;
-using Microsoft.Graphics.Canvas.Text;
 using Microsoft.UI;
 using ProjectTabletop.App.Media;
+using ProjectTabletop.Calibration;
 using ProjectTabletop.Vision;
 using Windows.Foundation;
 using Windows.UI;
@@ -34,6 +34,9 @@ public sealed class SceneCompositor : IDisposable
     private int _calibrationTarget = -1;
     private bool _calibrationTargetTop;
     private bool _boardSetup;
+    private bool _blackOutput;
+    private BoardGrid? _boardGrid;
+    private int _boardCalibrationSpot = -1;
     private DateTimeOffset _boardSetupStarted;
     private long _projectorFrames;
     private long _previewFrames;
@@ -117,9 +120,8 @@ public sealed class SceneCompositor : IDisposable
     }
 
     /// <summary>
-    /// Shows the projected placement guides while the camera finds the board.
-    /// These corners are the desired stage corners; live detected corners are
-    /// displayed in the camera preview until camera/projector registration exists.
+    /// Illuminates the complete projector field while the camera finds the physical
+    /// cardboard. No grid or corner marker is projected during this scan.
     /// </summary>
     public void SetBoardSetup(bool enabled)
     {
@@ -127,7 +129,57 @@ public sealed class SceneCompositor : IDisposable
         {
             if (enabled && !_boardSetup) _boardSetupStarted = DateTimeOffset.UtcNow;
             _boardSetup = enabled;
+            _blackOutput = false;
+            _boardGrid = null;
+            _boardCalibrationSpot = -1;
         }
+    }
+
+    /// <summary>Full-black projector output for an ambient camera reference frame.</summary>
+    public void SetBlackOutput(bool enabled)
+    {
+        lock (_gate) _blackOutput = enabled;
+    }
+
+    public const int BoardCalibrationSpotCount = 5;
+
+    public static Vector2 BoardCalibrationSpotPosition(int index) => index switch
+    {
+        0 => new(0.32f, 0.32f),
+        1 => new(0.68f, 0.32f),
+        2 => new(0.68f, 0.68f),
+        3 => new(0.32f, 0.68f),
+        4 => new(0.50f, 0.50f),
+        _ => throw new ArgumentOutOfRangeException(nameof(index))
+    };
+
+    /// <summary>Dark disk on the white field for camera/projector registration.</summary>
+    public void ShowBoardCalibrationSpot(int index)
+    {
+        if (index < -1 || index >= BoardCalibrationSpotCount)
+            throw new ArgumentOutOfRangeException(nameof(index));
+        lock (_gate)
+        {
+            if (!_boardSetup) return;
+            _boardCalibrationSpot = index;
+        }
+    }
+
+    /// <summary>
+    /// Replaces the white scan with a grid inside the four physical board corners.
+    /// Corners are normalized projector coordinates in perimeter order.
+    /// </summary>
+    public float SetDetectedBoardGrid(IReadOnlyList<Vector2> projectorCorners)
+    {
+        ArgumentNullException.ThrowIfNull(projectorCorners);
+        var grid = BoardGrid.Create(projectorCorners);
+        lock (_gate)
+        {
+            if (!_boardSetup) throw new InvalidOperationException("Board setup is not active.");
+            _boardGrid = grid;
+            _boardSetupStarted = DateTimeOffset.UtcNow;
+        }
+        return grid.InsetFraction;
     }
 
     public void ShowCalibrationTarget(int index, bool pieceTop)
@@ -168,6 +220,7 @@ public sealed class SceneCompositor : IDisposable
     {
         lock (_gate)
         {
+            _blackOutput = false;
             var old = _background;
             _background = asset;
             BackgroundLabel = asset is null ? "Test grid" : Path.GetFileName(asset.Path);
@@ -213,13 +266,26 @@ public sealed class SceneCompositor : IDisposable
         lock (_gate)
         {
             if (_disposed) return;
+            if (_blackOutput) return;
             var output = FitDisplay(canvasWidth, canvasHeight, preview);
             var stage = StageRect(output);
 
             if (_boardSetup)
             {
-                DrawTestGrid(ds, stage);
-                DrawBoardSetup(ds, stage, DateTimeOffset.UtcNow - _boardSetupStarted);
+                if (_boardGrid is { } grid)
+                    DrawDetectedBoardGrid(ds, output, grid, DateTimeOffset.UtcNow - _boardSetupStarted);
+                else
+                {
+                    ds.FillRectangle(output, Colors.White);
+                    if (_boardCalibrationSpot >= 0)
+                    {
+                        var point = BoardCalibrationSpotPosition(_boardCalibrationSpot);
+                        var center = new Vector2((float)(output.X + point.X * output.Width),
+                                                 (float)(output.Y + point.Y * output.Height));
+                        ds.FillCircle(center, (float)Math.Min(output.Width, output.Height) * 0.035f,
+                            Colors.Black);
+                    }
+                }
                 return;
             }
 
@@ -294,52 +360,87 @@ public sealed class SceneCompositor : IDisposable
         ds.DrawText("21 in × 21 in", (float)stage.X + 16, (float)stage.Y + 12, Colors.Black);
     }
 
-    private static void DrawBoardSetup(CanvasDrawingSession ds, Rect stage, TimeSpan elapsed)
+    private static void DrawDetectedBoardGrid(CanvasDrawingSession ds, Rect output,
+                                              BoardGrid grid, TimeSpan elapsed)
     {
-        const string message = "Center the white board in the grid";
-        var side = (float)stage.Width;
-        var fontSize = Math.Clamp(side * 0.043f, 9f, 34f);
-        var labelWidth = side * 0.86f;
-        var labelHeight = Math.Max(fontSize * 2.65f, side * 0.11f);
-        var label = new Rect(stage.X + (stage.Width - labelWidth) / 2,
-            stage.Y + (stage.Height - labelHeight) / 2, labelWidth, labelHeight);
-        ds.FillRoundedRectangle(label, fontSize * 0.45f, fontSize * 0.45f,
-            Color.FromArgb(236, 17, 24, 39));
-        using (var format = new CanvasTextFormat
-        {
-            FontFamily = "Segoe UI",
-            FontSize = fontSize,
-            HorizontalAlignment = CanvasHorizontalAlignment.Center,
-            VerticalAlignment = CanvasVerticalAlignment.Center,
-            WordWrapping = CanvasWordWrapping.NoWrap
-        })
-            ds.DrawText(message, label, Colors.White, format);
+        Vector2 View(Vector2 point) => new((float)(output.X + point.X * output.Width),
+                                            (float)(output.Y + point.Y * output.Height));
+        var corners = grid.Corners.Select(View).ToArray();
+        using (var polygon = CanvasGeometry.CreatePolygon(ds.Device, corners))
+            ds.FillGeometry(polygon, Colors.White);
 
-        var corners = new[]
-        {
-            new Vector2((float)stage.Left, (float)stage.Top),
-            new Vector2((float)stage.Right, (float)stage.Top),
-            new Vector2((float)stage.Right, (float)stage.Bottom),
-            new Vector2((float)stage.Left, (float)stage.Bottom)
-        };
-        var middle = new Vector2((float)(stage.X + stage.Width / 2),
-            (float)(stage.Y + stage.Height / 2));
-        var arm = Math.Clamp(side * 0.085f, 15f, 62f);
-        var thickness = Math.Clamp(side * 0.007f, 2f, 7f);
+        var shortestEdge = Enumerable.Range(0, 4)
+            .Min(index => Vector2.Distance(corners[index], corners[(index + 1) % 4]));
+        var gridThickness = Math.Clamp(shortestEdge * 0.0016f, 1.25f, 3.5f);
+        var gridColor = Color.FromArgb(225, 79, 89, 102);
+        foreach (var (first, last) in grid.Lines)
+            ds.DrawLine(View(first), View(last), gridColor, gridThickness);
+
+        var arm = Math.Clamp(shortestEdge * 0.07f, 17f, 95f);
+        var thickness = Math.Clamp(shortestEdge * 0.006f, 3f, 9f);
         var seconds = elapsed.TotalSeconds;
         var pulse = 0.85 + 0.15 * Math.Sin(seconds * 3.2);
         var orange = Color.FromArgb((byte)(255 * pulse), 255, 111, 24);
         for (var i = 0; i < corners.Length; i++)
         {
-            // The guides arrive in sequence, then gently pulse at their target corners.
             var t = Math.Clamp((seconds - i * 0.11) / 0.65, 0, 1);
             var ease = t * t * (3 - 2 * t);
-            var anchor = Vector2.Lerp(middle, corners[i], 0.30f + 0.70f * (float)ease);
-            var length = arm * (0.35f + 0.65f * (float)ease);
-            var towardX = i is 0 or 3 ? 1 : -1;
-            var towardY = i is 0 or 1 ? 1 : -1;
-            ds.DrawLine(anchor, anchor + new Vector2(towardX * length, 0), orange, thickness);
-            ds.DrawLine(anchor, anchor + new Vector2(0, towardY * length), orange, thickness);
+            var corner = corners[i];
+            var towardNext = Vector2.Normalize(corners[(i + 1) % 4] - corner);
+            var towardPrevious = Vector2.Normalize(corners[(i + 3) % 4] - corner);
+            var length = arm * (float)ease;
+            ds.DrawLine(corner, corner + towardNext * length, orange, thickness);
+            ds.DrawLine(corner, corner + towardPrevious * length, orange, thickness);
+        }
+    }
+
+    private sealed record BoardGrid(Vector2[] Corners, (Vector2 First, Vector2 Last)[] Lines,
+                                    float InsetFraction)
+    {
+        public static BoardGrid Create(IReadOnlyList<Vector2> corners)
+        {
+            if (corners.Count != 4 || corners.Any(point =>
+                    !float.IsFinite(point.X) || !float.IsFinite(point.Y) ||
+                    point.X < -0.06f || point.X > 1.06f || point.Y < -0.06f || point.Y > 1.06f))
+                throw new ArgumentException("The mapped board lies outside the projector field.", nameof(corners));
+
+            // The physical sheet nearly touches the projector's top and bottom edges.
+            // Pull the grid a little inside the detected material so edge uncertainty
+            // and the projector's optical blur cannot spill onto the surrounding floor.
+            var middle = corners.Aggregate(Vector2.Zero, (sum, point) => sum + point) / 4;
+            if (middle.X <= 0 || middle.X >= 1 || middle.Y <= 0 || middle.Y >= 1)
+                throw new ArgumentException("The board center is outside the projector field.", nameof(corners));
+            var inset = 0.01f;
+            foreach (var point in corners)
+            {
+                if (point.X < 0.005f) inset = Math.Max(inset, (0.005f - point.X) / (middle.X - point.X));
+                if (point.X > 0.995f) inset = Math.Max(inset, (point.X - 0.995f) / (point.X - middle.X));
+                if (point.Y < 0.005f) inset = Math.Max(inset, (0.005f - point.Y) / (middle.Y - point.Y));
+                if (point.Y > 0.995f) inset = Math.Max(inset, (point.Y - 0.995f) / (point.Y - middle.Y));
+            }
+            if (inset > 0.06f)
+                throw new ArgumentException("Too much of the board is outside the projector field.", nameof(corners));
+            var safeCorners = corners.Select(point => Vector2.Lerp(point, middle, inset)).ToArray();
+            if (safeCorners.Any(point => point.X < 0 || point.X > 1 || point.Y < 0 || point.Y > 1))
+                throw new ArgumentException("The grid cannot fit inside the projector field.", nameof(corners));
+
+            Point2[] logical = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
+            var projected = safeCorners.Select(point => new Point2(point.X, point.Y)).ToArray();
+            var map = Homography.FromFourPoints(logical, projected);
+            Vector2 At(double u, double v)
+            {
+                var point = map.Transform(new Point2(u, v));
+                return new Vector2((float)point.X, (float)point.Y);
+            }
+
+            var lines = new (Vector2 First, Vector2 Last)[22];
+            for (var index = 0; index <= 10; index++)
+            {
+                var fraction = index / 10.0;
+                lines[index] = (At(fraction, 0), At(fraction, 1));
+                lines[11 + index] = (At(0, fraction), At(1, fraction));
+            }
+            return new BoardGrid(safeCorners, lines, inset);
         }
     }
 

@@ -25,6 +25,7 @@ public sealed partial class MainWindow
                     _output = null;
                     _outputDisplayId = null;
                     FullscreenButton.Content = "Full screen";
+                    if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
                 };
             }
             _scene.SetDisplayAspect((double)display.Width / display.Height);
@@ -32,6 +33,7 @@ public sealed partial class MainWindow
             _output.SetFullScreen(true);
             _outputDisplayId = display.Id;
             FullscreenButton.Content = "Windowed";
+            if (Volatile.Read(ref _boardSetupActive)) RescanBoardSetup();
             SetStatus($"Projection output opened on {display}. Confirm hardware video decode on this laptop.");
         }
         catch (Exception ex) { SetStatus("Could not open projection output: " + ex.Message); }
@@ -42,6 +44,7 @@ public sealed partial class MainWindow
         if (_output is null) { OpenOutput_Click(sender, e); return; }
         try
         {
+            if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
             _output.SetFullScreen(!_output.IsFullScreen);
             FullscreenButton.Content = _output.IsFullScreen ? "Windowed" : "Full screen";
             InvalidateCalibration("Output window mode changed. Recalibrate in full screen.");

@@ -39,15 +39,37 @@ train again after changing settings that affect feature extraction.
 
 ## Board setup detection
 
-`BoardDetector.Detect(width, height, stride, bgra)` uses camera-frame edges to
-find a complete outer board quadrilateral containing the projected grid. It
-returns four camera-pixel corners in top-left, top-right, bottom-right,
-bottom-left order and a relative confidence value, or `null` when the evidence
-is weak. The detector intentionally rejects a clipped board instead of
-mistaking the inner projected grid for the board. This is a setup aid, not a
-physical measurement or a substitute for projector/camera calibration. The
-current geometry assumes the board is larger than the projected square, as in
-the first phone-camera capture; verify it on the newly centered live view.
+For a new scan, first display a **full-frame uniform white image** on the
+projector. Call `BoardDetector.DetectProjectedField(...)` for the outer light
+field and `BoardDetector.DetectUniformIllumination(...)` for a separate physical
+cardboard contour within it. Both return camera-pixel corners in top-left,
+top-right, bottom-right, bottom-left order, or `null` when all four edges are
+not distinguishable. The cardboard detector accepts a wide or narrow camera
+quadrilateral because the oblique camera view changes the apparent aspect
+ratio. It requires consistent brightness contrast across all four edges and
+rejects a field with no inner board contour. Only call it while the projector
+is actually showing the uniform scan image; a single camera frame cannot
+always distinguish an unpatterned projected rectangle from real cardboard.
+
+`BoardDetector.DetectAmbientBoard(...)` offers a separate check while the
+projector output is solid black. In the current room lighting, it finds the
+cardboard edge by ambient reflection. Its four corners should agree with the
+full-white scan. It will return `null` if the cardboard is not brighter than
+the surrounding floor or its edges are obscured.
+
+For projector mapping, retain a fresh camera frame of the white scan. Project
+one dark calibration disk at a time and call
+`BoardDetector.DetectDarkCalibrationSpot(width, height, stride,
+whiteBgra, spotBgra)` for each fresh camera frame. It returns a camera-pixel
+center and relative confidence. Four measured disk correspondences can define
+the camera-to-projector homography; validate it with a fifth point before
+placing a grid on the physical cardboard. The detector compensates for a
+global camera exposure shift, but movement between baseline and spot frames
+can still invalidate a measurement.
+
+The older `BoardDetector.Detect(...)` is kept for the projected-grid regression
+and compatibility. It requires a separately visible board contour outside a
+smaller grid and is not the full-white physical-cardboard scan.
 
 ## Synthetic regression
 
@@ -60,8 +82,11 @@ dotnet run --project src/ProjectTabletop.Vision/Regression/ProjectTabletop.Visio
 The fixture trains on two cards with the same asymmetric outline and different
 bright dot patterns at multiple rotations. It saves and reloads full captures,
 then checks two pieces in one frame and an unpatterned card with the same
-outline. It also checks board corners around a projected grid and rejects an
-isolated projection with no outer board. This proves data flow, persistence,
+outline. It also checks independent bright and dark cardboard contours in a
+uniform light field, rejects a light field with no cardboard, checks clean
+hardware frames under both full-white and black projector output, and locates
+a dark calibration disk despite a global exposure shift. The older projected-grid
+checks remain for compatibility. This proves data flow, persistence,
 classification, and pose fitting against clean
 generated images. It does **not** establish accuracy under moving projected
 video, hand occlusion, glare, or retroreflective bead behavior. Real camera

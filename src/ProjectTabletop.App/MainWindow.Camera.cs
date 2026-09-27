@@ -13,6 +13,65 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
+    // Sample the owned camera image once per status tick. A driver can keep its
+    // reader running while returning no new frames, or replay one old frame.
+    private static readonly TimeSpan NoCameraFrameWarning = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan UnchangedCameraImageWarning = TimeSpan.FromSeconds(8);
+    private CameraFrame? _cameraHealthSample;
+    private DateTimeOffset _cameraStartedAtUtc;
+    private DateTimeOffset _cameraImageChangedAtUtc;
+    private string? _cameraLiveStatus;
+    private bool _cameraHealthWarning;
+
+    private void ResetCameraHealth()
+    {
+        _cameraHealthSample = null;
+        _cameraStartedAtUtc = DateTimeOffset.MinValue;
+        _cameraImageChangedAtUtc = DateTimeOffset.MinValue;
+        _cameraLiveStatus = null;
+        _cameraHealthWarning = false;
+    }
+
+    private void UpdateCameraHealth()
+    {
+        if (!_camera.IsRunning || _cameraLiveStatus is null ||
+            SelectedCamera?.Device.Id != _camera.ActiveDeviceId) return;
+
+        var now = DateTimeOffset.UtcNow;
+        var frame = Volatile.Read(ref _latestCameraFrame);
+        var lastFrameAt = frame?.Timestamp ?? _cameraStartedAtUtc;
+        if (now - lastFrameAt >= NoCameraFrameWarning)
+        {
+            CameraStatusText.Text = frame is null
+                ? "Webcam connected, but no video frames have arrived. Press Start camera to reconnect."
+                : "Webcam stalled: no new video frame for " +
+                  $"{(int)(now - lastFrameAt).TotalSeconds} s. Press Start camera to reconnect.";
+            _cameraHealthWarning = true;
+            return;
+        }
+
+        if (frame is null) return;
+        if (_cameraHealthSample is null ||
+            _cameraHealthSample.Width != frame.Width || _cameraHealthSample.Height != frame.Height ||
+            _cameraHealthSample.Stride != frame.Stride ||
+            !_cameraHealthSample.Bgra.AsSpan().SequenceEqual(frame.Bgra))
+            _cameraImageChangedAtUtc = now;
+        _cameraHealthSample = frame;
+
+        if (now - _cameraImageChangedAtUtc >= UnchangedCameraImageWarning)
+        {
+            CameraStatusText.Text = "Webcam frames are arriving, but the image has been byte-identical for " +
+                $"{(int)(now - _cameraImageChangedAtUtc).TotalSeconds} s. " +
+                "Press Start camera to reconnect if the preview is frozen.";
+            _cameraHealthWarning = true;
+        }
+        else if (_cameraHealthWarning)
+        {
+            CameraStatusText.Text = _cameraLiveStatus;
+            _cameraHealthWarning = false;
+        }
+    }
+
     private async void RefreshCameras_Click(object sender, RoutedEventArgs e) => await RefreshCamerasAsync();
 
     private async Task RefreshCamerasAsync()
@@ -44,6 +103,8 @@ public sealed partial class MainWindow
             InvalidateCalibration("Webcam selection changed. Recalibrate both physical planes.");
         if (_camera.IsRunning && SelectedCamera?.Device.Id != _camera.ActiveDeviceId)
             CameraStatusText.Text = "Press Start camera to switch to the selected webcam.";
+        else if (_camera.IsRunning && _cameraLiveStatus is not null && !_cameraHealthWarning)
+            CameraStatusText.Text = _cameraLiveStatus;
     }
 
     private async void StartCamera_Click(object sender, RoutedEventArgs e) => await StartSelectedCameraAsync();
@@ -57,6 +118,7 @@ public sealed partial class MainWindow
         }
         try
         {
+            ResetCameraHealth();
             CameraStatusText.Text = "Starting " + choice.Device.DisplayName + "…";
             InvalidateCalibration("Camera restarted. Recalibrate both physical planes.");
             ClearBoardPreview();
@@ -68,10 +130,15 @@ public sealed partial class MainWindow
             CameraCanvas.Invalidate();
             await _camera.StartAsync(choice.Device.Id);
             var format = _camera.NegotiatedFormat;
-            CameraStatusText.Text = format is null
+            _cameraLiveStatus = format is null
                 ? $"Live: {choice.Device.DisplayName}"
                 : $"Live: {choice.Device.DisplayName}, {format.Value.Width} × {format.Value.Height} " +
                   $"at {format.Value.FramesPerSecond:F1} fps";
+            _cameraStartedAtUtc = DateTimeOffset.UtcNow;
+            CameraStatusText.Text = Volatile.Read(ref _latestCameraFrame) is null
+                ? $"Connected: {choice.Device.DisplayName}. Waiting for video frames…"
+                : _cameraLiveStatus;
+            _cameraHealthWarning = CameraStatusText.Text != _cameraLiveStatus;
             return true;
         }
         catch (Exception ex)
@@ -82,11 +149,14 @@ public sealed partial class MainWindow
         }
     }
 
-    private async void StopCamera_Click(object sender, RoutedEventArgs e)
+    private async void StopCamera_Click(object sender, RoutedEventArgs e) => await StopCameraAsync();
+
+    internal async Task StopCameraAsync()
     {
         try
         {
             await _camera.StopAsync();
+            ResetCameraHealth();
             ClearBoardPreview();
             _frozenFrame = null;
             Volatile.Write(ref _latestCameraFrame, null);
@@ -105,6 +175,7 @@ public sealed partial class MainWindow
         Volatile.Write(ref _latestDetections, Array.Empty<PieceDetection>());
         DispatcherQueue.TryEnqueue(() =>
         {
+            ResetCameraHealth();
             ClearBoardPreview();
             _frozenFrame = null;
             _bitmapFrame = null;

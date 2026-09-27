@@ -74,6 +74,7 @@ public sealed partial class MainWindow : Window
         UpdateTrainingStatus();
         SyncVisionSettingsControls();
         _ = TryLoadAutosavedVisionAsync();
+        StartControlHost();
     }
 
     private sealed record CameraChoice(CameraDeviceInfo Device)
@@ -126,6 +127,7 @@ public sealed partial class MainWindow : Window
         Microsoft.UI.Xaml.Controls.SelectionChangedEventArgs e)
     {
         if (!_initialized || SelectedDisplay is not { } display) return;
+        if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
         _scene.SetDisplayAspect((double)display.Width / display.Height);
         UpdateStage();
         InvalidateCalibration("Projection display changed. Recalibrate both planes.");
@@ -160,6 +162,7 @@ public sealed partial class MainWindow : Window
         var mediaError = _scene.MediaError;
         if (mediaError is not null) SetStatus(mediaError);
         else if (_visionError is not null) SetStatus(_visionError);
+        UpdateCameraHealth();
         UpdateBoardSetupStatus();
         StageStatusText.Text = $"Stage: {StageSizeSlider.Value:P0} of display height; " +
             $"draw callbacks: {outputFps:F1}/s output ({outputSlowDelta} slow), " +
@@ -176,6 +179,7 @@ public sealed partial class MainWindow : Window
         if (_closing) return;
         _closing = true;
         _statusTimer.Stop();
+        if (_controlHost is not null) await _controlHost.DisposeAsync();
         _output?.Close();
         _camera.FrameReceived -= Camera_FrameReceived;
         _camera.CaptureFailed -= Camera_CaptureFailed;
