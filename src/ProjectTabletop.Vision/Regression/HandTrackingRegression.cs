@@ -6,6 +6,7 @@ internal static class HandTrackingRegression
 {
     public static void Run()
     {
+        HandGestureRegression.Run();
         using var engine = new HandTrackingEngine(
             Path.Combine(AppContext.BaseDirectory, "Models", "Hands"));
         using Mat pointing = ReadFixture("mediapipe-pointing-up.jpg");

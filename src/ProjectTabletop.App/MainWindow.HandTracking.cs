@@ -15,6 +15,7 @@ public sealed partial class MainWindow
     private static readonly TimeSpan HandDetectionInterval = TimeSpan.FromMilliseconds(80);
     private static readonly TimeSpan HandMarkerLifetime = TimeSpan.FromMilliseconds(350);
     private readonly object _handGate = new();
+    private readonly HandGestureTracker _handGestures = new();
     private HandTrackingEngine? _handEngine;
     private Task? _handDetectionTask;
     private DispatcherQueueTimer? _handStatusTimer;
@@ -26,7 +27,7 @@ public sealed partial class MainWindow
     private string? _handTrackingError;
     private string? _handLatencyWarning;
 
-    private sealed record HandPreview(PixelPoint[] Tips, int Width, int Height, DateTimeOffset Timestamp);
+    private sealed record HandPreview(HandCursor[] Cursors, int Width, int Height, DateTimeOffset Timestamp);
 
     internal bool HandTrackingEnabled => _handTrackingEnabled;
     internal string HandTrackingControlStatus => HandTrackingStatusText.Text;
@@ -35,7 +36,20 @@ public sealed partial class MainWindow
         get
         {
             lock (_handGate) return _handPreview is { } preview &&
-                DateTimeOffset.UtcNow - preview.Timestamp <= HandMarkerLifetime ? preview.Tips.Length : 0;
+                DateTimeOffset.UtcNow - preview.Timestamp <= HandMarkerLifetime ? preview.Cursors.Length : 0;
+        }
+    }
+
+    internal int ExecutingHandCount
+    {
+        get
+        {
+            lock (_handGate)
+            {
+                var now = DateTimeOffset.UtcNow;
+                return _handPreview is { } preview && now - preview.Timestamp <= HandMarkerLifetime
+                    ? preview.Cursors.Count(cursor => cursor.IsExecuting(now)) : 0;
+            }
         }
     }
 
@@ -91,6 +105,7 @@ public sealed partial class MainWindow
         {
             _handGeneration++;
             _handPreview = null;
+            _handGestures.Reset();
             _handLatencyWarning = null;
             _lastHandDetectionTick = 0;
             _scene.ClearHandTips();
@@ -118,9 +133,10 @@ public sealed partial class MainWindow
                 {
                     _handEngine ??= new HandTrackingEngine(Path.Combine(AppContext.BaseDirectory, "Models", "Hands"));
                     var hands = _handEngine.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra);
-                    var tips = hands.Select(hand => hand.IndexTip)
-                        .Where(point => double.IsFinite(point.X) && double.IsFinite(point.Y) &&
-                            point.X >= 0 && point.X < frame.Width && point.Y >= 0 && point.Y < frame.Height)
+                    var visibleHands = hands.Where(hand =>
+                            double.IsFinite(hand.IndexTip.X) && double.IsFinite(hand.IndexTip.Y) &&
+                            hand.IndexTip.X >= 0 && hand.IndexTip.X < frame.Width &&
+                            hand.IndexTip.Y >= 0 && hand.IndexTip.Y < frame.Height)
                         .ToArray();
                     DispatcherQueue.TryEnqueue(() =>
                     {
@@ -140,8 +156,10 @@ public sealed partial class MainWindow
                             else
                             {
                                 _handLatencyWarning = null;
-                                _handPreview = new HandPreview(tips, frame.Width, frame.Height, frame.Timestamp);
-                                _scene.SetHandTips(tips, frame.Timestamp);
+                                var cursors = _handGestures.Update(visibleHands, frame.Timestamp,
+                                    DateTimeOffset.UtcNow).ToArray();
+                                _handPreview = new HandPreview(cursors, frame.Width, frame.Height, frame.Timestamp);
+                                _scene.SetHandCursors(cursors, frame.Timestamp);
                             }
                         }
                         if (_frozenFrame is null) CameraCanvas.Invalidate();
@@ -177,9 +195,11 @@ public sealed partial class MainWindow
              _cameraHealthWarning ? "Waiting for fresh webcam video before tracking your fingertip." :
              _handLatencyWarning is not null ? _handLatencyWarning :
              TrackedHandCount == 0 ? "Looking for a hand. Show your hand clearly in the camera view." :
+             ExecutingHandCount > 0 ? "Pinch detected: execute signal. Red circle for one second. " +
+                 "Separate thumb and index finger before the next pinch." :
              $"Tracking {TrackedHandCount} index fingertip{(TrackedHandCount == 1 ? "" : "s")}. " +
                  (_scene.HasBoardMediaClip ? "The circle is also projected on the board." :
-                     "Complete board setup to project the circle."));
+                     "Complete board setup to project the circle.") + " Pinch thumb and index finger to test execute.");
     }
 
     private void DrawHandPreview(CanvasDrawingSession ds, CameraFrame frame, Rect rect)
@@ -189,12 +209,14 @@ public sealed partial class MainWindow
         if (!_handTrackingEnabled || IsBoardScanMeasuring || preview is null ||
             preview.Width != frame.Width || preview.Height != frame.Height ||
             DateTimeOffset.UtcNow - preview.Timestamp > HandMarkerLifetime) return;
-        foreach (var tip in preview.Tips)
+        var now = DateTimeOffset.UtcNow;
+        foreach (var cursor in preview.Cursors)
         {
+            var tip = cursor.Position;
             var center = new Vector2((float)(rect.X + tip.X / frame.Width * rect.Width),
                                     (float)(rect.Y + tip.Y / frame.Height * rect.Height));
             ds.DrawCircle(center, 12, Colors.Black, 6);
-            ds.DrawCircle(center, 12, Colors.Cyan, 3);
+            ds.DrawCircle(center, 12, cursor.IsExecuting(now) ? Colors.Red : Colors.Cyan, 3);
         }
     }
 

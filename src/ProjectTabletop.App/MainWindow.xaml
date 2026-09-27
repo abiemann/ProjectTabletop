@@ -50,7 +50,7 @@
                 <ToggleSwitch x:Name="HandTrackingToggle" Header="Index fingertip circle" IsOn="True" Toggled="HandTrackingToggle_Toggled" />
                 <TextBlock x:Name="HandTrackingStatusText" Text="Start the webcam to track your index fingertip." TextWrapping="Wrap" />
                 <TextBlock Text="The camera circle works immediately. After board setup, the circle also follows your fingertip on the board. Keep your fingertip close to the board surface; lifting it causes projection offset. No piece training or raised-top calibration is needed." TextWrapping="Wrap" />
-                <TextBlock Text="This circle does not press buttons or trigger actions." TextWrapping="Wrap" />
+                <TextBlock Text="Execute test: briefly pinch your thumb and index fingertip together. The circle turns red for one second. Separate them before pinching again. This tests the signal; it does not open anything or press buttons yet." TextWrapping="Wrap" />
                 <Button Content="Save raw camera PNG" Click="SaveRawSnapshot_Click" />
 
                 <Expander Header="Physical pieces (optional / later)" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">

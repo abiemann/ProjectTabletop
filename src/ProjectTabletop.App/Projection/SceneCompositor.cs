@@ -35,7 +35,7 @@ public sealed class SceneCompositor : IDisposable
     private BoardGrid? _boardGrid;
     private ProjectionClipRegion? _boardMediaClip;
     private Homography? _boardCameraMap;
-    private Vector2[] _handTips = [];
+    private ProjectedHandCursor[] _handTips = [];
     private DateTimeOffset _handFrameTime;
     private int _boardCalibrationSpot = -1;
     private Vector2? _customBoardCalibrationSpot;
@@ -45,6 +45,8 @@ public sealed class SceneCompositor : IDisposable
     private long _projectorSlowFrames;
     private long _previewSlowFrames;
     private long _mediaRevision;
+
+    private readonly record struct ProjectedHandCursor(Vector2 Position, DateTimeOffset ExecuteUntil);
 
     public string BackgroundLabel { get; private set; } = "Test grid";
 
@@ -110,21 +112,23 @@ public sealed class SceneCompositor : IDisposable
         lock (_gate) _handTips = [];
     }
 
-    public void SetHandTips(IReadOnlyList<PixelPoint> tips, DateTimeOffset frameTime)
+    public void SetHandCursors(IReadOnlyList<HandCursor> cursors, DateTimeOffset frameTime)
     {
         lock (_gate)
         {
             _handTips = [];
             if (_boardMediaClip is null || _boardCameraMap is null) return;
-            var projectedTips = new List<Vector2>();
-            foreach (var tip in tips)
+            var projectedTips = new List<ProjectedHandCursor>();
+            foreach (var cursor in cursors)
             {
+                var tip = cursor.Position;
                 if (!double.IsFinite(tip.X) || !double.IsFinite(tip.Y)) continue;
                 try
                 {
                     var point = _boardCameraMap.Transform(new Point2(tip.X, tip.Y));
                     if (point.X >= 0 && point.X <= 1 && point.Y >= 0 && point.Y <= 1)
-                        projectedTips.Add(new Vector2((float)point.X, (float)point.Y));
+                        projectedTips.Add(new ProjectedHandCursor(
+                            new Vector2((float)point.X, (float)point.Y), cursor.ExecuteUntil));
                 }
                 catch (InvalidOperationException)
                 {
@@ -432,12 +436,15 @@ public sealed class SceneCompositor : IDisposable
         using var geometry = CanvasGeometry.CreatePolygon(ds.Device, clipPoints);
         using var layer = ds.CreateLayer(1, geometry);
         var radius = Math.Max(6, (float)Math.Min(output.Width, output.Height) * 0.018f);
-        foreach (var tip in _handTips)
+        var now = DateTimeOffset.UtcNow;
+        foreach (var cursor in _handTips)
         {
+            var tip = cursor.Position;
             var center = new Vector2((float)(output.X + tip.X * output.Width),
                                     (float)(output.Y + tip.Y * output.Height));
             ds.DrawCircle(center, radius, Colors.Black, Math.Max(4, radius * 0.35f));
-            ds.DrawCircle(center, radius, Colors.Cyan, Math.Max(2, radius * 0.17f));
+            ds.DrawCircle(center, radius, now < cursor.ExecuteUntil ? Colors.Red : Colors.Cyan,
+                Math.Max(2, radius * 0.17f));
         }
     }
 

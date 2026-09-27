@@ -53,6 +53,7 @@ public sealed partial class MainWindow
                     handTrackingEnabled = HandTrackingEnabled,
                     handTrackingStatus = HandTrackingControlStatus,
                     handCount = TrackedHandCount,
+                    handExecuteActive = ExecutingHandCount > 0,
                     renderStatus = RenderStatusText.Text,
                     status = StatusText.Text
                 };
@@ -62,7 +63,8 @@ public sealed partial class MainWindow
                     throw new ArgumentException("Provide enabled as a JSON boolean.");
                 SetHandTrackingEnabled(handEnabled.GetBoolean());
                 return new { handTrackingEnabled = HandTrackingEnabled,
-                    handTrackingStatus = HandTrackingControlStatus, handCount = TrackedHandCount };
+                    handTrackingStatus = HandTrackingControlStatus, handCount = TrackedHandCount,
+                    handExecuteActive = ExecutingHandCount > 0 };
             case "start_board_scan":
                 await StartBoardSetupAsync();
                 return new { status = BoardSetupControlStatus };
