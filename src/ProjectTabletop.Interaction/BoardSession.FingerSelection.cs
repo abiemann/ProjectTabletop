@@ -88,7 +88,7 @@ public sealed partial class BoardSession
                     {
                         track.ObserveEvidence(frameTime);
                         if (track.Samples >= 2 && track.Evidence >= IndexSeparationDuration)
-                            ready ??= new FingerSelectionCandidate(armedTarget, track, track.Anchor);
+                            ready ??= new FingerSelectionCandidate(armedTarget, track, track.Anchor, hand.TrackingId);
                     }
                     else if (track.Stage != BoardFingerSelectionStage.Selected)
                     {
@@ -162,7 +162,7 @@ public sealed partial class BoardSession
     }
 
     private static bool Finite(BoardAim aim) => double.IsFinite(aim.U) && double.IsFinite(aim.V);
-    private sealed record FingerSelectionCandidate(BoardButton Button, FingerTrack Track, BoardAim Anchor);
+    private sealed record FingerSelectionCandidate(BoardButton Button, FingerTrack Track, BoardAim Anchor, long TrackingId);
 
     private sealed class FingerTrack
     {

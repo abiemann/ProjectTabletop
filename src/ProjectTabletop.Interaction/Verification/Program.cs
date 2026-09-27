@@ -86,12 +86,16 @@ static void CheckIndependentHands()
     var session = new BoardSession();
     BoardButton first = session.Buttons[0];
     // Both events share a pulse deadline, but only the first hand is off-target.
-    Require(Update(session, 100, new(double.NaN, double.NaN, Time(1100), 1), Over(first, 2, 100))?.Current == BoardScreen.HandTracking,
-        "One hand's off-target pinch consumed the other hand's simultaneous pinch.");
+    Require(Update(session, 100, new BoardHandSample(double.NaN, double.NaN, Time(1100), 1) { TrackingId = 11 },
+        Over(first, 2, 100) with { TrackingId = 22 }) is
+        { Current: BoardScreen.HandTracking, TrackingId: 22, Gesture: BoardSelectionGesture.Pinch },
+        "One hand's off-target pinch consumed or inherited the identity of the other hand's simultaneous pinch.");
     Require(Update(session, 140, Over(session.Buttons[0], 2, 100), Over(session.Buttons[0], 1, 100)) is null,
         "Reordering two hands replayed one of their pinches.");
-    Require(Update(session, 180, Over(session.Buttons[0], 2, 100), Over(session.Buttons[0], 3, 180))?.Current == BoardScreen.Menu,
-        "A held pinch prevented the other hand from executing independently.");
+    Require(Update(session, 180, Over(session.Buttons[0], 2, 100) with { TrackingId = 22 },
+        Over(session.Buttons[0], 3, 180) with { TrackingId = 11 }) is
+        { Current: BoardScreen.Menu, TrackingId: 11, Gesture: BoardSelectionGesture.Pinch },
+        "A held pinch prevented the other hand from executing independently or reported the wrong hand.");
 
     session = new BoardSession();
     Require(Update(session, 100, Over(session.Buttons[0], 1, 100), Over(session.Buttons[1], 2, 100))?.Current == BoardScreen.HandTracking,

@@ -20,7 +20,8 @@ public sealed partial class SceneCompositor
     /// <summary>One perspective-correct table; card and button positions use the same board coordinates.</summary>
     private static void DrawBlackjackTable(CanvasDrawingSession ds, BlackjackSnapshot game,
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
-        IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback)
+        IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback,
+        IReadOnlyDictionary<int, IReadOnlySet<int>>? flyingPlayerCards = null)
     {
         DrawCasinoFelt(ds);
 
@@ -82,8 +83,7 @@ public sealed partial class SceneCompositor
             for (int index = 0; index < game.Hands.Count; index++)
             {
                 var hand = game.Hands[index];
-                var lane = split ? new Rect(index == 0 ? 83 : 518, 526, 399, 166)
-                    : new Rect(150, 526, 700, 166);
+                var lane = CasinoPlayerLane(index, game.Hands.Count);
                 if (hand.IsActive)
                 {
                     ds.FillRoundedRectangle(new Rect(lane.X - 6, 516, lane.Width + 12, 226),
@@ -92,7 +92,9 @@ public sealed partial class SceneCompositor
                         20, 20, ThemeColor(224, 194, 124, 110), 1.5f);
                     ds.FillCircle(new Vector2((float)lane.X + 18, 722), 3.5f, CasinoGold);
                 }
-                DrawCasinoCards(ds, hand.Cards.Select(card => (BlackjackCard?)card).ToArray(), lane);
+                var hidden = flyingPlayerCards is not null && flyingPlayerCards.TryGetValue(index, out var indices)
+                    ? indices : null;
+                DrawCasinoCards(ds, hand.Cards.Select(card => (BlackjackCard?)card).ToArray(), lane, hidden);
                 string total = hand.IsBust ? $"BUST · {hand.Total}"
                     : hand.IsNatural ? "BLACKJACK" : $"{hand.Total}{(hand.IsSoft ? " SOFT" : "")}";
                 string handName = split ? $"HAND {index + 1}" : "YOU";
@@ -251,27 +253,44 @@ public sealed partial class SceneCompositor
             20, ThemeColor(214, 190, 130, 26));
     }
 
-    private static void DrawCasinoCards(CanvasDrawingSession ds, IReadOnlyList<BlackjackCard?> cards, Rect lane)
+    private static Rect CasinoPlayerLane(int handIndex, int handCount) => handCount > 1
+        ? new Rect(handIndex == 0 ? 83 : 518, 526, 399, 166)
+        : new Rect(150, 526, 700, 166);
+
+    // Resting cards and their flying overlays share exactly the same destination
+    // rectangles, including the long-hand row transition and split-hand centering.
+    private static IReadOnlyList<Rect> CasinoCardLayout(int count, Rect lane)
     {
-        if (cards.Count == 0) return;
+        if (count <= 0) return Array.Empty<Rect>();
+        var layout = new Rect[count];
         // Very long hands use two overlapping rows: top-left indices stay exposed
         // instead of compressing nineteen cards into unreadable one-pixel slivers.
-        int rows = cards.Count > (lane.Width < 450 ? 8 : 11) ? 2 : 1;
-        int rowCount = (cards.Count + rows - 1) / rows;
+        int rows = count > (lane.Width < 450 ? 8 : 11) ? 2 : 1;
+        int rowCount = (count + rows - 1) / rows;
         float width = rows == 2 ? 88 : 112;
         float height = width * 154 / 112;
         for (int row = 0; row < rows; row++)
         {
             int start = row * rowCount;
-            int count = Math.Min(rowCount, cards.Count - start);
-            if (count <= 0) continue;
-            float step = count == 1 ? 0 : Math.Min(width + 14, ((float)lane.Width - width) / (count - 1));
-            float occupied = width + (count - 1) * step;
+            int rowSize = Math.Min(rowCount, count - start);
+            if (rowSize <= 0) continue;
+            float step = rowSize == 1 ? 0 : Math.Min(width + 14, ((float)lane.Width - width) / (rowSize - 1));
+            float occupied = width + (rowSize - 1) * step;
             float left = (float)(lane.X + (lane.Width - occupied) / 2);
-            for (int index = 0; index < count; index++)
-                DrawCasinoCard(ds, cards[start + index], new Rect(left + index * step,
-                    lane.Y + row * 43, width, height));
+            for (int index = 0; index < rowSize; index++)
+                layout[start + index] = new Rect(left + index * step,
+                    lane.Y + row * 43, width, height);
         }
+        return Array.AsReadOnly(layout);
+    }
+
+    private static void DrawCasinoCards(CanvasDrawingSession ds, IReadOnlyList<BlackjackCard?> cards, Rect lane,
+        IReadOnlySet<int>? hiddenIndices = null)
+    {
+        var layout = CasinoCardLayout(cards.Count, lane);
+        for (int index = 0; index < cards.Count; index++)
+            if (hiddenIndices?.Contains(index) != true)
+                DrawCasinoCard(ds, cards[index], layout[index]);
     }
 
     private static void DrawCasinoCard(CanvasDrawingSession ds, BlackjackCard? card, Rect rect)

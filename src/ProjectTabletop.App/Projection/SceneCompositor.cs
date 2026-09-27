@@ -226,7 +226,8 @@ public sealed partial class SceneCompositor : IDisposable
             _handTips = projectedTips.ToArray();
             _handFrameTime = acceptVisual ? frameTime : DateTimeOffset.MinValue;
             if (acceptVisual) _lastHandVisualFrameTime = frameTime;
-            _boardSession.Update(boardSamples, frameTime, now);
+            var selectionResult = _boardSession.Update(boardSamples, frameTime, now);
+            if (acceptVisual) ObserveHandLightingCommands(cursors, frameTime, now, selectionResult);
             SyncPhotoCopySession();
         }
     }
@@ -797,6 +798,10 @@ public sealed partial class SceneCompositor : IDisposable
             _boardApplicationTarget = null;
             _blackjackPreviewTarget?.Dispose();
             _blackjackPreviewTarget = null;
+            _blackjackFlightTarget?.Dispose();
+            _blackjackFlightTarget = null;
+            _blackjackFlights.Clear();
+            _boardSession.BlackjackHitOccurred -= OnBlackjackHit;
             _photoCopyBitmap?.Dispose();
             _photoCopyBitmap = null;
             _photoCopyCutout = null;

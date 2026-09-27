@@ -20,9 +20,14 @@ public sealed partial class SceneCompositor
     private BoardSurfaceState? _renderedBoardState;
 
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
-        int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision);
+        int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision);
 
-    public SceneCompositor(BlackjackGame? blackjack = null) => _boardSession = new BoardSession(blackjack);
+    public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null)
+    {
+        _boardSession = new BoardSession(blackjack);
+        _blackjackClock = blackjackClock ?? (() => DateTimeOffset.UtcNow);
+        _boardSession.BlackjackHitOccurred += OnBlackjackHit;
+    }
 
     public BoardScreen CurrentBoardScreen
     {
@@ -113,7 +118,9 @@ public sealed partial class SceneCompositor
         }
 
         var now = DateTimeOffset.UtcNow;
-        _boardSession.TickBlackjack(now);
+        var blackjackNow = _blackjackClock();
+        TickBlackjackVisuals(blackjackNow);
+        var flights = GetBlackjackFlights(blackjackNow);
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
         if (photoCopy && !preview && PhotoCopyCaptureAllowed)
             MarkPhotoCopySurfacePresented(now);
@@ -131,7 +138,8 @@ public sealed partial class SceneCompositor
             photoCopy ? PhotoCopyStampCount(now) : 0,
             photoCopy ? PhotoCopyDisplayStatus(now) : null,
             photoCopy ? _photoCopyRevision : 0,
-            _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision : 0);
+            _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision : 0,
+            _blackjackFlightRevision);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
@@ -177,7 +185,8 @@ public sealed partial class SceneCompositor
             if (_boardSession.Screen == BoardScreen.Blackjack)
             {
                 DrawBlackjackTable(surface, _boardSession.BlackjackState, _boardSession.Buttons,
-                    handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback);
+                    handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback,
+                    HiddenBlackjackCards(flights));
             }
             else if (_boardSession.Screen == BoardScreen.Menu)
             {
@@ -267,6 +276,15 @@ public sealed partial class SceneCompositor
             BorderMode = EffectBorderMode.Soft
         };
         ds.DrawImage(perspective);
+        if (DrawBlackjackFlightLayer(ds.Device, flights) is { } flightLayer)
+        {
+            using var moving = new Transform3DEffect
+            {
+                Source = flightLayer, TransformMatrix = matrix,
+                InterpolationMode = CanvasImageInterpolation.Linear, BorderMode = EffectBorderMode.Soft
+            };
+            ds.DrawImage(moving);
+        }
     }
 
     private static void DrawMenuButton(CanvasDrawingSession ds, BoardButton button,

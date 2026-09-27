@@ -14,8 +14,10 @@ public sealed partial class SceneCompositor
     private static readonly TimeSpan SpotlightHold = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan SpotlightLifetime = TimeSpan.FromMilliseconds(700);
     private const float SpotlightCoreFraction = .96f;
-    private HandSpotlight[] _handSpotlights = [];
+    private LitHand[] _handSpotlights = [];
+    private sealed record LitHand(HandSpotlight Light, long TrackingId);
     private DateTimeOffset _spotlightFrameTime;
+    private DateTimeOffset _spotlightObservationFrameTime;
     private DateTimeOffset _spotlightResetTime;
     private long _spotlightUpdateCount;
     private long _spotlightResetCount;
@@ -23,7 +25,7 @@ public sealed partial class SceneCompositor
     public sealed record HandLightingDiagnostics(string Board, bool BoardClipReady, bool BlackOutput,
         bool BoardSetup, int CalibrationTarget, DateTimeOffset SourceFrameTime, double? SourceAgeMilliseconds,
         float Opacity, long GeometryUpdates, long Resets, double ProjectorAspect,
-        double[]? CameraToProjector, HandSpotlight[] Lights);
+        double[]? CameraToProjector, HandSpotlight[] Lights, long[] SuppressedHandIds);
 
     public HandLightingDiagnostics GetHandLightingDiagnostics()
     {
@@ -34,7 +36,8 @@ public sealed partial class SceneCompositor
                 _boardSetup, _calibrationTarget, _spotlightFrameTime,
                 _spotlightFrameTime == DateTimeOffset.MinValue ? null : (now - _spotlightFrameTime).TotalMilliseconds,
                 SpotlightOpacity(now), _spotlightUpdateCount, _spotlightResetCount, _displayAspect,
-                _boardCameraMap?.ToMatrix(), _handSpotlights.ToArray());
+                _boardCameraMap?.ToMatrix(), _handSpotlights.Select(hand => hand.Light).ToArray(),
+                _suppressedHandLights.Select(hand => hand.TrackingId).ToArray());
         }
     }
 
@@ -50,7 +53,7 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             var now = DateTimeOffset.UtcNow;
-            if (frameTime < _spotlightResetTime || frameTime < _spotlightFrameTime ||
+            if (frameTime < _spotlightResetTime || frameTime <= _spotlightObservationFrameTime ||
                 frameTime > now || now - frameTime > TimeSpan.FromMilliseconds(350)) return;
             if (_boardCameraMap is null || _boardMediaClip is null || _blackOutput || _boardSetup ||
                 _calibrationTarget >= 0)
@@ -58,12 +61,19 @@ public sealed partial class SceneCompositor
                 ClearHandSpotlights();
                 return;
             }
+            _spotlightObservationFrameTime = frameTime;
             var map = _boardCameraMap.ToMatrix();
-            var lights = new List<HandSpotlight>();
-            foreach (var hand in hands)
-                if (HandSpotlight.TryCreate(hand, map, _displayAspect, out var light))
-                    lights.Add(light);
-            if (lights.Count == 0) return;
+            var observations = hands.Where(hand => HandSpotlight.TryCreate(hand, map, _displayAspect, out _))
+                .Select(hand => new SpotlightObservation(hand, _spotlightCursorFrameTime == frameTime
+                    ? _spotlightCursors.FirstOrDefault(cursor => cursor.Position == hand.IndexTip)?.TrackingId ?? 0 : 0))
+                .ToArray();
+            var suppressed = MatchSuppressedHandLights(observations, frameTime);
+            var lights = new List<LitHand>();
+            for (int index = 0; index < observations.Length; index++)
+                if (!suppressed.Contains(index) && HandSpotlight.TryCreate(observations[index].Hand, map, _displayAspect, out var light))
+                    lights.Add(new(light, observations[index].TrackingId));
+            _spotlightObservations = observations;
+            if (observations.Length == 0) return; // Preserve the ordinary short dropout hold.
             _handSpotlights = lights.ToArray();
             _spotlightFrameTime = frameTime;
             _spotlightUpdateCount++;
@@ -74,8 +84,14 @@ public sealed partial class SceneCompositor
     {
         _handSpotlights = [];
         _spotlightFrameTime = DateTimeOffset.MinValue;
+        _spotlightObservationFrameTime = DateTimeOffset.MinValue;
         _spotlightResetTime = DateTimeOffset.UtcNow;
         _spotlightResetCount++;
+        _suppressedHandLights.Clear();
+        _spotlightObservations = [];
+        _knownSpotlightHands.Clear();
+        _spotlightCursors = [];
+        _spotlightCursorFrameTime = DateTimeOffset.MinValue;
     }
 
     private float SpotlightOpacity(DateTimeOffset now)
@@ -103,8 +119,9 @@ public sealed partial class SceneCompositor
             new CanvasGradientStop { Position = 1, Color = Color.FromArgb(0, 255, 255, 255) }
         ]);
         brush.Opacity = opacity;
-        foreach (var light in _handSpotlights)
+        foreach (var hand in _handSpotlights)
         {
+            var light = hand.Light;
             var center = new Vector2((float)(output.X + light.Center.X * output.Width),
                 (float)(output.Y + light.Center.Y * output.Height));
             // The solid white core covers the hand; only the outer margin fades.

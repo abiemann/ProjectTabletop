@@ -37,6 +37,8 @@ public sealed partial class MainWindow
                 return await VerifyHandPoseFeedbackAsync();
             case "verify_hand_spotlights":
                 return await VerifyHandSpotlightsAsync();
+            case "verify_hand_spotlight_selection":
+                return await VerifyHandSpotlightSelectionAsync();
             case "verify_hand_detection_log":
                 return await HandDetectionLogVerification.RunAsync(Path.Combine(_appDataDirectory,
                     "LogVerification", Guid.NewGuid().ToString("N")));
@@ -47,6 +49,8 @@ public sealed partial class MainWindow
                 return await VerifyThemeAsync();
             case "verify_blackjack":
                 return await VerifyBlackjackAsync();
+            case "verify_blackjack_animation":
+                return await VerifyBlackjackAnimationAsync();
             case "verify_finger_selection":
                 return await VerifyFingerSelectionAsync();
             case "verify_photo_copy_render":
@@ -91,6 +95,7 @@ public sealed partial class MainWindow
                     boardApp = _scene.CurrentBoardScreen.ToString(),
                     boardAppTitle = _scene.CurrentBoardTitle,
                     blackjack = _scene.BlackjackState,
+                    blackjackAnimation = _scene.GetBlackjackAnimationDiagnostics(),
                     hoveredBoardButtons = _scene.HoveredBoardButtons,
                     photoCopyStatus = _scene.PhotoCopyStatus,
                     photoCopyLighting = _scene.PhotoCopyLightingStatus,

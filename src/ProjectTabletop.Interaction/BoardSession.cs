@@ -36,7 +36,14 @@ public readonly record struct BoardAim(double U, double V);
 public enum BoardFingerSelectionStage { Arming, Armed, Separating, Selected }
 public sealed record BoardFingerSelectionFeedback(string ButtonId, BoardFingerSelectionStage Stage, double Progress);
 
-public sealed record BoardNavigation(BoardScreen Previous, BoardScreen Current, string ButtonId);
+public enum BoardSelectionGesture { Pinch, IndexSeparation }
+
+public sealed record BoardNavigation(BoardScreen Previous, BoardScreen Current, string ButtonId)
+{
+    /// <summary>Identity of the hand whose gesture successfully selected this target.</summary>
+    public long TrackingId { get; init; }
+    public BoardSelectionGesture Gesture { get; init; } = BoardSelectionGesture.Pinch;
+}
 
 /// <summary>
 /// Board application navigation shared by rendering and gesture hit testing.
@@ -143,14 +150,16 @@ public sealed partial class BoardSession
                 !SelectionIsCurrent(hand, frameTime)) continue;
             BoardButton? selected = buttons.FirstOrDefault(button => button.Enabled && button.Bounds.Contains(hand.U, hand.V));
             if (selected is null) continue;
-            var result = new BoardNavigation(Screen, selected.Destination, selected.Id);
+            var result = new BoardNavigation(Screen, selected.Destination, selected.Id)
+                { TrackingId = hand.TrackingId, Gesture = BoardSelectionGesture.Pinch };
             if (!SelectButton(selected, now)) continue;
             return result;
         }
         if (fingerSelection is not null)
         {
             var selected = fingerSelection.Button;
-            var result = new BoardNavigation(Screen, selected.Destination, selected.Id);
+            var result = new BoardNavigation(Screen, selected.Destination, selected.Id)
+                { TrackingId = fingerSelection.TrackingId, Gesture = BoardSelectionGesture.IndexSeparation };
             if (SelectButton(selected, now))
             {
                 MarkFingerSelection(fingerSelection, frameTime);

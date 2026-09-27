@@ -1,8 +1,16 @@
 namespace ProjectTabletop.Interaction;
 
+/// <summary>A newly dealt player HIT card, after gameplay and input barriers have been updated.</summary>
+public sealed record BlackjackHit(long Sequence, int RoundNumber, int HandIndex, int CardIndex,
+    BlackjackCard Card, DateTimeOffset StartedAt);
+
 public sealed partial class BoardSession
 {
     private readonly BlackjackGame _blackjack;
+    private long _blackjackHitSequence;
+
+    /// <summary>Raised once for each successful HIT from any input route; sequence numbers survive resets.</summary>
+    public event Action<BlackjackHit>? BlackjackHitOccurred;
 
     public BoardSession(BlackjackGame? blackjack = null) => _blackjack = blackjack ?? new BlackjackGame();
     public BlackjackSnapshot BlackjackState => _blackjack.Snapshot;
@@ -27,16 +35,22 @@ public sealed partial class BoardSession
     public bool ActivateButton(string id, DateTimeOffset now)
     {
         var button = Buttons.FirstOrDefault(item => item.Id == id && item.Enabled);
-        if (button is null || !SelectButton(button, now)) return false;
-        _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
-        return true;
+        return button is not null && SelectButton(button, now, pointerAction: true);
     }
 
-    private bool SelectButton(BoardButton button, DateTimeOffset now)
+    private bool SelectButton(BoardButton button, DateTimeOffset now, bool pointerAction = false)
     {
+        BlackjackHit? hit = null;
         if (Screen == BoardScreen.Blackjack && button.Id != "menu")
         {
+            int hitHandIndex = button.Id == "bj-hit" ? _blackjack.Snapshot.ActiveHandIndex : -1;
             if (!_blackjack.HandleAction(button.Id, now)) return false;
+            if (hitHandIndex >= 0)
+            {
+                var after = _blackjack.Snapshot;
+                var cards = after.Hands[hitHandIndex].Cards;
+                hit = new(++_blackjackHitSequence, after.RoundNumber, hitHandIndex, cards.Count - 1, cards[^1], now);
+            }
         }
         else
         {
@@ -46,6 +60,8 @@ public sealed partial class BoardSession
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);
         HoveredButtonIds = Array.Empty<string>();
         InvalidateFingerSelection(now);
+        if (pointerAction) _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
+        if (hit is not null) BlackjackHitOccurred?.Invoke(hit);
         return true;
     }
 

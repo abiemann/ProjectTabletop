@@ -135,19 +135,23 @@ internal static class BoardFingerSelectionRegression
         var second = Together(Button(board, "menu"), 2);
         At(board, 100, first); At(board, 200, second, first);
         At(board, 300, Apart(first), second);
-        Require(At(board, 380, Apart(second), Apart(first))?.ButtonId == "capture-again",
-            "Hand ordering moved target or confirmation evidence to another hand.");
+        Require(At(board, 380, Apart(second), Apart(first)) is
+            { ButtonId: "capture-again", TrackingId: 1, Gesture: BoardSelectionGesture.IndexSeparation },
+            "Hand ordering moved target, confirmation evidence or selected identity to another hand.");
         Require(At(board, 460, Apart(second)) is null && At(board, 540, Apart(second)) is null,
             "Another hand's old armed gesture selected after the first action.");
-        Require(Select(board, second, 600)?.ButtonId == "menu", "The independent hand could not make a fresh selection.");
+        Require(Select(board, second, 600) is
+            { ButtonId: "menu", TrackingId: 2, Gesture: BoardSelectionGesture.IndexSeparation },
+            "The independent hand could not make a fresh selection with its own identity.");
 
         board = PhotoCopy(); first = Together(Button(board, "capture-again"));
         At(board, 100, first); At(board, 200, first); At(board, 300, Apart(first));
         var back = Center(Button(board, "menu"));
-        var pinch = new BoardHandSample(back.U, back.V, Time(1380), 20);
+        var pinch = new BoardHandSample(back.U, back.V, Time(1380), 20) { TrackingId = 2 };
         long revision = board.Revision;
-        Require(At(board, 380, Apart(first), pinch)?.ButtonId == "menu" && board.Revision == revision + 1,
-            "A simultaneous pinch failed to take precedence or performed two actions.");
+        Require(At(board, 380, Apart(first), pinch) is
+            { ButtonId: "menu", TrackingId: 2, Gesture: BoardSelectionGesture.Pinch } && board.Revision == revision + 1,
+            "A simultaneous pinch failed to take precedence, reported the other gesture's identity, or performed two actions.");
         board = PhotoCopy(); first = Together(Button(board, "capture-again"));
         At(board, 100, first); At(board, 200, first); At(board, 300, Apart(first));
         Require(At(board, 380, Apart(first), new(double.NaN, 0, Time(1380), 30))?.ButtonId == "capture-again",

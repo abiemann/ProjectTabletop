@@ -66,6 +66,7 @@ public sealed partial class MainWindow
         Require(scene.BlackjackState.Hands.Single().Total == 18 && scene.BlackjackState.Hands.Single().Cards.Count == 3,
             "A fresh hit gesture did not deal exactly one card.");
         scene.ClearHandTips(resetInput: false);
+        await Task.Delay(760); // Inspect the settled hand after its HIT card flies in.
         var hit = DrawPreview(scene);
         Require(DifferentPixels(player, hit) > 1000, "Hit changed the model but left an old table texture visible.");
         await Save("player-hit");

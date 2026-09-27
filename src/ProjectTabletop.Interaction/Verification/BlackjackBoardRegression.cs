@@ -6,6 +6,8 @@ internal static class BlackjackBoardRegression
     {
         var game = new BlackjackGame(initialShoe: Cards(8, 6, 8, 10, 3, 2, 10, 10));
         var board = new BoardSession(game);
+        var pinchHits = new List<BlackjackHit>();
+        board.BlackjackHitOccurred += pinchHits.Add;
         Select("blackjack", 1, 100);
         Require(board.Screen == BoardScreen.Blackjack && board.BlackjackState.Phase == BlackjackPhase.Betting,
             "The Blackjack menu item did not open the betting table.");
@@ -29,6 +31,8 @@ internal static class BlackjackBoardRegression
         Require(board.BlackjackState.Hands[0].Cards.Count == 2, "A disabled action's pinch replayed on Hit.");
         Select("bj-hit", 5, 420);
         Require(board.BlackjackState.Hands[0].Cards.Count == 3, "A fresh Hit after disabled action failed.");
+        Require(pinchHits is [{ Sequence: 1, RoundNumber: 1, HandIndex: 0, CardIndex: 2, Card.Rank: 10 }] &&
+            pinchHits[0].StartedAt == Time(420), "Pinch HIT did not emit exactly one payload for the previous active hand.");
         var saved = board.BlackjackState;
         Select("menu", 6, 480);
         Select("blackjack", 7, 540);
@@ -69,8 +73,10 @@ internal static class BlackjackBoardRegression
             Time(1600), Time(1600)) is null, "A pre-settlement pointing anchor crossed into betting.");
         Require(settling.Update([Sample(nextDeal, 22, 1700)], Time(1700), Time(1700)) is not null &&
             settling.BlackjackState.RoundNumber == 2, "Settlement barriers blocked a fresh Deal.");
+        CheckHitEvents();
         Console.WriteLine("Blackjack board verification passed: launch, shared targets, held/disabled pinch consumption, " +
-            "game/navigation revisions, split, menu continuity, reset and laptop/gesture input barriers.");
+            "game/navigation revisions, split, menu continuity, reset and laptop/gesture input barriers; " +
+            "HIT event payloads, advancing split hands, unique sequences and non-HIT suppression.");
 
         BoardButton Button(string id) => board.Buttons.Single(b => b.Id == id);
         void Select(string id, long eventId, int milliseconds, int? executed = null)
@@ -78,6 +84,60 @@ internal static class BlackjackBoardRegression
             var button = Button(id);
             board.Update([Sample(button, eventId, executed ?? milliseconds)], Time(milliseconds), Time(milliseconds));
         }
+    }
+
+    private static void CheckHitEvents()
+    {
+        var board = new BoardSession(new BlackjackGame(initialShoe: Cards(2, 6, 2, 10, 2, 3, 4, 10, 3, 6, 3, 10, 2)));
+        var hits = new List<BlackjackHit>();
+        board.BlackjackHitOccurred += hit =>
+        {
+            Require(board.BlackjackState.Hands[hit.HandIndex].Cards[hit.CardIndex] == hit.Card &&
+                board.HoveredButtonIds.Count == 0 && board.FingerSelectionFeedback.Count == 0,
+                "HIT notification preceded committed card state or cleared input feedback.");
+            hits.Add(hit);
+        };
+        board.ShowBlackjack(Time(0));
+        Require(!board.ActivateButton("bj-hit", Time(10)) && board.ActivateButton("bj-bet-10", Time(20)) &&
+            board.ActivateButton("bj-deal", Time(100)) && hits.Count == 0, "Rejected HIT, bet or Deal emitted a HIT notification.");
+        var hitButton = board.Buttons.Single(button => button.Id == "bj-hit");
+        var aim = new BoardAim(hitButton.Bounds.X + hitButton.Bounds.Width / 2, hitButton.Bounds.Y + hitButton.Bounds.Height / 2);
+        var grouped = new BoardHandSample(double.NaN, double.NaN, DateTimeOffset.MinValue, 0)
+            { TrackingId = 71, FourFingersExtended = true, FingerAim = aim, FingersTogether = true };
+        board.Update([grouped], Time(120), Time(120));
+        board.Update([grouped], Time(220), Time(220));
+        var separated = grouped with { FingersTogether = false, IndexFingerSeparated = true };
+        board.Update([separated], Time(250), Time(250));
+        Require(board.Update([separated], Time(340), Time(340))?.ButtonId == "bj-hit" &&
+            hits is [{ Sequence: 1, RoundNumber: 1, HandIndex: 0, CardIndex: 2, Card.Rank: 2 }] &&
+            hits[0].StartedAt == Time(340), "Finger selection did not emit the correct committed HIT card.");
+        Require(board.ActivateButton("bj-hit", Time(341)) && board.ActivateButton("bj-hit", Time(342)) &&
+            hits.Select(hit => hit.Sequence).SequenceEqual([1L, 2L, 3L]) &&
+            hits.Select(hit => hit.CardIndex).SequenceEqual([2, 3, 4]) &&
+            hits.Select(hit => hit.Card.Rank).SequenceEqual([2, 3, 4]), "Quick laptop HITs reused sequence numbers or identified stale cards.");
+        board.ResetInput(Time(350));
+        board.ShowMenu(Time(360)); board.ShowBlackjack(Time(370));
+        Require(board.ActivateButton("bj-stand", Time(400)) && !board.ActivateButton("bj-hit", Time(410)), "Stand/disabled-HIT fixture failed.");
+        Require(board.TickBlackjack(Time(1100)) && board.TickBlackjack(Time(1800)) && board.TickBlackjack(Time(2500)) &&
+            board.BlackjackState.Phase == BlackjackPhase.RoundOver && hits.Count == 3,
+            "Stand, input reset, navigation or dealer reveal/draw/settlement emitted a HIT notification.");
+        Require(board.ActivateButton("bj-reset", Time(2600)) && board.ActivateButton("bj-deal", Time(2700)) &&
+            board.ActivateButton("bj-hit", Time(2800)) && hits.Count == 4 &&
+            hits[3] is { Sequence: 4, RoundNumber: 2, HandIndex: 0, CardIndex: 2, Card.Rank: 2 },
+            "Game reset reused a HIT sequence or the new round emitted the wrong card.");
+        Require(!board.ActivateButton("bj-hit", Time(2799)) && !board.ActivateButton("not-an-action", Time(2900)) && hits.Count == 4,
+            "Rejected old-time or unknown action emitted a HIT notification.");
+
+        var split = new BoardSession(new BlackjackGame(initialShoe: Cards(8, 6, 8, 10, 9, 2, 7, 2, 10)));
+        var splitHits = new List<BlackjackHit>();
+        split.BlackjackHitOccurred += splitHits.Add;
+        split.ShowBlackjack(Time(0));
+        Require(split.ActivateButton("bj-deal", Time(100)) && split.ActivateButton("bj-split", Time(110)) && splitHits.Count == 0 &&
+            split.ActivateButton("bj-hit", Time(120)) && split.BlackjackState.Hands[0].IsBust && split.BlackjackState.ActiveHandIndex == 1 &&
+            splitHits is [{ HandIndex: 0, CardIndex: 2, Card.Rank: 7 }], "A split-hand bust reported the new active hand instead of the struck hand.");
+        Require(split.ActivateButton("bj-double", Time(130)) && split.TickBlackjack(Time(800)) &&
+            split.TickBlackjack(Time(1500)) && split.TickBlackjack(Time(2200)) && splitHits.Count == 1,
+            "Double or dealer cards emitted player HIT notifications.");
     }
 
     private static IReadOnlyList<BoardButton> BettingButtons(this BoardSession board)
