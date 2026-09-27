@@ -111,7 +111,7 @@ public static class PhotoObjectLocator
         {
             if (!TryMapHand(hand, h, out var points))
             {
-                failure = "Keep the pinching hand visible and separate from the object.";
+                failure = "Keep the selecting hand visible and separate from the object.";
                 return PhotoObjectTargetState.Unavailable;
             }
             double scale = Math.Max(Distance(points[0], points[9]), Distance(points[5], points[17]));
@@ -124,7 +124,7 @@ public static class PhotoObjectLocator
         byte[] excluded = Bytes(exclusion, 1), silhouette = Bytes(mask, 1);
         if (silhouette.Where((value, index) => value != 0 && excluded[index] != 0).Any())
         {
-            failure = "Keep the pinching hand and forearm away from the lit object.";
+            failure = "Keep the selecting hand and forearm away from the lit object.";
             return PhotoObjectTargetState.Occluded;
         }
 

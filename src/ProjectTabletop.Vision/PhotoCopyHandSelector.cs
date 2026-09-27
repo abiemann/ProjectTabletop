@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace ProjectTabletop.Vision;
 
-/// <summary>Identifies the shutter hand and optional other hand in a confirmed pinch observation.</summary>
+/// <summary>Identifies the shutter hand and optional other hand in a confirmed capture observation.</summary>
 public static class PhotoCopyHandSelector
 {
     private const double ReleaseThreshold = .45;
@@ -39,6 +39,38 @@ public static class PhotoCopyHandSelector
         shutter = null;
         if (!TryMatchShutter(hands, triggeringCursor, out int matchedIndex)) return false;
 
+        shutter = hands[matchedIndex];
+        return true;
+    }
+
+    /// <summary>
+    /// Identifies the hand that issued an already-confirmed index-separation
+    /// shutter action. The caller supplies current detections and the tracked
+    /// cursor from that same frame, and arbitrates simultaneous confirmed commands.
+    /// Detection records have no tracking ID, so the positive cursor identity
+    /// is matched by its actual index tip; an earlier selection anchor is ignored.
+    /// This validates geometry only and neither recognizes nor fabricates events.
+    /// </summary>
+    public static bool TrySelectGestureShutter(IReadOnlyList<HandDetection> hands, HandCursor triggeringCursor,
+        [NotNullWhen(true)] out HandDetection? shutter)
+    {
+        ArgumentNullException.ThrowIfNull(hands);
+        ArgumentNullException.ThrowIfNull(triggeringCursor);
+        shutter = null;
+        if (hands.Count is < 1 or > 2 || triggeringCursor.TrackingId <= 0 ||
+            !triggeringCursor.HasFourExtendedFingers || !triggeringCursor.IndexFingerSeparated ||
+            triggeringCursor.FingersTogether || !Finite(triggeringCursor.Position)) return false;
+
+        int matchedIndex = -1;
+        for (int index = 0; index < hands.Count; index++)
+        {
+            if (!TryObserve(hands[index], out double scale, out _)) return false;
+            if (Distance(hands[index].IndexTip, triggeringCursor.Position) > Math.Max(2, .1 * scale)) continue;
+            if (matchedIndex >= 0) return false;
+            matchedIndex = index;
+        }
+        if (matchedIndex < 0 || !HandPoseClassifier.DescribeFingerSelection(hands[matchedIndex]).IndexSeparated)
+            return false;
         shutter = hands[matchedIndex];
         return true;
     }

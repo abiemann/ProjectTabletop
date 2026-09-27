@@ -8,6 +8,7 @@ if (args is ["--photo-copy"])
     PhotoCopyRegression.Run();
     PhotoObjectRegression.Run();
     PhotoObjectTargetRegression.Run();
+    PhotoCopyCameraImageRegression.Run();
     return;
 }
 if (args is ["--hands"])
@@ -41,6 +42,7 @@ if (args is ["--photo-objects"])
     PhotoCopySelectionRegression.Run();
     PhotoObjectRegression.Run();
     PhotoObjectTargetRegression.Run();
+    PhotoCopyCameraImageRegression.Run();
     return;
 }
 if (args is ["--hand-spotlights"])

@@ -24,7 +24,7 @@ public static partial class PhotoObjectExtractor
         if (width is <= 0 or > 16384 || height is <= 0 or > 16384 || stride < width * 4L ||
             bgra.Length < (height - 1L) * stride + width * 4L)
             throw new ArgumentException("Invalid BGRA dimensions, stride, or buffer length.");
-        failure = "The hand or board mapping is unavailable. Keep the pinching hand visible and try again.";
+        failure = "The hand or board mapping is unavailable. Keep the selecting hand visible and try again.";
         if (!TryMatrix(cameraToBoard, out var h) || !TryMapHand(shutter, h, out var points)) return null;
         double palmScale = Math.Max(Distance(points[0], points[9]), Distance(points[5], points[17]));
         if (palmScale is < 20 or > 450) return null;
@@ -97,8 +97,8 @@ public static partial class PhotoObjectExtractor
         {
             bool joined = Enumerable.Range(1, count - 1).Any(id => touchesHand[id] &&
                 outsideHand[id] > Math.Max(MinimumArea, areas[id] * .12));
-            failure = joined ? "Keep the object separate from the pinching hand and forearm, then pinch again."
-                : "No separate object found. Put one contrasting object in the white area and pinch beside it.";
+            failure = joined ? "Keep the object separate from the selecting hand and forearm, then select again."
+                : "No separate object found. Put one contrasting object in the grey area and select beside it.";
             return null;
         }
         if (candidates.Length != 1)
@@ -108,7 +108,7 @@ public static partial class PhotoObjectExtractor
         }
         int selected = candidates[0];
 
-        // A recognized non-pinching hand keeps the established wrist cutoff and
+        // A recognized subject hand keeps the established wrist cutoff and
         // middle-finger direction, even if its forearm reaches the board edge.
         foreach (HandDetection hand in otherHands ?? [])
         {
@@ -158,7 +158,8 @@ public static partial class PhotoObjectExtractor
             }
         failure = null;
         return new(outputWidth, outputHeight, result,
-            new((outputWidth - 1) / 2.0, (outputHeight - 1) / 2.0), new(0, -1));
+            new((outputWidth - 1) / 2.0, (outputHeight - 1) / 2.0), new(0, -1))
+            { BoardOrigin = new(minX - 2, minY - 2) };
     }
 
     internal static bool TryMatrix(IReadOnlyList<double> input, out double[] h)

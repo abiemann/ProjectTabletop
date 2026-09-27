@@ -41,7 +41,12 @@ public sealed partial class BoardSession
     private bool SelectButton(BoardButton button, DateTimeOffset now, bool pointerAction = false)
     {
         BlackjackHit? hit = null;
-        if (Screen == BoardScreen.Blackjack && button.Id != "menu")
+        if (button.Id == PhotoCopyShutter.Id)
+        {
+            if (Screen != BoardScreen.PhotoCopy || !PhotoCopyShutterEnabled) return false;
+            // Taking a photo must not navigate or restart the capture session.
+        }
+        else if (Screen == BoardScreen.Blackjack && button.Id != "menu")
         {
             int hitHandIndex = button.Id == "bj-hit" ? _blackjack.Snapshot.ActiveHandIndex : -1;
             if (!_blackjack.HandleAction(button.Id, now)) return false;

@@ -102,14 +102,19 @@ public sealed partial class MainWindow
         await Task.Delay(1100);
         Require(scene.TryGetPhotoCopyCaptureContext(out var photoContext), "The grey capture field never became ready.");
         const int fixtureSize = 1000;
+        const double objectAngle = Math.PI / 4, objectStretch = 1.6;
         var fixture = new byte[fixtureSize * fixtureSize * 4];
         for (int y = 0; y < fixtureSize; y++)
         for (int x = 0; x < fixtureSize; x++)
         {
             int index = (y * fixtureSize + x) * 4;
-            double localX = (x - 270) * Math.Cos(.5) + (y - 600) * Math.Sin(.5);
-            double localY = -(x - 270) * Math.Sin(.5) + (y - 600) * Math.Cos(.5);
-            byte value = Math.Abs(localX) < 50 && Math.Abs(localY) < 70 ? (byte)30 : (byte)100;
+            // Normalizing a non-square physical board stretches a rotated
+            // rectangle into a parallelogram. This must exercise the GPU shear,
+            // not just rotation, or its long edges would no longer fit the object.
+            double unstretchedX = (x - 270) / objectStretch, unstretchedY = y - 600;
+            double localX = unstretchedX * Math.Cos(objectAngle) + unstretchedY * Math.Sin(objectAngle);
+            double localY = -unstretchedX * Math.Sin(objectAngle) + unstretchedY * Math.Cos(objectAngle);
+            byte value = Math.Abs(localX) < 60 && Math.Abs(localY) < 80 ? (byte)30 : (byte)100;
             fixture[index] = fixture[index + 1] = fixture[index + 2] = value;
             fixture[index + 3] = 255;
         }
@@ -118,6 +123,8 @@ public sealed partial class MainWindow
         Require(photoObject is not null, "The spotlight object fixture failed: " + locateFailure);
         Require(photoObject!.Spotlight.Shape == PhotoObjectSpotlightShape.RoundedRectangle,
             "A rectangular object did not acquire a fitted rectangular light.");
+        Require(Math.Abs(photoObject.Spotlight.Shear) > .3,
+            "The stretched, rotated object did not exercise a substantially sheared light.");
         Require(scene.SetPhotoCopyObject(photoObject!, photoContext.Revision), "The object spotlight could not lock.");
         var obsoleteSprite = new PhotoHandCutout(1, 1, [20, 40, 80, 255], new(0, 0), new(0, -1));
         Require(!scene.SetPhotoCopyCapture(obsoleteSprite, photoContext.Revision),
@@ -133,19 +140,57 @@ public sealed partial class MainWindow
         Require(scene.ActiveHandSpotlightCount == 1 && WhiteAt(twoLights, objectCenter) && WhiteAt(twoLights, new(.7, .6)),
             "Photo Copy failed to draw separate object and hand lights.");
         var fitted = photoObject.Spotlight;
+        PixelPoint LightPoint(double x, double y, bool applyShear = true)
+        {
+            if (applyShear) x += fitted.Shear * y;
+            return BoardPoint((fitted.Center.X + x * Math.Cos(fitted.RotationRadians) - y * Math.Sin(fitted.RotationRadians)) / 1000,
+                (fitted.Center.Y + x * Math.Sin(fitted.RotationRadians) + y * Math.Cos(fitted.RotationRadians)) / 1000);
+        }
         foreach (int signX in new[] { -1, 1 })
         foreach (int signY in new[] { -1, 1 })
         {
             double x = signX * (fitted.Width / 2 - 12), y = signY * (fitted.Height / 2 - 12);
-            var corner = BoardPoint((fitted.Center.X + x * Math.Cos(fitted.RotationRadians) - y * Math.Sin(fitted.RotationRadians)) / 1000,
-                (fitted.Center.Y + x * Math.Sin(fitted.RotationRadians) + y * Math.Cos(fitted.RotationRadians)) / 1000);
-            Require(WhiteAt(twoLights, corner), "The rectangular light did not rotate with the object's corners.");
+            Require(WhiteAt(twoLights, LightPoint(x, y)),
+                "The rectangular light did not shear and rotate with the object's corners.");
+            // These expected source corners are independent of the fitted model.
+            double objectX = signX * 58, objectY = signY * 78;
+            var sourceCorner = BoardPoint((270 + objectStretch *
+                (objectX * Math.Cos(objectAngle) - objectY * Math.Sin(objectAngle))) / 1000,
+                (600 + objectX * Math.Sin(objectAngle) + objectY * Math.Cos(objectAngle)) / 1000);
+            Require(WhiteAt(twoLights, sourceCorner), "The fitted light missed a corner of the source object.");
+        }
+        foreach (int sign in new[] { -1, 1 })
+        {
+            Require(WhiteAt(twoLights, LightPoint(sign * (fitted.Width / 2 - 8), 0)) &&
+                WhiteAt(twoLights, LightPoint(0, sign * (fitted.Height / 2 - 8))),
+                "The rectangular light did not cover all four fitted edges.");
+            Require(!WhiteAt(twoLights, LightPoint(sign * (fitted.Width / 2 + 18), 0)) &&
+                !WhiteAt(twoLights, LightPoint(0, sign * (fitted.Height / 2 + 18))),
+                "The rectangular light spilled beyond its fitted edges.");
+            double y = sign * (fitted.Height / 2 - 12);
+            double x = -Math.Sign(fitted.Shear * y) * (fitted.Width / 2 - 12);
+            Require(Math.Abs(fitted.Shear * y) > 28,
+                "The GPU shear fixture does not separate transformed and untransformed corners enough.");
+            // Missing/reordered shear would incorrectly illuminate this point,
+            // which is inside the rotation-only rectangle but outside the fit.
+            Require(!WhiteAt(twoLights, LightPoint(x, y, applyShear: false)),
+                "The object light rendered an unsheared rectangular corner.");
         }
         Require(!WhiteAt(twoLights, BoardPoint(.5, .9)), "Photo Copy flooded the grey field away from either subject.");
         scene.ClearHandTips(resetInput: false);
-        scene.SetHandSpotlights([Hand(.7, .25)], DateTimeOffset.UtcNow);
-        var clippedControls = Draw();
-        Require(!WhiteAt(clippedControls, BoardPoint(.75, .15)), "The hand spotlight covered Photo Copy controls.");
+        var photoButtons = new BoardSession();
+        photoButtons.ShowPhotoCopy();
+        var backBounds = photoButtons.Buttons.Single(button => button.Id == "menu").Bounds;
+        var backCenter = BoardPoint(backBounds.X + backBounds.Width / 2, backBounds.Y + backBounds.Height / 2);
+        // This light reaches over the actual Back to menu button and crosses the
+        // physical top edge, so both full control coverage and outer clipping matter.
+        scene.SetHandSpotlights([Hand(backCenter.X, backCenter.Y)], DateTimeOffset.UtcNow);
+        var litControls = Draw();
+        Require(WhiteAt(litControls, backCenter) &&
+            WhiteAt(litControls, BoardPoint(backBounds.X + backBounds.Width / 2, backBounds.Y + .02)),
+            "The hand spotlight was cut off over Photo Copy's Back to menu button.");
+        Require(BlackAt(litControls, new(backCenter.X, .08)),
+            "A Photo Copy hand spotlight spilled above the physical board.");
         await Task.Delay(750);
         Require(scene.ActiveHandSpotlightCount == 0 && WhiteAt(Draw(), objectCenter),
             "The stationary object light disappeared when the hand light expired.");
@@ -210,8 +255,10 @@ public sealed partial class MainWindow
 
         return new { passed = true, opaqueFingerCoverage = true, boardClipping = true, twoHands = true,
             sourceFrameOrdering = true, lightingDoesNotGenerateInput = true, resetRejectsOldFrames = true,
-            sourceLifetimeMilliseconds = 700, photoCopyIndependentLights = true, photoCopyControlsProtected = true,
+            sourceLifetimeMilliseconds = 700, photoCopyIndependentLights = true, photoCopyHandCoversTopControls = true,
+            photoCopyHandBoardClipping = true,
             photoCopyObjectLockLifecycle = true, rotatedRectangularObjectLight = true,
+            shearedRectangularObjectLight = true, rectangularObjectLightBoundaryCoverage = true,
             calibrationSuppressed = true, blackOutputClears = true,
             pinchCircleOnlyOnHandTracking = true, hiddenPinchStillNavigates = true };
 

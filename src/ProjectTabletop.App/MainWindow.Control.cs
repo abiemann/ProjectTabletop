@@ -55,6 +55,10 @@ public sealed partial class MainWindow
                 return await VerifyFingerSelectionAsync();
             case "verify_photo_copy_render":
                 return await VerifyPhotoCopyRenderAsync();
+            case "verify_photo_copy_gestures":
+                return await VerifyPhotoCopyGesturesAsync();
+            case "verify_photo_copy_proportions":
+                return await VerifyPhotoCopyProportionsAsync();
 #endif
             case "get_status":
                 var frame = Volatile.Read(ref _latestCameraFrame);

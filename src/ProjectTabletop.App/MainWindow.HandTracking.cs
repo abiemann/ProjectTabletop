@@ -235,7 +235,7 @@ public sealed partial class MainWindow
                                 var cursors = _handGestures.Update(visibleHands, frame.Timestamp,
                                     DateTimeOffset.UtcNow).ToArray();
                                 _handPreview = new HandPreview(cursors, frame.Width, frame.Height, frame.Timestamp);
-                                _scene.SetHandCursors(cursors, frame.Timestamp);
+                                _scene.SetHandCursors(cursors, frame.Timestamp, _photoCopyTask is { IsCompleted: false });
                                 _scene.SetHandSpotlights(visibleHands, frame.Timestamp);
                                 LogHandDetection(sequence, requestedInTester, frame, generation, engineReset,
                                     inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, cursors, "accepted");

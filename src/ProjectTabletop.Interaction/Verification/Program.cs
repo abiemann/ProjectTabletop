@@ -14,6 +14,7 @@ CheckPhotoCopySpiral();
 BlackjackRegression.Run();
 BlackjackBoardRegression.Run();
 BoardFingerSelectionRegression.Run();
+PhotoCopyShutterRegression.Run();
 Console.WriteLine("Board interaction verification passed: menu/navigation, shared hit targets, off-target consumption, " +
     "held-pinch suppression, dropouts, independent hands, freshness, anchored selection and navigation barriers, " +
     "reset, Photo Copy restarts and dense full-board inward spiral placement.");

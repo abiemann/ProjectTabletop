@@ -32,10 +32,12 @@ internal static class PhotoObjectTargetRegression
         CheckGlareAndSmallObjects();
         CheckCaptureBoundary();
         CheckSpotlightShape();
+        CheckNonSquareBoardSpotlights();
         Console.WriteLine("Photo object target regression: grey dark/light/color acquisition, holes and immutable mask, " +
             "current illuminated pixels, stationary/moved/removed/occluded checks, ambiguous/edge/invalid rejection, " +
             "perspective, gradients, local glare without discarding small real objects, padded rows, " +
-            "rotated rectangular lights with protrusion coverage and circular/irregular fallbacks passed.");
+            "rotated rectangular and rounded remote lights, non-square board geometry with sampling-band coverage, " +
+            "and circular/irregular fallbacks passed.");
     }
 
     private static void CheckCurrentPixelsAndPresence()
@@ -51,6 +53,8 @@ internal static class PhotoObjectTargetRegression
             BoardMap, target, out var failure);
         Require(cutout is not null, "Current target capture failed: " + failure);
         Require(cutout!.Width == target.Width && cutout.Height == target.Height, "Target capture changed its locked geometry.");
+        Require(cutout.BoardOrigin == new PixelPoint(target.Left, target.Top),
+            "Target capture lost its source-board crop origin.");
         for (int index = 0; index < target.Alpha.Count; index++)
         {
             Require(cutout.BgraPixels[index * 4 + 3] == target.Alpha[index], "White illumination changed the acquired alpha.");
@@ -219,6 +223,173 @@ internal static class PhotoObjectTargetRegression
         Require(bent.Spotlight.Shape == PhotoObjectSpotlightShape.Circle,
             "An irregular concave subject was forced into a rectangular classification.");
         CheckSpotlightCoverage(bent);
+
+        foreach (double angle in new[] { 0.0, 27, 71, 118, 164 })
+            foreach (double length in new[] { 90.0, 145 })
+            {
+                using Mat remote = Scene(); DrawRemote(remote, length, angle, tapered: true);
+                var target = Locate(remote);
+                Require(target.Spotlight.Shape == PhotoObjectSpotlightShape.RoundedRectangle,
+                    $"A rounded, tapered remote received circular light at {length}px/{angle} degrees.");
+                Require(Math.Abs(Math.Sin(2 * (target.Spotlight.RotationRadians - angle * Math.PI / 180))) < .14,
+                    "A rounded remote's rectangular light did not follow its long sides.");
+                CheckSpotlightCoverage(target);
+                using Mat litRemote = LitScene(target); DrawRemote(litRemote, length, angle, tapered: true);
+                Require(Observe(litRemote, target) == PhotoObjectTargetState.Present,
+                    "Rounded remote verification lost part of its outline in the rectangular light.");
+
+                using Mat ellipse = Scene();
+                Cv2.Ellipse(ellipse, new Point(210, 300), new Size(length / 2, length / 10), angle,
+                    0, 360, ObjectColor, -1);
+                var oval = Locate(ellipse);
+                Require(oval.Spotlight.Shape == PhotoObjectSpotlightShape.Circle,
+                    $"An elongated ellipse was mistaken for a rounded rectangle at {length}px/{angle} degrees.");
+                CheckSpotlightCoverage(oval);
+            }
+        using Mat capsule = Scene(); DrawRemote(capsule, 135, 39, tapered: false);
+        var rounded = Locate(capsule);
+        Require(rounded.Spotlight.Shape == PhotoObjectSpotlightShape.RoundedRectangle,
+            "Long parallel sides with fully rounded ends did not receive rectangular light.");
+        CheckSpotlightCoverage(rounded);
+        using Mat triangle = Scene();
+        Cv2.FillConvexPoly(triangle, [new(135, 230), new(300, 310), new(135, 340)], ObjectColor);
+        var triangular = Locate(triangle);
+        Require(triangular.Spotlight.Shape == PhotoObjectSpotlightShape.Circle,
+            "A triangular subject was classified as rectangular.");
+        CheckSpotlightCoverage(triangular);
+
+        // Only the object's anonymized alpha silhouette is retained from the
+        // live reproduction, not its camera photograph or surrounding room.
+        using Mat capturedMask = Cv2.ImRead(Path.Combine(AppContext.BaseDirectory, "Fixtures",
+            "photocopy-remote-alpha.png"), ImreadModes.Grayscale);
+        Require(!capturedMask.Empty(), "The captured remote silhouette fixture is missing.");
+        using Mat capturedRemote = Scene();
+        int maskHeight = capturedMask.Rows, maskWidth = capturedMask.Cols;
+        for (int y = 0; y < maskHeight; y++)
+            for (int x = 0; x < maskWidth; x++)
+                if (capturedMask.At<byte>(y, x) >= 200)
+                    capturedRemote.Set(145 + y, 180 + x, new Vec4b(40, 40, 40, 255));
+        var captured = Locate(capturedRemote);
+        Require(captured.Spotlight.Shape == PhotoObjectSpotlightShape.RoundedRectangle,
+            "The actual remote that formerly simplified to six corners still received circular light.");
+        CheckSpotlightCoverage(captured);
+    }
+
+    private static void DrawRemote(Mat scene, double length, double degrees, bool tapered)
+    {
+        double angle = degrees * Math.PI / 180, cosine = Math.Cos(angle), sine = Math.Sin(angle);
+        double radius = length / 10, end = length / 2 - radius;
+        Point P(double x, double y) => new((int)Math.Round(210 + x * cosine - y * sine),
+            (int)Math.Round(300 + x * sine + y * cosine));
+        List<Point> outline = [];
+        // The body is five times longer than wide, with smoothly rounded ends.
+        // A modest taper models a real remote without inventing sharp corners.
+        for (int step = 0; step <= 20; step++)
+        {
+            double arc = (-90 + step * 9) * Math.PI / 180;
+            outline.Add(P(end + radius * Math.Cos(arc), radius * Math.Sin(arc)));
+        }
+        for (int step = 0; step <= 20; step++)
+        {
+            double arc = (90 + step * 9) * Math.PI / 180;
+            outline.Add(P(-end + radius * Math.Cos(arc), radius * (tapered ? .9 : 1) * Math.Sin(arc)));
+        }
+        Cv2.FillConvexPoly(scene, outline, ObjectColor);
+    }
+
+    private static void CheckNonSquareBoardSpotlights()
+    {
+        // A physical rectangle rotated on a non-square board is a parallelogram
+        // after the board's two axes are independently normalized to 1000px.
+        // Rotate first, then scale X, rather than rotating an already square image.
+        foreach (double aspect in new[] { .65, 1, 1.4, 1.8 })
+            foreach (double degrees in new[] { 0.0, 30, 45, 60, 90 })
+            {
+                using Mat scene = Scene();
+                DrawAffineSubject(scene, aspect, degrees, AffineSubject.Rectangle);
+                var target = Locate(scene);
+                Require(target.Spotlight.Shape == PhotoObjectSpotlightShape.RoundedRectangle,
+                    $"A rectangle on a non-square board received circular light at aspect {aspect}/{degrees} degrees.");
+                CheckAffineEdgeAlignment(target.Spotlight, aspect, degrees);
+                CheckSpotlightCoverage(target);
+                Require(target.Spotlight.Width * target.Spotlight.Height <
+                    Math.PI * target.SpotlightRadius * target.SpotlightRadius * .95,
+                    "Affine rectangular illumination did not reduce the circular flood's footprint.");
+                using Mat lit = LitScene(target);
+                DrawAffineSubject(lit, aspect, degrees, AffineSubject.Rectangle);
+                Require(Observe(lit, target) == PhotoObjectTargetState.Present,
+                    "A rectangular light on a non-square board left its presence sampling band unlit.");
+
+                foreach (var negative in new[] { AffineSubject.Ellipse, AffineSubject.Concave })
+                {
+                    using Mat irregular = Scene(); DrawAffineSubject(irregular, aspect, degrees, negative);
+                    var rejected = Locate(irregular);
+                    Require(rejected.Spotlight.Shape == PhotoObjectSpotlightShape.Circle,
+                        $"A transformed {negative} received rectangular light at aspect {aspect}/{degrees} degrees.");
+                    CheckSpotlightCoverage(rejected);
+                }
+            }
+
+        using Mat mask = Cv2.ImRead(Path.Combine(AppContext.BaseDirectory, "Fixtures",
+            "photocopy-angled-rectangle-alpha.png"), ImreadModes.Grayscale);
+        Require(!mask.Empty(), "The captured angled rectangle silhouette fixture is missing.");
+        using Mat capturedScene = Scene();
+        DrawCapturedMask(capturedScene, mask);
+        var captured = Locate(capturedScene);
+        Require(captured.Spotlight.Shape == PhotoObjectSpotlightShape.RoundedRectangle,
+            "The actual diagonal rectangle with skewed normalized corners still received circular light.");
+        Require(Math.Abs(captured.Spotlight.Shear) > .1,
+            "The actual rectangle lost the affine skew introduced by the non-square board.");
+        CheckEdgeAlignment(captured.Spotlight, new PixelPoint(111, 146), new PixelPoint(-75, 90));
+        CheckSpotlightCoverage(captured);
+        using Mat capturedLit = LitScene(captured); DrawCapturedMask(capturedLit, mask);
+        Require(Observe(capturedLit, captured) == PhotoObjectTargetState.Present,
+            "The actual diagonal rectangle could not be verified under its fitted light.");
+    }
+
+    private enum AffineSubject { Rectangle, Ellipse, Concave }
+
+    private static void DrawAffineSubject(Mat scene, double aspect, double degrees, AffineSubject shape)
+    {
+        double angle = degrees * Math.PI / 180, cosine = Math.Cos(angle), sine = Math.Sin(angle);
+        Point P(double x, double y) => new((int)Math.Round(230 + aspect * (x * cosine - y * sine)),
+            (int)Math.Round(305 + x * sine + y * cosine));
+        Point[] outline = shape switch
+        {
+            AffineSubject.Rectangle => [P(-60, -42), P(60, -42), P(60, 42), P(-60, 42)],
+            AffineSubject.Concave => [P(-60, -42), P(-20, -42), P(-20, 12), P(60, 12), P(60, 42), P(-60, 42)],
+            _ => Enumerable.Range(0, 180).Select(i => P(60 * Math.Cos(i * Math.PI / 90),
+                42 * Math.Sin(i * Math.PI / 90))).ToArray()
+        };
+        Cv2.FillPoly(scene, [outline], ObjectColor);
+    }
+
+    private static void DrawCapturedMask(Mat scene, Mat mask)
+    {
+        int maskHeight = mask.Rows, maskWidth = mask.Cols;
+        for (int y = 0; y < maskHeight; y++)
+            for (int x = 0; x < maskWidth; x++)
+                if (mask.At<byte>(y, x) >= 200)
+                    scene.Set(130 + y, 150 + x, new Vec4b(40, 40, 40, 255));
+    }
+
+    private static void CheckAffineEdgeAlignment(PhotoObjectSpotlight light, double aspect, double degrees)
+    {
+        double angle = degrees * Math.PI / 180;
+        CheckEdgeAlignment(light, new(aspect * Math.Cos(angle), Math.Sin(angle)),
+            new(-aspect * Math.Sin(angle), Math.Cos(angle)));
+    }
+
+    private static void CheckEdgeAlignment(PhotoObjectSpotlight light, PixelPoint first, PixelPoint second)
+    {
+        double cosine = Math.Cos(light.RotationRadians), sine = Math.Sin(light.RotationRadians);
+        var u = new PixelPoint(cosine, sine);
+        var v = new PixelPoint(light.Shear * cosine - sine, light.Shear * sine + cosine);
+        static double Error(PixelPoint a, PixelPoint b) => Math.Abs(a.X * b.Y - a.Y * b.X) /
+            Math.Sqrt((a.X * a.X + a.Y * a.Y) * (b.X * b.X + b.Y * b.Y));
+        Require(Math.Min(Math.Max(Error(u, first), Error(v, second)),
+            Math.Max(Error(u, second), Error(v, first))) < .08,
+            "A rectangular spotlight stopped following the physical object's opposite edges after board normalization.");
     }
 
     private static void DrawRotatedBook(Mat scene, int offsetX = 0)
@@ -255,7 +426,8 @@ internal static class PhotoObjectTargetRegression
         if (spotlight.Shape == PhotoObjectSpotlightShape.Circle)
             return dx * dx + dy * dy <= spotlight.Width * spotlight.Width / 4;
         double cosine = Math.Cos(spotlight.RotationRadians), sine = Math.Sin(spotlight.RotationRadians);
-        double u = Math.Abs(dx * cosine + dy * sine), v = Math.Abs(-dx * sine + dy * cosine);
+        double localV = -dx * sine + dy * cosine;
+        double u = Math.Abs(dx * cosine + dy * sine - spotlight.Shear * localV), v = Math.Abs(localV);
         double qx = u - (spotlight.Width / 2 - spotlight.CornerRadius);
         double qy = v - (spotlight.Height / 2 - spotlight.CornerRadius);
         return Math.Sqrt(Math.Pow(Math.Max(qx, 0), 2) + Math.Pow(Math.Max(qy, 0), 2)) +

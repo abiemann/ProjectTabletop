@@ -81,6 +81,10 @@ internal static class PhotoCopyRegression
         if (AlphaAt(result, 261, 140) > 10)
             throw new Exception("Photo Copy retained a cast shadow.");
         PixelPoint palm = Palm();
+        if (result.BoardOrigin is not { } origin ||
+            Math.Abs(origin.X + result.PalmAnchor.X - palm.X * 2) > 1e-6 ||
+            Math.Abs(origin.Y + result.PalmAnchor.Y - palm.Y * 2) > 1e-6)
+            throw new Exception("Hand extraction lost its source-board crop origin.");
         int px = (int)Math.Round(result.PalmAnchor.X + (250 - palm.X) * 2);
         int py = (int)Math.Round(result.PalmAnchor.Y + (250 - palm.Y) * 2);
         int outputIndex = (py * result.Width + px) * 4, inputIndex = (250 * Size + 250) * 4;

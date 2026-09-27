@@ -49,9 +49,9 @@ fingers together rearms the gesture; stale results and wall time cannot complete
 it. The camera and projector show four fingertip markers with the middle aim
 marker in gold. Button feedback advances through **Bring fingers together**,
 **Ready · separate index**, **Selecting**, and **Selected · bring fingers
-together**. Thumb/index pinch selection remains available. Photo Copy's actual
-shutter remains pinch-only; its menu and reset buttons also accept index
-separation.
+together**. Thumb/index pinch selection remains available. Photo Copy's shutter,
+menu and reset buttons also accept index separation. The shutter matches the
+confirmed selecting cursor to the same frame's actual hand landmarks.
 
 `HandPoseClassifier.IsSpreadOut` classifies the current 21 landmarks: all four
 fingers must be extended and laterally separated, with an extended, open thumb.
@@ -215,9 +215,10 @@ confirmed that selection now works. Smaller openings around 0.40–0.43 remained
 neutral; broader lighting, positions, orientations and motion ranges remain
 unmeasured.
 
-Photo Copy uses `PhotoCopyHandSelector.TrySelectShutter` to match a fresh pinch
-cursor to the hand making the command. One or two hands may be visible; only
-one may pinch. The current app acquires an object **before** illuminating it:
+Photo Copy uses `PhotoCopyHandSelector.TrySelectGestureShutter` or
+`TrySelectShutter` to match fresh index-separation or pinch input to the hand
+making the command. One or two hands may be visible; one hand issues the shutter
+command. The current app acquires an object **before** illuminating it:
 `PhotoObjectLocator.Locate` rectifies the camera frame to the board plane,
 estimates the plain grey background below the controls, and selects one distinct
 foreground component. A smooth local illumination correction is fitted from
@@ -230,13 +231,15 @@ an immutable alpha silhouette, including holes, plus board-space geometry for
 the object's spotlight. The app requires two stable candidates before locking
 that light, while hand spotlights continue to move independently.
 
-`PhotoObjectSpotlight` classifies the main silhouette as rectangular only when
-its outline approximates four near-right-angle corners and fills its enclosing
-rectangle. These subjects get a rotated rounded rectangle; round and irregular
-subjects fall back to a circle. The rectangle covers every pixel of the original
-alpha plus a small margin, preserving narrow loops or bookmarks that are ignored
-only during shape classification. Rendering keeps a solid white core and soft
-outer edge. Hand illumination remains a separate moving circle.
+`PhotoObjectSpotlight` recognizes supported pairs of opposite parallel edges,
+including the oblique coordinates produced by mapping a non-square board to a
+square detection mask. The light retains both edge directions through an affine
+transform, so it follows a rotated physical rectangle. Long rounded remotes can
+also qualify through their straight sides. Round and irregular subjects fall
+back to a circle. The light covers every pixel of the original alpha plus its
+presence-sampling margin, preserving narrow loops or bookmarks ignored only
+during classification. Rendering keeps a solid white core and soft outer edge.
+Hand illumination remains a separate moving circle.
 
 `PhotoObjectLocator.ObserveTarget` checks the locked silhouette against its
 illuminated surroundings. Both the interior and boundary must still match;
@@ -249,9 +252,19 @@ frame's UTC, revision, state, failure detail and camera-to-board transform, plus
 the candidate center/area during acquisition, so observations can be matched to
 camera evidence.
 `PhotoObjectExtractor.ExtractTarget` repeats the presence/occlusion check on the
-confirmed-pinch frame and copies **that frame's RGB pixels** through the stored
+confirmed-command frame and copies **that frame's RGB pixels** through the stored
 alpha. It never resegments the projected white halo or reuses the acquisition
 photograph's colors. An overlapping shutter hand or forearm prevents capture.
+
+The app then calls `PhotoCopyCameraImage.Capture` to map only this alpha mask back
+to the original camera frame. RGB pixels are copied directly without resizing;
+the native crop retains its camera-space anchor and inward axis. Its immutable
+`PhotoCopyCameraGeometry` carries the camera-to-board map and frame dimensions.
+The compositor rotates and scales copies uniformly on a camera-sized layer,
+then maps that layer to the board for alignment. Thus copied photos preserve
+their photographed proportions at every rotation instead of rotating a stretched
+square-board bitmap. This preserves the camera photograph's perspective; it
+does not infer physical object dimensions from an uncalibrated camera.
 
 Generic objects need visible contrast on grey and under white illumination,
 not a trained class or hand landmarks. Multiple subjects, clipped objects and

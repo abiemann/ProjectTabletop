@@ -133,7 +133,8 @@ public sealed partial class SceneCompositor : IDisposable
         }
     }
 
-    public void SetHandCursors(IReadOnlyList<HandCursor> cursors, DateTimeOffset frameTime)
+    public void SetHandCursors(IReadOnlyList<HandCursor> cursors, DateTimeOffset frameTime,
+        bool photoCopyCaptureBusy = false)
     {
         lock (_gate)
         {
@@ -226,7 +227,10 @@ public sealed partial class SceneCompositor : IDisposable
             _handTips = projectedTips.ToArray();
             _handFrameTime = acceptVisual ? frameTime : DateTimeOffset.MinValue;
             if (acceptVisual) _lastHandVisualFrameTime = frameTime;
+            var shutterContext = PreparePhotoCopyGesture(cursors, frameTime, acceptVisual, photoCopyCaptureBusy);
             var selectionResult = _boardSession.Update(boardSamples, frameTime, now);
+            if (selectionResult is { ButtonId: "photo-shutter" } && shutterContext is not null)
+                _photoCopyGestureShutter = new(selectionResult.TrackingId, frameTime, shutterContext);
             if (acceptVisual) ObserveHandLightingCommands(cursors, frameTime, now, selectionResult);
             SyncPhotoCopySession();
         }
@@ -804,6 +808,8 @@ public sealed partial class SceneCompositor : IDisposable
             _boardSession.BlackjackHitOccurred -= OnBlackjackHit;
             _photoCopyBitmap?.Dispose();
             _photoCopyBitmap = null;
+            _photoCopyCameraTarget?.Dispose();
+            _photoCopyCameraTarget = null;
             _photoCopyCutout = null;
             _photoCopyPremultipliedPixels = null;
         }

@@ -111,7 +111,6 @@ public sealed partial class SceneCompositor
     {
         var opacity = SpotlightOpacity(DateTimeOffset.UtcNow);
         if (_handSpotlights.Length == 0 || opacity <= 0) return;
-        using var photoCopyClip = ClipPhotoCopyHandLighting(ds, output);
         using var brush = new CanvasRadialGradientBrush(ds.Device,
         [
             new CanvasGradientStop { Position = 0, Color = Colors.White },

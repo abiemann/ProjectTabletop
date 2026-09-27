@@ -127,11 +127,12 @@ public sealed partial class BoardSession
         _lastFrameTime = frameTime;
 
         var buttons = Buttons;
-        FingerSelectionCandidate? fingerSelection = UpdateFingerSelection(hands, buttons, frameTime);
-        HoveredButtonIds = buttons.Where(button => button.Enabled && hands.Any(hand =>
+        var fingerTargets = FingerTargets(buttons);
+        FingerSelectionCandidate? fingerSelection = UpdateFingerSelection(hands, fingerTargets, frameTime);
+        HoveredButtonIds = fingerTargets.Where(button => button.Enabled && hands.Any(hand =>
                 (hand.TrackingId > 0 && hand.FourFingersExtended
-                    ? FingerHoverTarget(hand, buttons)?.Id == button.Id
-                    : SelectionIsCurrent(hand, frameTime) && button.Bounds.Contains(hand.U, hand.V))))
+                    ? FingerHoverTarget(hand, fingerTargets)?.Id == button.Id
+                    : button.Id != PhotoCopyShutter.Id && SelectionIsCurrent(hand, frameTime) && button.Bounds.Contains(hand.U, hand.V))))
             .Select(button => button.Id).ToArray();
 
         // IDs come from a monotonically increasing event sequence, never reset by

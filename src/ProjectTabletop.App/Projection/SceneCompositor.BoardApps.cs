@@ -213,8 +213,8 @@ public sealed partial class SceneCompositor
 
                 if (photoCopy)
                 {
-                    // Every panel has an opaque metal/glass base so copied
-                    // images and dynamic illumination cannot obscure controls.
+                    // Opaque panels keep copied images below the controls.
+                    // Hand illumination is drawn later, across the whole board.
                     DrawGlassPanel(surface, new Rect(380, 55, 240, 105));
                     surface.DrawText("Photo Copy", 400, 84, AppPalette.Text, label);
                     surface.DrawLine(401, 140, 440, 140, AppPalette.AccentSecondary, 2);

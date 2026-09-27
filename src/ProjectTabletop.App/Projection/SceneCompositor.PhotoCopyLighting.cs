@@ -2,10 +2,7 @@ using System.Numerics;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Brushes;
 using Microsoft.Graphics.Canvas.Effects;
-using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.UI;
-using ProjectTabletop.Calibration;
-using ProjectTabletop.Interaction;
 using ProjectTabletop.Vision;
 using Windows.Foundation;
 using Windows.UI;
@@ -29,7 +26,7 @@ public sealed partial class SceneCompositor
                 return new { objectLocked = target is not null, revision = _photoCopyRevision,
                     center = target?.Center, radius = target?.SpotlightRadius,
                     spotlight = light is null ? null : new { shape = light.Shape.ToString(), light.Center,
-                        light.Width, light.Height, light.RotationRadians, light.CornerRadius },
+                        light.Width, light.Height, light.RotationRadians, light.CornerRadius, light.Shear },
                     shownAt = _photoCopyObjectShownAt, foregroundArea = target?.ForegroundArea };
             }
         }
@@ -53,7 +50,7 @@ public sealed partial class SceneCompositor
                 _photoCopyCutout is not null || _photoCopyObjectTarget is not null) return false;
             _photoCopyObjectTarget = target;
             _photoCopyObjectShownAt = DateTimeOffset.MinValue;
-            _photoCopyStatus = "Object locked and lit. Keep it still; pinch beside it to copy.";
+            _photoCopyStatus = "Object locked and lit. Beside it: four fingers together, then index sideways to copy.";
             _renderedBoardState = null;
             return true;
         }
@@ -88,7 +85,8 @@ public sealed partial class SceneCompositor
         if (shape.Shape == PhotoObjectSpotlightShape.RoundedRectangle)
         {
             var previousTransform = surface.Transform;
-            surface.Transform = Matrix3x2.CreateRotation((float)shape.RotationRadians) *
+            surface.Transform = new Matrix3x2(1, 0, (float)shape.Shear, 1, 0, 0) *
+                Matrix3x2.CreateRotation((float)shape.RotationRadians) *
                 Matrix3x2.CreateTranslation((float)shape.Center.X, (float)shape.Center.Y) * previousTransform;
             try
             {
@@ -120,21 +118,4 @@ public sealed partial class SceneCompositor
         surface.FillCircle(center, radius, light);
     }
 
-    // Both light sources may illuminate the subject field, but the glass
-    // navigation controls remain legible above it.
-    private CanvasActiveLayer? ClipPhotoCopyHandLighting(CanvasDrawingSession drawing, Rect output)
-    {
-        if (_boardSession.Screen != BoardScreen.PhotoCopy || _boardSurfaceMap is null) return null;
-        const double scale = 1.0 / PhotoHandCutout.BoardPixels;
-        var points = new[] {
-            new Point2(PhotoObjectTarget.CaptureLeft * scale, PhotoObjectTarget.CaptureTop * scale),
-            new Point2(PhotoObjectTarget.CaptureRight * scale, PhotoObjectTarget.CaptureTop * scale),
-            new Point2(PhotoObjectTarget.CaptureRight * scale, PhotoObjectTarget.CaptureBottom * scale),
-            new Point2(PhotoObjectTarget.CaptureLeft * scale, PhotoObjectTarget.CaptureBottom * scale) }
-            .Select(point => _boardSurfaceMap.Transform(point))
-            .Select(point => new Vector2((float)(output.X + point.X * output.Width),
-                (float)(output.Y + point.Y * output.Height))).ToArray();
-        using var geometry = CanvasGeometry.CreatePolygon(drawing.Device, points);
-        return drawing.CreateLayer(1, geometry);
-    }
 }

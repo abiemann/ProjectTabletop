@@ -31,6 +31,7 @@ public static partial class PhotoObjectExtractor
             }
         failure = null;
         return new(target.Width, target.Height, result,
-            new((target.Width - 1) / 2.0, (target.Height - 1) / 2.0), new(0, -1));
+            new((target.Width - 1) / 2.0, (target.Height - 1) / 2.0), new(0, -1))
+            { BoardOrigin = new(target.Left, target.Top) };
     }
 }

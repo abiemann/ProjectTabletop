@@ -188,7 +188,8 @@ public static class PhotoHandExtractor
         return new PhotoHandCutout(outWidth, outHeight, pixels,
             new PixelPoint(anchor.X - minX + 2, anchor.Y - minY + 2),
             new PixelPoint((local[12].X - local[9].X) / middleLength,
-                (local[12].Y - local[9].Y) / middleLength));
+                (local[12].Y - local[9].Y) / middleLength))
+            { BoardOrigin = new(left + minX - 2, top + minY - 2) };
     }
 
     private static void BuildAnatomyMasks(Mat envelope, Mat seeds, PixelPoint[] points,
