@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="ProjectTabletop.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml"
+    Title="Project Tabletop">
+    <Grid Background="#111827" ColumnSpacing="12">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="410" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Padding="18" Spacing="12">
+                <TextBlock Text="PROJECT TABLETOP" FontSize="23" FontWeight="Bold" />
+                <TextBlock x:Name="StatusText" Text="Ready. Choose a webcam and media files." TextWrapping="Wrap" />
+
+                <TextBlock Text="1  Webcam" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
+                <ComboBox x:Name="CameraComboBox" PlaceholderText="Select webcam" HorizontalAlignment="Stretch" SelectionChanged="CameraComboBox_SelectionChanged" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Refresh" Click="RefreshCameras_Click" />
+                    <Button Content="Start camera" Click="StartCamera_Click" />
+                    <Button Content="Stop" Click="StopCamera_Click" />
+                </StackPanel>
+                <TextBlock x:Name="CameraStatusText" Text="Camera stopped" TextWrapping="Wrap" />
+
+                <TextBlock Text="2  Projection display" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
+                <ComboBox x:Name="DisplayComboBox" PlaceholderText="Select projector display" HorizontalAlignment="Stretch" SelectionChanged="DisplayComboBox_SelectionChanged" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Refresh" Click="RefreshDisplays_Click" />
+                    <Button x:Name="OpenOutputButton" Content="Open output" Click="OpenOutput_Click" />
+                    <Button x:Name="FullscreenButton" Content="Full screen" Click="Fullscreen_Click" />
+                </StackPanel>
+                <TextBlock Text="Stage size: fraction of display height" />
+                <Slider x:Name="StageSizeSlider" Minimum="0.35" Maximum="0.95" Value="0.91" StepFrequency="0.005" ValueChanged="StageSliders_ValueChanged" />
+                <TextBlock Text="Stage horizontal offset" />
+                <Slider x:Name="StageXSlider" Minimum="-0.25" Maximum="0.25" Value="0" StepFrequency="0.001" ValueChanged="StageSliders_ValueChanged" />
+                <TextBlock Text="Stage vertical offset" />
+                <Slider x:Name="StageYSlider" Minimum="-0.25" Maximum="0.25" Value="0" StepFrequency="0.001" ValueChanged="StageSliders_ValueChanged" />
+                <TextBlock x:Name="StageStatusText" Text="Square stage centered in black output." TextWrapping="Wrap" />
+
+                <TextBlock Text="3  Background and board setup" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Choose video or image" Click="ChooseBackground_Click" />
+                    <Button Content="Test grid" Click="TestGrid_Click" />
+                </StackPanel>
+                <TextBlock x:Name="BackgroundPathText" Text="Test grid" TextTrimming="CharacterEllipsis" />
+                <Button x:Name="BoardSetupButton" Content="Start board setup" Click="BoardSetup_Click" HorizontalAlignment="Left" />
+                <TextBlock x:Name="BoardSetupStatusText" Text="Board setup shows a projected grid and finds the white board in the camera view." TextWrapping="Wrap" />
+
+                <TextBlock Text="4  Learn a physical piece" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
+                <TextBox x:Name="PieceIdTextBox" Header="Piece ID" PlaceholderText="e.g. boat-1" Text="piece-1" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Capture snapshot" Click="CaptureSnapshot_Click" />
+                    <Button Content="Save raw PNG" Click="SaveRawSnapshot_Click" />
+                    <Button Content="Resume live" Click="ResumeLive_Click" />
+                    <Button Content="Clear marks" Click="ClearMarks_Click" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Outline" Click="OutlineMode_Click" />
+                    <Button Content="Front point" Click="FrontMode_Click" />
+                    <Button Content="Add labeled sample" Click="AddSample_Click" />
+                </StackPanel>
+                <TextBlock Text="On a frozen camera frame, click around one piece's top in order, then click its front point. Label other visible pieces on the same frame; capture more views and orientations for training." TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Train" Click="Train_Click" />
+                    <Button Content="Save models" Click="SaveModels_Click" />
+                    <Button Content="Load models" Click="LoadModels_Click" />
+                </StackPanel>
+                <TextBlock x:Name="TrainingStatusText" Text="Untrained: no labeled samples." TextWrapping="Wrap" />
+                <TextBlock Text="Vision tuning" FontWeight="SemiBold" Margin="0,4,0,0" />
+                <ComboBox x:Name="VisionSegmentationComboBox" Header="Find candidate cards by" HorizontalAlignment="Stretch">
+                    <ComboBoxItem Content="Fixed brightness" />
+                    <ComboBoxItem Content="Automatic brightness (Otsu)" />
+                    <ComboBoxItem Content="Empty-board difference" />
+                </ComboBox>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <NumberBox x:Name="VisionBrightnessThresholdBox" Header="Brightness cutoff" Minimum="0" Maximum="255" Value="205" Width="180" SmallChange="1" />
+                    <NumberBox x:Name="VisionDifferenceThresholdBox" Header="Difference cutoff" Minimum="0" Maximum="255" Value="35" Width="180" SmallChange="1" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <NumberBox x:Name="VisionMinimumAreaBox" Header="Min area (pixels²)" Minimum="1" Maximum="1000000" Value="300" Width="180" SmallChange="10" />
+                    <NumberBox x:Name="VisionPatternThresholdBox" Header="Pattern cutoff" Minimum="0" Maximum="255" Value="225" Width="180" SmallChange="1" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="ApplyVisionSettingsButton" Content="Apply tuning" Click="ApplyVisionSettings_Click" />
+                    <Button x:Name="CaptureEmptyBoardButton" Content="Capture empty board" Click="CaptureEmptyBoard_Click" />
+                </StackPanel>
+                <TextBlock x:Name="VisionReferenceStatusText" Text="No empty-board reference saved." TextWrapping="Wrap" />
+                <TextBlock Text="Empty-board difference needs a card-free frame and a fixed projected image. Moving video changes the background every frame." TextWrapping="Wrap" />
+
+                <TextBlock Text="5  Assign media to a piece" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
+                <ComboBox x:Name="OverlayPieceComboBox" PlaceholderText="Choose trained piece" HorizontalAlignment="Stretch" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Choose overlay" Click="ChooseOverlay_Click" />
+                    <Button Content="Remove overlay" Click="RemoveOverlay_Click" />
+                </StackPanel>
+                <TextBlock x:Name="OverlayMappingsText" Text="No overlays assigned." TextWrapping="Wrap" />
+
+                <TextBlock Text="6  Registration" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Board corners" Click="BoardCorners_Click" />
+                    <Button Content="Raised top points" Click="TopPoints_Click" />
+                </StackPanel>
+                <NumberBox x:Name="PieceHeightNumberBox" Header="Measured piece top height above board (mm)" Minimum="0.1" Maximum="100" Value="5" ValueChanged="PieceHeightNumberBox_ValueChanged" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Save calibration" Click="SaveCalibration_Click" />
+                    <Button Content="Load calibration" Click="LoadCalibration_Click" />
+                </StackPanel>
+                <TextBlock Text="For board: click the four projected corner targets in the camera view. For raised top: move a piece until each projected target lands on its top center, then click that center in the camera view. The app advances the target after each click." TextWrapping="Wrap" />
+                <TextBlock x:Name="CalibrationStatusText" Text="Registration needed before overlays can align." TextWrapping="Wrap" />
+                <TextBlock Text="Media decoding and 4K/60 performance must be checked on the connected laptop and projector." TextWrapping="Wrap" FontStyle="Italic" Margin="0,8,0,12" />
+            </StackPanel>
+        </ScrollViewer>
+        <Grid Grid.Column="1" RowSpacing="8" Margin="0,12,12,12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <TextBlock Grid.Row="0" Text="CAMERA  ·  snapshot annotation and live detections" FontWeight="SemiBold" />
+            <Border Grid.Row="1" Background="#070B11" CornerRadius="4">
+                <canvas:CanvasControl x:Name="CameraCanvas" UseSharedDevice="True" Draw="CameraCanvas_Draw" PointerPressed="CameraCanvas_PointerPressed" />
+            </Border>
+            <TextBlock Grid.Row="2" Text="PROJECTION PREVIEW  ·  output display aspect ratio" FontWeight="SemiBold" />
+            <Border Grid.Row="3" Background="Black" CornerRadius="4">
+                <canvas:CanvasAnimatedControl x:Name="ProjectionPreview" UseSharedDevice="True" Draw="ProjectionPreview_Draw" />
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

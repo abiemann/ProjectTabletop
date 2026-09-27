@@ -1,0 +1,5 @@
+bin/
+obj/
+.build-appdata/
+Verification/bin/
+Verification/obj/

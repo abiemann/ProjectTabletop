@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="ProjectTabletop.App.ProjectionWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml"
+    Title="Project Tabletop Output">
+    <Grid Background="Black">
+        <canvas:CanvasAnimatedControl x:Name="OutputCanvas" UseSharedDevice="True" Draw="OutputCanvas_Draw" />
+    </Grid>
+</Window>
