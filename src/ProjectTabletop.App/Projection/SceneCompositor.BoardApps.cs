@@ -6,7 +6,6 @@ using Microsoft.UI;
 using Microsoft.UI.Text;
 using ProjectTabletop.Interaction;
 using Windows.Foundation;
-using Windows.UI;
 
 namespace ProjectTabletop.App.Projection;
 
@@ -110,7 +109,7 @@ public sealed partial class SceneCompositor
         {
             using var surface = _boardApplicationTarget.CreateDrawingSession();
             surface.Clear(photoCopy ? Colors.White : _boardSession.Screen == BoardScreen.HandTracking
-                ? Colors.Transparent : Color.FromArgb(255, 8, 14, 24));
+                ? Colors.Transparent : AppPalette.Background);
             if (photoCopy)
             {
                 DrawPhotoCopyStamps(surface, state.PhotoStampCount);
@@ -142,22 +141,23 @@ public sealed partial class SceneCompositor
                 WordWrapping = CanvasWordWrapping.NoWrap
             };
 
-            var muted = Color.FromArgb(255, 183, 201, 218);
+            var muted = AppPalette.MutedText;
             if (_boardSession.Screen == BoardScreen.Menu)
             {
-                surface.DrawText("PROJECT TABLETOP", 80, 57, Colors.Cyan, small);
-                surface.DrawText("Choose a board", 76, 97, Colors.White, heading);
-                surface.DrawText("Point to highlight a button. Then pinch.", 80, 186, muted, body);
+                // Keep neutral illumination on the targets instead of the whole
+                // board, with sparse text and no bright bands across the hand.
+                var menuText = AppPalette.Text;
+                var menuMuted = AppPalette.MutedText;
+                surface.DrawText("PROJECT TABLETOP", 80, 57, menuMuted, small);
+                surface.DrawText("Choose a board", 76, 97, menuText, heading);
+                surface.DrawText("Point until the side light comes on. Then pinch.", 80, 186, menuMuted, body);
                 foreach (var button in _boardSession.Buttons)
                 {
                     var hovered = handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id);
-                    DrawBoardButton(surface, button, hovered, label, small,
-                        button.Destination == BoardScreen.HandTracking ? "Gesture test" :
-                        button.Destination == BoardScreen.PhotoCopy ? "Copy your hand" : "Coming soon");
+                    DrawMenuButton(surface, button, hovered, label);
                 }
-                surface.DrawLine(80, 862, 920, 862, Color.FromArgb(255, 44, 65, 83), 2);
-                surface.DrawText("Blue circle = fingertip     Red circle = pinch", 80, 890, muted, small);
-                surface.DrawText("Release your fingers before selecting again.", 80, 931, muted, small);
+                surface.DrawText("White spotlight = hand     Red circle = pinch", 80, 890, menuMuted, small);
+                surface.DrawText("Release your fingers before selecting again.", 80, 931, menuMuted, small);
             }
             else
             {
@@ -169,33 +169,33 @@ public sealed partial class SceneCompositor
                 {
                     // Keep the controls and instructions legible over the copies,
                     // while letting the pattern reach the top edge between them.
-                    surface.FillRoundedRectangle(new Rect(380, 70, 240, 75), 12, 12, Colors.White);
-                    surface.DrawText("Photo Copy", 394, 87, Colors.Black, label);
+                    surface.FillRoundedRectangle(new Rect(380, 70, 240, 75), 12, 12, AppPalette.Surface);
+                    surface.DrawText("Photo Copy", 394, 87, AppPalette.Text, label);
                     using var photoStatus = new CanvasTextFormat
                     {
                         FontFamily = "Segoe UI",
                         FontSize = 18,
                         WordWrapping = CanvasWordWrapping.Wrap
                     };
-                    surface.FillRoundedRectangle(new Rect(50, 165, 900, 50), 10, 10, Colors.White);
+                    surface.FillRoundedRectangle(new Rect(50, 165, 900, 50), 10, 10, AppPalette.Surface);
                     surface.DrawText(state.PhotoStatus ?? PhotoCopyReadyMessage,
-                        new Rect(60, 170, 880, 44), Colors.Black, photoStatus);
+                        new Rect(60, 170, 880, 44), AppPalette.Text, photoStatus);
                 }
                 else if (_boardSession.Screen == BoardScreen.HandTracking)
                 {
                     surface.FillRoundedRectangle(new Rect(390, 55, 550, 105), 18, 18,
-                        Color.FromArgb(255, 20, 33, 49));
-                    surface.DrawText("Hand-Tracking", 414, 68, Colors.White, body);
-                    var statusColor = executing ? Colors.Red : Colors.Cyan;
+                        AppPalette.Surface);
+                    surface.DrawText("Hand-Tracking", 414, 68, AppPalette.Text, body);
+                    var statusColor = executing ? Colors.Red : AppPalette.Text;
                     var status = executing ? "PINCH DETECTED" : handsFresh && _handTips.Length > 0
                         ? "Pinch: red circle for one second" : "Waiting for a hand";
                     surface.DrawText(status, 414, 113, statusColor, small);
                 }
                 else
                 {
-                    surface.DrawText("PROJECT TABLETOP", 390, 83, Colors.Cyan, small);
-                    surface.DrawText(_boardSession.Title, 76, 264, Colors.White, heading);
-                    surface.DrawText("Coming soon", 80, 372, Colors.Cyan, label);
+                    surface.DrawText("PROJECT TABLETOP", 390, 83, AppPalette.MutedText, small);
+                    surface.DrawText(_boardSession.Title, 76, 264, AppPalette.Text, heading);
+                    surface.DrawText("Coming soon", 80, 372, AppPalette.IndicatorOn, label);
                     surface.DrawText("This app is not connected yet.", 80, 444, muted, body);
                     surface.DrawText("Point and pinch Back to choose another app.", 80, 543, muted, body);
                 }
@@ -227,22 +227,40 @@ public sealed partial class SceneCompositor
         ds.DrawImage(perspective);
     }
 
+    private static void DrawMenuButton(CanvasDrawingSession ds, BoardButton button,
+        bool hovered, CanvasTextFormat label)
+    {
+        var bounds = button.Bounds;
+        var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
+            bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
+        DrawButtonSurface(ds, rect, hovered);
+        ds.DrawText(button.Label, (float)rect.X + 34, (float)rect.Y + 58,
+            AppPalette.ButtonText, label);
+    }
+
+    private static void DrawButtonSurface(CanvasDrawingSession ds, Rect rect, bool hovered)
+    {
+        ds.FillRoundedRectangle(rect, 18, 18, AppPalette.Button);
+        var indicator = new Vector2((float)rect.X + 16, (float)(rect.Y + rect.Height / 2));
+        if (hovered)
+            ds.FillCircle(indicator, 10, AppPalette.IndicatorGlow);
+        ds.FillCircle(indicator, 6, hovered
+            ? AppPalette.IndicatorOn : AppPalette.IndicatorOff);
+    }
+
     private static void DrawBoardButton(CanvasDrawingSession ds, BoardButton button,
         bool hovered, CanvasTextFormat label, CanvasTextFormat small, string? description = null)
     {
         var bounds = button.Bounds;
         var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
             bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
-        ds.FillRoundedRectangle(rect, 18, 18, hovered
-            ? Color.FromArgb(255, 20, 78, 92) : Color.FromArgb(255, 27, 43, 62));
-        ds.DrawRoundedRectangle(rect, 18, 18,
-            hovered ? Colors.Cyan : Color.FromArgb(255, 87, 115, 140), hovered ? 5 : 2);
-        var x = (float)rect.X + 26;
+        DrawButtonSurface(ds, rect, hovered);
+        var x = (float)rect.X + 34;
         var y = (float)rect.Y + (description is null ? 27 : 33);
-        ds.DrawText(button.Label, x, y, Colors.White, label);
+        ds.DrawText(button.Label, x, y, AppPalette.ButtonText, label);
         if (description is not null)
             ds.DrawText(description, x, (float)rect.Y + 100,
-                hovered ? Colors.Cyan : Color.FromArgb(255, 183, 201, 218), small);
+                AppPalette.ButtonText, small);
     }
 
 }

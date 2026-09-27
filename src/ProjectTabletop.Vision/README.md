@@ -134,16 +134,25 @@ smaller grid and is not the full-white physical-cardboard scan.
 
 ## Regression and hardware checks
 
-Photo Copy uses `PhotoCopyHandSelector` to match a fresh pinch cursor to the
-pinching hand, then selects the other, unpinched hand from the same frame.
-`PhotoHandExtractor` rectifies its camera pixels and landmarks onto the board,
-segments the hand against white output with landmark-seeded GrabCut, and returns
-straight-alpha BGRA pixels plus a palm anchor and middle-finger axis. It trims
-the forearm and rejects unusable contrast, clipped poses, or a folded middle
-finger. It preserves photographed pixels; no image-generation model is used.
-The optional empty-white reference is supported by the extractor but the app
-currently uses the local white surroundings. Run `-- --photo-copy` for synthetic
-color, alpha, finger-gap, shadow, wrist, stride, perspective, and rejection checks.
+Photo Copy uses `PhotoCopyHandSelector.TrySelectShutter` to match a fresh pinch
+cursor to the hand making the command. One or two hands may be visible; only
+one may pinch. `PhotoObjectExtractor` rectifies the camera image, estimates the
+white background below the projected controls, and selects a distinct foreground
+component after excluding the shutter hand and connected forearm. Generic objects
+need visible contrast, not a trained class or hand landmarks. Ambiguous, clipped,
+or overlapping subjects are rejected with retry guidance. White-on-white and
+transparent objects remain limited by visible contrast, and shadows/reflections
+can affect the outline.
+
+If the selected component matches the other detected hand, `PhotoHandExtractor`
+provides landmark-seeded GrabCut, wrist trimming, and its middle-finger direction.
+Generic subjects use a center anchor and upward direction. Both paths retain
+camera pixels with straight-alpha BGRA, including background holes; no generated
+image or semantic object model is involved. `PhotoHandCutout` retains its historical
+field names for both subject types. No empty-board reference step is required.
+Run `-- --photo-objects` for general object and shutter-selection checks, or
+`-- --photo-copy` to include existing hand color, alpha, finger-gap, shadow, wrist,
+stride, perspective, and rejection checks.
 
 The default regression also runs the bundled hand models against an independently
 annotated MediaPipe pointing-hand image, its rotation, an off-center landscape

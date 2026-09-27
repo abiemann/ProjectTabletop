@@ -107,6 +107,7 @@ public sealed partial class SceneCompositor : IDisposable
             _boardCameraMap = null;
             _boardSurfaceMap = null;
             _handTips = [];
+            ClearHandSpotlights();
             _boardSession.ResetInput(DateTimeOffset.UtcNow);
             InvalidatePhotoCopyCapture();
         }
@@ -120,7 +121,11 @@ public sealed partial class SceneCompositor : IDisposable
             _handFrameTime = DateTimeOffset.MinValue;
             // A visual timeout must not reject a still-fresh inference that was
             // already in flight. Camera/calibration resets still block old input.
-            if (resetInput) _boardSession.ResetInput(DateTimeOffset.UtcNow);
+            if (resetInput)
+            {
+                ClearHandSpotlights();
+                _boardSession.ResetInput(DateTimeOffset.UtcNow);
+            }
         }
     }
 
@@ -198,7 +203,11 @@ public sealed partial class SceneCompositor : IDisposable
 
     public void SetDisplayAspect(double aspect)
     {
-        lock (_gate) _displayAspect = double.IsFinite(aspect) && aspect > 0 ? aspect : 16.0 / 9;
+        lock (_gate)
+        {
+            _displayAspect = double.IsFinite(aspect) && aspect > 0 ? aspect : 16.0 / 9;
+            ClearHandSpotlights();
+        }
     }
 
     public void SetTopPlaneMap(Func<PixelPoint, Vector2>? map)
@@ -227,7 +236,11 @@ public sealed partial class SceneCompositor : IDisposable
     /// <summary>Full-black projector output for an ambient camera reference frame.</summary>
     public void SetBlackOutput(bool enabled)
     {
-        lock (_gate) _blackOutput = enabled;
+        lock (_gate)
+        {
+            _blackOutput = enabled;
+            if (enabled) ClearHandSpotlights();
+        }
     }
 
     public const int BoardCalibrationSpotCount = 5;
@@ -290,6 +303,7 @@ public sealed partial class SceneCompositor : IDisposable
             _boardSurfaceMap = Homography.FromFourPoints(
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)], mediaClip.Corners);
             _handTips = [];
+            ClearHandSpotlights();
             _boardSession.ResetInput(DateTimeOffset.UtcNow);
             InvalidatePhotoCopyCapture();
             _boardSetupStarted = DateTimeOffset.UtcNow;
@@ -303,6 +317,7 @@ public sealed partial class SceneCompositor : IDisposable
         {
             _calibrationTarget = index is >= 0 and < 4 ? index : -1;
             _calibrationTargetTop = pieceTop;
+            if (_calibrationTarget >= 0) ClearHandSpotlights();
         }
     }
 
@@ -482,6 +497,7 @@ public sealed partial class SceneCompositor : IDisposable
                     DrawOverlay(ds, output, mediaRect, detection, frame, _topPlaneMap);
                 }
             }
+            DrawHandSpotlights(ds, output);
             DrawHandCursor(ds, output);
         }
     }
@@ -490,7 +506,7 @@ public sealed partial class SceneCompositor : IDisposable
     {
         // The projected marker would become part of the camera photograph.
         // Camera-preview markers remain available while Photo Copy is active.
-        if (_boardSession.Screen == BoardScreen.PhotoCopy) return;
+        if (_boardSession.Screen == BoardScreen.PhotoCopy || _boardSetup || _calibrationTarget >= 0) return;
         var now = DateTimeOffset.UtcNow;
         if (_boardMediaClip is not { } clip || _boardCameraMap is null ||
             _handTips.Length == 0 || _handFrameTime > now ||
@@ -503,11 +519,12 @@ public sealed partial class SceneCompositor : IDisposable
         var radius = Math.Max(6, (float)Math.Min(output.Width, output.Height) * 0.018f);
         foreach (var cursor in _handTips)
         {
+            if (now >= cursor.ExecuteUntil) continue;
             var tip = cursor.Position;
             var center = new Vector2((float)(output.X + tip.X * output.Width),
                                     (float)(output.Y + tip.Y * output.Height));
             ds.DrawCircle(center, radius, Colors.Black, Math.Max(4, radius * 0.35f));
-            ds.DrawCircle(center, radius, now < cursor.ExecuteUntil ? Colors.Red : Colors.Cyan,
+            ds.DrawCircle(center, radius, Colors.Red,
                 Math.Max(2, radius * 0.17f));
         }
     }
@@ -544,15 +561,15 @@ public sealed partial class SceneCompositor : IDisposable
 
     private static void DrawTestGrid(CanvasDrawingSession ds, Rect stage)
     {
-        ds.FillRectangle(stage, Colors.White);
+        ds.FillRectangle(stage, AppPalette.Background);
         for (var i = 0; i <= 10; i++)
         {
             var x = (float)(stage.X + stage.Width * i / 10);
             var y = (float)(stage.Y + stage.Height * i / 10);
-            ds.DrawLine(x, (float)stage.Y, x, (float)(stage.Y + stage.Height), Colors.Gray, i is 0 or 10 or 5 ? 2 : 1);
-            ds.DrawLine((float)stage.X, y, (float)(stage.X + stage.Width), y, Colors.Gray, i is 0 or 10 or 5 ? 2 : 1);
+            ds.DrawLine(x, (float)stage.Y, x, (float)(stage.Y + stage.Height), AppPalette.GridLine, i is 0 or 10 or 5 ? 2 : 1);
+            ds.DrawLine((float)stage.X, y, (float)(stage.X + stage.Width), y, AppPalette.GridLine, i is 0 or 10 or 5 ? 2 : 1);
         }
-        ds.DrawText("21 in × 21 in", (float)stage.X + 16, (float)stage.Y + 12, Colors.Black);
+        ds.DrawText("21 in × 21 in", (float)stage.X + 16, (float)stage.Y + 12, AppPalette.MutedText);
     }
 
     private static void DrawDetectedBoardGrid(CanvasDrawingSession ds, Rect output,

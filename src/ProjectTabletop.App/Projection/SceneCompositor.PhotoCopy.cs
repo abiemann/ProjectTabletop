@@ -16,7 +16,7 @@ public sealed partial class SceneCompositor
     private static readonly TimeSpan PhotoCopyWhiteSettle = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan PhotoCopyRemoveHandDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan PhotoCopyStampInterval = TimeSpan.FromMilliseconds(25);
-    private const string PhotoCopyReadyMessage = "Show one hand on the board. Pinch with your other hand.";
+    private const string PhotoCopyReadyMessage = "Place one object in the white area. Pinch beside it to copy.";
     private long _photoCopySessionRevision = -1;
     private long _photoCopyRevision;
     private DateTimeOffset _photoCopyWhiteShownAt;
@@ -51,6 +51,7 @@ public sealed partial class SceneCompositor
         {
             _blackOutput = false;
             _boardSession.ShowPhotoCopy();
+            ClearHandSpotlights();
             SyncPhotoCopySession();
         }
     }
@@ -154,9 +155,9 @@ public sealed partial class SceneCompositor
     {
         if (_photoCopyRenderFailed || _photoCopyCutout is null) return _photoCopyStatus;
         var count = PhotoCopyStampCount(now);
-        if (count == 0) return "Photo captured. Remove your hands.";
+        if (count == 0) return "Photo captured. Remove the object and your hands.";
         return count < _photoCopyPlacements.Count
-            ? $"Copying your hand: {count} of {_photoCopyPlacements.Count}"
+            ? $"Copying your photo: {count} of {_photoCopyPlacements.Count}"
             : "Copies complete. Pinch Capture again to make another photo.";
     }
 
@@ -178,8 +179,8 @@ public sealed partial class SceneCompositor
             {
                 var placement = _photoCopyPlacements[index];
                 var scale = (float)(placement.Height * BoardSurfaceSize / cutout.Height);
-                // Layout rotations start with an upward middle finger. Rotate the
-                // measured photo axis to that direction around its actual palm.
+                // Rotate the photographed subject's upward axis toward the center.
+                // For a detected hand, that axis is its measured middle finger.
                 var rotation = (float)(placement.RotationRadians - Math.PI / 2 - originalAngle);
                 surface.Transform = Matrix3x2.CreateTranslation(-anchor) *
                     Matrix3x2.CreateScale(scale) * Matrix3x2.CreateRotation(rotation) *

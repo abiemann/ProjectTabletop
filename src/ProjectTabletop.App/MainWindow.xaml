@@ -5,7 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml"
     Title="Project Tabletop">
-    <Grid Background="#111827" ColumnSpacing="12">
+    <Grid Background="{StaticResource TabletopBackgroundBrush}" ColumnSpacing="12">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="410" />
             <ColumnDefinition Width="*" />
@@ -41,8 +41,8 @@
                 </StackPanel>
                 <TextBlock x:Name="BoardAppStatusText" Text="Board menu. Complete board setup to project it." TextWrapping="Wrap" />
                 <Button Content="Photo Copy" Click="PhotoCopy_Click" />
-                <TextBlock Text="Photo Copy: hold the hand you want photographed in the white area. Keep both hands visible, then pinch with the other hand. Copies spiral inward with the middle finger pointing toward the center." TextWrapping="Wrap" />
-                <TextBlock Text="Point at a board button with the blue circle, then pinch thumb and index finger to open it. Release before selecting again. Each app has a Back to menu button." TextWrapping="Wrap" />
+                <TextBlock Text="Photo Copy: place one object in the white area below the controls. Pinch with a visible hand beside the object, leaving a gap. The object is photographed and copied in an inward spiral. You can still copy your other hand." TextWrapping="Wrap" />
+                <TextBlock Text="Point until the button's side light comes on, then pinch thumb and index finger to open it. A white spotlight illuminates your detected hand. Release before selecting again." TextWrapping="Wrap" />
                 <TextBlock Text="Background media (optional)" FontWeight="SemiBold" />
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button Content="Choose video or image" Click="ChooseBackground_Click" />
@@ -56,10 +56,10 @@
                 <TextBlock x:Name="BoardSetupStatusText" Text="Board setup first finds the cardboard under black output, then uses white projection and nine alignment spots to fit its grid." TextWrapping="Wrap" />
 
                 <TextBlock Text="4  Hand tracking" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
-                <ToggleSwitch x:Name="HandTrackingToggle" Header="Index fingertip circle" IsOn="True" Toggled="HandTrackingToggle_Toggled" />
+                <ToggleSwitch x:Name="HandTrackingToggle" Header="Hand tracking and spotlight" IsOn="True" Toggled="HandTrackingToggle_Toggled" />
                 <TextBlock x:Name="HandTrackingStatusText" Text="Start the webcam to track your index fingertip." TextWrapping="Wrap" />
-                <TextBlock Text="The camera circle works immediately. After board setup, the circle also follows your fingertip on the board. Keep your fingertip close to the board surface; lifting it causes projection offset. No piece training or raised-top calibration is needed." TextWrapping="Wrap" />
-                <TextBlock Text="Hand-Tracking opens the familiar grid with fingertip circles. Briefly pinch your thumb and index fingertip together: the circle turns red for one second. Separate them before pinching again. Blackjack, Monopoly, GTA, and Diablo show Coming soon for now." TextWrapping="Wrap" />
+                <TextBlock Text="The camera preview marks your fingertip in white. After board setup, a white spotlight covers each detected hand to help the camera see its fingers. Keep the hand near the board; lifting it causes projection offset. The camera must first detect a hand before its light can appear." TextWrapping="Wrap" />
+                <TextBlock Text="Hand-Tracking opens the grid with hand illumination. Pinch your thumb and index fingertip together for a red fingertip circle lasting one second. Separate them before pinching again. Photo Copy keeps its white capture surface; the games show Coming soon." TextWrapping="Wrap" />
                 <Button Content="Save raw camera PNG" Click="SaveRawSnapshot_Click" />
 
                 <Expander Header="Physical pieces (optional / later)" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
@@ -137,7 +137,7 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
             <TextBlock Grid.Row="0" Text="CAMERA  ·  live fingertip tracking" FontWeight="SemiBold" />
-            <Border Grid.Row="1" Background="#070B11" CornerRadius="4">
+            <Border Grid.Row="1" Background="{StaticResource TabletopSurfaceBrush}" CornerRadius="4">
                 <canvas:CanvasControl x:Name="CameraCanvas" UseSharedDevice="True" Draw="CameraCanvas_Draw" PointerPressed="CameraCanvas_PointerPressed" />
             </Border>
             <TextBlock Grid.Row="2" Text="PROJECTION PREVIEW  ·  output display aspect ratio" FontWeight="SemiBold" />

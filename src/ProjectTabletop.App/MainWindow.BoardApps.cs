@@ -55,8 +55,8 @@ public sealed partial class MainWindow
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
         SetStatus(_scene.HasBoardMediaClip
-            ? "Photo Copy: show both hands, then pinch with the hand you do not want photographed."
-            : "Photo Copy selected. Scan the board before capturing a hand.");
+            ? "Photo Copy: place one object in the white area, then pinch beside it to take the photo."
+            : "Photo Copy selected. Scan the board before taking a photo.");
     }
 
     private void PrepareBoardApp()

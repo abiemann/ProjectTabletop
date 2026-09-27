@@ -4,12 +4,25 @@ using ProjectTabletop.Vision;
 
 if (args is ["--photo-copy"])
 {
+    PhotoCopySelectionRegression.Run();
     PhotoCopyRegression.Run();
+    PhotoObjectRegression.Run();
     return;
 }
 if (args is ["--hands"])
 {
     HandTrackingRegression.Run();
+    return;
+}
+if (args is ["--photo-objects"])
+{
+    PhotoCopySelectionRegression.Run();
+    PhotoObjectRegression.Run();
+    return;
+}
+if (args is ["--hand-spotlights"])
+{
+    HandSpotlightRegression.Run();
     return;
 }
 if (args is ["--markers"])
@@ -94,7 +107,9 @@ CheckMovedHardwareFrames(whiteHardwareBoard);
 CheckProjectedCornerMarkers();
 CheckCalibrationSpot();
 HandTrackingRegression.Run();
+HandSpotlightRegression.Run();
 PhotoCopyRegression.Run();
+PhotoObjectRegression.Run();
 if (args.Length == 1)
 {
     using Mat actual = Cv2.ImRead(args[0], ImreadModes.Unchanged);

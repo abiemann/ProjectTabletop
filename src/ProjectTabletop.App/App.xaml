@@ -1,13 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Application
     x:Class="ProjectTabletop.App.App"
+    RequestedTheme="Dark"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:local="using:ProjectTabletop.App"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+                <local:AppThemeResources />
             </ResourceDictionary.MergedDictionaries>
+            <Style TargetType="ComboBox">
+                <Setter Property="Background" Value="{StaticResource TabletopButtonBrush}" />
+                <Setter Property="Foreground" Value="{StaticResource TabletopButtonTextBrush}" />
+            </Style>
+            <Style TargetType="TextBox">
+                <Setter Property="Background" Value="{StaticResource TabletopButtonBrush}" />
+                <Setter Property="Foreground" Value="{StaticResource TabletopButtonTextBrush}" />
+            </Style>
+            <Style TargetType="NumberBox">
+                <Setter Property="Background" Value="{StaticResource TabletopButtonBrush}" />
+                <Setter Property="Foreground" Value="{StaticResource TabletopButtonTextBrush}" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

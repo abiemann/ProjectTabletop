@@ -60,6 +60,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        AppPalette.ApplyTitleBar(AppWindow.TitleBar);
         _camera.FrameReceived += Camera_FrameReceived;
         _camera.CaptureFailed += Camera_CaptureFailed;
         Closed += MainWindow_Closed;

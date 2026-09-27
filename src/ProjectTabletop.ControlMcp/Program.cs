@@ -41,7 +41,7 @@ static async Task RunMcpAsync()
             new McpServerToolCreateOptions
             {
                 Name = "set_hand_tracking",
-                Description = "Enable or disable index-fingertip circles in the camera preview and registered board projection."
+                Description = "Enable or disable hand tracking, camera fingertip markers, and white hand spotlights on the registered board."
             });
     var options = new McpServerOptions
     {
@@ -62,7 +62,7 @@ static async Task RunMcpAsync()
             Tool("show_test_grid", "Show the board-clipped test grid on the projector."),
             Tool("show_board_menu", "Show the board app menu and enable hand tracking for pinch selection."),
             Tool("show_hand_tracking_test", "Open the built-in Hand-Tracking gesture test and enable hand tracking."),
-            Tool("show_photo_copy", "Open Photo Copy on white output; a pinch photographs the other visible hand."),
+            Tool("show_photo_copy", "Open Photo Copy on white output; a pinch photographs a separate object or the other hand."),
             Tool("capture_projection_preview", "Save the current compositor scene as a PNG, without capturing desktop windows."),
             Tool("shutdown", "Close the local ProjectTabletop app cleanly.")
         ]

@@ -188,6 +188,7 @@ public sealed partial class MainWindow
                                     DateTimeOffset.UtcNow).ToArray();
                                 _handPreview = new HandPreview(cursors, frame.Width, frame.Height, frame.Timestamp);
                                 _scene.SetHandCursors(cursors, frame.Timestamp);
+                                _scene.SetHandSpotlights(visibleHands, frame.Timestamp);
                                 QueuePhotoCopyCapture(frame, visibleHands, cursors);
                             }
                         }
@@ -236,8 +237,8 @@ public sealed partial class MainWindow
              ExecutingHandCount > 0 ? "Pinch detected: execute signal. Red circle for one second. " +
                  "Separate thumb and index finger before the next pinch." :
              $"Tracking {TrackedHandCount} index fingertip{(TrackedHandCount == 1 ? "" : "s")}. " +
-                 (_scene.HasBoardMediaClip ? "The circle is also projected on the board." :
-                     "Complete board setup to project the circle.") + " Point at a button and pinch to select, or open Hand-Tracking to test gestures.");
+                 (_scene.HasBoardMediaClip ? "A white spotlight illuminates each detected hand." :
+                     "Complete board setup to illuminate your hand.") + " Point at a button and pinch to select, or open Hand-Tracking to test gestures.");
     }
 
     private void DrawHandPreview(CanvasDrawingSession ds, CameraFrame frame, Rect rect)
@@ -254,7 +255,7 @@ public sealed partial class MainWindow
             var center = new Vector2((float)(rect.X + tip.X / frame.Width * rect.Width),
                                     (float)(rect.Y + tip.Y / frame.Height * rect.Height));
             ds.DrawCircle(center, 12, Colors.Black, 6);
-            ds.DrawCircle(center, 12, cursor.IsExecuting(now) ? Colors.Red : Colors.Cyan, 3);
+            ds.DrawCircle(center, 12, cursor.IsExecuting(now) ? Colors.Red : Colors.White, 3);
         }
     }
 

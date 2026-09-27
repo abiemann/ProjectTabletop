@@ -25,6 +25,7 @@ public sealed partial class ProjectionWindow : Window
     {
         _scene = scene;
         InitializeComponent();
+        AppPalette.ApplyTitleBar(AppWindow.TitleBar);
         _displayWatcher = DisplayArea.CreateWatcher();
         _displayWatcher.Removed += (_, _) => QueuePlacementCheck();
         _displayWatcher.Updated += (_, _) => QueuePlacementCheck();

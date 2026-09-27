@@ -30,40 +30,41 @@ public sealed partial class MainWindow
             now - frame.Timestamp > HandMarkerLifetime) return;
 
         if (shutters.Length != 1 ||
-            !PhotoCopyHandSelector.TrySelect(hands, shutters[0], out var target) || target is null)
+            !PhotoCopyHandSelector.TrySelectShutter(hands, shutters[0], out var shutter) || shutter is null)
         {
-            _scene.SetPhotoCopyStatus("Show both hands. Pinch with only the hand you do not want copied.", context.Revision);
-            return;
-        }
-        if (!HandInsidePhotoArea(target, context.CameraToBoard))
-        {
-            _scene.SetPhotoCopyStatus("Keep the whole hand to copy in the white area, below the buttons.", context.Revision);
+            _scene.SetPhotoCopyStatus("Pinch with one visible hand, keeping it separate from the object.", context.Revision);
             return;
         }
 
-        _scene.SetPhotoCopyStatus("Taking a photo of the other hand...", context.Revision);
-        _photoCopyTask = CapturePhotoCopyAsync(frame, target, context);
+        _scene.SetPhotoCopyStatus("Taking a photo of the object...", context.Revision);
+        _photoCopyTask = CapturePhotoCopyAsync(frame, shutter,
+            hands.Where(hand => !ReferenceEquals(hand, shutter)).ToArray(), context);
     }
 
-    private async Task CapturePhotoCopyAsync(CameraFrame frame, HandDetection target,
+    private async Task CapturePhotoCopyAsync(CameraFrame frame, HandDetection shutter,
+        IReadOnlyList<HandDetection> otherHands,
         SceneCompositor.PhotoCopyCaptureContext context)
     {
         try
         {
-            var cutout = await Task.Run(() => PhotoHandExtractor.Extract(frame.Width, frame.Height,
-                frame.Stride, frame.Bgra, target, context.CameraToBoard));
+            var result = await Task.Run(() =>
+            {
+                var cutout = PhotoObjectExtractor.Extract(frame.Width, frame.Height,
+                    frame.Stride, frame.Bgra, shutter, context.CameraToBoard, out var failure, otherHands);
+                return (Cutout: cutout, Failure: failure);
+            });
             if (_closing) return;
-            if (cutout is null)
-                _scene.SetPhotoCopyStatus("Keep the hand flat with the middle finger extended; pinch with the other hand again.", context.Revision);
-            else if (_scene.SetPhotoCopyCapture(cutout, context.Revision))
-                _lastPhotoCopyCapture = DescribeCutout(cutout, frame.Timestamp);
+            if (result.Cutout is null)
+                _scene.SetPhotoCopyStatus(result.Failure ?? "No separate object found. Place it in the white area and pinch again.", context.Revision);
+            else if (_scene.SetPhotoCopyCapture(result.Cutout, context.Revision))
+                _lastPhotoCopyCapture = DescribeCutout(result.Cutout, frame.Timestamp);
             UpdateBoardAppStatus();
         }
         catch (Exception ex)
         {
             if (!_closing)
             {
-                _scene.SetPhotoCopyStatus("Photo capture failed. Release, then pinch again with the other hand.", context.Revision);
+                _scene.SetPhotoCopyStatus("Photo capture failed. Release, then pinch again away from the object.", context.Revision);
                 AppLog.Write("Photo Copy capture", ex);
             }
         }
@@ -83,28 +84,5 @@ public sealed partial class MainWindow
                 border = false;
         }
         return new(frameTime, cutout.Width, cutout.Height, transparent, partial, border);
-    }
-
-    private static bool HandInsidePhotoArea(HandDetection hand, IReadOnlyList<double> map)
-    {
-        if (hand.Landmarks.Count != 21 || map.Count != 9) return false;
-        var boardPoints = new List<PixelPoint>(21);
-        foreach (var point in hand.Landmarks)
-        {
-            var denominator = map[6] * point.X + map[7] * point.Y + map[8];
-            if (!double.IsFinite(denominator) || Math.Abs(denominator) < 1e-12) return false;
-            var u = (map[0] * point.X + map[1] * point.Y + map[2]) / denominator;
-            var v = (map[3] * point.X + map[4] * point.Y + map[5]) / denominator;
-            if (!double.IsFinite(u) || !double.IsFinite(v) || u is < .06 or > .94 || v is < .23 or > .94)
-                return false;
-            boardPoints.Add(new PixelPoint(u, v));
-        }
-        static double Distance(PixelPoint a, PixelPoint b) =>
-            Math.Sqrt(Math.Pow(a.X - b.X, 2) + Math.Pow(a.Y - b.Y, 2));
-        var palmScale = Math.Max(Distance(boardPoints[0], boardPoints[9]),
-            Distance(boardPoints[5], boardPoints[17]));
-        // Finger contours extend beyond the landmark centers. Keep the entire
-        // segmentation crop below projected text, including its color-reference margin.
-        return boardPoints.Min(point => point.Y) - (palmScale * .22 + .004) > .215;
     }
 }

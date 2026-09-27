@@ -1,0 +1,95 @@
+using System.Numerics;
+using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Brushes;
+using Microsoft.UI;
+using ProjectTabletop.Interaction;
+using ProjectTabletop.Vision;
+using Windows.Foundation;
+using Windows.UI;
+
+namespace ProjectTabletop.App.Projection;
+
+public sealed partial class SceneCompositor
+{
+    private static readonly TimeSpan SpotlightHold = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan SpotlightLifetime = TimeSpan.FromMilliseconds(700);
+    private const float SpotlightCoreFraction = .96f;
+    private HandSpotlight[] _handSpotlights = [];
+    private DateTimeOffset _spotlightFrameTime;
+    private DateTimeOffset _spotlightResetTime;
+
+    public int ActiveHandSpotlightCount
+    {
+        get { lock (_gate) return SpotlightOpacity(DateTimeOffset.UtcNow) > 0 ? _handSpotlights.Length : 0; }
+    }
+
+    // Illumination has its own short dropout hold. It never supplies landmarks,
+    // hover positions, or gestures back to the input path.
+    public void SetHandSpotlights(IReadOnlyList<HandDetection> hands, DateTimeOffset frameTime)
+    {
+        lock (_gate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (frameTime < _spotlightResetTime || frameTime < _spotlightFrameTime ||
+                frameTime > now || now - frameTime > TimeSpan.FromMilliseconds(350)) return;
+            if (_boardCameraMap is null || _boardMediaClip is null || _blackOutput || _boardSetup ||
+                _calibrationTarget >= 0 || _boardSession.Screen == BoardScreen.PhotoCopy)
+            {
+                ClearHandSpotlights();
+                return;
+            }
+            var map = _boardCameraMap.ToMatrix();
+            var lights = new List<HandSpotlight>();
+            foreach (var hand in hands)
+                if (HandSpotlight.TryCreate(hand, map, _displayAspect, out var light))
+                    lights.Add(light);
+            if (lights.Count == 0) return;
+            _handSpotlights = lights.ToArray();
+            _spotlightFrameTime = frameTime;
+        }
+    }
+
+    private void ClearHandSpotlights()
+    {
+        _handSpotlights = [];
+        _spotlightFrameTime = DateTimeOffset.MinValue;
+        _spotlightResetTime = DateTimeOffset.UtcNow;
+    }
+
+    private float SpotlightOpacity(DateTimeOffset now)
+    {
+        var age = now - _spotlightFrameTime;
+        if (_blackOutput || _boardSetup || _calibrationTarget >= 0 || _boardMediaClip is null ||
+            _boardSession.Screen == BoardScreen.PhotoCopy || age < TimeSpan.Zero || age >= SpotlightLifetime)
+            return 0;
+        return age <= SpotlightHold ? 1 :
+            (float)((SpotlightLifetime - age).TotalMilliseconds /
+                (SpotlightLifetime - SpotlightHold).TotalMilliseconds);
+    }
+
+    // Called inside the existing board clip, over the complete scene: drawing
+    // labels back over the light would put those dark markings back on the hand.
+    private void DrawHandSpotlights(CanvasDrawingSession ds, Rect output)
+    {
+        var opacity = SpotlightOpacity(DateTimeOffset.UtcNow);
+        if (_handSpotlights.Length == 0 || opacity <= 0) return;
+        using var brush = new CanvasRadialGradientBrush(ds.Device,
+        [
+            new CanvasGradientStop { Position = 0, Color = Colors.White },
+            new CanvasGradientStop { Position = SpotlightCoreFraction, Color = Colors.White },
+            new CanvasGradientStop { Position = 1, Color = Color.FromArgb(0, 255, 255, 255) }
+        ]);
+        brush.Opacity = opacity;
+        foreach (var light in _handSpotlights)
+        {
+            var center = new Vector2((float)(output.X + light.Center.X * output.Width),
+                (float)(output.Y + light.Center.Y * output.Height));
+            // The solid white core covers the hand; only the outer margin fades.
+            var radius = (float)(light.Radius * output.Height / SpotlightCoreFraction);
+            brush.Center = center;
+            brush.RadiusX = radius;
+            brush.RadiusY = radius;
+            ds.FillCircle(center, radius, brush);
+        }
+    }
+}

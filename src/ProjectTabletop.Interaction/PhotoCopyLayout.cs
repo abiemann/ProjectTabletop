@@ -1,15 +1,15 @@
 namespace ProjectTabletop.Interaction;
 
 /// <summary>
-/// One hand image on the normalized square board. CenterU/V locate the source
-/// image's anchor (normally its palm). RotationRadians rotates a
-/// middle-finger-up source image (toward negative Y) in the board's Y-down axes.
+/// One photographed subject on the normalized square board. CenterU/V locate
+/// the source image's anchor. RotationRadians rotates an upward source axis
+/// (toward negative Y) in the board's Y-down axes.
 /// Width and Height describe the unrotated image, preserving its aspect ratio.
 /// </summary>
 public readonly record struct PhotoCopyPlacement(double CenterU, double CenterV,
     double Width, double Height, double RotationRadians);
 
-/// <summary>Places hand copies clockwise from the outside inward, each pointing at the board center.</summary>
+/// <summary>Places photo copies clockwise from the outside inward, each pointing at the board center.</summary>
 public static class PhotoCopyLayout
 {
     // Even dimensions leave four copies around the center, so every finger

@@ -96,8 +96,62 @@ public sealed partial class MainWindow
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, $"photo-copy-verification-{Guid.NewGuid():N}.png");
         await target.SaveAsync(path, CanvasBitmapFileFormat.Png);
-        return new { passed = true, copies = scene.PhotoCopyCount, transparentSource = true,
-            fullBoardCoverage = true, buttonsVisible = true, path };
+        var completedCopies = scene.PhotoCopyCount;
+
+        // A completed worker may return after Capture again or after leaving and
+        // reopening Photo Copy. Neither its pixels nor its error may enter the
+        // new session, which must wait for its own white field to settle.
+        void RejectObsoleteResult(long revision)
+        {
+            var currentStatus = scene.PhotoCopyStatus;
+            if (scene.SetPhotoCopyCapture(sprite, revision))
+                throw new InvalidOperationException("An obsolete photo capture entered a newer session.");
+            scene.SetPhotoCopyStatus("Obsolete worker failure", revision);
+            if (scene.PhotoCopyStatus != currentStatus)
+                throw new InvalidOperationException("An obsolete photo failure replaced the current status.");
+        }
+
+        // Exercise the actual Capture again gesture path, not only the public
+        // ShowPhotoCopy reset. Its same-screen navigation still needs a revision.
+        var restartTime = DateTimeOffset.UtcNow;
+        var restartTip = new PixelPoint(.1 + .8 * (inset / 2 + .8 * (1 - inset)),
+            .1 + .8 * (inset / 2 + .1 * (1 - inset)));
+        scene.SetHandCursors([new(restartTip, restartTime.AddSeconds(1), 1)], restartTime);
+        if (scene.CurrentBoardScreen != BoardScreen.PhotoCopy || scene.PhotoCopyCount != 0 ||
+            scene.TryGetPhotoCopyCaptureContext(out _))
+            throw new InvalidOperationException("Capture again did not clear the photo and require a new white draw.");
+        RejectObsoleteResult(context.Revision);
+        Draw();
+        if (scene.TryGetPhotoCopyCaptureContext(out _))
+            throw new InvalidOperationException("Capture again skipped the white-field settling interval.");
+        await Task.Delay(1100);
+        if (!scene.TryGetPhotoCopyCaptureContext(out var restartedContext) ||
+            restartedContext.Revision <= context.Revision || restartedContext.ReadyAfter <= context.ReadyAfter)
+            throw new InvalidOperationException("Capture again did not create a fresh, settled capture context.");
+        RejectObsoleteResult(context.Revision);
+
+        scene.ShowBoardMenu();
+        RejectObsoleteResult(restartedContext.Revision);
+        scene.ShowPhotoCopy();
+        if (scene.TryGetPhotoCopyCaptureContext(out _))
+            throw new InvalidOperationException("Reopening Photo Copy reused the previous white field.");
+        Draw();
+        if (scene.TryGetPhotoCopyCaptureContext(out _))
+            throw new InvalidOperationException("Reopening Photo Copy skipped the white-field settling interval.");
+        await Task.Delay(1100);
+        if (!scene.TryGetPhotoCopyCaptureContext(out var reopenedContext) ||
+            reopenedContext.Revision <= restartedContext.Revision ||
+            reopenedContext.ReadyAfter <= restartedContext.ReadyAfter)
+            throw new InvalidOperationException("Reopening Photo Copy did not create a fresh capture context.");
+        RejectObsoleteResult(restartedContext.Revision);
+        scene.InvalidatePhotoCopyCapture();
+        RejectObsoleteResult(reopenedContext.Revision);
+        if (scene.TryGetPhotoCopyCaptureContext(out _))
+            throw new InvalidOperationException("Invalidating camera capture retained a ready white field.");
+
+        return new { passed = true, copies = completedCopies, transparentSource = true,
+            fullBoardCoverage = true, buttonsVisible = true, obsoleteCaptureRejected = true,
+            obsoleteFailureRejected = true, resetRequiresWhiteSettle = true, path };
     }
 }
 #endif

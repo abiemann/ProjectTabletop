@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace ProjectTabletop.Vision;
 
-/// <summary>Selects the photographed hand from the same observation as a confirmed pinch on the other hand.</summary>
+/// <summary>Identifies the shutter hand and optional other hand in a confirmed pinch observation.</summary>
 public static class PhotoCopyHandSelector
 {
     private const double ReleaseThreshold = .45;
@@ -19,24 +19,48 @@ public static class PhotoCopyHandSelector
         ArgumentNullException.ThrowIfNull(hands);
         ArgumentNullException.ThrowIfNull(triggeringCursor);
         photoHand = null;
-        if (hands.Count != 2 || triggeringCursor.ExecuteEventId <= 0 ||
+        if (hands.Count != 2 || !TryMatchShutter(hands, triggeringCursor, out int matchedIndex)) return false;
+
+        photoHand = hands[1 - matchedIndex];
+        return true;
+    }
+
+    /// <summary>
+    /// Identifies the hand to exclude from a photo of an object on the board.
+    /// The caller supplies a fresh, newly confirmed pinch and detections from
+    /// that same frame. Match the actual fingertip, never the earlier button
+    /// selection anchor. One or two hands are allowed, but only one may pinch.
+    /// </summary>
+    public static bool TrySelectShutter(IReadOnlyList<HandDetection> hands, HandCursor triggeringCursor,
+        [NotNullWhen(true)] out HandDetection? shutter)
+    {
+        ArgumentNullException.ThrowIfNull(hands);
+        ArgumentNullException.ThrowIfNull(triggeringCursor);
+        shutter = null;
+        if (!TryMatchShutter(hands, triggeringCursor, out int matchedIndex)) return false;
+
+        shutter = hands[matchedIndex];
+        return true;
+    }
+
+    private static bool TryMatchShutter(IReadOnlyList<HandDetection> hands, HandCursor triggeringCursor,
+        out int matchedIndex)
+    {
+        matchedIndex = -1;
+        if (hands.Count is < 1 or > 2 || triggeringCursor.ExecuteEventId <= 0 ||
             !Finite(triggeringCursor.Position)) return false;
 
-        var observations = new (double Scale, double PinchRatio)[2];
-        int matchedIndex = -1;
+        var pinchRatios = new double[hands.Count];
         for (int index = 0; index < hands.Count; index++)
         {
             if (!TryObserve(hands[index], out double scale, out double ratio)) return false;
-            observations[index] = (scale, ratio);
+            pinchRatios[index] = ratio;
             if (Distance(hands[index].IndexTip, triggeringCursor.Position) > Math.Max(2, .1 * scale)) continue;
             if (matchedIndex >= 0) return false;
             matchedIndex = index;
         }
-        if (matchedIndex < 0 || observations[matchedIndex].PinchRatio >= ReleaseThreshold ||
-            observations[1 - matchedIndex].PinchRatio < ReleaseThreshold) return false;
-
-        photoHand = hands[1 - matchedIndex];
-        return true;
+        return matchedIndex >= 0 && pinchRatios[matchedIndex] < ReleaseThreshold &&
+            (hands.Count == 1 || pinchRatios[1 - matchedIndex] >= ReleaseThreshold);
     }
 
     private static bool TryObserve(HandDetection? hand, out double scale, out double pinchRatio)

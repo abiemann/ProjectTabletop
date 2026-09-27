@@ -33,6 +33,8 @@ public sealed partial class MainWindow
                 return await VerifyProjectionWindowAsync();
             case "verify_hand_tracking_input":
                 return VerifyHandTrackingInput();
+            case "verify_hand_spotlights":
+                return await VerifyHandSpotlightsAsync();
             case "verify_photo_copy_render":
                 return await VerifyPhotoCopyRenderAsync();
 #endif
@@ -60,6 +62,7 @@ public sealed partial class MainWindow
                     boardClipReady = _scene.HasBoardMediaClip,
                     boardSetupStatus = BoardSetupControlStatus,
                     handTrackingEnabled = HandTrackingEnabled,
+                    handSpotlightCount = _scene.ActiveHandSpotlightCount,
                     handTrackingStatus = HandTrackingControlStatus,
                     handCount = TrackedHandCount,
                     handExecuteActive = ExecutingHandCount > 0,
