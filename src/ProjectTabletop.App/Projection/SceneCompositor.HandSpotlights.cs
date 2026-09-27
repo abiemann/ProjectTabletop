@@ -15,7 +15,8 @@ public sealed partial class SceneCompositor
     private static readonly TimeSpan SpotlightLifetime = TimeSpan.FromMilliseconds(700);
     private const float SpotlightCoreFraction = .96f;
     private LitHand[] _handSpotlights = [];
-    private sealed record LitHand(HandSpotlight Light, long TrackingId, HandDetection Hand, DateTimeOffset SourceFrameTime);
+    private sealed record LitHand(HandSpotlight Light, HandSpotlight RawLight, long TrackingId,
+        HandDetection Hand, DateTimeOffset SourceFrameTime);
     private DateTimeOffset _spotlightFrameTime;
     private DateTimeOffset _spotlightObservationFrameTime;
     private DateTimeOffset _spotlightResetTime;
@@ -26,7 +27,7 @@ public sealed partial class SceneCompositor
         bool BoardSetup, int CalibrationTarget, DateTimeOffset SourceFrameTime, double? SourceAgeMilliseconds,
         float Opacity, long GeometryUpdates, long Resets, double ProjectorAspect,
         double[]? CameraToProjector, HandSpotlight[] Lights, long[] SuppressedHandIds,
-        HandLightLifetimeDiagnostics[] LightLifetimes);
+        HandLightLifetimeDiagnostics[] LightLifetimes, HandSpotlight[] RawLights);
 
     public sealed record HandLightLifetimeDiagnostics(long TrackingId, DateTimeOffset SourceFrameTime,
         double SourceAgeMilliseconds, float Opacity);
@@ -43,7 +44,8 @@ public sealed partial class SceneCompositor
                 _boardCameraMap?.ToMatrix(), _handSpotlights.Select(hand => hand.Light).ToArray(),
                 _suppressedHandLights.Select(hand => hand.TrackingId).ToArray(),
                 _handSpotlights.Select(hand => new HandLightLifetimeDiagnostics(hand.TrackingId, hand.SourceFrameTime,
-                    (now - hand.SourceFrameTime).TotalMilliseconds, SpotlightOpacity(now, hand.SourceFrameTime))).ToArray());
+                    (now - hand.SourceFrameTime).TotalMilliseconds, SpotlightOpacity(now, hand.SourceFrameTime))).ToArray(),
+                _handSpotlights.Select(hand => hand.RawLight).ToArray());
         }
     }
 
@@ -84,7 +86,7 @@ public sealed partial class SceneCompositor
             var suppressed = MatchSuppressedHandLights(observations, frameTime);
             var previous = _handSpotlights.Where(hand => SpotlightOpacity(now, hand.SourceFrameTime) > 0).ToArray();
             var matched = new HashSet<int>();
-            var matchedObservations = new HashSet<int>();
+            var matchedObservations = new Dictionary<int, int>();
             // Match all stable identities first so a nearby second hand cannot
             // claim the first hand's retained light through proximity alone.
             for (int index = 0; index < observations.Length; index++)
@@ -92,11 +94,11 @@ public sealed partial class SceneCompositor
                 var observation = observations[index];
                 int old = observation.TrackingId > 0
                     ? Array.FindIndex(previous, hand => hand.TrackingId == observation.TrackingId) : -1;
-                if (old >= 0 && matched.Add(old)) matchedObservations.Add(index);
+                if (old >= 0 && matched.Add(old)) matchedObservations.Add(index, old);
             }
             for (int index = 0; index < observations.Length; index++)
             {
-                if (matchedObservations.Contains(index)) continue;
+                if (matchedObservations.ContainsKey(index)) continue;
                 // A known hand without a light may be deliberately suppressed.
                 // It must not consume a different missing hand's cached light.
                 if (observations[index].TrackingId > 0 && knownIds.Contains(observations[index].TrackingId)) continue;
@@ -110,12 +112,22 @@ public sealed partial class SceneCompositor
                 }
                 // Reacquisition can assign a new tracker ID. Coalesce the old
                 // light, including when this observation is deliberately dark.
-                if (nearest >= 0) matched.Add(nearest);
+                if (nearest >= 0)
+                {
+                    matched.Add(nearest);
+                    matchedObservations.Add(index, nearest);
+                }
             }
             var lights = new List<LitHand>();
             for (int index = 0; index < observations.Length; index++)
                 if (!suppressed.Contains(index) && HandSpotlight.TryCreate(observations[index].Hand, map, _displayAspect, out var light))
-                    lights.Add(new(light, observations[index].TrackingId, observations[index].Hand, frameTime));
+                {
+                    var rawLight = light;
+                    if (matchedObservations.TryGetValue(index, out int old))
+                        light = HandSpotlightSmoother.Smooth(previous[old].Light, light,
+                            frameTime - previous[old].SourceFrameTime, _displayAspect);
+                    lights.Add(new(light, rawLight, observations[index].TrackingId, observations[index].Hand, frameTime));
+                }
             // One missing hand gets its own grace period even if a second hand
             // (or an off-board false positive) continues producing fresh results.
             // Never refresh a held light's timestamp or use it as gesture input.

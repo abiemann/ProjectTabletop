@@ -102,6 +102,9 @@ public sealed partial class MainWindow
                 cursor.FingersTogether, cursor.IndexFingerSeparated,
                 executing = cursor.IsExecuting(now), cursor.IsSpreadOut, cursor.SelectionPosition, cursor.SelectionFrameTime
             }).ToArray(),
+            visualCursors = _handPreview is { } preview && preview.Timestamp == frame.Timestamp
+                ? preview.VisualCursors.Select(cursor => new
+                    { cursor.TrackingId, cursor.Position, cursor.FingerTips }).ToArray() : null,
             hoveredButtons = _scene.HoveredBoardButtons,
             fingerSelection = _scene.CurrentFingerSelectionFeedback,
             lighting = _scene.GetHandLightingDiagnostics()

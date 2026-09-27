@@ -2,6 +2,17 @@ using System.Runtime.InteropServices;
 using OpenCvSharp;
 using ProjectTabletop.Vision;
 
+if (args is ["--hand-candidates"])
+{
+    HandCandidateContinuityRegression.Run();
+    return;
+}
+if (args is ["--hand-visuals"])
+{
+    HandVisualSmoothingRegression.Run();
+    HandSpotlightSmoothingRegression.Run();
+    return;
+}
 if (args is ["--photo-copy"])
 {
     PhotoCopySelectionRegression.Run();
@@ -13,6 +24,7 @@ if (args is ["--photo-copy"])
 }
 if (args is ["--hands"])
 {
+    HandCandidateContinuityRegression.Run();
     HandTrackingRegression.Run();
     HandSpreadRegression.Run();
     FourFingerPoseRegression.Run();
@@ -48,6 +60,7 @@ if (args is ["--photo-objects"])
 if (args is ["--hand-spotlights"])
 {
     HandSpotlightRegression.Run();
+    HandSpotlightSmoothingRegression.Run();
     return;
 }
 if (args is ["--markers"])
@@ -131,10 +144,13 @@ CheckHardwareAmbientScan(whiteHardwareBoard);
 CheckMovedHardwareFrames(whiteHardwareBoard);
 CheckProjectedCornerMarkers();
 CheckCalibrationSpot();
+HandCandidateContinuityRegression.Run();
 HandTrackingRegression.Run();
 HandSpreadRegression.Run();
 FourFingerPoseRegression.Run();
+HandVisualSmoothingRegression.Run();
 HandSpotlightRegression.Run();
+HandSpotlightSmoothingRegression.Run();
 PhotoCopyRegression.Run();
 PhotoObjectRegression.Run();
 PhotoObjectTargetRegression.Run();

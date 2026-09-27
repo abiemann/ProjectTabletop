@@ -19,6 +19,7 @@ public sealed partial class MainWindow
     private static readonly TimeSpan HandMarkerLifetime = TimeSpan.FromMilliseconds(350);
     private readonly object _handGate = new();
     private readonly HandGestureTracker _handGestures = new();
+    private readonly HandVisualSmoother _handVisuals = new();
     private HandTrackingEngine? _handEngine;
     // Accessed only by the single inference worker. Reset its cropped hand
     // history there, so camera/UI resets never wait for a network inference.
@@ -35,7 +36,8 @@ public sealed partial class MainWindow
     private string? _handLatencyWarning;
     private HandDetectionDiagnostics? _lastHandDetection;
 
-    private sealed record HandPreview(HandCursor[] Cursors, int Width, int Height, DateTimeOffset Timestamp);
+    private sealed record HandPreview(HandCursor[] Cursors, HandCursor[] VisualCursors,
+        int Width, int Height, DateTimeOffset Timestamp);
     private sealed record HandObservationDiagnostics(double Confidence, PixelPoint IndexTip, double PinchRatio,
         bool IsSpreadOut, bool HasFourExtendedFingers, PixelPoint[] FingerTips, FingerSelectionPose FingerSelection);
     private sealed record HandDetectionDiagnostics(DateTimeOffset FrameTime, double InferenceMilliseconds,
@@ -146,6 +148,7 @@ public sealed partial class MainWindow
             _handGeneration++;
             _handPreview = null;
             _handGestures.Reset();
+            _handVisuals.Reset();
             _handLatencyWarning = null;
             _lastHandDetection = null;
             _lastHandDetectionTick = 0;
@@ -223,6 +226,7 @@ public sealed partial class MainWindow
                             if (age > HandMarkerLifetime)
                             {
                                 _handPreview = null;
+                                _handVisuals.Reset();
                                 _scene.ClearHandTips(resetInput: false);
                                 _handLatencyWarning = $"Hand tracking result was {age.TotalMilliseconds:F0} ms old. " +
                                     "Waiting for a result under 350 ms before showing the circle.";
@@ -234,8 +238,10 @@ public sealed partial class MainWindow
                                 _handLatencyWarning = null;
                                 var cursors = _handGestures.Update(visibleHands, frame.Timestamp,
                                     DateTimeOffset.UtcNow).ToArray();
-                                _handPreview = new HandPreview(cursors, frame.Width, frame.Height, frame.Timestamp);
-                                _scene.SetHandCursors(cursors, frame.Timestamp, _photoCopyTask is { IsCompleted: false });
+                                var visualCursors = _handVisuals.Update(cursors, visibleHands,
+                                    frame.Timestamp, DateTimeOffset.UtcNow).ToArray();
+                                _handPreview = new HandPreview(cursors, visualCursors, frame.Width, frame.Height, frame.Timestamp);
+                                _scene.SetHandCursors(cursors, frame.Timestamp, _photoCopyTask is { IsCompleted: false }, visualCursors);
                                 _scene.SetHandSpotlights(visibleHands, frame.Timestamp);
                                 LogHandDetection(sequence, requestedInTester, frame, generation, engineReset,
                                     inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, cursors, "accepted");
@@ -315,7 +321,7 @@ public sealed partial class MainWindow
             preview.Width != frame.Width || preview.Height != frame.Height ||
             DateTimeOffset.UtcNow - preview.Timestamp > HandMarkerLifetime) return;
         var now = DateTimeOffset.UtcNow;
-        foreach (var cursor in preview.Cursors)
+        foreach (var cursor in preview.VisualCursors)
         {
             if (cursor.HasFourExtendedFingers && cursor.FingerTips.Count == 4)
             {

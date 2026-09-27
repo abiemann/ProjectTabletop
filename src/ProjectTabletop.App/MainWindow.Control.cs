@@ -39,6 +39,8 @@ public sealed partial class MainWindow
                 return await VerifyHandSpotlightsAsync();
             case "verify_hand_spotlight_selection":
                 return await VerifyHandSpotlightSelectionAsync();
+            case "verify_hand_visual_smoothing":
+                return await VerifyHandVisualSmoothingAsync();
             case "verify_hand_detection_log":
                 return await HandDetectionLogVerification.RunAsync(Path.Combine(_appDataDirectory,
                     "LogVerification", Guid.NewGuid().ToString("N")));

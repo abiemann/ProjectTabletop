@@ -73,6 +73,7 @@ public sealed class HandTrackingEngine : IDisposable
             using var rgb = new Mat();
             Cv2.CvtColor(frame, rgb, ColorConversionCodes.BGRA2RGB);
             var hands = new List<HandDetection>(2);
+            var trackedPreviousBoundsIou = new Dictionary<HandDetection, double>(ReferenceEqualityComparer.Instance);
             var diagnostics = _captureDiagnostics ? new DetectionTrace(_previousHands.Count) : null;
             if (width == _previousWidth && height == _previousHeight)
             {
@@ -90,7 +91,11 @@ public sealed class HandTrackingEngine : IDisposable
                     {
                         double overlap = IntersectionOverUnion(HandBounds(previous), HandBounds(hand));
                         if (attempt is not null) attempt.PreviousBoundsIou = double.IsFinite(overlap) ? overlap : null;
-                        if (overlap >= 0.2) hands.Add(hand);
+                        if (overlap >= 0.2)
+                        {
+                            hands.Add(hand);
+                            trackedPreviousBoundsIou.Add(hand, overlap);
+                        }
                         else if (attempt is not null) attempt.Result = "tracked-iou-rejected";
                     }
                 }
@@ -113,22 +118,11 @@ public sealed class HandTrackingEngine : IDisposable
             }
             diagnostics?.RecordPreNms(hands);
 
-            // Several views can find the same hand. Compare successful hand fits,
-            // not palm scores: a strong palm proposal can still yield a bad pose.
-            var selected = new List<HandDetection>(2);
-            foreach (HandDetection hand in hands.OrderByDescending(hand => hand.Confidence))
-            {
-                if (selected.Any(other => IntersectionOverUnion(HandBounds(hand), HandBounds(other)) > 0.3))
-                {
-                    if (diagnostics is not null)
-                        diagnostics.RecordNms(hand, "overlap", selected.First(other =>
-                            IntersectionOverUnion(HandBounds(hand), HandBounds(other)) > 0.3));
-                    continue;
-                }
-                selected.Add(hand);
-                diagnostics?.RecordNms(hand, "selected");
-                if (selected.Count == 2) break;
-            }
+            // Several views can fit the same hand. A reliable current-frame ROI
+            // wins a near-tie over a search fit; clearly better fits still recover
+            // tracking. Every selected pose was inferred from this camera frame.
+            var selected = HandCandidateSelector.Select(hands, trackedPreviousBoundsIou,
+                diagnostics is null ? null : diagnostics.RecordNms);
             _lastDiagnostics = diagnostics?.Finish(selected);
             _previousHands = selected;
             _previousWidth = width;

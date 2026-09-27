@@ -54,11 +54,20 @@ internal static class HandTrackingDiagnosticsRegression
                 }
                 else Require(candidate.SearchViewBounds is not null && candidate.PreviousHandIndex is null,
                     "A search proposal lost its full-frame/tile coordinates.");
-                if (candidate.NmsResult == "overlap")
+                if (candidate.NmsResult is "overlap" or "tracked-continuity")
                 {
                     sawSuppression = true;
                     Require(candidate.SuppressedByCandidateIndex is { } suppressedBy &&
                         trace.SelectedCandidateIndices.Contains(suppressedBy), "Suppression did not identify the winning candidate.");
+                    if (candidate.NmsResult == "tracked-continuity")
+                    {
+                        var winner = trace.Candidates[candidate.SuppressedByCandidateIndex!.Value];
+                        Require(candidate.Source != "tracked-roi" && winner.Source == "tracked-roi" &&
+                            winner.HandConfidence >= 0.90 && winner.PreviousBoundsIou >= 0.65 &&
+                            candidate.HandConfidence > winner.HandConfidence &&
+                            candidate.HandConfidence <= winner.HandConfidence + 0.01,
+                            "Continuity suppression did not satisfy its fresh tracked-ROI evidence.");
+                    }
                 }
             }
             Require(trace.TrackedRoiAttempts == trace.Candidates.Count(candidate => candidate.Source == "tracked-roi"),

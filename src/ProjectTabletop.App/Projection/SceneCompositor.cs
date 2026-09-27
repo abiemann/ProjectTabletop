@@ -135,7 +135,7 @@ public sealed partial class SceneCompositor : IDisposable
     }
 
     public void SetHandCursors(IReadOnlyList<HandCursor> cursors, DateTimeOffset frameTime,
-        bool photoCopyCaptureBusy = false)
+        bool photoCopyCaptureBusy = false, IReadOnlyList<HandCursor>? visualCursors = null)
     {
         lock (_gate)
         {
@@ -152,10 +152,14 @@ public sealed partial class SceneCompositor : IDisposable
                 var tip = cursor.Position;
                 if (acceptVisual && _boardMediaClip is not null && _boardCameraMap is not null)
                 {
+                    // Share the camera preview's filtered positions, but keep
+                    // raw cursors below for hit testing, gestures and matching.
+                    var visual = cursor.TrackingId > 0 ? visualCursors?.FirstOrDefault(
+                        item => item.TrackingId == cursor.TrackingId) ?? cursor : cursor;
                     var cameraMap = _boardCameraMap;
-                    var point = ProjectFinger(tip);
-                    var fingers = cursor.HasFourExtendedFingers && cursor.FingerTips.Count == 4
-                        ? cursor.FingerTips.Select(ProjectFinger).ToArray() : Array.Empty<Vector2>();
+                    var point = ProjectFinger(visual.Position);
+                    var fingers = cursor.HasFourExtendedFingers && visual.FingerTips.Count == 4
+                        ? visual.FingerTips.Select(ProjectFinger).ToArray() : Array.Empty<Vector2>();
                     // Middle-tip aiming is independent of the old index cursor.
                     // Preserve finger order even when one point is outside the
                     // projective plane, so the middle marker never shifts fingers.
@@ -180,9 +184,8 @@ public sealed partial class SceneCompositor : IDisposable
                     }
                     static bool OnProjector(Vector2 point) => point.X is >= 0 and <= 1 && point.Y is >= 0 and <= 1;
                 }
-                // The fingertip still follows the physical hand. Button selection
-                // uses the open pointing position while the finger curls to pinch.
-                // Map it independently, even if the current tip has left the board.
+                // Input uses current measured geometry, independently of visual
+                // damping. Pinch selection retains the recent open pointing pose.
                 var selection = cursor.SelectionPosition ?? tip;
                 try
                 {

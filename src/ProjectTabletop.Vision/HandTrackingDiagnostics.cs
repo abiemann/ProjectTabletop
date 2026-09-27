@@ -9,7 +9,9 @@ public sealed record HandTrackingSearchDiagnostics(string Source, HandTrackingBo
 /// <summary>
 /// One attempted landmark inference. Index identifies this attempt throughout
 /// the snapshot. A returned hand rejected by temporal IoU retains its landmarks.
-/// NmsResult is not-eligible, selected, overlap, or selection-limit.
+/// NmsResult is not-eligible, selected, overlap, tracked-continuity, or selection-limit.
+/// Tracked-continuity identifies a near-tied search fit suppressed by a reliable
+/// current-frame tracked ROI despite the search fit's slightly higher model score.
 /// </summary>
 public sealed record HandTrackingCandidateDiagnostics(int Index, string Source, HandTrackingBounds? SearchViewBounds, int? PreviousHandIndex,
     HandTrackingBounds PalmBounds, double PalmScore, double? HandConfidence, string Result,

@@ -17,12 +17,23 @@ A lost fit searches immediately, and periodic searches acquire arriving hands.
 Call `ResetTracking()` after a camera/scene interruption; changing dimensions
 also invalidates crop hints. Old landmarks are never returned as current results.
 
+During duplicate suppression, a fresh tracked fit with confidence at least .90
+and previous-bounds IoU at least .65 takes precedence over an overlapping search
+fit with at most .01 greater confidence. The original confidence and landmarks
+remain unchanged. Search results keep normal priority for separate hands,
+clearly stronger fits, or failed/weak/low-continuity tracking. Diagnostics report
+`tracked-continuity` when this preference suppresses an alternate search fit.
+Run `-- --hand-candidates` for the eight recorded near-tie cases and recovery,
+confidence-boundary, and independent-hand counterexamples. These fixtures contain
+numeric landmark data only. `-- --hands` includes these checks and model inference;
+`-- --hand-diagnostics` checks that diagnostics do not change detection results.
+
 The app schedules one inference at a time off the UI thread and maps the index
 tip through the completed board scan for the pinch cursor and board buttons.
 `HandGestureTracker` confirms a thumb/index pinch using observed dwell, tolerates
 bounded landmark noise and brief missed detections, and debounces release before
 allowing another execute event. Each event produces a one-second red pulse.
-`HandCursor.Position` always carries the actual fingertip for drawing and
+The gesture tracker's `HandCursor.Position` carries the actual fingertip for selection and
 Photo Copy hand matching. Optional `SelectionPosition` and `SelectionFrameTime`
 retain the same hand's recent open pointing pose while the fingers close. An
 expired or moved anchor is non-finite until release; consumers must reject it,
@@ -30,6 +41,20 @@ and must reject anchors from before a screen change or camera reset.
 These image landmarks do not establish physical board contact. See the root
 README for verification status. [Model sources, checksums, and licenses](Models/Hands/README.md)
 are bundled with the models.
+
+`HandVisualSmoother` creates separate display-only cursor copies for the camera
+preview and projector on every board. It filters index and four-finger markers
+by tracking identity and source-camera time, with stronger damping for small
+palm-relative changes and faster following during deliberate motion. Missing
+hands are not drawn; new identities, large jumps, long gaps, and camera/setup
+resets discard history. Gesture classification, selection anchors, button hit
+testing, and Photo Copy hand matching continue to use the original observations.
+`HandSpotlightSmoother` filters each matched light independently, bounds center
+lag to 4% of the current radius, expands immediately to cover the complete fresh
+hand fit, and smooths contraction. It does not change the existing dropout hold
+or execute suppression. Tester logs retain raw landmarks/cursors and add
+`visualCursors`; lighting diagnostics pair rendered `lights` with `rawLights`.
+Run `-- --hand-visuals` for the focused smoothing regressions.
 
 `HandPoseClassifier.AreFourFingersExtended` recognizes an extended index,
 middle, ring and little finger without requiring a spread thumb.

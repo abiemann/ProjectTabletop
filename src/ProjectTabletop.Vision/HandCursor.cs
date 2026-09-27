@@ -3,7 +3,9 @@ namespace ProjectTabletop.Vision;
 /// <summary>
 /// A current fingertip/pose observation and the expiry of its visual pinch pulse.
 /// SelectionPosition optionally preserves where the same hand pointed just
-/// before closing; Position always remains the actual observed fingertip.
+/// before closing; the gesture tracker's Position remains the actual observed
+/// fingertip. HandVisualSmoother creates separate display-only copies, which
+/// must never be passed back into gesture recognition, selection or hand matching.
 /// A non-finite selection position means the anchor was cancelled and callers
 /// must not fall back to Position. SelectionFrameTime is the source camera time
 /// of that pointing observation, including after cancellation.

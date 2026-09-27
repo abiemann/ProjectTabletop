@@ -10,6 +10,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="Regression/**/*.cs" />
+    <InternalsVisibleTo Include="ProjectTabletop.Vision.Regression" />
     <Content Include="Models/Hands/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
