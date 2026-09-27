@@ -15,6 +15,9 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     private bool _boardSetupActive;
+    private Task? _boardSetupStartTask;
+    private long _boardSetupRequestVersion;
+    private long _boardSetupStartRequest;
     private long _boardSetupGeneration;
     private long _lastBoardDetectTick;
     private BoardPreviewState? _latestBoardPreview;
@@ -63,7 +66,9 @@ public sealed partial class MainWindow
 
     private async void BoardSetup_Click(object sender, RoutedEventArgs e)
     {
-        if (Volatile.Read(ref _boardSetupActive))
+        if (Volatile.Read(ref _boardSetupActive) ||
+            (_boardSetupStartTask is { IsCompleted: false } &&
+             _boardSetupStartRequest == _boardSetupRequestVersion))
         {
             StopBoardSetup();
             return;
@@ -72,36 +77,65 @@ public sealed partial class MainWindow
         await StartBoardSetupAsync();
     }
 
-    internal async Task StartBoardSetupAsync()
+    internal Task StartBoardSetupAsync()
     {
-        if (Volatile.Read(ref _boardSetupActive)) return;
+        if (Volatile.Read(ref _boardSetupActive)) return Task.CompletedTask;
+        if (_boardSetupStartTask is { IsCompleted: false } &&
+            _boardSetupStartRequest == _boardSetupRequestVersion) return _boardSetupStartTask;
+        return _boardSetupStartTask = StartBoardSetupCoreAsync();
+    }
 
-        // Re-resolve and verify the actual output display before starting the
-        // black ambient scan, even when a projection window already exists.
-        if (!OpenProjectionOutput())
+    private async Task StartBoardSetupCoreAsync()
+    {
+        var request = Interlocked.Increment(ref _boardSetupRequestVersion);
+        _boardSetupStartRequest = request;
+        BoardSetupButton.Content = "Cancel board setup";
+        try
         {
-            BoardSetupStatusText.Text = StatusText.Text;
-            return;
-        }
+            // Await the verified native fullscreen presenter before collecting
+            // any camera/projector correspondence, including the ambient frame.
+            if (!await OpenProjectionOutputAsync())
+            {
+                if (request == _boardSetupRequestVersion && !_closing)
+                    BoardSetupStatusText.Text = StatusText.Text;
+                return;
+            }
+            if (request != _boardSetupRequestVersion || _closing) return;
+            RequireProjectionOutput();
 
-        Volatile.Write(ref _boardSetupActive, true);
-        ClearBoardPreview();
-        Volatile.Write(ref _latestDetections, Array.Empty<PieceDetection>());
-        _scene.SetDetections(Array.Empty<PieceDetection>(), DateTimeOffset.MinValue);
-        BoardSetupButton.Content = "End board setup";
-        RescanBoardButton.IsEnabled = true;
-        if (SelectedCamera is not null && (!_camera.IsRunning ||
-            _camera.ActiveDeviceId != SelectedCamera.Device.Id))
-            await StartSelectedCameraAsync();
-        if (!Volatile.Read(ref _boardSetupActive) || _closing) return;
-        BoardSetupStatusText.Text = _camera.IsRunning
-            ? "Projector is black. Finding the cardboard by ambient light before the white scan."
-            : "Projector is black. Select and start a webcam to find the cardboard.";
-        SetStatus("Board scan is active. Keep the cardboard still while black and white views are checked.");
+            Volatile.Write(ref _boardSetupActive, true);
+            ClearBoardPreview();
+            Volatile.Write(ref _latestDetections, Array.Empty<PieceDetection>());
+            _scene.SetDetections(Array.Empty<PieceDetection>(), DateTimeOffset.MinValue);
+            BoardSetupButton.Content = "End board setup";
+            RescanBoardButton.IsEnabled = true;
+            if (SelectedCamera is not null && (!_camera.IsRunning ||
+                _camera.ActiveDeviceId != SelectedCamera.Device.Id))
+                await StartSelectedCameraAsync();
+            if (request != _boardSetupRequestVersion || !Volatile.Read(ref _boardSetupActive) || _closing) return;
+            BoardSetupStatusText.Text = _camera.IsRunning
+                ? "Projector is black. Finding the cardboard by ambient light before the white scan."
+                : "Projector is black. Select and start a webcam to find the cardboard.";
+            SetStatus("Board scan is active. Keep the cardboard still while black and white views are checked.");
+        }
+        catch (Exception ex)
+        {
+            if (request != _boardSetupRequestVersion || _closing) return;
+            EndBoardSetup();
+            BoardSetupStatusText.Text = "Cannot start board setup: " + ex.Message;
+            SetStatus(BoardSetupStatusText.Text);
+        }
+        finally
+        {
+            if (!_closing && !Volatile.Read(ref _boardSetupActive) &&
+                request == _boardSetupRequestVersion)
+                BoardSetupButton.Content = "Start board setup";
+        }
     }
 
     private void EndBoardSetup()
     {
+        Interlocked.Increment(ref _boardSetupRequestVersion);
         Volatile.Write(ref _boardSetupActive, false);
         Volatile.Write(ref _trustedBoardPrior, null);
         ClearBoardPreview();
@@ -116,7 +150,8 @@ public sealed partial class MainWindow
 
     internal void StopBoardSetup()
     {
-        if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
+        if (Volatile.Read(ref _boardSetupActive) || _boardSetupStartTask is { IsCompleted: false })
+            EndBoardSetup();
     }
 
     internal void ShowBlackOutputForControl()
@@ -129,12 +164,18 @@ public sealed partial class MainWindow
         SetStatus("Projector output is black for an ambient webcam capture. Start board scan to restore white illumination.");
     }
 
-    private void RescanBoard_Click(object sender, RoutedEventArgs e) => RescanBoardSetup();
+    private async void RescanBoard_Click(object sender, RoutedEventArgs e) => await RescanBoardSetupAsync();
 
-    internal void RescanBoardSetup()
+    internal async Task RescanBoardSetupAsync()
     {
         if (!Volatile.Read(ref _boardSetupActive)) return;
-        try { RequireProjectionOutput(); }
+        var request = _boardSetupRequestVersion;
+        try
+        {
+            if (!await OpenProjectionOutputAsync() || request != _boardSetupRequestVersion ||
+                !Volatile.Read(ref _boardSetupActive) || _closing) return;
+            RequireProjectionOutput();
+        }
         catch (Exception ex)
         {
             _output?.Close();
@@ -200,6 +241,7 @@ public sealed partial class MainWindow
 
     private void QueueBoardDetection(CameraFrame frame, long tick)
     {
+        if (_outputOperation.CurrentCount == 0) return;
         var phase = (BoardSetupPhase)Volatile.Read(ref _boardSetupPhase);
         if (phase is not (BoardSetupPhase.ScanAmbient or BoardSetupPhase.ScanWhite or
                           BoardSetupPhase.MeasureSpots)) return;

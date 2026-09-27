@@ -40,7 +40,9 @@ public sealed partial class MainWindow
     }
 
     private bool IsBoardScanMeasuring => Volatile.Read(ref _boardSetupActive) &&
-        (BoardSetupPhase)Volatile.Read(ref _boardSetupPhase) != BoardSetupPhase.GridReady;
+        (BoardSetupPhase)Volatile.Read(ref _boardSetupPhase) is
+            BoardSetupPhase.Switching or BoardSetupPhase.ScanAmbient or
+            BoardSetupPhase.ScanWhite or BoardSetupPhase.MeasureSpots;
 
     private void StartHandTrackingStatus()
     {

@@ -67,7 +67,7 @@ public sealed partial class MainWindow
                 await StartBoardSetupAsync();
                 return new { status = BoardSetupControlStatus };
             case "rescan_board":
-                if (Volatile.Read(ref _boardSetupActive)) RescanBoardSetup();
+                if (Volatile.Read(ref _boardSetupActive)) await RescanBoardSetupAsync();
                 else await StartBoardSetupAsync();
                 return new { status = BoardSetupControlStatus };
             case "black_output":
@@ -98,7 +98,7 @@ public sealed partial class MainWindow
                 await StopCameraAsync();
                 return new { status = CameraStatusText.Text };
             case "open_output":
-                OpenOutput_Click(this, new Microsoft.UI.Xaml.RoutedEventArgs());
+                await OpenProjectionOutputAsync();
                 return new { outputOpen = _output is not null, outputFullScreen = _output?.IsFullScreen ?? false,
                     status = StatusText.Text };
             case "shutdown":

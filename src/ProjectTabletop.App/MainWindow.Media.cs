@@ -8,23 +8,44 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
-    private void OpenOutput_Click(object sender, RoutedEventArgs e)
+    private readonly SemaphoreSlim _outputOperation = new(1, 1);
+    private Task<bool>? _openProjectionTask;
+
+    private async void OpenOutput_Click(object sender, RoutedEventArgs e)
     {
-        OpenProjectionOutput();
+        await OpenProjectionOutputAsync();
     }
 
-    private bool OpenProjectionOutput()
+    private Task<bool> OpenProjectionOutputAsync()
     {
+        if (_openProjectionTask is { IsCompleted: false }) return _openProjectionTask;
+        return _openProjectionTask = OpenProjectionOutputCoreAsync();
+    }
+
+    private async Task<bool> OpenProjectionOutputCoreAsync()
+    {
+        await _outputOperation.WaitAsync();
         try
         {
+            if (_closing) return false;
+            OpenOutputButton.IsEnabled = false;
+            FullscreenButton.IsEnabled = false;
+            if (Volatile.Read(ref _boardSetupActive))
+            {
+                Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.Switching);
+                Interlocked.Increment(ref _boardSetupGeneration);
+                _scene.SetBlackOutput(true);
+            }
             var display = ResolveProjectionDisplay();
             ClearHandTracking();
             _scene.ClearBoardMediaClip();
             if (_output is null)
             {
-                _output = new ProjectionWindow(_scene);
-                _output.Closed += (_, _) =>
+                var created = new ProjectionWindow(_scene);
+                _output = created;
+                created.Closed += (_, _) =>
                 {
+                    if (!ReferenceEquals(_output, created)) return;
                     _output = null;
                     _outputDisplayId = null;
                     ClearHandTracking();
@@ -33,11 +54,19 @@ public sealed partial class MainWindow
                     if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
                 };
             }
+            var output = _output;
             _scene.SetDisplayAspect((double)display.Width / display.Height);
-            _output.ShowOn(display.Area, AppWindow.Id);
-            _outputDisplayId = _output.ActualDisplayId;
+            await output.ShowOnAsync(display.Area, AppWindow.Id);
+            if (_closing || !ReferenceEquals(_output, output) || SelectedDisplay?.Id != display.Id)
+                throw new InvalidOperationException("The output window or selected display changed while opening.");
+            RequireProjectionOutput();
+            _outputDisplayId = output.ActualDisplayId;
             FullscreenButton.Content = "Windowed";
-            if (Volatile.Read(ref _boardSetupActive)) RescanBoardSetup();
+            if (Volatile.Read(ref _boardSetupActive))
+            {
+                ClearBoardPreview();
+                BoardSetupStatusText.Text = "Projector is black. Finding the physical cardboard again.";
+            }
             SetStatus($"Projection output opened on {display}. Confirm hardware video decode on this laptop.");
             return true;
         }
@@ -45,28 +74,57 @@ public sealed partial class MainWindow
         {
             _output?.Close();
             _outputDisplayId = null;
-            SetStatus("Could not open projection output: " + ex.Message);
+            if (!_closing) SetStatus("Could not open projection output: " + ex.Message);
             return false;
+        }
+        finally
+        {
+            _outputOperation.Release();
+            if (!_closing)
+            {
+                OpenOutputButton.IsEnabled = true;
+                FullscreenButton.IsEnabled = true;
+            }
         }
     }
 
-    private void Fullscreen_Click(object sender, RoutedEventArgs e)
+    private async void Fullscreen_Click(object sender, RoutedEventArgs e)
     {
-        if (_output is null) { OpenOutput_Click(sender, e); return; }
+        if (_outputOperation.CurrentCount == 0) return;
+        if (_output is null) { await OpenProjectionOutputAsync(); return; }
+        await _outputOperation.WaitAsync();
         try
         {
-            if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
+            if (_closing || _output is null) return;
+            OpenOutputButton.IsEnabled = false;
+            FullscreenButton.IsEnabled = false;
+            StopBoardSetup();
             ClearHandTracking();
             _scene.ClearBoardMediaClip();
-            _output.SetFullScreen(!_output.IsFullScreen);
-            FullscreenButton.Content = _output.IsFullScreen ? "Windowed" : "Full screen";
+            var display = ResolveProjectionDisplay();
+            var output = _output;
+            await output.SetFullScreenAsync(!output.IsFullScreen);
+            if (_closing || !ReferenceEquals(_output, output) || SelectedDisplay?.Id != display.Id ||
+                output.ActualDisplayId != display.Id)
+                throw new InvalidOperationException("The output window or selected display changed during the window-mode change.");
+            _outputDisplayId = output.ActualDisplayId;
+            FullscreenButton.Content = output.IsFullScreen ? "Windowed" : "Full screen";
             InvalidateCalibration("Output window mode changed. Recalibrate in full screen.");
         }
         catch (Exception ex)
         {
             _output?.Close();
             _outputDisplayId = null;
-            SetStatus("Could not change output window mode: " + ex.Message);
+            if (!_closing) SetStatus("Could not change output window mode: " + ex.Message);
+        }
+        finally
+        {
+            _outputOperation.Release();
+            if (!_closing)
+            {
+                OpenOutputButton.IsEnabled = true;
+                FullscreenButton.IsEnabled = true;
+            }
         }
     }
 
@@ -93,7 +151,7 @@ public sealed partial class MainWindow
         if (!File.Exists(fullPath)) throw new FileNotFoundException("Background media was not found.", fullPath);
         var asset = _scene.FindAssetByPath(fullPath) ??
             await MediaAsset.OpenAsync(CanvasDevice.GetSharedDevice(), fullPath);
-        if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
+        StopBoardSetup();
         _scene.SetBackground(asset);
         BackgroundPathText.Text = fullPath;
         SetStatus(_scene.HasBoardMediaClip
@@ -103,7 +161,7 @@ public sealed partial class MainWindow
 
     private void TestGrid_Click(object sender, RoutedEventArgs e)
     {
-        if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
+        StopBoardSetup();
         _scene.SetBackground(null);
         BackgroundPathText.Text = "Test grid";
         SetStatus(_scene.HasBoardMediaClip

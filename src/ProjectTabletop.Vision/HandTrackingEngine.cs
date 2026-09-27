@@ -62,8 +62,56 @@ public sealed class HandTrackingEngine : IDisposable
                 HandDetection? hand = DetectHand(rgb, palm);
                 if (hand is not null) hands.Add(hand);
             }
-            return hands;
+
+            // Letterboxing a wide webcam image into 192 pixels makes a tabletop
+            // hand very small. Recheck overlapping square views when acquisition
+            // fails or the observed hand is small relative to the whole image.
+            // Refine on the original image so a tile boundary cannot cut off fingers.
+            int side = Math.Min(width, height), longest = Math.Max(width, height);
+            if (longest > side * 1.25 && (hands.Count == 0 ||
+                hands.Any(hand => HandExtent(hand) < longest * 0.35)))
+            {
+                foreach (int offset in new[] { 0, (longest - side) / 2, longest - side }.Distinct())
+                {
+                    int x = width > height ? offset : 0, y = height > width ? offset : 0;
+                    using var tile = new Mat(rgb, new Rect(x, y, side, side));
+                    foreach (Palm local in DetectPalms(tile))
+                    {
+                        var palm = new Palm(new Rect2d(local.Bounds.X + x, local.Bounds.Y + y,
+                            local.Bounds.Width, local.Bounds.Height),
+                            local.Landmarks.Select(point => new PixelPoint(point.X + x, point.Y + y)).ToArray(),
+                            local.Score);
+                        HandDetection? hand = DetectHand(rgb, palm);
+                        if (hand is not null) hands.Add(hand);
+                    }
+                }
+            }
+
+            // Several views can find the same hand. Compare successful hand fits,
+            // not palm scores: a strong palm proposal can still yield a bad pose.
+            var selected = new List<HandDetection>(2);
+            foreach (HandDetection hand in hands.OrderByDescending(hand => hand.Confidence))
+            {
+                if (selected.Any(other => IntersectionOverUnion(HandBounds(hand), HandBounds(other)) > 0.3))
+                    continue;
+                selected.Add(hand);
+                if (selected.Count == 2) break;
+            }
+            return selected;
         }
+    }
+
+    private static Rect2d HandBounds(HandDetection hand)
+    {
+        double left = hand.Landmarks.Min(point => point.X), top = hand.Landmarks.Min(point => point.Y);
+        return new Rect2d(left, top, hand.Landmarks.Max(point => point.X) - left,
+            hand.Landmarks.Max(point => point.Y) - top);
+    }
+
+    private static double HandExtent(HandDetection hand)
+    {
+        Rect2d bounds = HandBounds(hand);
+        return Math.Max(bounds.Width, bounds.Height);
     }
 
     private IReadOnlyList<Palm> DetectPalms(Mat rgb)

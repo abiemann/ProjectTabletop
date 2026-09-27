@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI;
@@ -14,11 +15,14 @@ public sealed partial class ProjectionWindow : Window
     private readonly SceneCompositor _scene;
     private Microsoft.UI.DisplayId? _targetDisplayId;
     private WindowId? _controlWindowId;
+    private readonly SemaphoreSlim _placementOperation = new(1, 1);
+    private bool _closed;
 
     public ProjectionWindow(SceneCompositor scene)
     {
         _scene = scene;
         InitializeComponent();
+        Closed += (_, _) => _closed = true;
         Content.KeyDown += (_, args) =>
         {
             if (args.Key != VirtualKey.Escape) return;
@@ -33,49 +37,83 @@ public sealed partial class ProjectionWindow : Window
         DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.None)?.DisplayId.Value
             .ToString(CultureInfo.InvariantCulture);
 
-    public void ShowOn(DisplayArea display, WindowId controlWindowId)
+    public async Task ShowOnAsync(DisplayArea display, WindowId controlWindowId)
     {
-        AppWindow.Hide();
-        _targetDisplayId = display.DisplayId;
-        _controlWindowId = controlWindowId;
-        SetFullScreen(true);
+        await _placementOperation.WaitAsync();
+        try
+        {
+            ThrowIfClosed();
+            AppWindow.Hide();
+            _targetDisplayId = display.DisplayId;
+            _controlWindowId = controlWindowId;
+            await ApplyWindowModeAsync(fullScreen: true);
+        }
+        finally { _placementOperation.Release(); }
     }
 
-    public void SetFullScreen(bool enabled)
+    public async Task SetFullScreenAsync(bool enabled)
+    {
+        await _placementOperation.WaitAsync();
+        try { await ApplyWindowModeAsync(enabled); }
+        finally { _placementOperation.Release(); }
+    }
+
+    private async Task ApplyWindowModeAsync(bool fullScreen)
     {
         try
         {
-            if (!enabled)
-            {
-                // Restoring the windowed presenter can restore an earlier position.
-                // Keep it hidden until the placement has been checked as well.
-                AppWindow.Hide();
-                AppWindow.SetPresenter(AppWindowPresenterKind.Default);
-                var windowedTarget = ResolveTargetDisplay();
-                PositionOn(windowedTarget);
-                VerifyPlacement();
-                AppWindow.Show(false);
-                VerifyPlacement();
-                return;
-            }
-
+            ThrowIfClosed();
             AppWindow.Hide();
             var target = ResolveTargetDisplay();
             AppWindow.SetPresenter(AppWindowPresenterKind.Default);
+            await WaitUntilAsync(() => AppWindow.Presenter.Kind == AppWindowPresenterKind.Overlapped,
+                "restore the output window", verifyDisplay: false);
             PositionOn(target);
             VerifyPlacement();
-            AppWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
-            VerifyPlacement();
-            // Showing without activation preserves keyboard focus on the controls.
-            // The XAML content is already attached by InitializeComponent.
+
+            // The first native Show can apply the startup windowed presenter.
+            // Let it and XAML loading finish on the already verified projector,
+            // then request fullscreen and wait for the actual presenter to settle.
             AppWindow.Show(false);
+            await WaitUntilAsync(() => AppWindow.IsVisible && Content is FrameworkElement { IsLoaded: true },
+                "initialize the output window");
+            var requested = fullScreen ? AppWindowPresenterKind.FullScreen : AppWindowPresenterKind.Overlapped;
+            AppWindow.SetPresenter(fullScreen ? AppWindowPresenterKind.FullScreen : AppWindowPresenterKind.Default);
+            await WaitUntilAsync(() => AppWindow.IsVisible && AppWindow.Presenter.Kind == requested,
+                fullScreen ? "enter fullscreen on the projector" : "restore windowed output");
             VerifyPlacement();
         }
         catch
         {
-            AppWindow.Hide();
+            if (!_closed) AppWindow.Hide();
             throw;
         }
+    }
+
+    private async Task WaitUntilAsync(Func<bool> ready, string operation, bool verifyDisplay = true)
+    {
+        var deadline = Stopwatch.StartNew();
+        long? stableSince = null;
+        while (deadline.Elapsed < TimeSpan.FromSeconds(5))
+        {
+            ThrowIfClosed();
+            if (verifyDisplay) VerifyPlacement();
+            if (ready())
+            {
+                stableSince ??= Stopwatch.GetTimestamp();
+                if (Stopwatch.GetElapsedTime(stableSince.Value) >= TimeSpan.FromMilliseconds(150)) return;
+            }
+            else stableSince = null;
+            // Yield to the UI message loop so native presenter/XAML transitions
+            // can complete. No scan is allowed to start during this bounded wait.
+            await Task.Delay(25);
+        }
+        throw new TimeoutException("Windows did not " + operation + ". Output was hidden; try opening it again.");
+    }
+
+    private void ThrowIfClosed()
+    {
+        if (_closed) throw new InvalidOperationException("The projection window was closed.");
     }
 
     public void VerifyTargetDisplay() => VerifyPlacement();
