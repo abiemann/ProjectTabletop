@@ -58,6 +58,8 @@
                 <TextBlock Text="4  Hand tracking" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
                 <ToggleSwitch x:Name="HandTrackingToggle" Header="Hand tracking and spotlight" IsOn="True" Toggled="HandTrackingToggle_Toggled" />
                 <TextBlock x:Name="HandTrackingStatusText" Text="Start the webcam to track your index fingertip." TextWrapping="Wrap" />
+                <TextBlock x:Name="HandDetectionLogStatusText" Text="Full detection logging starts automatically in the Hand-Tracking tester." TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                <TextBlock x:Name="HandVideoRecordingStatusText" Text="Hand video records automatically in the Hand-Tracking tester only." TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                 <TextBlock Text="The camera preview marks your fingertip in white. After board setup, a white spotlight covers each detected hand to help the camera see its fingers. Keep the hand near the board; lifting it causes projection offset. The camera must first detect a hand before its light can appear." TextWrapping="Wrap" />
                 <TextBlock Text="Hand-Tracking opens the grid with hand illumination. Pinch your thumb and index fingertip together for a red fingertip circle lasting one second. Separate them before pinching again. Photo Copy keeps its white capture surface; the games show Coming soon." TextWrapping="Wrap" />
                 <Button Content="Save raw camera PNG" Click="SaveRawSnapshot_Click" />
@@ -136,7 +138,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <TextBlock Grid.Row="0" Text="CAMERA  ·  live fingertip tracking" FontWeight="SemiBold" />
+            <TextBlock x:Name="CameraPreviewTitleText" Grid.Row="0" Text="CAMERA  ·  live fingertip tracking" FontWeight="SemiBold" />
             <Border Grid.Row="1" Background="{StaticResource TabletopSurfaceBrush}" CornerRadius="4">
                 <canvas:CanvasControl x:Name="CameraCanvas" UseSharedDevice="True" Draw="CameraCanvas_Draw" PointerPressed="CameraCanvas_PointerPressed" />
             </Border>

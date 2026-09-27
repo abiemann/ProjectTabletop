@@ -153,6 +153,7 @@ public sealed partial class MainWindow
             await MediaAsset.OpenAsync(CanvasDevice.GetSharedDevice(), fullPath);
         StopBoardSetup();
         _scene.SetBackground(asset);
+        UpdateHandDetectionLogStatus();
         BackgroundPathText.Text = fullPath;
         SetStatus(_scene.HasBoardMediaClip
             ? $"Background: {Path.GetFileName(fullPath)}. Playback is limited to the detected board."
@@ -163,6 +164,7 @@ public sealed partial class MainWindow
     {
         StopBoardSetup();
         _scene.SetBackground(null);
+        UpdateHandDetectionLogStatus();
         BackgroundPathText.Text = "Test grid";
         SetStatus(_scene.HasBoardMediaClip
             ? "Test grid is limited to the detected board."

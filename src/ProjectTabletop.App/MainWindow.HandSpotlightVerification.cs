@@ -114,9 +114,50 @@ public sealed partial class MainWindow
         scene.SetBlackOutput(false);
         Require(scene.ActiveHandSpotlightCount == 0, "Disabling black output restored a discarded spotlight.");
 
+        // Render confirmed pinch input into every kind of projector scene. Only
+        // the gesture tester may add red pixels; menu navigation still operates.
+        long gestureEvent = 0;
+        var probeTip = BoardPoint(.5, .65); // Clear of all menu and app controls.
+        void CheckPinchRendering(bool showCircle)
+        {
+            Draw(); // Warm each screen before sending a time-limited observation.
+            var frameTime = DateTimeOffset.UtcNow;
+            scene.SetHandCursors([new(probeTip, frameTime.AddSeconds(1), ++gestureEvent)], frameTime);
+            var rendered = Draw();
+            var redPixels = 0;
+            var ringPixels = 0;
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                int index = (y * size + x) * 4;
+                if (rendered[index + 2] < 160 || rendered[index + 1] > 80 || rendered[index] > 80) continue;
+                redPixels++;
+                if (Math.Abs(x - probeTip.X * size) < 25 && Math.Abs(y - probeTip.Y * size) < 25)
+                    ringPixels++;
+            }
+            Require(showCircle ? ringPixels > 20 : redPixels == 0,
+                showCircle ? "The Hand-Tracking projector lost its red pinch circle."
+                    : $"A red pinch marker appeared on {scene.CurrentBoardScreen}.");
+        }
+
+        scene.ShowBoardMenu();
+        CheckPinchRendering(showCircle: false);
+        var navigateTime = DateTimeOffset.UtcNow;
+        scene.SetHandCursors([new(BoardPoint(.25, .53), navigateTime.AddSeconds(1), ++gestureEvent)], navigateTime);
+        Require(scene.CurrentBoardScreen == BoardScreen.Blackjack,
+            "Suppressing pinch markers prevented normal board navigation.");
+        CheckPinchRendering(showCircle: false);
+        scene.ShowPhotoCopy();
+        CheckPinchRendering(showCircle: false);
+        scene.SetBackground(null);
+        CheckPinchRendering(showCircle: false);
+        scene.ShowHandTrackingTest();
+        CheckPinchRendering(showCircle: true);
+
         return new { passed = true, opaqueFingerCoverage = true, boardClipping = true, twoHands = true,
             sourceFrameOrdering = true, lightingDoesNotGenerateInput = true, resetRejectsOldFrames = true,
-            sourceLifetimeMilliseconds = 700, photoCopyAndCalibrationSuppressed = true, blackOutputClears = true };
+            sourceLifetimeMilliseconds = 700, photoCopyAndCalibrationSuppressed = true, blackOutputClears = true,
+            pinchCircleOnlyOnHandTracking = true, hiddenPinchStillNavigates = true };
 
         PixelPoint BoardPoint(double u, double v) => new(
             .1 + .8 * (inset / 2 + u * (1 - inset)), .1 + .8 * (inset / 2 + v * (1 - inset)));

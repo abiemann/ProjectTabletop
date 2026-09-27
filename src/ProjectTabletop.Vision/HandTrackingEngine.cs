@@ -28,7 +28,20 @@ public sealed class HandTrackingEngine : IDisposable
     private readonly Net _handNet;
     private IReadOnlyList<HandDetection> _previousHands = [];
     private int _previousWidth, _previousHeight, _framesSincePalmSearch;
+    private bool _captureDiagnostics;
+    private HandTrackingDiagnostics? _lastDiagnostics;
     private bool _disposed;
+
+    public bool CaptureDiagnostics
+    {
+        get { lock (_gate) return _captureDiagnostics; }
+        set { lock (_gate) { _captureDiagnostics = value; if (!value) _lastDiagnostics = null; } }
+    }
+
+    public HandTrackingDiagnostics? LastDiagnostics
+    {
+        get { lock (_gate) return _lastDiagnostics; }
+    }
 
     public HandTrackingEngine(string modelDirectory)
     {
@@ -50,6 +63,7 @@ public sealed class HandTrackingEngine : IDisposable
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            _lastDiagnostics = null;
             ArgumentNullException.ThrowIfNull(bgra);
             if (width is <= 0 or > 16384 || height is <= 0 or > 16384 ||
                 stride < (long)width * 4 || bgra.Length < (long)(height - 1) * stride + width * 4L)
@@ -59,18 +73,26 @@ public sealed class HandTrackingEngine : IDisposable
             using var rgb = new Mat();
             Cv2.CvtColor(frame, rgb, ColorConversionCodes.BGRA2RGB);
             var hands = new List<HandDetection>(2);
+            var diagnostics = _captureDiagnostics ? new DetectionTrace(_previousHands.Count) : null;
             if (width == _previousWidth && height == _previousHeight)
             {
                 // Once acquired, a hand's own palm landmarks provide a much
                 // larger, steadier crop than locating its tiny palm afresh in
                 // every 192-pixel full-frame scan. Still infer ALL landmarks
                 // from this image: these are crop hints, never stale results.
+                int previousIndex = 0;
                 foreach (HandDetection previous in _previousHands)
                 {
-                    HandDetection? hand = DetectHand(rgb, PalmFromHand(previous));
-                    if (hand is not null &&
-                        IntersectionOverUnion(HandBounds(previous), HandBounds(hand)) >= 0.2)
-                        hands.Add(hand);
+                    Palm palm = PalmFromHand(previous);
+                    var attempt = diagnostics?.Begin("tracked-roi", palm, previousIndex++);
+                    HandDetection? hand = DetectHand(rgb, palm, attempt);
+                    if (hand is not null)
+                    {
+                        double overlap = IntersectionOverUnion(HandBounds(previous), HandBounds(hand));
+                        if (attempt is not null) attempt.PreviousBoundsIou = double.IsFinite(overlap) ? overlap : null;
+                        if (overlap >= 0.2) hands.Add(hand);
+                        else if (attempt is not null) attempt.Result = "tracked-iou-rejected";
+                    }
                 }
             }
 
@@ -78,11 +100,18 @@ public sealed class HandTrackingEngine : IDisposable
             // triggers acquisition immediately, including on this very frame.
             bool search = hands.Count == 0 || hands.Count < _previousHands.Count ||
                 ++_framesSincePalmSearch >= 6;
+            if (diagnostics is not null)
+            {
+                diagnostics.FullSearch = search;
+                diagnostics.FullSearchReason = !search ? "tracking-only" : hands.Count == 0
+                    ? "no-tracked-hand" : hands.Count < _previousHands.Count ? "lost-tracked-hand" : "periodic";
+            }
             if (search)
             {
                 _framesSincePalmSearch = 0;
-                FindHands(rgb, hands);
+                FindHands(rgb, hands, diagnostics);
             }
+            diagnostics?.RecordPreNms(hands);
 
             // Several views can find the same hand. Compare successful hand fits,
             // not palm scores: a strong palm proposal can still yield a bad pose.
@@ -90,10 +119,17 @@ public sealed class HandTrackingEngine : IDisposable
             foreach (HandDetection hand in hands.OrderByDescending(hand => hand.Confidence))
             {
                 if (selected.Any(other => IntersectionOverUnion(HandBounds(hand), HandBounds(other)) > 0.3))
+                {
+                    if (diagnostics is not null)
+                        diagnostics.RecordNms(hand, "overlap", selected.First(other =>
+                            IntersectionOverUnion(HandBounds(hand), HandBounds(other)) > 0.3));
                     continue;
+                }
                 selected.Add(hand);
+                diagnostics?.RecordNms(hand, "selected");
                 if (selected.Count == 2) break;
             }
+            _lastDiagnostics = diagnostics?.Finish(selected);
             _previousHands = selected;
             _previousWidth = width;
             _previousHeight = height;
@@ -108,6 +144,7 @@ public sealed class HandTrackingEngine : IDisposable
         {
             _previousHands = [];
             _previousWidth = _previousHeight = _framesSincePalmSearch = 0;
+            _lastDiagnostics = null;
         }
     }
 
@@ -120,11 +157,14 @@ public sealed class HandTrackingEngine : IDisposable
             points.Max(point => point.Y) - top), points, hand.Confidence);
     }
 
-    private void FindHands(Mat rgb, List<HandDetection> hands)
+    private void FindHands(Mat rgb, List<HandDetection> hands, DetectionTrace? diagnostics)
     {
-        foreach (Palm palm in DetectPalms(rgb))
+        var fullProposals = DetectPalms(rgb);
+        diagnostics?.Searches.Add(new("full-frame", new(0, 0, rgb.Width, rgb.Height), fullProposals.Count));
+        foreach (Palm palm in fullProposals)
         {
-            HandDetection? hand = DetectHand(rgb, palm);
+            HandDetection? hand = DetectHand(rgb, palm, diagnostics?.Begin("full-frame", palm,
+                searchView: new(0, 0, rgb.Width, rgb.Height)));
             if (hand is not null) hands.Add(hand);
         }
 
@@ -140,13 +180,16 @@ public sealed class HandTrackingEngine : IDisposable
             {
                 int x = rgb.Width > rgb.Height ? offset : 0, y = rgb.Height > rgb.Width ? offset : 0;
                 using var tile = new Mat(rgb, new Rect(x, y, side, side));
-                foreach (Palm local in DetectPalms(tile))
+                var tileProposals = DetectPalms(tile);
+                diagnostics?.Searches.Add(new("tile", new(x, y, side, side), tileProposals.Count));
+                foreach (Palm local in tileProposals)
                 {
                     var palm = new Palm(new Rect2d(local.Bounds.X + x, local.Bounds.Y + y,
                         local.Bounds.Width, local.Bounds.Height),
                         local.Landmarks.Select(point => new PixelPoint(point.X + x, point.Y + y)).ToArray(),
                         local.Score);
-                    HandDetection? hand = DetectHand(rgb, palm);
+                    HandDetection? hand = DetectHand(rgb, palm, diagnostics?.Begin("tile", palm,
+                        searchView: new(x, y, side, side)));
                     if (hand is not null) hands.Add(hand);
                 }
             }
@@ -223,8 +266,9 @@ public sealed class HandTrackingEngine : IDisposable
         return selected;
     }
 
-    private HandDetection? DetectHand(Mat rgb, Palm palm)
+    private HandDetection? DetectHand(Mat rgb, Palm palm, CandidateTrace? diagnostics = null)
     {
+        if (diagnostics is not null) diagnostics.Result = "invalid-rotation-crop";
         var first = CropAndPad(rgb, palm.Bounds, forRotation: true);
         if (first is null) return null;
         using Mat padded = first.Value.Image;
@@ -234,6 +278,7 @@ public sealed class HandTrackingEngine : IDisposable
             new PixelPoint(point.X - bias.X, point.Y - bias.Y)).ToArray();
         double dx = palmPoints[2].X - palmPoints[0].X;
         double dy = palmPoints[2].Y - palmPoints[0].Y;
+        if (diagnostics is not null) diagnostics.Result = "degenerate-palm-direction";
         if (dx * dx + dy * dy < 1) return null;
         double radians = Math.PI / 2 - Math.Atan2(-dy, dx);
         radians -= 2 * Math.PI * Math.Floor((radians + Math.PI) / (2 * Math.PI));
@@ -246,6 +291,7 @@ public sealed class HandTrackingEngine : IDisposable
         double minX = rotatedPoints.Min(point => point.X), minY = rotatedPoints.Min(point => point.Y);
         var rotatedBounds = new Rect2d(minX, minY, rotatedPoints.Max(point => point.X) - minX,
             rotatedPoints.Max(point => point.Y) - minY);
+        if (diagnostics is not null) diagnostics.Result = "invalid-hand-crop";
         var second = CropAndPad(rotated, rotatedBounds, forRotation: false);
         if (second is null) return null;
         using Mat crop = second.Value.Image;
@@ -254,6 +300,12 @@ public sealed class HandTrackingEngine : IDisposable
         using Mat blob = ToNhwcBlob(resized);
         float[][] output = Forward(_handNet, blob, [63, 1, 1, 63]);
         double confidence = output[1][0], handedness = output[2][0];
+        if (diagnostics is not null)
+        {
+            diagnostics.HandConfidence = double.IsFinite(confidence) ? confidence : null;
+            diagnostics.Result = !double.IsFinite(confidence) || confidence < HandThreshold || confidence > 1
+                ? "hand-score-rejected" : "invalid-model-output";
+        }
         if (!double.IsFinite(confidence) || confidence < HandThreshold || confidence > 1 ||
             !double.IsFinite(handedness) || handedness is < 0 or > 1 || !output[0].All(float.IsFinite))
             return null;
@@ -263,6 +315,7 @@ public sealed class HandTrackingEngine : IDisposable
         using var inverseRotation = new Mat();
         Cv2.InvertAffineTransform(rotation, inverseRotation);
         var landmarks = new PixelPoint[21];
+        if (diagnostics is not null) diagnostics.Result = "landmarks-outside-frame";
         for (int index = 0; index < landmarks.Length; index++)
         {
             // The reference unpads around the clipped crop's center, then applies
@@ -280,8 +333,15 @@ public sealed class HandTrackingEngine : IDisposable
                 return null;
         }
         PixelPoint tip = landmarks[8];
+        if (diagnostics is not null) diagnostics.Result = "index-tip-outside-frame";
         if (tip.X < 0 || tip.Y < 0 || tip.X >= rgb.Width || tip.Y >= rgb.Height) return null;
-        return new HandDetection(Array.AsReadOnly(landmarks), confidence, handedness);
+        var result = new HandDetection(Array.AsReadOnly(landmarks), confidence, handedness);
+        if (diagnostics is not null)
+        {
+            diagnostics.Hand = result;
+            diagnostics.Result = "hand-accepted";
+        }
+        return result;
     }
 
     private static (Mat Image, Rect Bounds, PixelPoint Bias)? CropAndPad(Mat image, Rect2d palm,
@@ -404,6 +464,71 @@ public sealed class HandTrackingEngine : IDisposable
             _handNet.Dispose();
             _disposed = true;
         }
+    }
+
+    // Mutable trace builders live only within one Detect call. Public snapshots
+    // copy their collections and expose no state used by subsequent inference.
+    private sealed class DetectionTrace(int previousHandCount)
+    {
+        private readonly List<CandidateTrace> _candidates = [];
+        public readonly List<HandTrackingSearchDiagnostics> Searches = [];
+        public bool FullSearch;
+        public string FullSearchReason = "tracking-only";
+
+        public CandidateTrace Begin(string source, Palm palm, int? previousHandIndex = null,
+            HandTrackingBounds? searchView = null)
+        {
+            var candidate = new CandidateTrace(_candidates.Count, source, palm, previousHandIndex, searchView);
+            _candidates.Add(candidate);
+            return candidate;
+        }
+
+        public void RecordPreNms(IReadOnlyList<HandDetection> hands)
+        {
+            for (int index = 0; index < hands.Count; index++)
+            {
+                var candidate = ForHand(hands[index]);
+                candidate.PreNmsIndex = index;
+                candidate.NmsResult = "selection-limit";
+            }
+        }
+
+        public void RecordNms(HandDetection hand, string result, HandDetection? suppressor = null)
+        {
+            var candidate = ForHand(hand);
+            candidate.NmsResult = result;
+            candidate.SuppressedByCandidateIndex = suppressor is null ? null : ForHand(suppressor).Index;
+        }
+
+        public HandTrackingDiagnostics Finish(IReadOnlyList<HandDetection> selected) => new(
+            FullSearch, FullSearchReason, previousHandCount,
+            _candidates.Count(candidate => candidate.Source == "tracked-roi"),
+            Array.AsReadOnly(Searches.ToArray()),
+            Array.AsReadOnly(_candidates.Select(candidate => candidate.Snapshot()).ToArray()),
+            Array.AsReadOnly(_candidates.Where(candidate => candidate.PreNmsIndex.HasValue)
+                .OrderBy(candidate => candidate.PreNmsIndex).Select(candidate => candidate.Index).ToArray()),
+            Array.AsReadOnly(selected.Select(hand => ForHand(hand).Index).ToArray()));
+
+        private CandidateTrace ForHand(HandDetection hand) =>
+            _candidates.First(candidate => ReferenceEquals(candidate.Hand, hand));
+    }
+
+    private sealed class CandidateTrace(int index, string source, Palm palm, int? previousHandIndex,
+        HandTrackingBounds? searchView)
+    {
+        public int Index { get; } = index;
+        public string Source { get; } = source;
+        public double? HandConfidence;
+        public string Result = "not-run";
+        public double? PreviousBoundsIou;
+        public HandDetection? Hand;
+        public int? PreNmsIndex;
+        public string NmsResult = "not-eligible";
+        public int? SuppressedByCandidateIndex;
+
+        public HandTrackingCandidateDiagnostics Snapshot() => new(Index, Source, searchView, previousHandIndex,
+            new(palm.Bounds.X, palm.Bounds.Y, palm.Bounds.Width, palm.Bounds.Height), palm.Score,
+            HandConfidence, Result, PreviousBoundsIou, Hand, PreNmsIndex, NmsResult, SuppressedByCandidateIndex);
     }
 
     private sealed record Palm(Rect2d Bounds, PixelPoint[] Landmarks, double Score);

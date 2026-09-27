@@ -14,6 +14,11 @@ if (args is ["--hands"])
     HandTrackingRegression.Run();
     return;
 }
+if (args is ["--hand-diagnostics"])
+{
+    HandTrackingDiagnosticsRegression.Run();
+    return;
+}
 if (args is ["--photo-objects"])
 {
     PhotoCopySelectionRegression.Run();

@@ -17,6 +17,26 @@ public sealed partial class SceneCompositor
     private HandSpotlight[] _handSpotlights = [];
     private DateTimeOffset _spotlightFrameTime;
     private DateTimeOffset _spotlightResetTime;
+    private long _spotlightUpdateCount;
+    private long _spotlightResetCount;
+
+    public sealed record HandLightingDiagnostics(string Board, bool BoardClipReady, bool BlackOutput,
+        bool BoardSetup, int CalibrationTarget, DateTimeOffset SourceFrameTime, double? SourceAgeMilliseconds,
+        float Opacity, long GeometryUpdates, long Resets, double ProjectorAspect,
+        double[]? CameraToProjector, HandSpotlight[] Lights);
+
+    public HandLightingDiagnostics GetHandLightingDiagnostics()
+    {
+        lock (_gate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            return new(_boardSession.Screen.ToString(), _boardMediaClip is not null, _blackOutput,
+                _boardSetup, _calibrationTarget, _spotlightFrameTime,
+                _spotlightFrameTime == DateTimeOffset.MinValue ? null : (now - _spotlightFrameTime).TotalMilliseconds,
+                SpotlightOpacity(now), _spotlightUpdateCount, _spotlightResetCount, _displayAspect,
+                _boardCameraMap?.ToMatrix(), _handSpotlights.ToArray());
+        }
+    }
 
     public int ActiveHandSpotlightCount
     {
@@ -46,6 +66,7 @@ public sealed partial class SceneCompositor
             if (lights.Count == 0) return;
             _handSpotlights = lights.ToArray();
             _spotlightFrameTime = frameTime;
+            _spotlightUpdateCount++;
         }
     }
 
@@ -54,6 +75,7 @@ public sealed partial class SceneCompositor
         _handSpotlights = [];
         _spotlightFrameTime = DateTimeOffset.MinValue;
         _spotlightResetTime = DateTimeOffset.UtcNow;
+        _spotlightResetCount++;
     }
 
     private float SpotlightOpacity(DateTimeOffset now)

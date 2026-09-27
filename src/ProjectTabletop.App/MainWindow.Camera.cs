@@ -364,6 +364,7 @@ public sealed partial class MainWindow
         if (_closing || !_cameraWanted || _cameraOperation.CurrentCount == 0 ||
             _camera.ActiveDeviceId != _cameraWantedDeviceId) return;
         Volatile.Write(ref _latestCameraFrame, frame);
+        QueueHandTrackingVideoFrame(frame);
         var now = Stopwatch.GetTimestamp();
         if (_lastPreviewTick == 0 || Stopwatch.GetElapsedTime(_lastPreviewTick, now) >= TimeSpan.FromMilliseconds(40))
         {

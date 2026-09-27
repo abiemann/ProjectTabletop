@@ -61,6 +61,7 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         AppPalette.ApplyTitleBar(AppWindow.TitleBar);
+        InitializeHandDetectionLogging();
         _camera.FrameReceived += Camera_FrameReceived;
         _camera.CaptureFailed += Camera_CaptureFailed;
         Closed += MainWindow_Closed;

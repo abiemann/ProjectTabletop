@@ -504,9 +504,9 @@ public sealed partial class SceneCompositor : IDisposable
 
     private void DrawHandCursor(CanvasDrawingSession ds, Rect output)
     {
-        // The projected marker would become part of the camera photograph.
-        // Camera-preview markers remain available while Photo Copy is active.
-        if (_boardSession.Screen == BoardScreen.PhotoCopy || _boardSetup || _calibrationTarget >= 0) return;
+        // Pinch feedback belongs to the gesture tester. Other boards still
+        // receive the same gesture input without projecting a red marker.
+        if (_boardSession.Screen != BoardScreen.HandTracking || _boardSetup || _calibrationTarget >= 0) return;
         var now = DateTimeOffset.UtcNow;
         if (_boardMediaClip is not { } clip || _boardCameraMap is null ||
             _handTips.Length == 0 || _handFrameTime > now ||

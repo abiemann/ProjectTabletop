@@ -156,7 +156,7 @@ public sealed partial class SceneCompositor
                     var hovered = handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id);
                     DrawMenuButton(surface, button, hovered, label);
                 }
-                surface.DrawText("White spotlight = hand     Red circle = pinch", 80, 890, menuMuted, small);
+                surface.DrawText("White spotlight = hand     Side light = selected button", 80, 890, menuMuted, small);
                 surface.DrawText("Release your fingers before selecting again.", 80, 931, menuMuted, small);
             }
             else

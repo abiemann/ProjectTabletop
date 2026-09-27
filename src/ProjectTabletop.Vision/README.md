@@ -134,6 +134,14 @@ smaller grid and is not the full-white physical-cardboard scan.
 
 ## Regression and hardware checks
 
+`HandTrackingEngine.CaptureDiagnostics` optionally records a read-only
+`LastDiagnostics` snapshot for each inference: tracked-region attempts and overlap,
+full/tile palm-search views, landmark confidence/rejection, candidate landmarks,
+and suppression/selection decisions. It defaults to off and does not change model
+thresholds or selection. The app enables it in the Hand-Tracking tester and writes
+the snapshot with pinch and spotlight geometry to local JSONL logs. Run
+`-- --hand-diagnostics` to compare instrumented and ordinary inference results.
+
 Photo Copy uses `PhotoCopyHandSelector.TrySelectShutter` to match a fresh pinch
 cursor to the hand making the command. One or two hands may be visible; only
 one may pinch. `PhotoObjectExtractor` rectifies the camera image, estimates the

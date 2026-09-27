@@ -35,6 +35,12 @@ public sealed partial class MainWindow
                 return VerifyHandTrackingInput();
             case "verify_hand_spotlights":
                 return await VerifyHandSpotlightsAsync();
+            case "verify_hand_detection_log":
+                return await HandDetectionLogVerification.RunAsync(Path.Combine(_appDataDirectory,
+                    "LogVerification", Guid.NewGuid().ToString("N")));
+            case "verify_hand_video_recording":
+                return await HandTrackingVideoRecorderVerification.RunAsync(Path.Combine(_appDataDirectory,
+                    "VideoVerification", Guid.NewGuid().ToString("N")));
             case "verify_photo_copy_render":
                 return await VerifyPhotoCopyRenderAsync();
 #endif
@@ -67,6 +73,9 @@ public sealed partial class MainWindow
                     handCount = TrackedHandCount,
                     handExecuteActive = ExecutingHandCount > 0,
                     lastHandDetection = _lastHandDetection,
+                    handDetectionLog = _handDetectionLog?.Status,
+                    handVideoRecording = _handVideoRecorder?.Status,
+                    handLighting = _scene.GetHandLightingDiagnostics(),
                     boardApp = _scene.CurrentBoardScreen.ToString(),
                     boardAppTitle = _scene.CurrentBoardTitle,
                     hoveredBoardButtons = _scene.HoveredBoardButtons,

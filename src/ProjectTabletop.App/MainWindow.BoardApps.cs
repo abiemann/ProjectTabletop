@@ -39,6 +39,7 @@ public sealed partial class MainWindow
     private void UpdateBoardAppStatus()
     {
         if (_closing) return;
+        UpdateHandDetectionLogStatus();
         BoardAppStatusText.Text = _scene.CurrentBoardTitle + ". " +
             (IsBoardScanMeasuring ? "Board alignment is in progress." :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
