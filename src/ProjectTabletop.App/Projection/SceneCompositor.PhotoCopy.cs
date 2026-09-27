@@ -11,15 +11,15 @@ namespace ProjectTabletop.App.Projection;
 public sealed partial class SceneCompositor
 {
     public sealed record PhotoCopyCaptureContext(long Revision, double[] CameraToBoard,
-        DateTimeOffset ReadyAfter);
+        DateTimeOffset ReadyAfter, PhotoObjectTarget? Target);
 
-    private static readonly TimeSpan PhotoCopyWhiteSettle = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan PhotoCopySurfaceSettle = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan PhotoCopyRemoveHandDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan PhotoCopyStampInterval = TimeSpan.FromMilliseconds(25);
-    private const string PhotoCopyReadyMessage = "Place one object in the white area. Pinch beside it to copy.";
+    private const string PhotoCopyReadyMessage = "Place an object on grey; lift your hand briefly to lock its light. Then pinch beside it.";
     private long _photoCopySessionRevision = -1;
     private long _photoCopyRevision;
-    private DateTimeOffset _photoCopyWhiteShownAt;
+    private DateTimeOffset _photoCopySurfaceShownAt;
     private DateTimeOffset _photoCopyAnimationStarts;
     private PhotoHandCutout? _photoCopyCutout;
     private byte[]? _photoCopyPremultipliedPixels;
@@ -68,7 +68,9 @@ public sealed partial class SceneCompositor
             _photoCopyBitmap?.Dispose();
             _photoCopyBitmap = null;
             _photoCopyPlacements = Array.Empty<PhotoCopyPlacement>();
-            _photoCopyWhiteShownAt = DateTimeOffset.MinValue;
+            _photoCopySurfaceShownAt = DateTimeOffset.MinValue;
+            _photoCopyObjectTarget = null;
+            _photoCopyObjectShownAt = DateTimeOffset.MinValue;
             _photoCopyAnimationStarts = DateTimeOffset.MinValue;
             _photoCopyStatus = PhotoCopyReadyMessage;
             _renderedBoardState = null;
@@ -92,8 +94,14 @@ public sealed partial class SceneCompositor
             SyncPhotoCopySession();
             context = null!;
             if (!PhotoCopyCaptureAllowed || _photoCopyCutout is not null ||
-                _photoCopyWhiteShownAt == DateTimeOffset.MinValue) return false;
-            var readyAfter = _photoCopyWhiteShownAt + PhotoCopyWhiteSettle;
+                _photoCopySurfaceShownAt == DateTimeOffset.MinValue) return false;
+            var readyAfter = _photoCopySurfaceShownAt + PhotoCopySurfaceSettle;
+            if (_photoCopyObjectTarget is not null)
+            {
+                if (_photoCopyObjectShownAt == DateTimeOffset.MinValue) return false;
+                var illuminatedAfter = _photoCopyObjectShownAt + TimeSpan.FromMilliseconds(400);
+                if (illuminatedAfter > readyAfter) readyAfter = illuminatedAfter;
+            }
             if (DateTimeOffset.UtcNow < readyAfter) return false;
             var cameraToProjector = _boardCameraMap!.ToMatrix();
             var projectorToBoard = _boardSurfaceMap!.Inverse().ToMatrix();
@@ -103,18 +111,19 @@ public sealed partial class SceneCompositor
             for (var middle = 0; middle < 3; middle++)
                 cameraToBoard[row * 3 + column] +=
                     projectorToBoard[row * 3 + middle] * cameraToProjector[middle * 3 + column];
-            context = new PhotoCopyCaptureContext(_photoCopyRevision, cameraToBoard, readyAfter);
+            context = new PhotoCopyCaptureContext(_photoCopyRevision, cameraToBoard, readyAfter, _photoCopyObjectTarget);
             return true;
         }
     }
 
-    public bool SetPhotoCopyCapture(PhotoHandCutout cutout, long revision)
+    public bool SetPhotoCopyCapture(PhotoHandCutout cutout, long revision, PhotoObjectTarget? expectedTarget = null)
     {
         ArgumentNullException.ThrowIfNull(cutout);
         lock (_gate)
         {
             SyncPhotoCopySession();
-            if (!PhotoCopyCaptureAllowed || revision != _photoCopyRevision || _photoCopyCutout is not null)
+            if (!PhotoCopyCaptureAllowed || revision != _photoCopyRevision || _photoCopyCutout is not null ||
+                !ReferenceEquals(expectedTarget, _photoCopyObjectTarget))
                 return false;
             if (cutout.Width <= 0 || cutout.Height <= 0 ||
                 cutout.BgraPixels.LongLength != (long)cutout.Width * cutout.Height * 4 ||
@@ -126,6 +135,8 @@ public sealed partial class SceneCompositor
                 return false;
             var placements = PhotoCopyLayout.Create(cutout.Width / (double)cutout.Height);
             _photoCopyCutout = cutout;
+            _photoCopyObjectTarget = null;
+            _photoCopyObjectShownAt = DateTimeOffset.MinValue;
             _photoCopyPremultipliedPixels = PhotoCopyBitmapPixels.Premultiply(cutout.BgraPixels);
             _photoCopyPlacements = placements;
             _photoCopyAnimationStarts = DateTimeOffset.UtcNow + PhotoCopyRemoveHandDelay;

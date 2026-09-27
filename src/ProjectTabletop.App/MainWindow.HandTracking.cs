@@ -211,6 +211,7 @@ public sealed partial class MainWindow
                                 _scene.SetHandSpotlights(visibleHands, frame.Timestamp);
                                 LogHandDetection(sequence, requestedInTester, frame, generation, engineReset,
                                     inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, cursors, "accepted");
+                                QueuePhotoCopyObservation(frame, visibleHands);
                                 QueuePhotoCopyCapture(frame, visibleHands, cursors);
                             }
                         }
@@ -296,6 +297,7 @@ public sealed partial class MainWindow
         lock (_handGate) pending = _handDetectionTask;
         if (pending is not null) await pending;
         if (_photoCopyTask is { } photoCopyTask) await photoCopyTask;
+        if (_photoCopyObservationTask is { } observationTask) await observationTask;
         _handEngine?.Dispose();
         _handEngine = null;
         if (_handVideoRecorder is not null) await _handVideoRecorder.DisposeAsync();

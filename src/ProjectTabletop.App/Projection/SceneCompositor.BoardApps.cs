@@ -88,9 +88,8 @@ public sealed partial class SceneCompositor
 
         var now = DateTimeOffset.UtcNow;
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
-        if (photoCopy && !preview && PhotoCopyCaptureAllowed &&
-            _photoCopyWhiteShownAt == DateTimeOffset.MinValue)
-            _photoCopyWhiteShownAt = now;
+        if (photoCopy && !preview && PhotoCopyCaptureAllowed)
+            MarkPhotoCopySurfacePresented(now);
         var handsFresh = _handFrameTime <= now &&
             now - _handFrameTime <= TimeSpan.FromMilliseconds(350);
         var executing = handsFresh && _handTips.Any(cursor => now < cursor.ExecuteUntil);
@@ -108,56 +107,59 @@ public sealed partial class SceneCompositor
         if (_renderedBoardState != state)
         {
             using var surface = _boardApplicationTarget.CreateDrawingSession();
-            surface.Clear(photoCopy ? Colors.White : _boardSession.Screen == BoardScreen.HandTracking
+            surface.Clear(photoCopy ? AppPalette.PhotoCopyBackground : _boardSession.Screen == BoardScreen.HandTracking
                 ? Colors.Transparent : AppPalette.Background);
             if (photoCopy)
             {
                 DrawPhotoCopyStamps(surface, state.PhotoStampCount);
+                DrawPhotoCopyObjectSpotlight(surface);
             }
+            else if (_boardSession.Screen != BoardScreen.HandTracking)
+                DrawMetalBackdrop(surface);
             using var heading = new CanvasTextFormat
             {
                 FontFamily = "Segoe UI",
-                FontSize = 52,
+                FontSize = 54,
                 FontWeight = FontWeights.SemiBold,
                 WordWrapping = CanvasWordWrapping.NoWrap
             };
             using var label = new CanvasTextFormat
             {
                 FontFamily = "Segoe UI",
-                FontSize = 34,
+                FontSize = 32,
                 FontWeight = FontWeights.SemiBold,
                 WordWrapping = CanvasWordWrapping.NoWrap
             };
             using var body = new CanvasTextFormat
             {
                 FontFamily = "Segoe UI",
-                FontSize = 24,
+                FontSize = 23,
                 WordWrapping = CanvasWordWrapping.NoWrap
             };
             using var small = new CanvasTextFormat
             {
                 FontFamily = "Segoe UI",
-                FontSize = 21,
+                FontSize = 20,
                 WordWrapping = CanvasWordWrapping.NoWrap
             };
 
             var muted = AppPalette.MutedText;
             if (_boardSession.Screen == BoardScreen.Menu)
             {
-                // Keep neutral illumination on the targets instead of the whole
-                // board, with sparse text and no bright bands across the hand.
-                var menuText = AppPalette.Text;
-                var menuMuted = AppPalette.MutedText;
-                surface.DrawText("PROJECT TABLETOP", 80, 57, menuMuted, small);
-                surface.DrawText("Choose a board", 76, 97, menuText, heading);
-                surface.DrawText("Point until the side light comes on. Then pinch.", 80, 186, menuMuted, body);
-                foreach (var button in _boardSession.Buttons)
+                surface.DrawLine(80, 65, 109, 65, AppPalette.IndicatorOn, 3);
+                surface.DrawText("PROJECT TABLETOP", 125, 51, AppPalette.MutedText, small);
+                surface.DrawText("06  /  BOARDS", 771, 54, AppPalette.AccentSecondary, small);
+                surface.DrawText("Choose a board", 76, 99, AppPalette.Text, heading);
+                surface.DrawText("Point at a panel. Pinch when its edge lights up.", 80, 182, muted, body);
+                for (int index = 0; index < _boardSession.Buttons.Count; index++)
                 {
+                    var button = _boardSession.Buttons[index];
                     var hovered = handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id);
-                    DrawMenuButton(surface, button, hovered, label);
+                    DrawMenuButton(surface, button, hovered, label, small, index + 1);
                 }
-                surface.DrawText("White spotlight = hand     Side light = selected button", 80, 890, menuMuted, small);
-                surface.DrawText("Release your fingers before selecting again.", 80, 931, menuMuted, small);
+                surface.FillCircle(new Vector2(88, 894), 4, AppPalette.IndicatorOn);
+                surface.DrawText("Point. Pinch. Play.", 105, 877, AppPalette.Text, body);
+                surface.DrawText("Release your fingers before the next selection.", 80, 923, muted, small);
             }
             else
             {
@@ -167,37 +169,43 @@ public sealed partial class SceneCompositor
 
                 if (photoCopy)
                 {
-                    // Keep the controls and instructions legible over the copies,
-                    // while letting the pattern reach the top edge between them.
-                    surface.FillRoundedRectangle(new Rect(380, 70, 240, 75), 12, 12, AppPalette.Surface);
-                    surface.DrawText("Photo Copy", 394, 87, AppPalette.Text, label);
+                    // Every panel has an opaque metal/glass base so copied
+                    // images and dynamic illumination cannot obscure controls.
+                    DrawGlassPanel(surface, new Rect(380, 55, 240, 105));
+                    surface.DrawText("Photo Copy", 400, 84, AppPalette.Text, label);
+                    surface.DrawLine(401, 140, 440, 140, AppPalette.AccentSecondary, 2);
                     using var photoStatus = new CanvasTextFormat
                     {
                         FontFamily = "Segoe UI",
-                        FontSize = 18,
+                        FontSize = 19,
                         WordWrapping = CanvasWordWrapping.Wrap
                     };
-                    surface.FillRoundedRectangle(new Rect(50, 165, 900, 50), 10, 10, AppPalette.Surface);
+                    DrawGlassPanel(surface, new Rect(50, 165, 900, 50));
                     surface.DrawText(state.PhotoStatus ?? PhotoCopyReadyMessage,
-                        new Rect(60, 170, 880, 44), AppPalette.Text, photoStatus);
+                        new Rect(69, 170, 862, 44), AppPalette.Text, photoStatus);
                 }
                 else if (_boardSession.Screen == BoardScreen.HandTracking)
                 {
-                    surface.FillRoundedRectangle(new Rect(390, 55, 550, 105), 18, 18,
-                        AppPalette.Surface);
-                    surface.DrawText("Hand-Tracking", 414, 68, AppPalette.Text, body);
-                    var statusColor = executing ? Colors.Red : AppPalette.Text;
+                    DrawGlassPanel(surface, new Rect(390, 55, 550, 105));
+                    surface.DrawText("Hand-Tracking", 414, 69, AppPalette.Text, body);
+                    surface.DrawCircle(new Vector2(906, 88), 9, AppPalette.AccentSecondary, 2);
+                    surface.FillCircle(new Vector2(906, 88), 3, AppPalette.IndicatorOn);
+                    var statusColor = executing ? Colors.Red : AppPalette.IndicatorOn;
                     var status = executing ? "PINCH DETECTED" : handsFresh && _handTips.Length > 0
                         ? "Pinch: red circle for one second" : "Waiting for a hand";
                     surface.DrawText(status, 414, 113, statusColor, small);
                 }
                 else
                 {
-                    surface.DrawText("PROJECT TABLETOP", 390, 83, AppPalette.MutedText, small);
-                    surface.DrawText(_boardSession.Title, 76, 264, AppPalette.Text, heading);
-                    surface.DrawText("Coming soon", 80, 372, AppPalette.IndicatorOn, label);
-                    surface.DrawText("This app is not connected yet.", 80, 444, muted, body);
-                    surface.DrawText("Point and pinch Back to choose another app.", 80, 543, muted, body);
+                    surface.DrawText("PROJECT TABLETOP", 390, 85, muted, small);
+                    DrawGlassPanel(surface, new Rect(80, 270, 840, 445));
+                    surface.DrawText("COMING SOON", 119, 307, AppPalette.AccentSecondary, small);
+                    surface.DrawText(_boardSession.Title, 115, 355, AppPalette.Text, heading);
+                    DrawBoardSymbol(surface, _boardSession.Screen, new Vector2(813, 384), 1.85f, AppPalette.IndicatorOn);
+                    surface.DrawLine(120, 453, 880, 453, AppPalette.MetalEdge, 1);
+                    surface.DrawText("A new way to play is on its way.", 120, 494, AppPalette.Text, body);
+                    surface.DrawText("Choose another board from the menu.", 120, 548, muted, body);
+                    surface.DrawText("YOUR TABLE. MORE POSSIBILITIES.", 120, 660, muted, small);
                 }
             }
             _renderedBoardState = state;
@@ -228,24 +236,32 @@ public sealed partial class SceneCompositor
     }
 
     private static void DrawMenuButton(CanvasDrawingSession ds, BoardButton button,
-        bool hovered, CanvasTextFormat label)
+        bool hovered, CanvasTextFormat label, CanvasTextFormat small, int number)
     {
         var bounds = button.Bounds;
         var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
             bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
         DrawButtonSurface(ds, rect, hovered);
-        ds.DrawText(button.Label, (float)rect.X + 34, (float)rect.Y + 58,
+        ds.DrawText(number.ToString("00"), (float)rect.X + 32, (float)rect.Y + 16,
+            hovered ? AppPalette.IndicatorOn : AppPalette.MutedText, small);
+        ds.DrawText(button.Label, (float)rect.X + 32, (float)rect.Y + 52,
             AppPalette.ButtonText, label);
-    }
-
-    private static void DrawButtonSurface(CanvasDrawingSession ds, Rect rect, bool hovered)
-    {
-        ds.FillRoundedRectangle(rect, 18, 18, AppPalette.Button);
-        var indicator = new Vector2((float)rect.X + 16, (float)(rect.Y + rect.Height / 2));
-        if (hovered)
-            ds.FillCircle(indicator, 10, AppPalette.IndicatorGlow);
-        ds.FillCircle(indicator, 6, hovered
-            ? AppPalette.IndicatorOn : AppPalette.IndicatorOff);
+        var description = button.Destination switch
+        {
+            BoardScreen.HandTracking => "Test gestures",
+            BoardScreen.PhotoCopy => "Copy hands and objects",
+            _ => "Coming soon"
+        };
+        ds.DrawText(description, (float)rect.X + 32, (float)rect.Y + 111, AppPalette.MutedText, small);
+        var iconCenter = new Vector2((float)rect.Right - 55, (float)rect.Y + 48);
+        ds.FillCircle(iconCenter, 30, ThemeColor(9, 21, 35, 110));
+        ds.DrawCircle(iconCenter, 30, hovered ? AppPalette.IndicatorOn : ThemeColor(123, 158, 187, 65), 1);
+        DrawBoardSymbol(ds, button.Destination, iconCenter, .79f,
+            hovered ? AppPalette.IndicatorOn : AppPalette.AccentSecondary);
+        float arrowX = (float)rect.Right - 41, arrowY = (float)rect.Bottom - 30;
+        ds.DrawLine(arrowX - 12, arrowY, arrowX, arrowY, hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 2);
+        ds.DrawLine(arrowX - 6, arrowY - 6, arrowX, arrowY, hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 2);
+        ds.DrawLine(arrowX - 6, arrowY + 6, arrowX, arrowY, hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 2);
     }
 
     private static void DrawBoardButton(CanvasDrawingSession ds, BoardButton button,
@@ -255,7 +271,7 @@ public sealed partial class SceneCompositor
         var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
             bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
         DrawButtonSurface(ds, rect, hovered);
-        var x = (float)rect.X + 34;
+        var x = (float)rect.X + 33;
         var y = (float)rect.Y + (description is null ? 27 : 33);
         ds.DrawText(button.Label, x, y, AppPalette.ButtonText, label);
         if (description is not null)

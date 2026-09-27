@@ -98,8 +98,62 @@ public sealed partial class MainWindow
 
         scene.SetHandSpotlights([left], DateTimeOffset.UtcNow);
         scene.ShowPhotoCopy();
-        scene.SetHandSpotlights([left], DateTimeOffset.UtcNow);
-        Require(scene.ActiveHandSpotlightCount == 0, "A spotlight contaminated the Photo Copy capture area.");
+        Draw();
+        await Task.Delay(1100);
+        Require(scene.TryGetPhotoCopyCaptureContext(out var photoContext), "The grey capture field never became ready.");
+        const int fixtureSize = 1000;
+        var fixture = new byte[fixtureSize * fixtureSize * 4];
+        for (int y = 0; y < fixtureSize; y++)
+        for (int x = 0; x < fixtureSize; x++)
+        {
+            int index = (y * fixtureSize + x) * 4;
+            double localX = (x - 270) * Math.Cos(.5) + (y - 600) * Math.Sin(.5);
+            double localY = -(x - 270) * Math.Sin(.5) + (y - 600) * Math.Cos(.5);
+            byte value = Math.Abs(localX) < 50 && Math.Abs(localY) < 70 ? (byte)30 : (byte)100;
+            fixture[index] = fixture[index + 1] = fixture[index + 2] = value;
+            fixture[index + 3] = 255;
+        }
+        var photoObject = PhotoObjectLocator.Locate(fixtureSize, fixtureSize, fixtureSize * 4, fixture,
+            [.001, 0, 0, 0, .001, 0, 0, 0, 1], out var locateFailure);
+        Require(photoObject is not null, "The spotlight object fixture failed: " + locateFailure);
+        Require(photoObject!.Spotlight.Shape == PhotoObjectSpotlightShape.RoundedRectangle,
+            "A rectangular object did not acquire a fitted rectangular light.");
+        Require(scene.SetPhotoCopyObject(photoObject!, photoContext.Revision), "The object spotlight could not lock.");
+        var obsoleteSprite = new PhotoHandCutout(1, 1, [20, 40, 80, 255], new(0, 0), new(0, -1));
+        Require(!scene.SetPhotoCopyCapture(obsoleteSprite, photoContext.Revision),
+            "A hand-only capture entered after a different object target had locked.");
+        Require(!scene.TryGetPhotoCopyCaptureContext(out _), "Capture ignored the object's illumination settling time.");
+        Draw();
+        await Task.Delay(450);
+        Require(scene.TryGetPhotoCopyCaptureContext(out var litContext) && ReferenceEquals(litContext.Target, photoObject),
+            "The settled object light did not expose its matching capture target.");
+        scene.SetHandSpotlights([right], DateTimeOffset.UtcNow);
+        var twoLights = Draw();
+        var objectCenter = BoardPoint(photoObject!.Center.X / 1000, photoObject.Center.Y / 1000);
+        Require(scene.ActiveHandSpotlightCount == 1 && WhiteAt(twoLights, objectCenter) && WhiteAt(twoLights, new(.7, .6)),
+            "Photo Copy failed to draw separate object and hand lights.");
+        var fitted = photoObject.Spotlight;
+        foreach (int signX in new[] { -1, 1 })
+        foreach (int signY in new[] { -1, 1 })
+        {
+            double x = signX * (fitted.Width / 2 - 12), y = signY * (fitted.Height / 2 - 12);
+            var corner = BoardPoint((fitted.Center.X + x * Math.Cos(fitted.RotationRadians) - y * Math.Sin(fitted.RotationRadians)) / 1000,
+                (fitted.Center.Y + x * Math.Sin(fitted.RotationRadians) + y * Math.Cos(fitted.RotationRadians)) / 1000);
+            Require(WhiteAt(twoLights, corner), "The rectangular light did not rotate with the object's corners.");
+        }
+        Require(!WhiteAt(twoLights, BoardPoint(.5, .9)), "Photo Copy flooded the grey field away from either subject.");
+        scene.ClearHandTips(resetInput: false);
+        scene.SetHandSpotlights([Hand(.7, .25)], DateTimeOffset.UtcNow);
+        var clippedControls = Draw();
+        Require(!WhiteAt(clippedControls, BoardPoint(.75, .15)), "The hand spotlight covered Photo Copy controls.");
+        await Task.Delay(750);
+        Require(scene.ActiveHandSpotlightCount == 0 && WhiteAt(Draw(), objectCenter),
+            "The stationary object light disappeared when the hand light expired.");
+        Require(scene.ClearPhotoCopyObject(photoObject, photoContext.Revision), "A removed object retained its spotlight.");
+        Require(!scene.TryGetPhotoCopyCaptureContext(out _) && !WhiteAt(Draw(), objectCenter),
+            "Removing the target failed to restore grey or require a fresh surface settle.");
+        Require(!scene.SetPhotoCopyCapture(obsoleteSprite, photoContext.Revision, photoObject),
+            "A capture completed after its object lock had been removed.");
         scene.ShowBoardMenu();
         scene.SetHandSpotlights([left], DateTimeOffset.UtcNow);
         scene.ShowCalibrationTarget(0, pieceTop: false);
@@ -156,7 +210,9 @@ public sealed partial class MainWindow
 
         return new { passed = true, opaqueFingerCoverage = true, boardClipping = true, twoHands = true,
             sourceFrameOrdering = true, lightingDoesNotGenerateInput = true, resetRejectsOldFrames = true,
-            sourceLifetimeMilliseconds = 700, photoCopyAndCalibrationSuppressed = true, blackOutputClears = true,
+            sourceLifetimeMilliseconds = 700, photoCopyIndependentLights = true, photoCopyControlsProtected = true,
+            photoCopyObjectLockLifecycle = true, rotatedRectangularObjectLight = true,
+            calibrationSuppressed = true, blackOutputClears = true,
             pinchCircleOnlyOnHandTracking = true, hiddenPinchStillNavigates = true };
 
         PixelPoint BoardPoint(double u, double v) => new(

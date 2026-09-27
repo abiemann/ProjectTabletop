@@ -37,7 +37,7 @@ public sealed partial class MainWindow
         }
         await Task.Delay(1100);
         if (!scene.TryGetPhotoCopyCaptureContext(out var context))
-            throw new InvalidOperationException("Offscreen white capture context did not become ready.");
+            throw new InvalidOperationException("Offscreen grey capture context did not become ready.");
 
         const int size = 80;
         var pixels = new byte[size * size * 4];
@@ -100,7 +100,7 @@ public sealed partial class MainWindow
 
         // A completed worker may return after Capture again or after leaving and
         // reopening Photo Copy. Neither its pixels nor its error may enter the
-        // new session, which must wait for its own white field to settle.
+        // new session, which must wait for its own grey field to settle.
         void RejectObsoleteResult(long revision)
         {
             var currentStatus = scene.PhotoCopyStatus;
@@ -119,11 +119,11 @@ public sealed partial class MainWindow
         scene.SetHandCursors([new(restartTip, restartTime.AddSeconds(1), 1)], restartTime);
         if (scene.CurrentBoardScreen != BoardScreen.PhotoCopy || scene.PhotoCopyCount != 0 ||
             scene.TryGetPhotoCopyCaptureContext(out _))
-            throw new InvalidOperationException("Capture again did not clear the photo and require a new white draw.");
+            throw new InvalidOperationException("Capture again did not clear the photo and require a new grey draw.");
         RejectObsoleteResult(context.Revision);
         Draw();
         if (scene.TryGetPhotoCopyCaptureContext(out _))
-            throw new InvalidOperationException("Capture again skipped the white-field settling interval.");
+            throw new InvalidOperationException("Capture again skipped the grey-field settling interval.");
         await Task.Delay(1100);
         if (!scene.TryGetPhotoCopyCaptureContext(out var restartedContext) ||
             restartedContext.Revision <= context.Revision || restartedContext.ReadyAfter <= context.ReadyAfter)
@@ -134,10 +134,10 @@ public sealed partial class MainWindow
         RejectObsoleteResult(restartedContext.Revision);
         scene.ShowPhotoCopy();
         if (scene.TryGetPhotoCopyCaptureContext(out _))
-            throw new InvalidOperationException("Reopening Photo Copy reused the previous white field.");
+            throw new InvalidOperationException("Reopening Photo Copy reused the previous grey field.");
         Draw();
         if (scene.TryGetPhotoCopyCaptureContext(out _))
-            throw new InvalidOperationException("Reopening Photo Copy skipped the white-field settling interval.");
+            throw new InvalidOperationException("Reopening Photo Copy skipped the grey-field settling interval.");
         await Task.Delay(1100);
         if (!scene.TryGetPhotoCopyCaptureContext(out var reopenedContext) ||
             reopenedContext.Revision <= restartedContext.Revision ||
@@ -147,11 +147,11 @@ public sealed partial class MainWindow
         scene.InvalidatePhotoCopyCapture();
         RejectObsoleteResult(reopenedContext.Revision);
         if (scene.TryGetPhotoCopyCaptureContext(out _))
-            throw new InvalidOperationException("Invalidating camera capture retained a ready white field.");
+            throw new InvalidOperationException("Invalidating camera capture retained a ready grey field.");
 
         return new { passed = true, copies = completedCopies, transparentSource = true,
             fullBoardCoverage = true, buttonsVisible = true, obsoleteCaptureRejected = true,
-            obsoleteFailureRejected = true, resetRequiresWhiteSettle = true, path };
+            obsoleteFailureRejected = true, resetRequiresSurfaceSettle = true, path };
     }
 }
 #endif

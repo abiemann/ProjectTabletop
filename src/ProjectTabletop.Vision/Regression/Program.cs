@@ -7,6 +7,7 @@ if (args is ["--photo-copy"])
     PhotoCopySelectionRegression.Run();
     PhotoCopyRegression.Run();
     PhotoObjectRegression.Run();
+    PhotoObjectTargetRegression.Run();
     return;
 }
 if (args is ["--hands"])
@@ -23,6 +24,7 @@ if (args is ["--photo-objects"])
 {
     PhotoCopySelectionRegression.Run();
     PhotoObjectRegression.Run();
+    PhotoObjectTargetRegression.Run();
     return;
 }
 if (args is ["--hand-spotlights"])
@@ -115,6 +117,7 @@ HandTrackingRegression.Run();
 HandSpotlightRegression.Run();
 PhotoCopyRegression.Run();
 PhotoObjectRegression.Run();
+PhotoObjectTargetRegression.Run();
 if (args.Length == 1)
 {
     using Mat actual = Cv2.ImRead(args[0], ImreadModes.Unchanged);

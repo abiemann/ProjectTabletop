@@ -42,10 +42,11 @@ internal static class PhotoObjectRegression
         CheckGradientAndForearm();
         CheckPerspective();
         CheckOtherHand();
+        CheckOtherHand(greyBackground: true);
         CheckRejections();
         Console.WriteLine("Photo object regression: one-hand shutter, dark/neutral/color pixels, genuine alpha/holes, " +
             "tinted gradient background, disconnected forearm exclusion, perspective, padding, " +
-            "other-hand middle-finger orientation and empty/overlap/ambiguous/edge/invalid rejection passed.");
+            "other-hand middle-finger orientation on white/grey and empty/overlap/ambiguous/edge/invalid rejection passed.");
     }
 
     private static void CheckHolesAndPadding()
@@ -110,14 +111,18 @@ internal static class PhotoObjectRegression
             "Camera perspective changed the object's rectified coverage.");
     }
 
-    private static void CheckOtherHand()
+    private static void CheckOtherHand(bool greyBackground = false)
     {
         using Mat scene = Scene();
+        if (greyBackground)
+            Cv2.Rectangle(scene, new Rect(0, 115, Size, Size - 115), new Scalar(110, 110, 110, 255), -1);
         DrawShutter(scene);
         var target = new HandDetection(OpenPoints.Select(point => new PixelPoint(point.X - 80, point.Y + 70)).ToArray(), .99, .7);
         DrawHand(scene, target, new Scalar(125, 167, 209, 255), 16, 45);
-        var result = PhotoObjectExtractor.Extract(Size, Size, Size * 4, Bytes(scene), Shutter, BoardMap,
-            out var failure, [target]);
+        string? failure = null;
+        var result = greyBackground
+            ? PhotoHandExtractor.Extract(Size, Size, Size * 4, Bytes(scene), target, BoardMap)
+            : PhotoObjectExtractor.Extract(Size, Size, Size * 4, Bytes(scene), Shutter, BoardMap, out failure, [target]);
         Require(result is not null, "The existing other-hand photograph was not preserved: " + failure);
         CheckAlpha(result!);
         Require(result!.MiddleFingerDirection.Y < -.99 && result.MiddleFingerDirection.X < -.005 &&

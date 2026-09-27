@@ -56,7 +56,7 @@ public sealed partial class MainWindow
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
         SetStatus(_scene.HasBoardMediaClip
-            ? "Photo Copy: place one object in the white area, then pinch beside it to take the photo."
+            ? "Photo Copy: place an object on grey and lift your hand briefly. Once its light locks, pinch beside it."
             : "Photo Copy selected. Scan the board before taking a photo.");
     }
 

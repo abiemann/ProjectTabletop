@@ -53,7 +53,7 @@ public sealed partial class SceneCompositor
             if (frameTime < _spotlightResetTime || frameTime < _spotlightFrameTime ||
                 frameTime > now || now - frameTime > TimeSpan.FromMilliseconds(350)) return;
             if (_boardCameraMap is null || _boardMediaClip is null || _blackOutput || _boardSetup ||
-                _calibrationTarget >= 0 || _boardSession.Screen == BoardScreen.PhotoCopy)
+                _calibrationTarget >= 0)
             {
                 ClearHandSpotlights();
                 return;
@@ -82,7 +82,7 @@ public sealed partial class SceneCompositor
     {
         var age = now - _spotlightFrameTime;
         if (_blackOutput || _boardSetup || _calibrationTarget >= 0 || _boardMediaClip is null ||
-            _boardSession.Screen == BoardScreen.PhotoCopy || age < TimeSpan.Zero || age >= SpotlightLifetime)
+            age < TimeSpan.Zero || age >= SpotlightLifetime)
             return 0;
         return age <= SpotlightHold ? 1 :
             (float)((SpotlightLifetime - age).TotalMilliseconds /
@@ -95,6 +95,7 @@ public sealed partial class SceneCompositor
     {
         var opacity = SpotlightOpacity(DateTimeOffset.UtcNow);
         if (_handSpotlights.Length == 0 || opacity <= 0) return;
+        using var photoCopyClip = ClipPhotoCopyHandLighting(ds, output);
         using var brush = new CanvasRadialGradientBrush(ds.Device,
         [
             new CanvasGradientStop { Position = 0, Color = Colors.White },

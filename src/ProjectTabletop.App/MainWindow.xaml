@@ -5,64 +5,102 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:canvas="using:Microsoft.Graphics.Canvas.UI.Xaml"
     Title="Project Tabletop">
-    <Grid Background="{StaticResource TabletopBackgroundBrush}" ColumnSpacing="12">
+    <Grid Background="{StaticResource TabletopChassisBrush}" ColumnSpacing="16">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="410" />
+            <ColumnDefinition Width="448" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
-        <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Padding="18" Spacing="12">
-                <TextBlock Text="PROJECT TABLETOP" FontSize="23" FontWeight="Bold" />
-                <TextBlock x:Name="StatusText" Text="Ready. Scan the board to open its menu, then point and pinch to choose a board." TextWrapping="Wrap" />
+        <ScrollViewer Grid.Column="0" Margin="16,16,0,16" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Spacing="14" Padding="0,0,8,0">
+                <Border Style="{StaticResource WorkstationPanelStyle}" Background="{StaticResource TabletopHeaderBrush}">
+                    <StackPanel Spacing="8">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="4" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Background="{StaticResource TabletopAccentBrush}" CornerRadius="2" />
+                            <StackPanel Grid.Column="1" Spacing="3">
+                                <TextBlock Text="PROJECT TABLETOP" FontSize="23" FontWeight="SemiBold" CharacterSpacing="50" />
+                                <TextBlock Text="Camera · projector · interaction" Foreground="{StaticResource TabletopMutedBrush}" />
+                            </StackPanel>
+                        </Grid>
+                        <Border Height="1" Background="{StaticResource TabletopPanelBorderBrush}" Margin="0,5" />
+                        <TextBlock x:Name="StatusText" Text="Ready. Scan the board to open its menu, then point and pinch to choose a board." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                    </StackPanel>
+                </Border>
 
-                <TextBlock Text="1  Webcam" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
-                <ComboBox x:Name="CameraComboBox" PlaceholderText="Select webcam" HorizontalAlignment="Stretch" SelectionChanged="CameraComboBox_SelectionChanged" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Refresh" Click="RefreshCameras_Click" />
-                    <Button Content="Start camera" Click="StartCamera_Click" />
-                    <Button Content="Stop" Click="StopCamera_Click" />
-                </StackPanel>
-                <TextBlock x:Name="CameraStatusText" Text="Camera stopped" TextWrapping="Wrap" />
+                <Border Style="{StaticResource WorkstationPanelStyle}">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="01 / CAMERA INPUT" Style="{StaticResource SectionTitleStyle}" />
+                        <ComboBox x:Name="CameraComboBox" PlaceholderText="Select webcam" HorizontalAlignment="Stretch" SelectionChanged="CameraComboBox_SelectionChanged" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Refresh" Click="RefreshCameras_Click" />
+                            <Button Content="Start camera" Click="StartCamera_Click" />
+                            <Button Content="Stop" Click="StopCamera_Click" />
+                        </StackPanel>
+                        <TextBlock x:Name="CameraStatusText" Text="Camera stopped" TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                    </StackPanel>
+                </Border>
 
-                <TextBlock Text="2  Projection display" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
-                <ComboBox x:Name="DisplayComboBox" PlaceholderText="Select projector display" HorizontalAlignment="Stretch" SelectionChanged="DisplayComboBox_SelectionChanged" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Refresh" Click="RefreshDisplays_Click" />
-                    <Button x:Name="OpenOutputButton" Content="Open output" Click="OpenOutput_Click" />
-                    <Button x:Name="FullscreenButton" Content="Full screen" Click="Fullscreen_Click" />
-                </StackPanel>
-                <TextBlock Text="Projection stays black until the cardboard scan completes. Media then fills its detected bounds and is clipped to its corners." TextWrapping="Wrap" />
-                <TextBlock x:Name="RenderStatusText" Text="Waiting for projection diagnostics." TextWrapping="Wrap" />
+                <Border Style="{StaticResource WorkstationPanelStyle}">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="02 / PROJECTION OUTPUT" Style="{StaticResource SectionTitleStyle}" />
+                        <ComboBox x:Name="DisplayComboBox" PlaceholderText="Select projector display" HorizontalAlignment="Stretch" SelectionChanged="DisplayComboBox_SelectionChanged" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Refresh" Click="RefreshDisplays_Click" />
+                            <Button x:Name="OpenOutputButton" Content="Open output" Click="OpenOutput_Click" />
+                            <Button x:Name="FullscreenButton" Content="Full screen" Click="Fullscreen_Click" />
+                        </StackPanel>
+                        <TextBlock Text="Projection stays black until board setup completes, then fills the detected board." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <TextBlock x:Name="RenderStatusText" Text="Waiting for projection diagnostics." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                    </StackPanel>
+                </Border>
 
-                <TextBlock Text="3  Board menu and setup" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Board menu" Click="BoardMenu_Click" />
-                    <Button Content="Hand-Tracking test" Click="HandTrackingTest_Click" />
-                </StackPanel>
-                <TextBlock x:Name="BoardAppStatusText" Text="Board menu. Complete board setup to project it." TextWrapping="Wrap" />
-                <Button Content="Photo Copy" Click="PhotoCopy_Click" />
-                <TextBlock Text="Photo Copy: place one object in the white area below the controls. Pinch with a visible hand beside the object, leaving a gap. The object is photographed and copied in an inward spiral. You can still copy your other hand." TextWrapping="Wrap" />
-                <TextBlock Text="Point until the button's side light comes on, then pinch thumb and index finger to open it. A white spotlight illuminates your detected hand. Release before selecting again." TextWrapping="Wrap" />
-                <TextBlock Text="Background media (optional)" FontWeight="SemiBold" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Choose video or image" Click="ChooseBackground_Click" />
-                    <Button Content="Test grid" Click="TestGrid_Click" />
-                </StackPanel>
-                <TextBlock x:Name="BackgroundPathText" Text="No background media selected" TextTrimming="CharacterEllipsis" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button x:Name="BoardSetupButton" Content="Start board setup" Click="BoardSetup_Click" />
-                    <Button x:Name="RescanBoardButton" Content="Scan again" Click="RescanBoard_Click" IsEnabled="False" />
-                </StackPanel>
-                <TextBlock x:Name="BoardSetupStatusText" Text="Board setup first finds the cardboard under black output, then uses white projection and nine alignment spots to fit its grid." TextWrapping="Wrap" />
+                <Border Style="{StaticResource WorkstationPanelStyle}">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="03 / BOARD CONTROL" Style="{StaticResource SectionTitleStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="BoardSetupButton" Content="Start board setup" Click="BoardSetup_Click" Background="{StaticResource TabletopPrimaryButtonBrush}" BorderBrush="{StaticResource TabletopAccentBrush}" />
+                            <Button x:Name="RescanBoardButton" Content="Scan again" Click="RescanBoard_Click" IsEnabled="False" />
+                        </StackPanel>
+                        <TextBlock x:Name="BoardSetupStatusText" Text="Board setup first finds the cardboard under black output, then uses white projection and nine alignment spots to fit its grid." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <Border Height="1" Background="{StaticResource TabletopPanelBorderBrush}" Margin="0,2" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Board menu" Click="BoardMenu_Click" />
+                            <Button Content="Hand-Tracking test" Click="HandTrackingTest_Click" />
+                        </StackPanel>
+                        <TextBlock x:Name="BoardAppStatusText" Text="Board menu. Complete board setup to project it." TextWrapping="Wrap" />
+                        <TextBlock Text="Point until the button's side light comes on, then pinch to open it. Release before selecting again." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <Button Content="Photo Copy" Click="PhotoCopy_Click" />
+                        <TextBlock Text="Place one object on the grey area below the controls, then move your hands out of view briefly to lock its light. A separate spotlight follows your returning hand. Leave a gap, then pinch beside the object to copy it in an inward spiral. You can also copy your other hand." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <Border Height="1" Background="{StaticResource TabletopPanelBorderBrush}" Margin="0,2" />
+                        <TextBlock Text="Background media" FontWeight="SemiBold" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Choose video or image" Click="ChooseBackground_Click" />
+                            <Button Content="Test grid" Click="TestGrid_Click" />
+                        </StackPanel>
+                        <TextBlock x:Name="BackgroundPathText" Text="No background media selected" TextTrimming="CharacterEllipsis" Foreground="{StaticResource TabletopMutedBrush}" />
+                    </StackPanel>
+                </Border>
 
-                <TextBlock Text="4  Hand tracking" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
-                <ToggleSwitch x:Name="HandTrackingToggle" Header="Hand tracking and spotlight" IsOn="True" Toggled="HandTrackingToggle_Toggled" />
-                <TextBlock x:Name="HandTrackingStatusText" Text="Start the webcam to track your index fingertip." TextWrapping="Wrap" />
-                <TextBlock x:Name="HandDetectionLogStatusText" Text="Full detection logging starts automatically in the Hand-Tracking tester." TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-                <TextBlock x:Name="HandVideoRecordingStatusText" Text="Hand video records automatically in the Hand-Tracking tester only." TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-                <TextBlock Text="The camera preview marks your fingertip in white. After board setup, a white spotlight covers each detected hand to help the camera see its fingers. Keep the hand near the board; lifting it causes projection offset. The camera must first detect a hand before its light can appear." TextWrapping="Wrap" />
-                <TextBlock Text="Hand-Tracking opens the grid with hand illumination. Pinch your thumb and index fingertip together for a red fingertip circle lasting one second. Separate them before pinching again. Photo Copy keeps its white capture surface; the games show Coming soon." TextWrapping="Wrap" />
-                <Button Content="Save raw camera PNG" Click="SaveRawSnapshot_Click" />
+                <Border Style="{StaticResource WorkstationPanelStyle}">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="04 / HAND INTERACTION" Style="{StaticResource SectionTitleStyle}" />
+                        <ToggleSwitch x:Name="HandTrackingToggle" Header="Hand tracking and spotlight" IsOn="True" Toggled="HandTrackingToggle_Toggled" />
+                        <TextBlock x:Name="HandTrackingStatusText" Text="Start the webcam to track your index fingertip." TextWrapping="Wrap" />
+                        <TextBlock Text="Keep your hand near the board. A white spotlight follows detected fingers; lifting your hand can offset the projection. The camera must see the hand before its light can appear." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <TextBlock Text="Open Hand-Tracking for the test grid. Pinch thumb and index finger for a one-second red circle, then release. Photo Copy uses a grey surface with separate lights for the object and your hand." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <Border Background="{StaticResource TabletopInsetBrush}" BorderBrush="{StaticResource TabletopPanelBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                            <StackPanel Spacing="9">
+                                <TextBlock Text="RECORDING &amp; DIAGNOSTICS" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TabletopSecondaryAccentBrush}" CharacterSpacing="60" />
+                                <TextBlock x:Name="HandDetectionLogStatusText" Text="Full detection logging starts automatically in the Hand-Tracking tester." TextWrapping="Wrap" IsTextSelectionEnabled="True" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <TextBlock x:Name="HandVideoRecordingStatusText" Text="Hand video records automatically in the Hand-Tracking tester only." TextWrapping="Wrap" IsTextSelectionEnabled="True" Foreground="{StaticResource TabletopMutedBrush}" />
+                            </StackPanel>
+                        </Border>
+                        <Button Content="Save raw camera PNG" Click="SaveRawSnapshot_Click" />
+                    </StackPanel>
+                </Border>
 
                 <Expander Header="Physical pieces (optional / later)" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                     <StackPanel Spacing="12">
@@ -131,20 +169,52 @@
                 <TextBlock Text="Media decoding and 4K/60 performance must be checked on the connected laptop and projector." TextWrapping="Wrap" FontStyle="Italic" Margin="0,8,0,12" />
             </StackPanel>
         </ScrollViewer>
-        <Grid Grid.Column="1" RowSpacing="8" Margin="0,12,12,12">
+        <Grid Grid.Column="1" RowSpacing="16" Margin="0,16,16,16">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <TextBlock x:Name="CameraPreviewTitleText" Grid.Row="0" Text="CAMERA  ·  live fingertip tracking" FontWeight="SemiBold" />
-            <Border Grid.Row="1" Background="{StaticResource TabletopSurfaceBrush}" CornerRadius="4">
-                <canvas:CanvasControl x:Name="CameraCanvas" UseSharedDevice="True" Draw="CameraCanvas_Draw" PointerPressed="CameraCanvas_PointerPressed" />
+            <Border Grid.Row="0" Background="{StaticResource TabletopPanelBrush}" BorderBrush="{StaticResource TabletopViewportBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="8">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border Background="{StaticResource TabletopHeaderBrush}" CornerRadius="9" Padding="14,11">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="3" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Background="{StaticResource TabletopAccentBrush}" CornerRadius="2" />
+                            <TextBlock x:Name="CameraPreviewTitleText" Grid.Column="1" Text="CAMERA  ·  live fingertip tracking" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TabletopAccentBrush}" CharacterSpacing="40" TextTrimming="CharacterEllipsis" />
+                        </Grid>
+                    </Border>
+                    <Border Grid.Row="1" Background="{StaticResource TabletopViewportBrush}" BorderBrush="{StaticResource TabletopPanelBorderBrush}" BorderThickness="1" CornerRadius="9">
+                        <canvas:CanvasControl x:Name="CameraCanvas" UseSharedDevice="True" Draw="CameraCanvas_Draw" PointerPressed="CameraCanvas_PointerPressed" />
+                    </Border>
+                </Grid>
             </Border>
-            <TextBlock Grid.Row="2" Text="PROJECTION PREVIEW  ·  output display aspect ratio" FontWeight="SemiBold" />
-            <Border Grid.Row="3" Background="Black" CornerRadius="4">
-                <canvas:CanvasAnimatedControl x:Name="ProjectionPreview" UseSharedDevice="True" Draw="ProjectionPreview_Draw" />
+            <Border Grid.Row="1" Background="{StaticResource TabletopPanelBrush}" BorderBrush="{StaticResource TabletopViewportBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="8">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border Background="{StaticResource TabletopHeaderBrush}" CornerRadius="9" Padding="14,11">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="3" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Background="{StaticResource TabletopSecondaryAccentBrush}" CornerRadius="2" />
+                            <TextBlock Grid.Column="1" Text="PROJECTION PREVIEW  ·  mapped board output" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TabletopAccentBrush}" CharacterSpacing="40" TextTrimming="CharacterEllipsis" />
+                        </Grid>
+                    </Border>
+                    <Border Grid.Row="1" Background="Black" BorderBrush="{StaticResource TabletopPanelBorderBrush}" BorderThickness="1" CornerRadius="9">
+                        <canvas:CanvasAnimatedControl x:Name="ProjectionPreview" UseSharedDevice="True" Draw="ProjectionPreview_Draw" />
+                    </Border>
+                </Grid>
             </Border>
         </Grid>
     </Grid>

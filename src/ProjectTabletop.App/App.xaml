@@ -11,17 +11,57 @@
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
                 <local:AppThemeResources />
             </ResourceDictionary.MergedDictionaries>
+            <Style TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{StaticResource TabletopTextBrush}" />
+                <Setter Property="FontSize" Value="14" />
+            </Style>
+            <Style x:Key="WorkstationPanelStyle" TargetType="Border">
+                <Setter Property="Background" Value="{StaticResource TabletopPanelBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource TabletopPanelBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="14" />
+                <Setter Property="Padding" Value="16" />
+            </Style>
+            <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{StaticResource TabletopAccentBrush}" />
+                <Setter Property="FontSize" Value="15" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="CharacterSpacing" Value="90" />
+            </Style>
+            <Style TargetType="Button">
+                <Setter Property="Background" Value="{StaticResource TabletopButtonBrush}" />
+                <Setter Property="Foreground" Value="{StaticResource TabletopButtonTextBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource TabletopButtonBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="FontSize" Value="14" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Padding" Value="13,9" />
+                <Setter Property="MinHeight" Value="38" />
+            </Style>
             <Style TargetType="ComboBox">
                 <Setter Property="Background" Value="{StaticResource TabletopButtonBrush}" />
                 <Setter Property="Foreground" Value="{StaticResource TabletopButtonTextBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource TabletopButtonBorderBrush}" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="MinHeight" Value="38" />
             </Style>
             <Style TargetType="TextBox">
-                <Setter Property="Background" Value="{StaticResource TabletopButtonBrush}" />
+                <Setter Property="Background" Value="{StaticResource TabletopInputBrush}" />
                 <Setter Property="Foreground" Value="{StaticResource TabletopButtonTextBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource TabletopPanelBorderBrush}" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="MinHeight" Value="38" />
             </Style>
             <Style TargetType="NumberBox">
-                <Setter Property="Background" Value="{StaticResource TabletopButtonBrush}" />
+                <Setter Property="Background" Value="{StaticResource TabletopInputBrush}" />
                 <Setter Property="Foreground" Value="{StaticResource TabletopButtonTextBrush}" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="MinHeight" Value="38" />
+            </Style>
+            <Style TargetType="Expander">
+                <Setter Property="Foreground" Value="{StaticResource TabletopTextBrush}" />
+                <Setter Property="CornerRadius" Value="12" />
             </Style>
         </ResourceDictionary>
     </Application.Resources>

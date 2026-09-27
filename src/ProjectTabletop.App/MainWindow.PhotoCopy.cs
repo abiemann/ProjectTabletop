@@ -14,7 +14,7 @@ public sealed partial class MainWindow
         int TransparentPixels, int PartialAlphaPixels, bool TransparentBorder);
 
     // Run on the UI thread after navigation has consumed the same frame. Events
-    // from entering Photo Copy, a settling white field, or another app never replay.
+    // from entering Photo Copy, settling illumination, or another app never replay.
     private void QueuePhotoCopyCapture(CameraFrame frame, IReadOnlyList<HandDetection> hands,
         IReadOnlyList<HandCursor> cursors)
     {
@@ -36,6 +36,13 @@ public sealed partial class MainWindow
             return;
         }
 
+        if (context.Target is null && hands.Count < 2)
+        {
+            _scene.SetPhotoCopyStatus("First place an object on grey and lift your hand briefly to lock its light.",
+                context.Revision);
+            return;
+        }
+
         _scene.SetPhotoCopyStatus("Taking a photo of the object...", context.Revision);
         _photoCopyTask = CapturePhotoCopyAsync(frame, shutter,
             hands.Where(hand => !ReferenceEquals(hand, shutter)).ToArray(), context);
@@ -49,14 +56,25 @@ public sealed partial class MainWindow
         {
             var result = await Task.Run(() =>
             {
-                var cutout = PhotoObjectExtractor.Extract(frame.Width, frame.Height,
-                    frame.Stride, frame.Bgra, shutter, context.CameraToBoard, out var failure, otherHands);
+                string? failure;
+                PhotoHandCutout? cutout;
+                if (context.Target is { } target)
+                    cutout = PhotoObjectExtractor.ExtractTarget(frame.Width, frame.Height,
+                        frame.Stride, frame.Bgra, shutter, context.CameraToBoard, target, out failure, otherHands);
+                else
+                {
+                    // Preserve the original two-hand photo without trying to
+                    // discover objects in a field containing moving hand lights.
+                    cutout = otherHands.Count == 1 ? PhotoHandExtractor.Extract(frame.Width, frame.Height,
+                        frame.Stride, frame.Bgra, otherHands[0], context.CameraToBoard) : null;
+                    failure = cutout is null ? "Keep the other hand open, still and separate from the pinching hand." : null;
+                }
                 return (Cutout: cutout, Failure: failure);
             });
             if (_closing) return;
             if (result.Cutout is null)
-                _scene.SetPhotoCopyStatus(result.Failure ?? "No separate object found. Place it in the white area and pinch again.", context.Revision);
-            else if (_scene.SetPhotoCopyCapture(result.Cutout, context.Revision))
+                _scene.SetPhotoCopyStatus(result.Failure ?? "Keep the lit object still and pinch beside it again.", context.Revision);
+            else if (_scene.SetPhotoCopyCapture(result.Cutout, context.Revision, context.Target))
                 _lastPhotoCopyCapture = DescribeCutout(result.Cutout, frame.Timestamp);
             UpdateBoardAppStatus();
         }

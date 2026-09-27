@@ -41,6 +41,8 @@ public sealed partial class MainWindow
             case "verify_hand_video_recording":
                 return await HandTrackingVideoRecorderVerification.RunAsync(Path.Combine(_appDataDirectory,
                     "VideoVerification", Guid.NewGuid().ToString("N")));
+            case "verify_theme":
+                return await VerifyThemeAsync();
             case "verify_photo_copy_render":
                 return await VerifyPhotoCopyRenderAsync();
 #endif
@@ -80,6 +82,8 @@ public sealed partial class MainWindow
                     boardAppTitle = _scene.CurrentBoardTitle,
                     hoveredBoardButtons = _scene.HoveredBoardButtons,
                     photoCopyStatus = _scene.PhotoCopyStatus,
+                    photoCopyLighting = _scene.PhotoCopyLightingStatus,
+                    photoCopyObservation = _lastPhotoCopyObservation,
                     photoCopyCount = _scene.PhotoCopyCount,
                     lastPhotoCopyCapture = _lastPhotoCopyCapture,
                     renderStatus = RenderStatusText.Text,

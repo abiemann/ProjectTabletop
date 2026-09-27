@@ -8,7 +8,7 @@ namespace ProjectTabletop.Vision;
 /// This is color/background segmentation, not a trained object recognizer. The
 /// shutter hand and its connected forearm are excluded before choosing an object.
 /// </summary>
-public static class PhotoObjectExtractor
+public static partial class PhotoObjectExtractor
 {
     private const int BoardSize = PhotoHandCutout.BoardPixels;
     private static readonly Rect Capture = new(30, 230, 940, 740);
@@ -161,7 +161,7 @@ public static class PhotoObjectExtractor
             new((outputWidth - 1) / 2.0, (outputHeight - 1) / 2.0), new(0, -1));
     }
 
-    private static bool TryMatrix(IReadOnlyList<double> input, out double[] h)
+    internal static bool TryMatrix(IReadOnlyList<double> input, out double[] h)
     {
         h = [];
         if (input.Count != 9 || input.Any(value => !double.IsFinite(value))) return false;
@@ -173,7 +173,7 @@ public static class PhotoObjectExtractor
         return Math.Abs(determinant) > 1e-14;
     }
 
-    private static bool TryMapHand(HandDetection hand, double[] h, out PixelPoint[] mapped)
+    internal static bool TryMapHand(HandDetection hand, double[] h, out PixelPoint[] mapped)
     {
         mapped = [];
         if (hand?.Landmarks is not { Count: 21 } points || !double.IsFinite(hand.Confidence) ||
@@ -198,7 +198,7 @@ public static class PhotoObjectExtractor
         return true;
     }
 
-    private static bool DrawShutterExclusion(Mat mask, PixelPoint[] points, double scale)
+    internal static bool DrawShutterExclusion(Mat mask, PixelPoint[] points, double scale)
     {
         int[] palm = [0, 1, 2, 5, 9, 13, 17];
         Cv2.FillConvexPoly(mask, Cv2.ConvexHull(palm.Select(index => ToPoint(points[index])).ToArray()), Scalar.White);
@@ -221,9 +221,10 @@ public static class PhotoObjectExtractor
         return true;
     }
 
-    private sealed record BackgroundSample(double X, double Y, double[] Color);
+    internal sealed record BackgroundSample(double X, double Y, double[] Color);
 
-    private static bool TryBackground(byte[] photo, byte[] excluded, out double[][] model, out double threshold)
+    internal static bool TryBackground(byte[] photo, byte[] excluded, out double[][] model, out double threshold,
+        bool neutralGrey = false)
     {
         var samples = new List<BackgroundSample>();
         const int columns = 10, rows = 8;
@@ -242,7 +243,9 @@ public static class PhotoObjectExtractor
                 // Bright, near-white observations dominate a white board; using
                 // the weakest color channel also suppresses bright colored objects.
                 pixels.Sort((a, b) => MinimumChannel(photo, a).CompareTo(MinimumChannel(photo, b)));
-                int[] bright = pixels.Skip(pixels.Count * 3 / 4).ToArray();
+                int[] bright = neutralGrey
+                    ? pixels.Skip(pixels.Count * 2 / 5).Take(Math.Max(1, pixels.Count / 5)).ToArray()
+                    : pixels.Skip(pixels.Count * 3 / 4).ToArray();
                 double[] color = Enumerable.Range(0, 3).Select(channel =>
                     (double)bright.Select(index => photo[index * 4 + channel]).Order().ElementAt(bright.Length / 2)).ToArray();
                 samples.Add(new((left + right) / (2.0 * BoardSize), (top + bottom) / (2.0 * BoardSize), color));
@@ -276,10 +279,10 @@ public static class PhotoObjectExtractor
         }
         double typicalError = residuals.Order().ElementAt(residuals.Length / 2);
         threshold = Math.Clamp(typicalError * 3 + 6, 16, 30);
-        return typicalError < 14 && model.All(plane => BackgroundAt(plane, 500, 600) > 90);
+        return typicalError < 14 && model.All(plane => BackgroundAt(plane, 500, 600) > (neutralGrey ? 12 : 90));
     }
 
-    private static bool FitPlane(IReadOnlyList<BackgroundSample> samples, double[] weights, int channel, out double[] plane)
+    internal static bool FitPlane(IReadOnlyList<BackgroundSample> samples, double[] weights, int channel, out double[] plane)
     {
         var equations = new double[3, 4];
         for (int index = 0; index < samples.Count; index++)
@@ -323,13 +326,13 @@ public static class PhotoObjectExtractor
         return false;
     }
 
-    private static double BackgroundAt(double[] plane, int x, int y) =>
+    internal static double BackgroundAt(double[] plane, int x, int y) =>
         Math.Clamp(plane[0] + plane[1] * x / BoardSize + plane[2] * y / BoardSize, 0, 255);
     private static byte MinimumChannel(byte[] pixels, int index) =>
         Math.Min(pixels[index * 4], Math.Min(pixels[index * 4 + 1], pixels[index * 4 + 2]));
     private static double Distance(PixelPoint a, PixelPoint b) => Math.Sqrt(Math.Pow(a.X - b.X, 2) + Math.Pow(a.Y - b.Y, 2));
     private static Point ToPoint(PixelPoint p) => new((int)Math.Round(p.X), (int)Math.Round(p.Y));
-    private static byte[] Bytes(Mat image, int channels)
+    internal static byte[] Bytes(Mat image, int channels)
     {
         int width = image.Width, height = image.Height;
         var result = new byte[width * height * channels];

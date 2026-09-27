@@ -144,23 +144,73 @@ the snapshot with pinch and spotlight geometry to local JSONL logs. Run
 
 Photo Copy uses `PhotoCopyHandSelector.TrySelectShutter` to match a fresh pinch
 cursor to the hand making the command. One or two hands may be visible; only
-one may pinch. `PhotoObjectExtractor` rectifies the camera image, estimates the
-white background below the projected controls, and selects a distinct foreground
-component after excluding the shutter hand and connected forearm. Generic objects
-need visible contrast, not a trained class or hand landmarks. Ambiguous, clipped,
-or overlapping subjects are rejected with retry guidance. White-on-white and
-transparent objects remain limited by visible contrast, and shadows/reflections
-can affect the outline.
+one may pinch. The current app acquires an object **before** illuminating it:
+`PhotoObjectLocator.Locate` rectifies the camera frame to the board plane,
+estimates the plain grey background below the controls, and selects one distinct
+foreground component. A smooth local illumination correction is fitted from
+background-like pixels, accounting for gradual projector glare without blurring
+contrasting object colors into that background estimate. The shared capture
+rectangle reserves the upper 23% for controls and a 1% guard at the sides and
+bottom. Call it only after hands and their projected lights have
+left the view and exposure has settled. The returned `PhotoObjectTarget` owns
+an immutable alpha silhouette, including holes, plus board-space geometry for
+the object's spotlight. The app requires two stable candidates before locking
+that light, while hand spotlights continue to move independently.
 
-If the selected component matches the other detected hand, `PhotoHandExtractor`
-provides landmark-seeded GrabCut, wrist trimming, and its middle-finger direction.
-Generic subjects use a center anchor and upward direction. Both paths retain
-camera pixels with straight-alpha BGRA, including background holes; no generated
-image or semantic object model is involved. `PhotoHandCutout` retains its historical
-field names for both subject types. No empty-board reference step is required.
-Run `-- --photo-objects` for general object and shutter-selection checks, or
-`-- --photo-copy` to include existing hand color, alpha, finger-gap, shadow, wrist,
-stride, perspective, and rejection checks.
+`PhotoObjectSpotlight` classifies the main silhouette as rectangular only when
+its outline approximates four near-right-angle corners and fills its enclosing
+rectangle. These subjects get a rotated rounded rectangle; round and irregular
+subjects fall back to a circle. The rectangle covers every pixel of the original
+alpha plus a small margin, preserving narrow loops or bookmarks that are ignored
+only during shape classification. Rendering keeps a solid white core and soft
+outer edge. Hand illumination remains a separate moving circle.
+
+`PhotoObjectLocator.ObserveTarget` checks the locked silhouette against its
+illuminated surroundings. Both the interior and boundary must still match;
+mapped hands and forearms are excluded from the comparison. It distinguishes
+`Present`, `MissingOrMoved`, `Occluded`, and `Unavailable` so a brief obstruction
+does not immediately erase a lock. The app clears a repeatedly moved or missing
+target and waits for a settled grey field before acquiring again.
+The app's local-control `photoCopyObservation` exposes the last accepted source
+frame's UTC, revision, state, failure detail and camera-to-board transform, plus
+the candidate center/area during acquisition, so observations can be matched to
+camera evidence.
+`PhotoObjectExtractor.ExtractTarget` repeats the presence/occlusion check on the
+confirmed-pinch frame and copies **that frame's RGB pixels** through the stored
+alpha. It never resegments the projected white halo or reuses the acquisition
+photograph's colors. An overlapping shutter hand or forearm prevents capture.
+
+Generic objects need visible contrast on grey and under white illumination,
+not a trained class or hand landmarks. Multiple subjects, clipped objects and
+insufficient clear margin are rejected with retry guidance. Transparent,
+low-contrast and reflective materials remain limited by visible contrast;
+shadows can affect the acquired outline. If no object is locked and the other
+hand is visible, `PhotoHandExtractor` still provides landmark-seeded GrabCut,
+wrist trimming and its extended middle-finger direction. Generic subjects use
+a center anchor and upward direction. Both paths retain current camera pixels
+with straight-alpha BGRA; no generated image or semantic object model is involved.
+`PhotoHandCutout` retains its historical field names for both subject types.
+No empty-board reference step is required.
+
+Run `-- --photo-objects` for shutter selection, the earlier white-background
+extractor and the new grey target checks, or `-- --photo-copy` to include hand
+color, alpha, finger-gap, shadow, wrist, stride, perspective and rejection checks.
+Shape tests render the returned illumination geometry and cover rotated rectangles,
+bookmark/loop coverage, circular and irregular fallbacks, presence and current-pixel
+extraction under the tighter light. The final live book acquired a rounded rectangle
+and remained `Present`; the app's GPU check also verifies rotated corner coverage.
+The complete `--photo-copy` suite passes, including immutable target masks,
+current illuminated pixels, stationary/moved/removed/occluded observations,
+dark/light/colored subjects, gradients, padded rows, local glare compensation
+and objects inside the 1% boundary guard. The correction also recovered a saved
+real book frame that previously yielded two false glare components; regressions
+still reject a small real second object rather than filtering it away.
+On the physical board, a book near the lower edge was acquired and captured
+through the live camera pipeline as a 242 × 205 cutout with a fully transparent
+exterior border. The renderer completed all 576 copies with controls visible.
+After reset, sampled observations over more than a minute kept the same lock
+and reported `Present` without hands or new copies. Broader gesture feel and
+moved-object reacquisition remain to be tested live.
 
 The default regression also runs the bundled hand models against an independently
 annotated MediaPipe pointing-hand image, its rotation, an off-center landscape
