@@ -17,5 +17,6 @@
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
     <ProjectReference Include="..\ProjectTabletop.Calibration\ProjectTabletop.Calibration.csproj" />
     <ProjectReference Include="..\ProjectTabletop.Vision\ProjectTabletop.Vision.csproj" />
+    <ProjectReference Include="..\ProjectTabletop.Interaction\ProjectTabletop.Interaction.csproj" />
   </ItemGroup>
 </Project>

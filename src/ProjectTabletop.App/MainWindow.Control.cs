@@ -54,6 +54,8 @@ public sealed partial class MainWindow
                     handTrackingStatus = HandTrackingControlStatus,
                     handCount = TrackedHandCount,
                     handExecuteActive = ExecutingHandCount > 0,
+                    boardApp = _scene.CurrentBoardScreen.ToString(),
+                    boardAppTitle = _scene.CurrentBoardTitle,
                     renderStatus = RenderStatusText.Text,
                     status = StatusText.Text
                 };
@@ -92,6 +94,16 @@ public sealed partial class MainWindow
             case "show_test_grid":
                 TestGrid_Click(this, new Microsoft.UI.Xaml.RoutedEventArgs());
                 return new { boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
+            case "show_board_menu":
+                ShowBoardMenu();
+                return new { boardApp = _scene.CurrentBoardScreen.ToString(),
+                    boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
+            case "show_hand_tracking_test":
+                ShowHandTrackingTest();
+                return new { boardApp = _scene.CurrentBoardScreen.ToString(),
+                    boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
+            case "capture_projection_preview":
+                return new { path = await SaveProjectionPreviewAsync() };
             case "capture_raw_frame":
                 return new { path = await SaveRawSnapshotAsync() };
             case "start_camera":

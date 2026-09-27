@@ -20,7 +20,7 @@ if (args.Length == 0)
 
 if (args.Length < 2 || args[0] != "--once" || args.Length > 3)
 {
-    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|show_test_grid|shutdown> [JSON object]");
+    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|show_test_grid|show_board_menu|show_hand_tracking_test|shutdown> [JSON object]");
     return 2;
 }
 
@@ -60,6 +60,9 @@ static async Task RunMcpAsync()
             BackgroundMediaTool(),
             HandTrackingTool(),
             Tool("show_test_grid", "Show the board-clipped test grid on the projector."),
+            Tool("show_board_menu", "Show the board app menu and enable hand tracking for pinch selection."),
+            Tool("show_hand_tracking_test", "Open the built-in Hand-Tracking gesture test and enable hand tracking."),
+            Tool("capture_projection_preview", "Save the current compositor scene as a PNG, without capturing desktop windows."),
             Tool("shutdown", "Close the local ProjectTabletop app cleanly.")
         ]
     };

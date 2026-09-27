@@ -111,8 +111,8 @@ center and relative confidence. The app first measures four central disks to
 form a provisional camera-to-projector homography. `NearEdgeRegistrationPlan`
 then places four more disks safely inside the detected physical corners; those
 measurements form the final homography. A ninth disk at the projector center
-validates the result before the app draws the grid and orange physical-corner
-brackets. The detector compensates for a global camera exposure shift, but
+validates the result before the app shows the selected board app or media within
+the safe board corners. The detector compensates for a global camera exposure shift, but
 movement between baseline and spot frames can still invalidate a measurement.
 
 The older `BoardDetector.Detect(...)` is kept for the projected-grid regression

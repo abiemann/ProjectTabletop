@@ -199,7 +199,7 @@ public sealed partial class MainWindow
                  "Separate thumb and index finger before the next pinch." :
              $"Tracking {TrackedHandCount} index fingertip{(TrackedHandCount == 1 ? "" : "s")}. " +
                  (_scene.HasBoardMediaClip ? "The circle is also projected on the board." :
-                     "Complete board setup to project the circle.") + " Pinch thumb and index finger to test execute.");
+                     "Complete board setup to project the circle.") + " Point at a button and pinch to select, or open Hand-Tracking to test gestures.");
     }
 
     private void DrawHandPreview(CanvasDrawingSession ds, CameraFrame frame, Rect rect)

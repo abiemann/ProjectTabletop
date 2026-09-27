@@ -1,0 +1,137 @@
+namespace ProjectTabletop.Interaction;
+
+public enum BoardScreen { Menu, HandTracking, CopyMachine, Blackjack, Monopoly, Gta, Diablo, Media }
+
+/// <summary>A rectangle in the board's normalized, perspective-corrected coordinate system.</summary>
+public readonly record struct BoardRect(double X, double Y, double Width, double Height)
+{
+    public bool Contains(double u, double v) =>
+        double.IsFinite(u) && double.IsFinite(v) && u is >= 0 and <= 1 && v is >= 0 and <= 1 &&
+        u >= X && u <= X + Width && v >= Y && v <= Y + Height;
+}
+
+public sealed record BoardButton(string Id, string Label, BoardRect Bounds, BoardScreen Destination);
+
+/// <summary>
+/// A current hand observation mapped to board coordinates. Preserve samples that
+/// cannot be mapped, using NaN coordinates, so their execution events are consumed.
+/// ExecuteEventId identifies one pinch and remains unchanged throughout its pulse.
+/// ExecuteUntil is exactly one second after that event, as produced by HandGestureTracker.
+/// </summary>
+public readonly record struct BoardHandSample(double U, double V, DateTimeOffset ExecuteUntil,
+    long ExecuteEventId);
+
+public sealed record BoardNavigation(BoardScreen Previous, BoardScreen Current, string ButtonId);
+
+/// <summary>
+/// Board application navigation shared by rendering and gesture hit testing.
+/// Call from one thread. Each pinch can activate one target only, including when
+/// hands disappear briefly, change order, move to another target, or switch screens.
+/// </summary>
+public sealed class BoardSession
+{
+    private static readonly TimeSpan ObservationLifetime = TimeSpan.FromMilliseconds(350);
+    private static readonly TimeSpan ExecuteDuration = TimeSpan.FromSeconds(1);
+    private static readonly IReadOnlyList<BoardButton> MenuButtons = Array.AsReadOnly(new[]
+    {
+        new BoardButton("hand-tracking", "Hand-Tracking", new(.08, .25, .40, .16), BoardScreen.HandTracking),
+        new BoardButton("copy-machine", "Copy-Machine", new(.52, .25, .40, .16), BoardScreen.CopyMachine),
+        new BoardButton("blackjack", "Blackjack", new(.08, .45, .40, .16), BoardScreen.Blackjack),
+        new BoardButton("monopoly", "Monopoly", new(.52, .45, .40, .16), BoardScreen.Monopoly),
+        new BoardButton("gta", "GTA", new(.08, .65, .40, .16), BoardScreen.Gta),
+        new BoardButton("diablo", "Diablo", new(.52, .65, .40, .16), BoardScreen.Diablo)
+    });
+    private static readonly IReadOnlyList<BoardButton> AppButtons = Array.AsReadOnly(new[]
+    {
+        new BoardButton("menu", "Back to menu", new(.06, .055, .30, .105), BoardScreen.Menu)
+    });
+    private DateTimeOffset? _lastFrameTime;
+    private DateTimeOffset? _lastNow;
+    private DateTimeOffset _ignoreExecutionsThrough = DateTimeOffset.MinValue;
+    private DateTimeOffset _ignoreFramesThrough = DateTimeOffset.MinValue;
+    private long _consumedEventId;
+
+    public BoardScreen Screen { get; private set; } = BoardScreen.Menu;
+    public string Title => Screen switch
+    {
+        BoardScreen.Menu => "Project Tabletop",
+        BoardScreen.HandTracking => "Hand-Tracking",
+        BoardScreen.CopyMachine => "Copy-Machine",
+        BoardScreen.Blackjack => "Blackjack",
+        BoardScreen.Monopoly => "Monopoly",
+        BoardScreen.Gta => "GTA",
+        BoardScreen.Diablo => "Diablo",
+        BoardScreen.Media => "Media",
+        _ => throw new InvalidOperationException("Unknown board screen.")
+    };
+    public IReadOnlyList<BoardButton> Buttons => Screen switch
+    {
+        BoardScreen.Menu => MenuButtons,
+        BoardScreen.Media => Array.Empty<BoardButton>(),
+        _ => AppButtons
+    };
+    public IReadOnlyList<string> HoveredButtonIds { get; private set; } = Array.Empty<string>();
+
+    public BoardNavigation? Update(IReadOnlyList<BoardHandSample> hands,
+        DateTimeOffset frameTime, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(hands);
+        HoveredButtonIds = Array.Empty<string>();
+        if (_lastNow is { } previousNow && now < previousNow) return null;
+        _lastNow = now;
+        if (frameTime > now || now - frameTime > ObservationLifetime ||
+            frameTime <= _ignoreFramesThrough ||
+            (_lastFrameTime is { } previousFrame && frameTime <= previousFrame)) return null;
+        _lastFrameTime = frameTime;
+
+        var buttons = Buttons;
+        HoveredButtonIds = buttons.Where(button => hands.Any(hand => button.Bounds.Contains(hand.U, hand.V)))
+            .Select(button => button.Id).ToArray();
+
+        // IDs come from a monotonically increasing event sequence, never reset by
+        // tracking restarts. Consume the entire frame before a possible navigation,
+        // including off-board/expired events, to prevent replay on the next screen.
+        long previouslyConsumed = _consumedEventId;
+        foreach (var hand in hands)
+            _consumedEventId = Math.Max(_consumedEventId, hand.ExecuteEventId);
+
+        var examinedEvents = new HashSet<long>();
+        foreach (var hand in hands)
+        {
+            if (!examinedEvents.Add(hand.ExecuteEventId) || hand.ExecuteEventId <= previouslyConsumed || hand.ExecuteUntil <= now ||
+                hand.ExecuteUntil - now > ExecuteDuration ||
+                hand.ExecuteUntil - ExecuteDuration <= _ignoreExecutionsThrough) continue;
+            BoardButton? selected = buttons.FirstOrDefault(button => button.Bounds.Contains(hand.U, hand.V));
+            if (selected is null) continue;
+            var result = new BoardNavigation(Screen, selected.Destination, selected.Id);
+            Screen = selected.Destination;
+            HoveredButtonIds = Array.Empty<string>();
+            return result;
+        }
+        return null;
+    }
+
+    public void ShowMenu(DateTimeOffset? now = null) => Show(BoardScreen.Menu, now ?? DateTimeOffset.UtcNow);
+    public void ShowHandTrackingTest(DateTimeOffset? now = null) => Show(BoardScreen.HandTracking, now ?? DateTimeOffset.UtcNow);
+    public void ShowMedia(DateTimeOffset? now = null) => Show(BoardScreen.Media, now ?? DateTimeOffset.UtcNow);
+
+    /// <summary>Clear hover and reject observations/pulses that predate a camera or calibration reset.</summary>
+    public void ResetInput(DateTimeOffset now)
+    {
+        HoveredButtonIds = Array.Empty<string>();
+        _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
+        _ignoreFramesThrough = Later(_ignoreFramesThrough, now);
+        _lastFrameTime = null;
+        _lastNow = now;
+        // Keep the high-water mark: clearing visual state must never replay a pinch.
+    }
+
+    private void Show(BoardScreen screen, DateTimeOffset now)
+    {
+        Screen = screen;
+        HoveredButtonIds = Array.Empty<string>();
+        _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
+    }
+
+    private static DateTimeOffset Later(DateTimeOffset first, DateTimeOffset second) => first > second ? first : second;
+}

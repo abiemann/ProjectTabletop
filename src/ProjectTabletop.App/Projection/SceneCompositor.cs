@@ -4,6 +4,7 @@ using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.UI;
 using ProjectTabletop.App.Media;
 using ProjectTabletop.Calibration;
+using ProjectTabletop.Interaction;
 using ProjectTabletop.Vision;
 using Windows.Foundation;
 using Windows.UI;
@@ -15,7 +16,7 @@ namespace ProjectTabletop.App.Projection;
 /// of the fullscreen projector canvas, so preview scaling and Windows DPI do not change
 /// registration. The GPU owns decoded video surfaces and final composition.
 /// </summary>
-public sealed class SceneCompositor : IDisposable
+public sealed partial class SceneCompositor : IDisposable
 {
     // Win2D drawing units in the projection canvas. Tune after measuring the actual
     // camera-to-projector edge error and projector DPI on the physical piece.
@@ -35,6 +36,7 @@ public sealed class SceneCompositor : IDisposable
     private BoardGrid? _boardGrid;
     private ProjectionClipRegion? _boardMediaClip;
     private Homography? _boardCameraMap;
+    private Homography? _boardSurfaceMap;
     private ProjectedHandCursor[] _handTips = [];
     private DateTimeOffset _handFrameTime;
     private int _boardCalibrationSpot = -1;
@@ -103,13 +105,19 @@ public sealed class SceneCompositor : IDisposable
         {
             _boardMediaClip = null;
             _boardCameraMap = null;
+            _boardSurfaceMap = null;
             _handTips = [];
+            _boardSession.ResetInput(DateTimeOffset.UtcNow);
         }
     }
 
     public void ClearHandTips()
     {
-        lock (_gate) _handTips = [];
+        lock (_gate)
+        {
+            _handTips = [];
+            _boardSession.ResetInput(DateTimeOffset.UtcNow);
+        }
     }
 
     public void SetHandCursors(IReadOnlyList<HandCursor> cursors, DateTimeOffset frameTime)
@@ -117,27 +125,41 @@ public sealed class SceneCompositor : IDisposable
         lock (_gate)
         {
             _handTips = [];
-            if (_boardMediaClip is null || _boardCameraMap is null) return;
+            var now = DateTimeOffset.UtcNow;
+            var boardSamples = new List<BoardHandSample>();
             var projectedTips = new List<ProjectedHandCursor>();
             foreach (var cursor in cursors)
             {
+                var boardPoint = new Point2(double.NaN, double.NaN);
                 var tip = cursor.Position;
-                if (!double.IsFinite(tip.X) || !double.IsFinite(tip.Y)) continue;
                 try
                 {
-                    var point = _boardCameraMap.Transform(new Point2(tip.X, tip.Y));
-                    if (point.X >= 0 && point.X <= 1 && point.Y >= 0 && point.Y <= 1)
-                        projectedTips.Add(new ProjectedHandCursor(
-                            new Vector2((float)point.X, (float)point.Y), cursor.ExecuteUntil));
+                    if (_boardMediaClip is not null && _boardCameraMap is not null &&
+                        double.IsFinite(tip.X) && double.IsFinite(tip.Y))
+                    {
+                        var point = _boardCameraMap.Transform(new Point2(tip.X, tip.Y));
+                        if (point.X >= 0 && point.X <= 1 && point.Y >= 0 && point.Y <= 1)
+                        {
+                            projectedTips.Add(new ProjectedHandCursor(
+                                new Vector2((float)point.X, (float)point.Y), cursor.ExecuteUntil));
+                            if (!_boardSetup && _calibrationTarget < 0 && _boardSurfaceMap is not null)
+                                boardPoint = _boardSurfaceMap.InverseTransform(point);
+                        }
+                    }
                 }
                 catch (InvalidOperationException)
                 {
                     // A fingertip outside the calibrated plane can lie on its
                     // projective horizon; it has no finite projector position.
                 }
+                // Even a pinch outside the board is consumed, so moving a held
+                // red cursor onto a button cannot turn it into a delayed click.
+                boardSamples.Add(new BoardHandSample(boardPoint.X, boardPoint.Y,
+                    cursor.ExecuteUntil, cursor.ExecuteEventId));
             }
             _handTips = projectedTips.ToArray();
             _handFrameTime = frameTime;
+            _boardSession.Update(boardSamples, frameTime, now);
         }
     }
 
@@ -243,7 +265,10 @@ public sealed class SceneCompositor : IDisposable
             _boardGrid = grid;
             _boardMediaClip = mediaClip;
             _boardCameraMap = cameraMap;
+            _boardSurfaceMap = Homography.FromFourPoints(
+                [new(0, 0), new(1, 0), new(1, 1), new(0, 1)], mediaClip.Corners);
             _handTips = [];
+            _boardSession.ResetInput(DateTimeOffset.UtcNow);
             _boardSetupStarted = DateTimeOffset.UtcNow;
         }
         return grid.InsetFraction;
@@ -290,6 +315,7 @@ public sealed class SceneCompositor : IDisposable
         lock (_gate)
         {
             _blackOutput = false;
+            _boardSession.ShowMedia();
             var old = _background;
             _background = asset;
             BackgroundLabel = asset is null ? "Test grid" : Path.GetFileName(asset.Path);
@@ -383,18 +409,27 @@ public sealed class SceneCompositor : IDisposable
             using var clipGeometry = CanvasGeometry.CreatePolygon(ds.Device, clipPoints);
             using var boardLayer = ds.CreateLayer(1, clipGeometry);
 
-            var image = _background?.GetFrame(ds.Device);
-            if (image is null) DrawTestGrid(ds, mediaRect);
+            if (_boardSession.Screen != BoardScreen.Media && _boardSurfaceMap is not null)
+            {
+                if (_boardSession.Screen == BoardScreen.HandTracking)
+                    DrawTestGrid(ds, mediaRect);
+                DrawBoardApplication(ds, output);
+            }
             else
             {
-                var size = image.SizeInPixels;
-                var targetAspect = mediaRect.Width / mediaRect.Height;
-                var sourceAspect = size.Width / size.Height;
-                var cropWidth = sourceAspect > targetAspect ? size.Height * targetAspect : size.Width;
-                var cropHeight = sourceAspect > targetAspect ? size.Height : size.Width / targetAspect;
-                var source = new Rect((size.Width - cropWidth) / 2,
-                    (size.Height - cropHeight) / 2, cropWidth, cropHeight);
-                ds.DrawImage(image, mediaRect, source, 1);
+                var image = _background?.GetFrame(ds.Device);
+                if (image is null) DrawTestGrid(ds, mediaRect);
+                else
+                {
+                    var size = image.SizeInPixels;
+                    var targetAspect = mediaRect.Width / mediaRect.Height;
+                    var sourceAspect = size.Width / size.Height;
+                    var cropWidth = sourceAspect > targetAspect ? size.Height * targetAspect : size.Width;
+                    var cropHeight = sourceAspect > targetAspect ? size.Height : size.Width / targetAspect;
+                    var source = new Rect((size.Width - cropWidth) / 2,
+                        (size.Height - cropHeight) / 2, cropWidth, cropHeight);
+                    ds.DrawImage(image, mediaRect, source, 1);
+                }
             }
 
             if (_calibrationTarget >= 0)
@@ -412,7 +447,8 @@ public sealed class SceneCompositor : IDisposable
                     _calibrationTarget + 1, _calibrationTargetTop);
             }
 
-            if (_topPlaneMap is not null && DateTimeOffset.UtcNow - _detectionTime <= TimeSpan.FromMilliseconds(350))
+            if (_boardSession.Screen == BoardScreen.Media && _topPlaneMap is not null &&
+                DateTimeOffset.UtcNow - _detectionTime <= TimeSpan.FromMilliseconds(350))
             {
                 foreach (var detection in _detections)
                 {
@@ -428,15 +464,16 @@ public sealed class SceneCompositor : IDisposable
 
     private void DrawHandCursor(CanvasDrawingSession ds, Rect output)
     {
+        var now = DateTimeOffset.UtcNow;
         if (_boardMediaClip is not { } clip || _boardCameraMap is null ||
-            _handTips.Length == 0 || DateTimeOffset.UtcNow - _handFrameTime > TimeSpan.FromMilliseconds(350)) return;
+            _handTips.Length == 0 || _handFrameTime > now ||
+            now - _handFrameTime > TimeSpan.FromMilliseconds(350)) return;
         var clipPoints = clip.Corners.Select(point => new Vector2(
             (float)(output.X + point.X * output.Width),
             (float)(output.Y + point.Y * output.Height))).ToArray();
         using var geometry = CanvasGeometry.CreatePolygon(ds.Device, clipPoints);
         using var layer = ds.CreateLayer(1, geometry);
         var radius = Math.Max(6, (float)Math.Min(output.Width, output.Height) * 0.018f);
-        var now = DateTimeOffset.UtcNow;
         foreach (var cursor in _handTips)
         {
             var tip = cursor.Position;
@@ -656,6 +693,8 @@ public sealed class SceneCompositor : IDisposable
             _disposed = true;
             foreach (var asset in _overlays.Values.Append(_background).OfType<MediaAsset>().Distinct()) asset.Dispose();
             _overlays.Clear();
+            _boardApplicationTarget?.Dispose();
+            _boardApplicationTarget = null;
         }
     }
 }

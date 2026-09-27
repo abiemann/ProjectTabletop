@@ -14,6 +14,7 @@ public sealed class HandGestureTracker
     private static readonly TimeSpan PinchDwell = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan ObservationLifetime = TimeSpan.FromMilliseconds(350);
     private static readonly TimeSpan ExecuteDuration = TimeSpan.FromSeconds(1);
+    private static long s_nextExecuteEventId;
     private readonly List<Track> _tracks = new(2);
     private DateTimeOffset? _lastFrameTime;
     private DateTimeOffset? _lastNow;
@@ -74,7 +75,7 @@ public sealed class HandGestureTracker
             track.LastSeen = frameTime;
             UpdatePinch(track, observation.PinchRatio, frameTime, now);
             active.Add(track);
-            cursors.Add(new HandCursor(observation.IndexTip, track.ExecuteUntil));
+            cursors.Add(new HandCursor(observation.IndexTip, track.ExecuteUntil, track.ExecuteEventId));
         }
         return cursors;
     }
@@ -107,6 +108,7 @@ public sealed class HandGestureTracker
         track.CloseSamples = Math.Min(2, track.CloseSamples + 1);
         if (track.CloseSamples < 2 || frameTime - track.CloseStarted.Value < PinchDwell) return;
         track.ExecuteUntil = now + ExecuteDuration;
+        track.ExecuteEventId = Interlocked.Increment(ref s_nextExecuteEventId);
         track.Latched = true;
         track.CloseStarted = null;
         track.CloseSamples = 0;
@@ -185,5 +187,6 @@ public sealed class HandGestureTracker
         public int CloseSamples;
         public bool Latched;
         public DateTimeOffset ExecuteUntil = DateTimeOffset.MinValue;
+        public long ExecuteEventId;
     }
 }

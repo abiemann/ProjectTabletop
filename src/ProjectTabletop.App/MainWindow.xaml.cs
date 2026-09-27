@@ -195,6 +195,7 @@ public sealed partial class MainWindow : Window
         else if (_visionError is not null) SetStatus(_visionError);
         UpdateCameraHealth();
         UpdateBoardSetupStatus();
+        UpdateBoardAppStatus();
         RenderStatusText.Text = $"Draw callbacks: {outputFps:F1}/s output ({outputSlowDelta} slow), " +
             $"{previewFps:F1}/s preview ({previewSlowDelta} slow). " +
             (videoAssets == 0 ? "No video assets loaded. " :

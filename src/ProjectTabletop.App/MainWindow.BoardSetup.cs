@@ -143,7 +143,7 @@ public sealed partial class MainWindow
         BoardSetupButton.Content = "Start board setup";
         RescanBoardButton.IsEnabled = false;
         BoardSetupStatusText.Text = _scene.HasBoardMediaClip
-            ? "Board scan complete. Images and video are clipped inside the detected cardboard."
+            ? "Board scan complete. The selected app or media is projected inside the detected cardboard."
             : "Board setup stopped. Output stays black until a successful board scan.";
         SetStatus(BoardSetupStatusText.Text);
     }
@@ -164,7 +164,11 @@ public sealed partial class MainWindow
         SetStatus("Projector output is black for an ambient webcam capture. Start board scan to restore white illumination.");
     }
 
-    private async void RescanBoard_Click(object sender, RoutedEventArgs e) => await RescanBoardSetupAsync();
+    private async void RescanBoard_Click(object sender, RoutedEventArgs e)
+    {
+        if (Volatile.Read(ref _boardSetupActive)) await RescanBoardSetupAsync();
+        else await StartBoardSetupAsync();
+    }
 
     internal async Task RescanBoardSetupAsync()
     {
@@ -583,12 +587,19 @@ public sealed partial class MainWindow
                 ? "White edge unavailable; using trusted ambient cardboard corners. "
                 : $"{(_ambientRecoveredFromPrior ? "Three-edge inferred" : "Four-edge ambient")} " +
                   $"and white cardboard edges agreed within {_boardCrossCheckErrorPixels:F1} px. ") +
-                "Nine-spot near-edge registration complete. Grid is projected inside " +
+                "Nine-spot near-edge registration complete. Content is projected inside " +
                 $"its detected edges (center check error {error:F4} normalized; " +
                 $"grid inset {_boardGridInset:P1}). " +
                 (_boardProjectionWarning ?? "Press Scan again if the cardboard moves.");
+            // Keep the final clip/map and diagnostics, then reveal the selected board app.
+            // EndBoardSetup clears scan history, which is still useful for a later rescan.
+            _scene.SetBoardSetup(false);
+            Volatile.Write(ref _boardSetupActive, false);
+            BoardSetupButton.Content = "Start board setup";
+            RescanBoardButton.IsEnabled = true;
+            UpdateBoardAppStatus();
             SetStatus(_boardProjectionWarning ??
-                "Cardboard scan complete. Grid follows the detected physical board corners.");
+                $"Cardboard scan complete. {_scene.CurrentBoardTitle} is ready on the board.");
         }
         catch (Exception ex)
         {

@@ -11,9 +11,10 @@ internal static class HandGestureRegression
         CheckJitterAndDropout();
         CheckRejectedFramesAndReset();
         CheckIndependentHands();
+        CheckExecutionEventIdentity();
         CheckPoseInvariance();
         Console.WriteLine("Hand gesture regression: pointing/dwell, one-second pulse, release, " +
-            "jitter, dropout, frame freshness, reset, independent hands and pose invariance passed.");
+            "jitter, dropout, frame freshness, reset, independent hands, event identity and pose invariance passed.");
     }
 
     private static void CheckPointingAndDwell()
@@ -166,6 +167,38 @@ internal static class HandGestureRegression
             Require(Distance(cursor.Position, closed.IndexTip) < 0.001,
                 "The cursor was not centered on the transformed index fingertip.");
         }
+    }
+
+    private static void CheckExecutionEventIdentity()
+    {
+        var tracker = new HandGestureTracker();
+        HandDetection first = Hand(.15, x: 300), second = Hand(.15, x: 700);
+        var cursors = At(tracker, 0, first, second);
+        Require(cursors.All(cursor => cursor.ExecuteEventId == 0), "An untriggered hand received an event ID.");
+        cursors = At(tracker, 120, first, second);
+        long firstId = Nearest(cursors, first.IndexTip).ExecuteEventId;
+        long secondId = Nearest(cursors, second.IndexTip).ExecuteEventId;
+        Require(firstId > 0 && secondId > firstId, "Simultaneous pinches did not receive unique monotonic IDs.");
+        cursors = At(tracker, 160, second, first);
+        Require(Nearest(cursors, first.IndexTip).ExecuteEventId == firstId &&
+            Nearest(cursors, second.IndexTip).ExecuteEventId == secondId, "Reordering moved event IDs between hands.");
+        At(tracker, 200);
+        cursors = At(tracker, 240, first, second);
+        Require(Nearest(cursors, first.IndexTip).ExecuteEventId == firstId, "A brief dropout changed a held-pinch event ID.");
+        At(tracker, 280, Hand(.65, x: 300), second);
+        At(tracker, 320, first, second);
+        cursors = At(tracker, 440, first, second);
+        long retriggeredId = Nearest(cursors, first.IndexTip).ExecuteEventId;
+        Require(retriggeredId > secondId && Nearest(cursors, second.IndexTip).ExecuteEventId == secondId,
+            "A fresh pinch did not receive its own event ID.");
+        tracker.Reset();
+        At(tracker, 0, first);
+        long resetId = One(At(tracker, 120, first)).ExecuteEventId;
+        Require(resetId > retriggeredId, "Reset reused a gesture event ID.");
+        var replacement = new HandGestureTracker();
+        At(replacement, 0, first);
+        Require(One(At(replacement, 120, first)).ExecuteEventId > resetId,
+            "A replacement tracker reused an event ID.");
     }
 
     private static HandDetection Hand(double gapRatio, double x = 320, double y = 240,
