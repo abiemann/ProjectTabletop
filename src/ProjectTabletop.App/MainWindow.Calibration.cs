@@ -65,6 +65,11 @@ public sealed partial class MainWindow
             CalibrationStatusText.Text = "Open the selected projection display in full screen before calibrating.";
             return false;
         }
+        if (!_scene.HasBoardMediaClip)
+        {
+            CalibrationStatusText.Text = "Complete a board scan before projecting calibration targets.";
+            return false;
+        }
         return true;
     }
 

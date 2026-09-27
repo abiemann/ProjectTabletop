@@ -17,6 +17,7 @@ public sealed partial class MainWindow
         }
         try
         {
+            _scene.ClearBoardMediaClip();
             if (_output is null)
             {
                 _output = new ProjectionWindow(_scene);
@@ -24,6 +25,7 @@ public sealed partial class MainWindow
                 {
                     _output = null;
                     _outputDisplayId = null;
+                    _scene.ClearBoardMediaClip();
                     FullscreenButton.Content = "Full screen";
                     if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
                 };
@@ -45,6 +47,7 @@ public sealed partial class MainWindow
         try
         {
             if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
+            _scene.ClearBoardMediaClip();
             _output.SetFullScreen(!_output.IsFullScreen);
             FullscreenButton.Content = _output.IsFullScreen ? "Windowed" : "Full screen";
             InvalidateCalibration("Output window mode changed. Recalibrate in full screen.");
@@ -52,48 +55,26 @@ public sealed partial class MainWindow
         catch (Exception ex) { SetStatus("Could not change output window mode: " + ex.Message); }
     }
 
-    private void StageSliders_ValueChanged(object sender,
-        Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
-    {
-        if (!_initialized || _updatingStage) return;
-        UpdateStage();
-        InvalidateCalibration("Stage position or size changed. Recalibrate board and raised top.");
-    }
-
-    private void UpdateStage()
-    {
-        if (SelectedDisplay is not { } display) return;
-        _updatingStage = true;
-        try
-        {
-            var aspect = (double)display.Width / display.Height;
-            var heightFraction = Math.Min(StageSizeSlider.Value, 0.95 * aspect);
-            var widthFraction = heightFraction / aspect;
-            var xLimit = Math.Min(0.25, (1 - widthFraction) / 2);
-            var yLimit = Math.Min(0.25, (1 - heightFraction) / 2);
-            StageXSlider.Minimum = -xLimit;
-            StageXSlider.Maximum = xLimit;
-            StageYSlider.Minimum = -yLimit;
-            StageYSlider.Maximum = yLimit;
-            _scene.SetStage(StageSizeSlider.Value, StageXSlider.Value, StageYSlider.Value);
-        }
-        finally { _updatingStage = false; }
-    }
-
     private async void ChooseBackground_Click(object sender, RoutedEventArgs e)
     {
         var path = await PickMediaPathAsync();
         if (path is null) return;
-        try
-        {
-            var asset = _scene.FindAssetByPath(path) ??
-                await MediaAsset.OpenAsync(CanvasDevice.GetSharedDevice(), path);
-            if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
-            _scene.SetBackground(asset);
-            BackgroundPathText.Text = path;
-            SetStatus($"Background: {Path.GetFileName(path)}. Playback loops when the Windows decoder supports the file.");
-        }
+        try { await SetBackgroundFromPathAsync(path); }
         catch (Exception ex) { SetStatus("Background media could not open: " + ex.Message); }
+    }
+
+    private async Task SetBackgroundFromPathAsync(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        if (!File.Exists(fullPath)) throw new FileNotFoundException("Background media was not found.", fullPath);
+        var asset = _scene.FindAssetByPath(fullPath) ??
+            await MediaAsset.OpenAsync(CanvasDevice.GetSharedDevice(), fullPath);
+        if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
+        _scene.SetBackground(asset);
+        BackgroundPathText.Text = fullPath;
+        SetStatus(_scene.HasBoardMediaClip
+            ? $"Background: {Path.GetFileName(fullPath)}. Playback is limited to the detected board."
+            : $"Background: {Path.GetFileName(fullPath)} loaded. Complete a board scan before it is projected.");
     }
 
     private void TestGrid_Click(object sender, RoutedEventArgs e)
@@ -101,6 +82,9 @@ public sealed partial class MainWindow
         if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
         _scene.SetBackground(null);
         BackgroundPathText.Text = "Test grid";
+        SetStatus(_scene.HasBoardMediaClip
+            ? "Test grid is limited to the detected board."
+            : "Complete a board scan before the test grid is projected.");
     }
 
     private async void ChooseOverlay_Click(object sender, RoutedEventArgs e)

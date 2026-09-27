@@ -49,6 +49,10 @@ public sealed partial class MainWindow
 
     private void SuspendBoardScanForCameraOutage()
     {
+        var hadMediaClip = _scene.HasBoardMediaClip;
+        _scene.ClearBoardMediaClip();
+        if (hadMediaClip && !Volatile.Read(ref _boardSetupActive))
+            SetStatus("Webcam video is stale. Projection is black; rescan the board after the camera recovers.");
         if (!Volatile.Read(ref _boardSetupActive) || _boardScanSuspendedForCameraOutage) return;
         _boardScanSuspendedForCameraOutage = true;
         ClearBoardPreview();
@@ -212,6 +216,7 @@ public sealed partial class MainWindow
         if (!_initialized || SelectedCamera is not { } selected ||
             _selectedCameraId == selected.Device.Id) return;
         _selectedCameraId = selected.Device.Id;
+        _scene.ClearBoardMediaClip();
         if (_cameraWantedDeviceId is not null && _cameraWantedDeviceId != selected.Device.Id)
         {
             _cameraWanted = false;
@@ -251,6 +256,7 @@ public sealed partial class MainWindow
         try
         {
             if (_closing || !_cameraWanted || version != _cameraOperationVersion) return false;
+            _scene.ClearBoardMediaClip();
             ResetCameraHealth(preserveBoardScanSuspension:
                 _boardScanSuspendedForCameraOutage && Volatile.Read(ref _boardSetupActive));
             CameraStatusText.Text = "Starting " + choice.Device.DisplayName + "…";
@@ -302,6 +308,7 @@ public sealed partial class MainWindow
         await _cameraOperation.WaitAsync();
         try
         {
+            _scene.ClearBoardMediaClip();
             await _camera.StopAsync();
             ResetCameraHealth();
             ClearBoardPreview();
@@ -320,6 +327,7 @@ public sealed partial class MainWindow
     {
         if (_camera.IsRunning) return;
         var version = Interlocked.Read(ref _cameraOperationVersion);
+        _scene.ClearBoardMediaClip();
         _scene.SetDetections(Array.Empty<PieceDetection>(), DateTimeOffset.MinValue);
         Volatile.Write(ref _latestCameraFrame, null);
         Volatile.Write(ref _latestDetections, Array.Empty<PieceDetection>());

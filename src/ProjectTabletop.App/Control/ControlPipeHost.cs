@@ -10,11 +10,11 @@ internal sealed class ControlPipeHost : IAsyncDisposable
     internal const string PipeName = "ProjectTabletop.Control.v1";
     private const int MaxLineCharacters = 16_384;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private readonly Func<string, CancellationToken, Task<object?>> _handle;
+    private readonly Func<string, JsonElement, CancellationToken, Task<object?>> _handle;
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _loop;
 
-    internal ControlPipeHost(Func<string, CancellationToken, Task<object?>> handle)
+    internal ControlPipeHost(Func<string, JsonElement, CancellationToken, Task<object?>> handle)
     {
         _handle = handle;
         _loop = Task.Run(RunAsync);
@@ -57,7 +57,12 @@ internal sealed class ControlPipeHost : IAsyncDisposable
                 methodElement.ValueKind != JsonValueKind.String ||
                 string.IsNullOrWhiteSpace(methodElement.GetString()))
                 throw new InvalidDataException("A method string is required.");
-            response = new { ok = true, result = await _handle(methodElement.GetString()!, cancellationToken) };
+            var parameters = document.RootElement.TryGetProperty("params", out var requestedParameters)
+                ? requestedParameters
+                : JsonSerializer.SerializeToElement(new { });
+            if (parameters.ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException("Parameters must be a JSON object.");
+            response = new { ok = true, result = await _handle(methodElement.GetString()!, parameters, cancellationToken) };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

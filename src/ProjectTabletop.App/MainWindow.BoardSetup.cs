@@ -114,7 +114,10 @@ public sealed partial class MainWindow
         _scene.SetBoardSetup(false);
         BoardSetupButton.Content = "Start board setup";
         RescanBoardButton.IsEnabled = false;
-        BoardSetupStatusText.Text = "Board setup stopped.";
+        BoardSetupStatusText.Text = _scene.HasBoardMediaClip
+            ? "Board scan complete. Images and video are clipped inside the detected cardboard."
+            : "Board setup stopped. Output stays black until a successful board scan.";
+        SetStatus(BoardSetupStatusText.Text);
     }
 
     internal void StopBoardSetup()
@@ -125,6 +128,7 @@ public sealed partial class MainWindow
     internal void ShowBlackOutputForControl()
     {
         StopBoardSetup();
+        _scene.ClearBoardMediaClip();
         _scene.SetBlackOutput(true);
         SetStatus("Projector output is black for an ambient webcam capture. Start board scan to restore white illumination.");
     }

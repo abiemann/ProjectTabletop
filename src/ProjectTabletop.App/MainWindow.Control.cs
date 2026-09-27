@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ProjectTabletop.App.Control;
 
 namespace ProjectTabletop.App;
@@ -9,19 +10,20 @@ public sealed partial class MainWindow
     private void StartControlHost() =>
         _controlHost ??= new ControlPipeHost(DispatchControlAsync);
 
-    private Task<object?> DispatchControlAsync(string method, CancellationToken token)
+    private Task<object?> DispatchControlAsync(string method, JsonElement parameters, CancellationToken token)
     {
+        var commandParameters = parameters.Clone();
         var completion = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!DispatcherQueue.TryEnqueue(async () =>
             {
-                try { completion.TrySetResult(await HandleControlOnUiAsync(method)); }
+                try { completion.TrySetResult(await HandleControlOnUiAsync(method, commandParameters)); }
                 catch (Exception ex) { completion.TrySetException(ex); }
             }))
             completion.TrySetException(new InvalidOperationException("The app UI is unavailable."));
         return completion.Task.WaitAsync(token);
     }
 
-    private async Task<object?> HandleControlOnUiAsync(string method)
+    private async Task<object?> HandleControlOnUiAsync(string method, JsonElement parameters)
     {
         if (_closing) throw new InvalidOperationException("The app is closing.");
         switch (method)
@@ -41,6 +43,7 @@ public sealed partial class MainWindow
                     outputOpen = _output is not null,
                     outputFullScreen = _output?.IsFullScreen ?? false,
                     boardSetupActive = Volatile.Read(ref _boardSetupActive),
+                    boardClipReady = _scene.HasBoardMediaClip,
                     boardSetupStatus = BoardSetupControlStatus,
                     status = StatusText.Text
                 };
@@ -60,6 +63,17 @@ public sealed partial class MainWindow
             case "stop_scan":
                 StopBoardSetup();
                 return new { status = BoardSetupControlStatus };
+            case "set_background_media":
+                var path = parameters.TryGetProperty("path", out var pathElement) &&
+                    pathElement.ValueKind == JsonValueKind.String ? pathElement.GetString() : null;
+                if (string.IsNullOrWhiteSpace(path))
+                    throw new ArgumentException("Provide the absolute local media path.");
+                await SetBackgroundFromPathAsync(path);
+                return new { background = _scene.BackgroundLabel,
+                    boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
+            case "show_test_grid":
+                TestGrid_Click(this, new Microsoft.UI.Xaml.RoutedEventArgs());
+                return new { boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
             case "capture_raw_frame":
                 return new { path = await SaveRawSnapshotAsync() };
             case "start_camera":

@@ -21,7 +21,6 @@ public sealed partial class MainWindow : Window
     private string? _outputDisplayId;
     private readonly DispatcherQueueTimer _statusTimer;
     private bool _initialized;
-    private bool _updatingStage;
     private bool _closing;
     private CameraFrame? _latestCameraFrame;
     private CameraFrame? _frozenFrame;
@@ -70,7 +69,6 @@ public sealed partial class MainWindow : Window
         _initialized = true;
         RefreshDisplays();
         _ = RefreshCamerasAsync();
-        UpdateStage();
         UpdateTrainingStatus();
         SyncVisionSettingsControls();
         _ = TryLoadAutosavedVisionAsync();
@@ -128,8 +126,8 @@ public sealed partial class MainWindow : Window
     {
         if (!_initialized || SelectedDisplay is not { } display) return;
         if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
+        _scene.ClearBoardMediaClip();
         _scene.SetDisplayAspect((double)display.Width / display.Height);
-        UpdateStage();
         InvalidateCalibration("Projection display changed. Recalibrate both planes.");
         SetStatus($"Selected {display}. " + (_output is null || _outputDisplayId == display.Id
             ? "Calibration follows the fullscreen canvas layout size."
@@ -164,8 +162,7 @@ public sealed partial class MainWindow : Window
         else if (_visionError is not null) SetStatus(_visionError);
         UpdateCameraHealth();
         UpdateBoardSetupStatus();
-        StageStatusText.Text = $"Stage: {StageSizeSlider.Value:P0} of display height; " +
-            $"draw callbacks: {outputFps:F1}/s output ({outputSlowDelta} slow), " +
+        RenderStatusText.Text = $"Draw callbacks: {outputFps:F1}/s output ({outputSlowDelta} slow), " +
             $"{previewFps:F1}/s preview ({previewSlowDelta} slow). " +
             (videoAssets == 0 ? "No video assets loaded. " :
                 $"Video ({videoAssets} loaded asset{(videoAssets == 1 ? "" : "s")}): " +

@@ -32,6 +32,33 @@ Reject(() => Homography.FromFourPoints(source, [source[0], source[1], source[1],
 Reject(() => Homography.FromFourPoints(source, [new(0, 0), new(100, 100), new(0, 100), new(100, 0)]));
 Reject(() => Homography.FromFourPoints(source, [new(0, 0), new(100, 0), new(100, 100), new(double.NaN, 100)]));
 
+// The board clip region is the single geometry used to bound all projected media.
+// Check its perspective edges, the inclusive boundary, and a caller-mutated input.
+Point2[] insetCorners = [new(0.12, 0.18), new(0.88, 0.12),
+                         new(0.81, 0.84), new(0.19, 0.78)];
+var clip = ProjectionClipRegion.FromCorners(insetCorners);
+insetCorners[0] = new Point2(0, 0);
+Close(clip.Corners[0], new Point2(0.12, 0.18));
+Close(new Point2(clip.MinX, clip.MinY), new Point2(0.12, 0.12));
+Close(new Point2(clip.MaxX, clip.MaxY), new Point2(0.88, 0.84));
+if (!clip.Contains(new Point2(0.5, 0.5)) ||
+    !clip.Contains(clip.Corners[0]) ||
+    !clip.Contains(new Point2(0.5, 0.15)) ||
+    // These points are inside the axis-aligned bounds but outside the
+    // slanted board edges; a rectangular crop would wrongly light them.
+    clip.Contains(new Point2(0.5, 0.13)) ||
+    clip.Contains(new Point2(0.87, 0.5)) ||
+    clip.Contains(new Point2(0.5, 0.83)) ||
+    clip.Contains(new Point2(0.13, 0.5)) ||
+    clip.Contains(new Point2(double.NaN, 0.5)))
+    throw new Exception("Perspective board clipping accepted exterior media or rejected board media.");
+Reject(() => ProjectionClipRegion.FromCorners([new(0, 0), new(1, 0), new(1, 1)]));
+Reject(() => ProjectionClipRegion.FromCorners([new(0, 0), new(1, 0), new(1, 1), new(1.01, 1)]));
+Reject(() => ProjectionClipRegion.FromCorners([new(0, 0), new(1, 0), new(1, 1), new(double.NaN, 1)]));
+Reject(() => ProjectionClipRegion.FromCorners([new(0, 0), new(0, 1), new(1, 1), new(1, 0)]));
+Reject(() => ProjectionClipRegion.FromCorners([new(0, 0), new(1, 0), new(0.3, 0.3), new(0, 1)]));
+Reject(() => ProjectionClipRegion.FromCorners([new(0, 0), new(1, 0), new(1, 0), new(0, 1)]));
+
 // The camera sees this board upside down and the lens bends points away from a
 // single homography. Spots near the board edges should reduce extrapolation error.
 static Point2 DistortedCamera(Point2 projector)

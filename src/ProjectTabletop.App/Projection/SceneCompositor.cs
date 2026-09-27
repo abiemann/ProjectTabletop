@@ -28,14 +28,12 @@ public sealed class SceneCompositor : IDisposable
     private Func<PixelPoint, Vector2>? _topPlaneMap;
     private bool _disposed;
     private double _displayAspect = 16.0 / 9;
-    private double _stageSize = 0.91;
-    private double _stageOffsetX;
-    private double _stageOffsetY;
     private int _calibrationTarget = -1;
     private bool _calibrationTargetTop;
     private bool _boardSetup;
     private bool _blackOutput;
     private BoardGrid? _boardGrid;
+    private ProjectionClipRegion? _boardMediaClip;
     private int _boardCalibrationSpot = -1;
     private Vector2? _customBoardCalibrationSpot;
     private DateTimeOffset _boardSetupStarted;
@@ -89,6 +87,16 @@ public sealed class SceneCompositor : IDisposable
         }
     }
 
+    public bool HasBoardMediaClip
+    {
+        get { lock (_gate) return _boardMediaClip is not null; }
+    }
+
+    public void ClearBoardMediaClip()
+    {
+        lock (_gate) _boardMediaClip = null;
+    }
+
     public MediaAsset? FindAssetByPath(string path)
     {
         lock (_gate)
@@ -105,16 +113,6 @@ public sealed class SceneCompositor : IDisposable
         lock (_gate) _displayAspect = double.IsFinite(aspect) && aspect > 0 ? aspect : 16.0 / 9;
     }
 
-    public void SetStage(double heightFraction, double horizontalOffset, double verticalOffset)
-    {
-        lock (_gate)
-        {
-            _stageSize = Math.Clamp(heightFraction, 0.35, 0.95);
-            _stageOffsetX = Math.Clamp(horizontalOffset, -0.25, 0.25);
-            _stageOffsetY = Math.Clamp(verticalOffset, -0.25, 0.25);
-        }
-    }
-
     public void SetTopPlaneMap(Func<PixelPoint, Vector2>? map)
     {
         lock (_gate) _topPlaneMap = map;
@@ -129,6 +127,7 @@ public sealed class SceneCompositor : IDisposable
         lock (_gate)
         {
             if (enabled && !_boardSetup) _boardSetupStarted = DateTimeOffset.UtcNow;
+            if (enabled) _boardMediaClip = null;
             _boardSetup = enabled;
             _blackOutput = false;
             _boardGrid = null;
@@ -191,10 +190,13 @@ public sealed class SceneCompositor : IDisposable
     {
         ArgumentNullException.ThrowIfNull(projectorCorners);
         var grid = BoardGrid.Create(projectorCorners);
+        var mediaClip = ProjectionClipRegion.FromCorners(grid.GridCorners
+            .Select(point => new Point2(point.X, point.Y)).ToArray());
         lock (_gate)
         {
             if (!_boardSetup) throw new InvalidOperationException("Board setup is not active.");
             _boardGrid = grid;
+            _boardMediaClip = mediaClip;
             _boardSetupStarted = DateTimeOffset.UtcNow;
         }
         return grid.InsetFraction;
@@ -213,14 +215,16 @@ public sealed class SceneCompositor : IDisposable
     {
         lock (_gate)
         {
-            var stage = StageRect(new Rect(0, 0, displayWidth, displayHeight));
-            var margin = pieceTop ? 0.2 : 0.0;
+            var clip = _boardMediaClip ??
+                throw new InvalidOperationException("Scan the cardboard before calibrating projection targets.");
+            var output = new Rect(0, 0, displayWidth, displayHeight);
+            var margin = pieceTop ? 0.2f : 0.1f;
             return
             [
-                new((float)(stage.X + stage.Width * margin), (float)(stage.Y + stage.Height * margin)),
-                new((float)(stage.X + stage.Width * (1 - margin)), (float)(stage.Y + stage.Height * margin)),
-                new((float)(stage.X + stage.Width * (1 - margin)), (float)(stage.Y + stage.Height * (1 - margin))),
-                new((float)(stage.X + stage.Width * margin), (float)(stage.Y + stage.Height * (1 - margin)))
+                BoardPoint(clip, output, margin, margin),
+                BoardPoint(clip, output, 1 - margin, margin),
+                BoardPoint(clip, output, 1 - margin, 1 - margin),
+                BoardPoint(clip, output, margin, 1 - margin)
             ];
         }
     }
@@ -286,7 +290,6 @@ public sealed class SceneCompositor : IDisposable
             if (_disposed) return;
             if (_blackOutput) return;
             var output = FitDisplay(canvasWidth, canvasHeight, preview);
-            var stage = StageRect(output);
 
             if (_boardSetup)
             {
@@ -321,28 +324,43 @@ public sealed class SceneCompositor : IDisposable
                 return;
             }
 
+            // Media is fail-closed: a successful board scan supplies the only
+            // projector-space region that can receive images or video. The
+            // inset polygon leaves a small guard band for optical edge blur.
+            if (_boardMediaClip is not { } mediaClip) return;
+            var clipPoints = mediaClip.Corners.Select(point => new Vector2(
+                (float)(output.X + point.X * output.Width),
+                (float)(output.Y + point.Y * output.Height))).ToArray();
+            var mediaRect = BoardBounds(mediaClip, output);
+            using var clipGeometry = CanvasGeometry.CreatePolygon(ds.Device, clipPoints);
+            using var boardLayer = ds.CreateLayer(1, clipGeometry);
+
             var image = _background?.GetFrame(ds.Device);
-            if (image is null) DrawTestGrid(ds, stage);
+            if (image is null) DrawTestGrid(ds, mediaRect);
             else
             {
                 var size = image.SizeInPixels;
-                var crop = Math.Min(size.Width, size.Height);
-                var source = new Rect((size.Width - crop) / 2, (size.Height - crop) / 2, crop, crop);
-                ds.DrawImage(image, stage, source, 1);
+                var targetAspect = mediaRect.Width / mediaRect.Height;
+                var sourceAspect = size.Width / size.Height;
+                var cropWidth = sourceAspect > targetAspect ? size.Height * targetAspect : size.Width;
+                var cropHeight = sourceAspect > targetAspect ? size.Height : size.Width / targetAspect;
+                var source = new Rect((size.Width - cropWidth) / 2,
+                    (size.Height - cropHeight) / 2, cropWidth, cropHeight);
+                ds.DrawImage(image, mediaRect, source, 1);
             }
 
             if (_calibrationTarget >= 0)
             {
-                var margin = _calibrationTargetTop ? 0.2 : 0.0;
+                var margin = _calibrationTargetTop ? 0.2f : 0.1f;
                 var uv = _calibrationTarget switch
                 {
-                    0 => new Vector2((float)margin, (float)margin),
-                    1 => new Vector2((float)(1 - margin), (float)margin),
-                    2 => new Vector2((float)(1 - margin), (float)(1 - margin)),
-                    _ => new Vector2((float)margin, (float)(1 - margin))
+                    0 => new Vector2(margin, margin),
+                    1 => new Vector2(1 - margin, margin),
+                    2 => new Vector2(1 - margin, 1 - margin),
+                    _ => new Vector2(margin, 1 - margin)
                 };
                 DrawCalibrationTarget(ds,
-                    new Vector2((float)(stage.X + uv.X * stage.Width), (float)(stage.Y + uv.Y * stage.Height)),
+                    BoardPoint(mediaClip, output, uv.X, uv.Y),
                     _calibrationTarget + 1, _calibrationTargetTop);
             }
 
@@ -352,7 +370,7 @@ public sealed class SceneCompositor : IDisposable
                 if (!_overlays.TryGetValue(detection.PieceId, out var media)) continue;
                 var frame = media.GetFrame(ds.Device);
                 if (frame is null || detection.Outline.Count < 3) continue;
-                DrawOverlay(ds, output, stage, detection, frame, _topPlaneMap);
+                DrawOverlay(ds, output, mediaRect, detection, frame, _topPlaneMap);
             }
         }
     }
@@ -367,16 +385,24 @@ public sealed class SceneCompositor : IDisposable
             : new Rect(0, (height - width / targetAspect) / 2, width, width / targetAspect);
     }
 
-    private Rect StageRect(Rect output)
+    private static Rect BoardBounds(ProjectionClipRegion clip, Rect output)
     {
-        var side = Math.Min(output.Height * _stageSize, output.Width * 0.95);
-        var xMargin = (output.Width - side) / 2;
-        var yMargin = (output.Height - side) / 2;
-        var dx = Math.Clamp(_stageOffsetX * output.Width, -xMargin, xMargin);
-        var dy = Math.Clamp(_stageOffsetY * output.Height, -yMargin, yMargin);
-        return new Rect(output.X + xMargin + dx,
-                        output.Y + yMargin + dy,
-                        side, side);
+        return new Rect(output.X + clip.MinX * output.Width,
+            output.Y + clip.MinY * output.Height,
+            (clip.MaxX - clip.MinX) * output.Width,
+            (clip.MaxY - clip.MinY) * output.Height);
+    }
+
+    private static Vector2 BoardPoint(ProjectionClipRegion clip, Rect output, float u, float v)
+    {
+        var corners = clip.Corners;
+        var top = Vector2.Lerp(new Vector2((float)corners[0].X, (float)corners[0].Y),
+            new Vector2((float)corners[1].X, (float)corners[1].Y), u);
+        var bottom = Vector2.Lerp(new Vector2((float)corners[3].X, (float)corners[3].Y),
+            new Vector2((float)corners[2].X, (float)corners[2].Y), u);
+        var point = Vector2.Lerp(top, bottom, v);
+        return new Vector2((float)(output.X + point.X * output.Width),
+            (float)(output.Y + point.Y * output.Height));
     }
 
     private static void DrawTestGrid(CanvasDrawingSession ds, Rect stage)

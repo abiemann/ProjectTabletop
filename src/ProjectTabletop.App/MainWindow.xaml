@@ -31,13 +31,8 @@
                     <Button x:Name="OpenOutputButton" Content="Open output" Click="OpenOutput_Click" />
                     <Button x:Name="FullscreenButton" Content="Full screen" Click="Fullscreen_Click" />
                 </StackPanel>
-                <TextBlock Text="Stage size: fraction of display height" />
-                <Slider x:Name="StageSizeSlider" Minimum="0.35" Maximum="0.95" Value="0.91" StepFrequency="0.005" ValueChanged="StageSliders_ValueChanged" />
-                <TextBlock Text="Stage horizontal offset" />
-                <Slider x:Name="StageXSlider" Minimum="-0.25" Maximum="0.25" Value="0" StepFrequency="0.001" ValueChanged="StageSliders_ValueChanged" />
-                <TextBlock Text="Stage vertical offset" />
-                <Slider x:Name="StageYSlider" Minimum="-0.25" Maximum="0.25" Value="0" StepFrequency="0.001" ValueChanged="StageSliders_ValueChanged" />
-                <TextBlock x:Name="StageStatusText" Text="Square stage centered in black output." TextWrapping="Wrap" />
+                <TextBlock Text="Projection stays black until the cardboard scan completes. Media then fills its detected bounds and is clipped to its corners." TextWrapping="Wrap" />
+                <TextBlock x:Name="RenderStatusText" Text="Waiting for projection diagnostics." TextWrapping="Wrap" />
 
                 <TextBlock Text="3  Background and board setup" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
                 <StackPanel Orientation="Horizontal" Spacing="8">

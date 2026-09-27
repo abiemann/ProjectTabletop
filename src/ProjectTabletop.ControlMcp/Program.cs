@@ -20,7 +20,7 @@ if (args.Length == 0)
 
 if (args.Length < 2 || args[0] != "--once" || args.Length > 3)
 {
-    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|stop_scan|start_camera|stop_camera|open_output|shutdown> [JSON object]");
+    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|stop_scan|start_camera|stop_camera|open_output|set_background_media|show_test_grid|shutdown> [JSON object]");
     return 2;
 }
 
@@ -29,6 +29,13 @@ static async Task RunMcpAsync()
     static McpServerTool Tool(string name, string description) =>
         McpServerTool.Create((Func<Task<string>>)(() => CallToolAsync(name)),
             new McpServerToolCreateOptions { Name = name, Description = description });
+    static McpServerTool BackgroundMediaTool() =>
+        McpServerTool.Create((Func<string, Task<string>>)SetBackgroundMediaAsync,
+            new McpServerToolCreateOptions
+            {
+                Name = "set_background_media",
+                Description = "Load an image or video from an absolute local path as the board-clipped background."
+            });
     var options = new McpServerOptions
     {
         ServerInfo = new Implementation { Name = "ProjectTabletop.ControlMcp", Version = "0.1.0" },
@@ -43,6 +50,8 @@ static async Task RunMcpAsync()
             Tool("start_camera", "Start or reconnect the selected webcam."),
             Tool("stop_camera", "Stop the webcam."),
             Tool("open_output", "Open the projector output on the selected display."),
+            BackgroundMediaTool(),
+            Tool("show_test_grid", "Show the board-clipped test grid on the projector."),
             Tool("shutdown", "Close the local ProjectTabletop app cleanly.")
         ]
     };
@@ -50,13 +59,16 @@ static async Task RunMcpAsync()
     await server.RunAsync();
 }
 
-static async Task<string> CallToolAsync(string method)
+static Task<string> SetBackgroundMediaAsync(string path) =>
+    CallToolAsync("set_background_media", JsonSerializer.SerializeToElement(new { path }));
+
+static async Task<string> CallToolAsync(string method, JsonElement? parameters = null)
 {
     try
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(65));
         using var empty = JsonDocument.Parse("{}");
-        var response = await ControlPipeClient.CallAsync(method, empty.RootElement, timeout.Token);
+        var response = await ControlPipeClient.CallAsync(method, parameters ?? empty.RootElement, timeout.Token);
         return response.GetRawText();
     }
     catch (Exception ex)
