@@ -13,6 +13,13 @@ if (args is ["--photo-copy"])
 if (args is ["--hands"])
 {
     HandTrackingRegression.Run();
+    HandSpreadRegression.Run();
+    return;
+}
+if (args is ["--hand-poses"])
+{
+    HandSpreadRegression.Run();
+    HandGestureRegression.Run();
     return;
 }
 if (args is ["--hand-diagnostics"])
@@ -114,6 +121,7 @@ CheckMovedHardwareFrames(whiteHardwareBoard);
 CheckProjectedCornerMarkers();
 CheckCalibrationSpot();
 HandTrackingRegression.Run();
+HandSpreadRegression.Run();
 HandSpotlightRegression.Run();
 PhotoCopyRegression.Run();
 PhotoObjectRegression.Run();

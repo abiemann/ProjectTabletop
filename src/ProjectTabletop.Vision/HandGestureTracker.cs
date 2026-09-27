@@ -1,7 +1,8 @@
 namespace ProjectTabletop.Vision;
 
 /// <summary>
-/// Recognizes a thumb/index pinch from current camera landmarks. Distances are
+/// Recognizes a thumb/index pinch and a separate spread-hand pose from current
+/// camera landmarks. Only a pinch creates execute feedback. Distances are
 /// normalized by the observed palm, so thresholds are image-space heuristics,
 /// not measurements of physical contact. This class performs no commands.
 /// Call Update and Reset on the same thread.
@@ -13,6 +14,7 @@ public sealed class HandGestureTracker
     private const double ReleaseThreshold = 0.45;
     private const double MaximumMatchDistance = 1.5;
     private static readonly TimeSpan PinchDwell = TimeSpan.FromMilliseconds(120);
+    private static readonly TimeSpan SpreadDwell = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan ReleaseDwell = TimeSpan.FromMilliseconds(60);
     private static readonly TimeSpan CandidateDropoutGrace = TimeSpan.FromMilliseconds(160);
     private static readonly TimeSpan ObservationLifetime = TimeSpan.FromMilliseconds(350);
@@ -29,11 +31,17 @@ public sealed class HandGestureTracker
     {
         ArgumentNullException.ThrowIfNull(hands);
         if (_lastNow is { } previousNow && now < previousNow)
+        {
+            ClearSpreadEvidence();
             return Array.Empty<HandCursor>();
+        }
         _lastNow = now;
         if (frameTime > now || now - frameTime > ObservationLifetime ||
             (_lastFrameTime is { } previousFrame && frameTime <= previousFrame))
+        {
+            ClearSpreadEvidence();
             return Array.Empty<HandCursor>();
+        }
         // Identity follows camera time. Comparing a previous frame with the
         // completion time would count inference latency as a detection gap and
         // erase a live pinch even when successive source frames are fresh.
@@ -52,6 +60,7 @@ public sealed class HandGestureTracker
         foreach (var track in _tracks)
         {
             if (assignments.Contains(track)) continue;
+            ResetSpread(track);
             // Brief misses pause the accumulated evidence instead of making a
             // user start the pinch over. Missing frames never add dwell time or
             // release an already-fired pinch.
@@ -90,7 +99,10 @@ public sealed class HandGestureTracker
             UpdateSelection(track, observation, frameTime);
             active.Add(track);
             cursors.Add(new HandCursor(observation.IndexTip, track.ExecuteUntil, track.ExecuteEventId,
-                track.SelectionPosition, track.SelectionFrameTime));
+                track.SelectionPosition, track.SelectionFrameTime)
+            {
+                IsSpreadOut = UpdateSpread(track, observation.IsSpreadOut, frameTime)
+            });
         }
         return cursors;
     }
@@ -154,6 +166,30 @@ public sealed class HandGestureTracker
         track.ReleaseStarted = null;
         track.ReleaseSamples = 0;
         ResetCandidate(track);
+    }
+
+    private static bool UpdateSpread(Track track, bool spread, DateTimeOffset frameTime)
+    {
+        if (!spread)
+        {
+            ResetSpread(track);
+            return false;
+        }
+        if (track.SpreadLastObserved is not { } previous || frameTime - previous > ObservationLifetime)
+            track.SpreadStarted = frameTime;
+        track.SpreadLastObserved = frameTime;
+        return track.SpreadStarted is { } started && frameTime - started >= SpreadDwell;
+    }
+
+    private void ClearSpreadEvidence()
+    {
+        foreach (var track in _tracks) ResetSpread(track);
+    }
+
+    private static void ResetSpread(Track track)
+    {
+        track.SpreadStarted = null;
+        track.SpreadLastObserved = null;
     }
 
     private static void ResetCandidate(Track track)
@@ -249,14 +285,14 @@ public sealed class HandGestureTracker
             (points[0].Y + points[5].Y + points[9].Y + points[13].Y + points[17].Y) / 5);
         var pinchRatio = Distance(points[4], points[8]) / scale;
         if (!double.IsFinite(center.X) || !double.IsFinite(center.Y) || !double.IsFinite(pinchRatio)) return null;
-        return new Observation(points[0], center, scale, points[8], pinchRatio);
+        return new Observation(points[0], center, scale, points[8], pinchRatio, HandPoseClassifier.IsSpreadOut(hand));
     }
 
     private static double Distance(PixelPoint first, PixelPoint second) =>
         Math.Sqrt(Math.Pow(first.X - second.X, 2) + Math.Pow(first.Y - second.Y, 2));
 
     private sealed record Observation(PixelPoint Wrist, PixelPoint PalmCenter,
-        double PalmScale, PixelPoint IndexTip, double PinchRatio);
+        double PalmScale, PixelPoint IndexTip, double PinchRatio, bool IsSpreadOut);
 
     private sealed class Track
     {
@@ -264,6 +300,8 @@ public sealed class HandGestureTracker
         public PixelPoint PalmCenter;
         public double PalmScale;
         public DateTimeOffset LastSeen;
+        public DateTimeOffset? SpreadStarted;
+        public DateTimeOffset? SpreadLastObserved;
         public DateTimeOffset? CloseLastObserved;
         public TimeSpan CloseEvidence;
         public int CloseSamples;

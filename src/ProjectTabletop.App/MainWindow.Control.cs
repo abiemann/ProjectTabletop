@@ -33,6 +33,8 @@ public sealed partial class MainWindow
                 return await VerifyProjectionWindowAsync();
             case "verify_hand_tracking_input":
                 return VerifyHandTrackingInput();
+            case "verify_hand_pose_feedback":
+                return await VerifyHandPoseFeedbackAsync();
             case "verify_hand_spotlights":
                 return await VerifyHandSpotlightsAsync();
             case "verify_hand_detection_log":
@@ -74,6 +76,8 @@ public sealed partial class MainWindow
                     handTrackingStatus = HandTrackingControlStatus,
                     handCount = TrackedHandCount,
                     handExecuteActive = ExecutingHandCount > 0,
+                    spreadOutHandCount = SpreadOutHandCount,
+                    handTestStatus = _scene.HandTrackingTestStatus,
                     lastHandDetection = _lastHandDetection,
                     handDetectionLog = _handDetectionLog?.Status,
                     handVideoRecording = _handVideoRecorder?.Status,

@@ -90,12 +90,13 @@ public sealed partial class MainWindow
                 index, hand.Confidence, hand.RightHandProbability,
                 visible = visibleHands.Contains(hand),
                 pinchRatio = hand.Landmarks.Count == 21 ? DescribeHandObservation(hand).PinchRatio : (double?)null,
+                spreadOutPose = HandPoseClassifier.IsSpreadOut(hand),
                 landmarks = hand.Landmarks.ToArray()
             }).ToArray(),
             cursors = cursors.Select(cursor => new
             {
                 cursor.Position, cursor.ExecuteEventId, cursor.ExecuteUntil,
-                executing = cursor.IsExecuting(now), cursor.SelectionPosition, cursor.SelectionFrameTime
+                executing = cursor.IsExecuting(now), cursor.IsSpreadOut, cursor.SelectionPosition, cursor.SelectionFrameTime
             }).ToArray(),
             hoveredButtons = _scene.HoveredBoardButtons,
             lighting = _scene.GetHandLightingDiagnostics()

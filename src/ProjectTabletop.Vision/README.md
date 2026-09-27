@@ -31,6 +31,22 @@ These image landmarks do not establish physical board contact. See the root
 README for verification status. [Model sources, checksums, and licenses](Models/Hands/README.md)
 are bundled with the models.
 
+`HandPoseClassifier.IsSpreadOut` classifies the current 21 landmarks: all four
+fingers must be extended and laterally separated, with an extended, open thumb.
+Its palm-normalized geometry is invariant to two-dimensional scaling, mirroring
+and rotation; severe foreshortening, overlap and three-dimensional pose are not
+resolved. Invalid or degenerate landmarks are rejected.
+`HandGestureTracker` requires 120 ms of source-frame observations before setting
+`HandCursor.IsSpreadOut`. A folded pose or missing hand clears that evidence;
+an observation gap over 350 ms restarts its dwell, and stale results older than
+350 ms or resets clear it. It never creates an execute event. In Hand-Tracking,
+the confirmed pose displays **Spread out hand** on the board and laptop; it takes
+caption priority over a lingering pinch pulse without altering that pulse.
+Diagnostic records retain raw `spreadOutPose` and confirmed cursor `isSpreadOut`
+values, while local status exposes `spreadOutHandCount` and `handTestStatus`.
+The user confirmed reliable recognition in the live tester on the current board;
+broader pose and lighting accuracy remains unmeasured.
+
 ## Card recognition baseline
 
 This .NET 10 library is the first local vision baseline for several white cards with
@@ -141,6 +157,9 @@ and suppression/selection decisions. It defaults to off and does not change mode
 thresholds or selection. The app enables it in the Hand-Tracking tester and writes
 the snapshot with pinch and spotlight geometry to local JSONL logs. Run
 `-- --hand-diagnostics` to compare instrumented and ordinary inference results.
+
+Run `dotnet run --project src/ProjectTabletop.Vision/Regression/ProjectTabletop.Vision.Regression.csproj -- --hand-poses`
+for focused spread-hand pose and gesture-state regressions.
 
 Photo Copy uses `PhotoCopyHandSelector.TrySelectShutter` to match a fresh pinch
 cursor to the hand making the command. One or two hands may be visible; only

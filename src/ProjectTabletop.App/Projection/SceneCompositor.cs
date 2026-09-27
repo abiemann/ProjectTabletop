@@ -39,6 +39,7 @@ public sealed partial class SceneCompositor : IDisposable
     private Homography? _boardSurfaceMap;
     private ProjectedHandCursor[] _handTips = [];
     private DateTimeOffset _handFrameTime;
+    private DateTimeOffset _handVisualResetThrough, _lastHandVisualFrameTime;
     private int _boardCalibrationSpot = -1;
     private Vector2? _customBoardCalibrationSpot;
     private DateTimeOffset _boardSetupStarted;
@@ -48,7 +49,7 @@ public sealed partial class SceneCompositor : IDisposable
     private long _previewSlowFrames;
     private long _mediaRevision;
 
-    private readonly record struct ProjectedHandCursor(Vector2 Position, DateTimeOffset ExecuteUntil);
+    private readonly record struct ProjectedHandCursor(Vector2 Position, DateTimeOffset ExecuteUntil, bool IsSpreadOut);
 
     public string BackgroundLabel { get; private set; } = "Test grid";
 
@@ -107,6 +108,7 @@ public sealed partial class SceneCompositor : IDisposable
             _boardCameraMap = null;
             _boardSurfaceMap = null;
             _handTips = [];
+            _handVisualResetThrough = DateTimeOffset.UtcNow;
             ClearHandSpotlights();
             _boardSession.ResetInput(DateTimeOffset.UtcNow);
             InvalidatePhotoCopyCapture();
@@ -123,6 +125,7 @@ public sealed partial class SceneCompositor : IDisposable
             // already in flight. Camera/calibration resets still block old input.
             if (resetInput)
             {
+                _handVisualResetThrough = DateTimeOffset.UtcNow;
                 ClearHandSpotlights();
                 _boardSession.ResetInput(DateTimeOffset.UtcNow);
             }
@@ -135,6 +138,8 @@ public sealed partial class SceneCompositor : IDisposable
         {
             _handTips = [];
             var now = DateTimeOffset.UtcNow;
+            var acceptVisual = frameTime <= now && now - frameTime <= TimeSpan.FromMilliseconds(350) &&
+                frameTime > _handVisualResetThrough && frameTime > _lastHandVisualFrameTime;
             var boardSamples = new List<BoardHandSample>();
             var projectedTips = new List<ProjectedHandCursor>();
             foreach (var cursor in cursors)
@@ -143,14 +148,14 @@ public sealed partial class SceneCompositor : IDisposable
                 var tip = cursor.Position;
                 try
                 {
-                    if (_boardMediaClip is not null && _boardCameraMap is not null &&
+                    if (acceptVisual && _boardMediaClip is not null && _boardCameraMap is not null &&
                         double.IsFinite(tip.X) && double.IsFinite(tip.Y))
                     {
                         var point = _boardCameraMap.Transform(new Point2(tip.X, tip.Y));
                         if (point.X >= 0 && point.X <= 1 && point.Y >= 0 && point.Y <= 1)
                         {
                             projectedTips.Add(new ProjectedHandCursor(
-                                new Vector2((float)point.X, (float)point.Y), cursor.ExecuteUntil));
+                                new Vector2((float)point.X, (float)point.Y), cursor.ExecuteUntil, cursor.IsSpreadOut));
                         }
                     }
                 }
@@ -184,7 +189,8 @@ public sealed partial class SceneCompositor : IDisposable
                     cursor.ExecuteUntil, cursor.ExecuteEventId, cursor.SelectionFrameTime));
             }
             _handTips = projectedTips.ToArray();
-            _handFrameTime = frameTime;
+            _handFrameTime = acceptVisual ? frameTime : DateTimeOffset.MinValue;
+            if (acceptVisual) _lastHandVisualFrameTime = frameTime;
             _boardSession.Update(boardSamples, frameTime, now);
             SyncPhotoCopySession();
         }
@@ -303,6 +309,7 @@ public sealed partial class SceneCompositor : IDisposable
             _boardSurfaceMap = Homography.FromFourPoints(
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)], mediaClip.Corners);
             _handTips = [];
+            _handVisualResetThrough = DateTimeOffset.UtcNow;
             ClearHandSpotlights();
             _boardSession.ResetInput(DateTimeOffset.UtcNow);
             InvalidatePhotoCopyCapture();

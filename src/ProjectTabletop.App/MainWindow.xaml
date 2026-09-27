@@ -90,7 +90,7 @@
                         <ToggleSwitch x:Name="HandTrackingToggle" Header="Hand tracking and spotlight" IsOn="True" Toggled="HandTrackingToggle_Toggled" />
                         <TextBlock x:Name="HandTrackingStatusText" Text="Start the webcam to track your index fingertip." TextWrapping="Wrap" />
                         <TextBlock Text="Keep your hand near the board. A white spotlight follows detected fingers; lifting your hand can offset the projection. The camera must see the hand before its light can appear." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
-                        <TextBlock Text="Open Hand-Tracking for the test grid. Pinch thumb and index finger for a one-second red circle, then release. Photo Copy uses a grey surface with separate lights for the object and your hand." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <TextBlock Text="Open Hand-Tracking for the test grid. Extend and separate all fingers to show &quot;Spread out hand&quot;. Pinch thumb and index finger for a one-second red circle, then release. Photo Copy uses a grey surface with separate lights for the object and your hand." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Border Background="{StaticResource TabletopInsetBrush}" BorderBrush="{StaticResource TabletopPanelBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
                             <StackPanel Spacing="9">
                                 <TextBlock Text="RECORDING &amp; DIAGNOSTICS" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TabletopSecondaryAccentBrush}" CharacterSpacing="60" />

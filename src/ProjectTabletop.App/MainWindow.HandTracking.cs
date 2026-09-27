@@ -35,7 +35,7 @@ public sealed partial class MainWindow
     private HandDetectionDiagnostics? _lastHandDetection;
 
     private sealed record HandPreview(HandCursor[] Cursors, int Width, int Height, DateTimeOffset Timestamp);
-    private sealed record HandObservationDiagnostics(double Confidence, PixelPoint IndexTip, double PinchRatio);
+    private sealed record HandObservationDiagnostics(double Confidence, PixelPoint IndexTip, double PinchRatio, bool IsSpreadOut);
     private sealed record HandDetectionDiagnostics(DateTimeOffset FrameTime, double InferenceMilliseconds,
         double ResultAgeMilliseconds, double? FrameIntervalMilliseconds, bool DiscardedAsStale,
         HandObservationDiagnostics[] Hands);
@@ -60,6 +60,19 @@ public sealed partial class MainWindow
                 var now = DateTimeOffset.UtcNow;
                 return _handPreview is { } preview && now - preview.Timestamp <= HandMarkerLifetime
                     ? preview.Cursors.Count(cursor => cursor.IsExecuting(now)) : 0;
+            }
+        }
+    }
+
+    internal int SpreadOutHandCount
+    {
+        get
+        {
+            lock (_handGate)
+            {
+                var now = DateTimeOffset.UtcNow;
+                return _handPreview is { } preview && preview.Timestamp <= now && now - preview.Timestamp <= HandMarkerLifetime
+                    ? preview.Cursors.Count(cursor => cursor.IsSpreadOut) : 0;
             }
         }
     }
@@ -249,7 +262,8 @@ public sealed partial class MainWindow
             Math.Sqrt(Math.Pow(a.X - b.X, 2) + Math.Pow(a.Y - b.Y, 2));
         var points = hand.Landmarks;
         var scale = Math.Max(Distance(points[0], points[9]), Distance(points[5], points[17]));
-        return new(hand.Confidence, hand.IndexTip, scale > 1 ? Distance(points[4], points[8]) / scale : 0);
+        return new(hand.Confidence, hand.IndexTip, scale > 1 ? Distance(points[4], points[8]) / scale : 0,
+            HandPoseClassifier.IsSpreadOut(hand));
     }
 
     private void UpdateHandTrackingStatus()
@@ -263,6 +277,7 @@ public sealed partial class MainWindow
              _cameraHealthWarning ? "Waiting for fresh webcam video before tracking your fingertip." :
              _handLatencyWarning is not null ? _handLatencyWarning :
              TrackedHandCount == 0 ? "Looking for a hand. Show your hand clearly in the camera view." :
+             IsHandTrackingTester && SpreadOutHandCount > 0 ? "Spread out hand" :
              ExecutingHandCount > 0 ? "Pinch detected: execute signal. " +
                  (IsHandTrackingTester ? "Red circle for one second. " : "") +
                  "Separate thumb and index finger before the next pinch." :

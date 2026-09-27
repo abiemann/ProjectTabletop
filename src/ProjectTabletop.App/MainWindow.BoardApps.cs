@@ -32,7 +32,7 @@ public sealed partial class MainWindow
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
         SetStatus(_scene.HasBoardMediaClip
-            ? "Hand-Tracking test ready. Pinch for a one-second red circle."
+            ? "Hand-Tracking test ready. Spread your fingers to show Spread out hand, or pinch for a one-second red circle."
             : "Hand-Tracking test selected. Start the camera and scan the board to project it.");
     }
 

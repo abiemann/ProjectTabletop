@@ -32,6 +32,28 @@ public sealed partial class SceneCompositor
         get { lock (_gate) return _boardSession.Title; }
     }
 
+    public string HandTrackingTestStatus
+    {
+        get { lock (_gate) return _boardSession.Screen == BoardScreen.HandTracking
+            ? HandTestCaption(HandStatusAt(DateTimeOffset.UtcNow)) : string.Empty; }
+    }
+
+    private int HandStatusAt(DateTimeOffset now)
+    {
+        if (_handFrameTime > now || now - _handFrameTime > TimeSpan.FromMilliseconds(350) || _handTips.Length == 0)
+            return 0;
+        if (_handTips.Any(cursor => cursor.IsSpreadOut)) return 3;
+        return _handTips.Any(cursor => now < cursor.ExecuteUntil) ? 2 : 1;
+    }
+
+    private static string HandTestCaption(int status) => status switch
+    {
+        3 => "Spread out hand",
+        2 => "PINCH DETECTED",
+        1 => "Pinch: red circle for one second",
+        _ => "Waiting for a hand"
+    };
+
     public IReadOnlyList<string> HoveredBoardButtons
     {
         get
@@ -92,13 +114,13 @@ public sealed partial class SceneCompositor
             MarkPhotoCopySurfacePresented(now);
         var handsFresh = _handFrameTime <= now &&
             now - _handFrameTime <= TimeSpan.FromMilliseconds(350);
-        var executing = handsFresh && _handTips.Any(cursor => now < cursor.ExecuteUntil);
+        var handStatus = HandStatusAt(now);
         var hoverMask = 0;
         for (var index = 0; index < _boardSession.Buttons.Count; index++)
             if (handsFresh && _boardSession.HoveredButtonIds.Contains(_boardSession.Buttons[index].Id))
                 hoverMask |= 1 << index;
         var state = new BoardSurfaceState(_boardSession.Screen, hoverMask,
-            executing ? 2 : handsFresh && _handTips.Length > 0 ? 1 : 0,
+            handStatus,
             photoCopy ? PhotoCopyStampCount(now) : 0,
             photoCopy ? PhotoCopyDisplayStatus(now) : null,
             photoCopy ? _photoCopyRevision : 0);
@@ -190,9 +212,8 @@ public sealed partial class SceneCompositor
                     surface.DrawText("Hand-Tracking", 414, 69, AppPalette.Text, body);
                     surface.DrawCircle(new Vector2(906, 88), 9, AppPalette.AccentSecondary, 2);
                     surface.FillCircle(new Vector2(906, 88), 3, AppPalette.IndicatorOn);
-                    var statusColor = executing ? Colors.Red : AppPalette.IndicatorOn;
-                    var status = executing ? "PINCH DETECTED" : handsFresh && _handTips.Length > 0
-                        ? "Pinch: red circle for one second" : "Waiting for a hand";
+                    var statusColor = state.HandStatus == 2 ? Colors.Red : AppPalette.IndicatorOn;
+                    var status = HandTestCaption(state.HandStatus);
                     surface.DrawText(status, 414, 113, statusColor, small);
                 }
                 else
