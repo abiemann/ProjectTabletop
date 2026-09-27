@@ -15,12 +15,14 @@ public sealed partial class SceneCompositor
     // homography used in reverse for hit testing. Buttons never occupy clipped
     // corners of the board's projector-space bounding rectangle.
     private const float BoardSurfaceSize = 1000;
-    private readonly BoardSession _boardSession = new();
+    private readonly BoardSession _boardSession;
     private CanvasRenderTarget? _boardApplicationTarget;
     private BoardSurfaceState? _renderedBoardState;
 
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int HandStatus,
-        int PhotoStampCount, string? PhotoStatus, long PhotoRevision);
+        int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision);
+
+    public SceneCompositor(BlackjackGame? blackjack = null) => _boardSession = new BoardSession(blackjack);
 
     public BoardScreen CurrentBoardScreen
     {
@@ -109,6 +111,7 @@ public sealed partial class SceneCompositor
         }
 
         var now = DateTimeOffset.UtcNow;
+        _boardSession.TickBlackjack(now);
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
         if (photoCopy && !preview && PhotoCopyCaptureAllowed)
             MarkPhotoCopySurfacePresented(now);
@@ -123,7 +126,8 @@ public sealed partial class SceneCompositor
             handStatus,
             photoCopy ? PhotoCopyStampCount(now) : 0,
             photoCopy ? PhotoCopyDisplayStatus(now) : null,
-            photoCopy ? _photoCopyRevision : 0);
+            photoCopy ? _photoCopyRevision : 0,
+            _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision : 0);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
@@ -136,7 +140,7 @@ public sealed partial class SceneCompositor
                 DrawPhotoCopyStamps(surface, state.PhotoStampCount);
                 DrawPhotoCopyObjectSpotlight(surface);
             }
-            else if (_boardSession.Screen != BoardScreen.HandTracking)
+            else if (_boardSession.Screen is not (BoardScreen.HandTracking or BoardScreen.Blackjack))
                 DrawMetalBackdrop(surface);
             using var heading = new CanvasTextFormat
             {
@@ -166,7 +170,12 @@ public sealed partial class SceneCompositor
             };
 
             var muted = AppPalette.MutedText;
-            if (_boardSession.Screen == BoardScreen.Menu)
+            if (_boardSession.Screen == BoardScreen.Blackjack)
+            {
+                DrawBlackjackTable(surface, _boardSession.BlackjackState, _boardSession.Buttons,
+                    handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>());
+            }
+            else if (_boardSession.Screen == BoardScreen.Menu)
             {
                 surface.DrawLine(80, 65, 109, 65, AppPalette.IndicatorOn, 3);
                 surface.DrawText("PROJECT TABLETOP", 125, 51, AppPalette.MutedText, small);
@@ -271,6 +280,7 @@ public sealed partial class SceneCompositor
         {
             BoardScreen.HandTracking => "Test gestures",
             BoardScreen.PhotoCopy => "Copy hands and objects",
+            BoardScreen.Blackjack => "Play against the dealer",
             _ => "Coming soon"
         };
         ds.DrawText(description, (float)rect.X + 32, (float)rect.Y + 111, AppPalette.MutedText, small);

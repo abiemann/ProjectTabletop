@@ -746,6 +746,8 @@ public sealed partial class SceneCompositor : IDisposable
             _overlays.Clear();
             _boardApplicationTarget?.Dispose();
             _boardApplicationTarget = null;
+            _blackjackPreviewTarget?.Dispose();
+            _blackjackPreviewTarget = null;
             _photoCopyBitmap?.Dispose();
             _photoCopyBitmap = null;
             _photoCopyCutout = null;

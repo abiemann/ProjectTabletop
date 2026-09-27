@@ -10,7 +10,7 @@ public readonly record struct BoardRect(double X, double Y, double Width, double
         u >= X && u <= X + Width && v >= Y && v <= Y + Height;
 }
 
-public sealed record BoardButton(string Id, string Label, BoardRect Bounds, BoardScreen Destination);
+public sealed record BoardButton(string Id, string Label, BoardRect Bounds, BoardScreen Destination, bool Enabled = true);
 
 /// <summary>
 /// A hand selection position mapped to board coordinates. SelectionFrameTime
@@ -30,7 +30,7 @@ public sealed record BoardNavigation(BoardScreen Previous, BoardScreen Current, 
 /// Call from one thread. Each pinch can activate one target only, including when
 /// hands disappear briefly, change order, move to another target, or switch screens.
 /// </summary>
-public sealed class BoardSession
+public sealed partial class BoardSession
 {
     private static readonly TimeSpan ObservationLifetime = TimeSpan.FromMilliseconds(350);
     private static readonly TimeSpan SelectionLifetime = TimeSpan.FromMilliseconds(750);
@@ -79,6 +79,7 @@ public sealed class BoardSession
     {
         BoardScreen.Menu => MenuButtons,
         BoardScreen.PhotoCopy => PhotoCopyButtons,
+        BoardScreen.Blackjack => BlackjackButtons(),
         BoardScreen.Media => Array.Empty<BoardButton>(),
         _ => AppButtons
     };
@@ -97,7 +98,7 @@ public sealed class BoardSession
         _lastFrameTime = frameTime;
 
         var buttons = Buttons;
-        HoveredButtonIds = buttons.Where(button => hands.Any(hand =>
+        HoveredButtonIds = buttons.Where(button => button.Enabled && hands.Any(hand =>
                 SelectionIsCurrent(hand, frameTime) && button.Bounds.Contains(hand.U, hand.V)))
             .Select(button => button.Id).ToArray();
 
@@ -115,13 +116,10 @@ public sealed class BoardSession
                 hand.ExecuteUntil - now > ExecuteDuration ||
                 hand.ExecuteUntil - ExecuteDuration <= _ignoreExecutionsThrough ||
                 !SelectionIsCurrent(hand, frameTime)) continue;
-            BoardButton? selected = buttons.FirstOrDefault(button => button.Bounds.Contains(hand.U, hand.V));
+            BoardButton? selected = buttons.FirstOrDefault(button => button.Enabled && button.Bounds.Contains(hand.U, hand.V));
             if (selected is null) continue;
             var result = new BoardNavigation(Screen, selected.Destination, selected.Id);
-            Screen = selected.Destination;
-            Revision++;
-            _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);
-            HoveredButtonIds = Array.Empty<string>();
+            if (!SelectButton(selected, now)) continue;
             return result;
         }
         return null;
@@ -130,6 +128,7 @@ public sealed class BoardSession
     public void ShowMenu(DateTimeOffset? now = null) => Show(BoardScreen.Menu, now ?? DateTimeOffset.UtcNow);
     public void ShowHandTrackingTest(DateTimeOffset? now = null) => Show(BoardScreen.HandTracking, now ?? DateTimeOffset.UtcNow);
     public void ShowPhotoCopy(DateTimeOffset? now = null) => Show(BoardScreen.PhotoCopy, now ?? DateTimeOffset.UtcNow);
+    public void ShowBlackjack(DateTimeOffset? now = null) => Show(BoardScreen.Blackjack, now ?? DateTimeOffset.UtcNow);
     public void ShowMedia(DateTimeOffset? now = null) => Show(BoardScreen.Media, now ?? DateTimeOffset.UtcNow);
 
     /// <summary>Clear hover and reject observations/pulses that predate a camera or calibration reset.</summary>

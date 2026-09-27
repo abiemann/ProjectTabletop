@@ -40,8 +40,12 @@ public sealed partial class MainWindow
     {
         if (_closing) return;
         UpdateHandDetectionLogStatus();
+        bool blackjack = _scene.CurrentBoardScreen == BoardScreen.Blackjack;
+        BlackjackPreviewPanel.Visibility = blackjack ? Visibility.Visible : Visibility.Collapsed;
+        CameraPreviewPanel.Visibility = ProjectionPreviewPanel.Visibility = blackjack ? Visibility.Collapsed : Visibility.Visible;
         BoardAppStatusText.Text = _scene.CurrentBoardTitle + ". " +
             (IsBoardScanMeasuring ? "Board alignment is in progress." :
+             blackjack ? _scene.BlackjackState.Status :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :
              _scene.CurrentBoardScreen == BoardScreen.PhotoCopy ? _scene.PhotoCopyStatus :

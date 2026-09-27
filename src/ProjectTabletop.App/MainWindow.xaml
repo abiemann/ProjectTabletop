@@ -74,6 +74,8 @@
                         <TextBlock Text="Point until the button's side light comes on, then pinch to open it. Release before selecting again." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Photo Copy" Click="PhotoCopy_Click" />
                         <TextBlock Text="Place one object on the grey area below the controls, then move your hands out of view briefly to lock its light. A separate spotlight follows your returning hand. Leave a gap, then pinch beside the object to copy it in an inward spiral. You can also copy your other hand." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <Button Content="Blackjack" Click="Blackjack_Click" />
+                        <TextBlock Text="Play the dealer with virtual chips. Point and pinch on the board, or click the table in the laptop preview. The laptop table works with the projector off." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Border Height="1" Background="{StaticResource TabletopPanelBorderBrush}" Margin="0,2" />
                         <TextBlock Text="Background media" FontWeight="SemiBold" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
@@ -174,7 +176,7 @@
                 <RowDefinition Height="*" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <Border Grid.Row="0" Background="{StaticResource TabletopPanelBrush}" BorderBrush="{StaticResource TabletopViewportBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="8">
+            <Border x:Name="CameraPreviewPanel" Grid.Row="0" Background="{StaticResource TabletopPanelBrush}" BorderBrush="{StaticResource TabletopViewportBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="8">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -195,7 +197,7 @@
                     </Border>
                 </Grid>
             </Border>
-            <Border Grid.Row="1" Background="{StaticResource TabletopPanelBrush}" BorderBrush="{StaticResource TabletopViewportBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="8">
+            <Border x:Name="ProjectionPreviewPanel" Grid.Row="1" Background="{StaticResource TabletopPanelBrush}" BorderBrush="{StaticResource TabletopViewportBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="8">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -214,6 +216,18 @@
                     <Border Grid.Row="1" Background="Black" BorderBrush="{StaticResource TabletopPanelBorderBrush}" BorderThickness="1" CornerRadius="9">
                         <canvas:CanvasAnimatedControl x:Name="ProjectionPreview" UseSharedDevice="True" Draw="ProjectionPreview_Draw" />
                     </Border>
+                </Grid>
+            </Border>
+            <Border x:Name="BlackjackPreviewPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="{StaticResource TabletopPanelBrush}" BorderBrush="{StaticResource TabletopViewportBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="8">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border Background="{StaticResource TabletopHeaderBrush}" CornerRadius="9" Padding="14,11">
+                        <TextBlock Text="BLACKJACK  ·  click the table to play  ·  virtual chips" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TabletopAccentBrush}" TextTrimming="CharacterEllipsis" />
+                    </Border>
+                    <canvas:CanvasAnimatedControl Grid.Row="1" x:Name="BlackjackPreview" UseSharedDevice="True" Draw="BlackjackPreview_Draw" PointerPressed="BlackjackPreview_PointerPressed" />
                 </Grid>
             </Border>
         </Grid>

@@ -45,6 +45,8 @@ public sealed partial class MainWindow
                     "VideoVerification", Guid.NewGuid().ToString("N")));
             case "verify_theme":
                 return await VerifyThemeAsync();
+            case "verify_blackjack":
+                return await VerifyBlackjackAsync();
             case "verify_photo_copy_render":
                 return await VerifyPhotoCopyRenderAsync();
 #endif
@@ -84,6 +86,7 @@ public sealed partial class MainWindow
                     handLighting = _scene.GetHandLightingDiagnostics(),
                     boardApp = _scene.CurrentBoardScreen.ToString(),
                     boardAppTitle = _scene.CurrentBoardTitle,
+                    blackjack = _scene.BlackjackState,
                     hoveredBoardButtons = _scene.HoveredBoardButtons,
                     photoCopyStatus = _scene.PhotoCopyStatus,
                     photoCopyLighting = _scene.PhotoCopyLightingStatus,
@@ -142,6 +145,17 @@ public sealed partial class MainWindow
                 ShowPhotoCopy();
                 return new { boardApp = _scene.CurrentBoardScreen.ToString(),
                     boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
+            case "show_blackjack":
+                ShowBlackjack();
+                return new { boardApp = _scene.CurrentBoardScreen.ToString(), blackjack = _scene.BlackjackState };
+            case "blackjack_action":
+                if (!parameters.TryGetProperty("id", out var action) || action.ValueKind != JsonValueKind.String)
+                    throw new ArgumentException("Provide a Blackjack button id.");
+                bool accepted = _scene.ActivateBlackjackButton(action.GetString()!);
+                UpdateBoardAppStatus();
+                return new { accepted, blackjack = _scene.BlackjackState };
+            case "capture_blackjack_preview":
+                return new { path = await SaveBlackjackPreviewAsync() };
             case "capture_raw_frame":
                 return new { path = await SaveRawSnapshotAsync() };
             case "start_camera":
