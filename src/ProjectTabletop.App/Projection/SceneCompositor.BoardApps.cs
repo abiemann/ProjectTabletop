@@ -22,10 +22,12 @@ public sealed partial class SceneCompositor
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision);
 
-    public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null)
+    public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
+        Func<DateTimeOffset>? boardRevealClock = null)
     {
         _boardSession = new BoardSession(blackjack);
         _blackjackClock = blackjackClock ?? (() => DateTimeOffset.UtcNow);
+        _boardRevealClock = boardRevealClock ?? (() => DateTimeOffset.UtcNow);
         _boardSession.BlackjackHitOccurred += OnBlackjackHit;
     }
 
@@ -77,6 +79,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
+            CancelBoardReveal();
             _blackOutput = false;
             _boardSession.ShowMenu();
             SyncPhotoCopySession();
@@ -87,6 +90,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
+            CancelBoardReveal();
             _blackOutput = false;
             _boardSession.ShowHandTrackingTest();
             SyncPhotoCopySession();

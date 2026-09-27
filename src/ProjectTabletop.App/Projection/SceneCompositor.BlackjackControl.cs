@@ -20,6 +20,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
+            CancelBoardReveal();
             _blackOutput = false;
             _boardSession.ShowBlackjack();
             SyncPhotoCopySession();
@@ -35,7 +36,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
-            if (_boardSession.Screen != BoardScreen.Blackjack) return false;
+            if (_boardSession.Screen != BoardScreen.Blackjack || IsBoardRevealActive) return false;
             bool changed = _boardSession.ActivateButton(id, _blackjackClock());
             if (changed) SyncPhotoCopySession();
             return changed;

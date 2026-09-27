@@ -51,6 +51,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
+            CancelBoardReveal();
             _blackOutput = false;
             _boardSession.ShowPhotoCopy();
             ClearHandSpotlights();
@@ -89,7 +90,7 @@ public sealed partial class SceneCompositor
             InvalidatePhotoCopyCapture();
     }
 
-    private bool PhotoCopyCaptureAllowed => !_disposed && !_blackOutput && !_boardSetup && !_photoCopyRenderFailed &&
+    private bool PhotoCopyCaptureAllowed => !_disposed && !_blackOutput && !_boardSetup && !IsBoardRevealActive && !_photoCopyRenderFailed &&
         _calibrationTarget < 0 && _boardSession.Screen == BoardScreen.PhotoCopy &&
         _boardMediaClip is not null && _boardCameraMap is not null && _boardSurfaceMap is not null;
 

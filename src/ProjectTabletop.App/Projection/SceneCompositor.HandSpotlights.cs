@@ -68,7 +68,7 @@ public sealed partial class SceneCompositor
             var now = DateTimeOffset.UtcNow;
             if (frameTime < _spotlightResetTime || frameTime <= _spotlightObservationFrameTime ||
                 frameTime > now || now - frameTime > TimeSpan.FromMilliseconds(350)) return;
-            if (_boardCameraMap is null || _boardMediaClip is null || _blackOutput || _boardSetup ||
+            if (_boardCameraMap is null || _boardMediaClip is null || _blackOutput || _boardSetup || IsBoardRevealActive ||
                 _calibrationTarget >= 0)
             {
                 ClearHandSpotlights();
@@ -157,7 +157,7 @@ public sealed partial class SceneCompositor
     private float SpotlightOpacity(DateTimeOffset now, DateTimeOffset sourceFrameTime)
     {
         var age = now - sourceFrameTime;
-        if (_blackOutput || _boardSetup || _calibrationTarget >= 0 || _boardMediaClip is null ||
+        if (_blackOutput || _boardSetup || IsBoardRevealActive || _calibrationTarget >= 0 || _boardMediaClip is null ||
             age < TimeSpan.Zero || age >= SpotlightLifetime)
             return 0;
         return age <= SpotlightHold ? 1 :

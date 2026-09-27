@@ -51,6 +51,8 @@ public sealed partial class MainWindow
                 return await VerifyBlackjackAsync();
             case "verify_blackjack_animation":
                 return await VerifyBlackjackAnimationAsync();
+            case "verify_board_reveal":
+                return await VerifyBoardRevealAsync();
             case "verify_finger_selection":
                 return await VerifyFingerSelectionAsync();
             case "verify_photo_copy_render":
@@ -83,6 +85,7 @@ public sealed partial class MainWindow
                     boardSetupActive = Volatile.Read(ref _boardSetupActive),
                     boardClipReady = _scene.HasBoardMediaClip,
                     boardSetupStatus = BoardSetupControlStatus,
+                    boardReveal = _scene.GetBoardRevealDiagnostics(),
                     handTrackingEnabled = HandTrackingEnabled,
                     handSpotlightCount = _scene.ActiveHandSpotlightCount,
                     handTrackingStatus = HandTrackingControlStatus,

@@ -573,7 +573,7 @@ public sealed partial class MainWindow
                 return new Vector2((float)projected.X, (float)projected.Y);
             }).ToArray();
             _boardProjectionWarning = ProjectionBoundaryWarning(corners);
-            _boardGridInset = _scene.SetDetectedBoardGrid(corners, map);
+            _boardGridInset = _scene.CompleteBoardSetup(corners, map);
             Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.GridReady);
             if (_ambientBoard is not null && !_ambientRecoveredFromPrior &&
                 _camera.ActiveDeviceId is { } cameraId && _outputDisplayId is { } displayId)
@@ -593,7 +593,6 @@ public sealed partial class MainWindow
                 (_boardProjectionWarning ?? "Press Scan again if the cardboard moves.");
             // Keep the final clip/map and diagnostics, then reveal the selected board app.
             // EndBoardSetup clears scan history, which is still useful for a later rescan.
-            _scene.SetBoardSetup(false);
             Volatile.Write(ref _boardSetupActive, false);
             BoardSetupButton.Content = "Start board setup";
             RescanBoardButton.IsEnabled = true;
