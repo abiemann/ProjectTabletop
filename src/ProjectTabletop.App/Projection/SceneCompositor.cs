@@ -37,6 +37,7 @@ public sealed class SceneCompositor : IDisposable
     private bool _blackOutput;
     private BoardGrid? _boardGrid;
     private int _boardCalibrationSpot = -1;
+    private Vector2? _customBoardCalibrationSpot;
     private DateTimeOffset _boardSetupStarted;
     private long _projectorFrames;
     private long _previewFrames;
@@ -132,6 +133,7 @@ public sealed class SceneCompositor : IDisposable
             _blackOutput = false;
             _boardGrid = null;
             _boardCalibrationSpot = -1;
+            _customBoardCalibrationSpot = null;
         }
     }
 
@@ -162,6 +164,22 @@ public sealed class SceneCompositor : IDisposable
         {
             if (!_boardSetup) return;
             _boardCalibrationSpot = index;
+            _customBoardCalibrationSpot = null;
+        }
+    }
+
+    /// <summary>Dark registration disk at a normalized projector-canvas position.</summary>
+    public void ShowBoardCalibrationSpotAt(Vector2 position)
+    {
+        if (!float.IsFinite(position.X) || !float.IsFinite(position.Y) ||
+            position.X < 0.05f || position.X > 0.95f ||
+            position.Y < 0.05f || position.Y > 0.95f)
+            throw new ArgumentOutOfRangeException(nameof(position));
+        lock (_gate)
+        {
+            if (!_boardSetup) return;
+            _boardCalibrationSpot = -1;
+            _customBoardCalibrationSpot = position;
         }
     }
 
@@ -273,13 +291,27 @@ public sealed class SceneCompositor : IDisposable
             if (_boardSetup)
             {
                 if (_boardGrid is { } grid)
-                    DrawDetectedBoardGrid(ds, output, grid, DateTimeOffset.UtcNow - _boardSetupStarted);
+                {
+                    // Preview pixels outside the fitted projector rectangle are
+                    // unreachable on the real display. Clip them here too so a
+                    // corner beyond the light field is not shown as projected.
+                    if (preview)
+                    {
+                        using (ds.CreateLayer(1, output))
+                            DrawDetectedBoardGrid(ds, output, grid,
+                                DateTimeOffset.UtcNow - _boardSetupStarted);
+                    }
+                    else
+                        DrawDetectedBoardGrid(ds, output, grid,
+                            DateTimeOffset.UtcNow - _boardSetupStarted);
+                }
                 else
                 {
                     ds.FillRectangle(output, Colors.White);
-                    if (_boardCalibrationSpot >= 0)
+                    if (_boardCalibrationSpot >= 0 || _customBoardCalibrationSpot is not null)
                     {
-                        var point = BoardCalibrationSpotPosition(_boardCalibrationSpot);
+                        var point = _customBoardCalibrationSpot ??
+                            BoardCalibrationSpotPosition(_boardCalibrationSpot);
                         var center = new Vector2((float)(output.X + point.X * output.Width),
                                                  (float)(output.Y + point.Y * output.Height));
                         ds.FillCircle(center, (float)Math.Min(output.Width, output.Height) * 0.035f,
@@ -365,12 +397,12 @@ public sealed class SceneCompositor : IDisposable
     {
         Vector2 View(Vector2 point) => new((float)(output.X + point.X * output.Width),
                                             (float)(output.Y + point.Y * output.Height));
-        var corners = grid.Corners.Select(View).ToArray();
-        using (var polygon = CanvasGeometry.CreatePolygon(ds.Device, corners))
+        var gridCorners = grid.GridCorners.Select(View).ToArray();
+        using (var polygon = CanvasGeometry.CreatePolygon(ds.Device, gridCorners))
             ds.FillGeometry(polygon, Colors.White);
 
         var shortestEdge = Enumerable.Range(0, 4)
-            .Min(index => Vector2.Distance(corners[index], corners[(index + 1) % 4]));
+            .Min(index => Vector2.Distance(gridCorners[index], gridCorners[(index + 1) % 4]));
         var gridThickness = Math.Clamp(shortestEdge * 0.0016f, 1.25f, 3.5f);
         var gridColor = Color.FromArgb(225, 79, 89, 102);
         foreach (var (first, last) in grid.Lines)
@@ -381,20 +413,25 @@ public sealed class SceneCompositor : IDisposable
         var seconds = elapsed.TotalSeconds;
         var pulse = 0.85 + 0.15 * Math.Sin(seconds * 3.2);
         var orange = Color.FromArgb((byte)(255 * pulse), 255, 111, 24);
-        for (var i = 0; i < corners.Length; i++)
+        // The grid is inset to keep its light on the cardboard. The orange
+        // brackets instead mark the detected physical edges, including when
+        // the board nearly reaches the projector's clipping boundary.
+        var boardCorners = grid.BoardCorners.Select(View).ToArray();
+        for (var i = 0; i < boardCorners.Length; i++)
         {
             var t = Math.Clamp((seconds - i * 0.11) / 0.65, 0, 1);
             var ease = t * t * (3 - 2 * t);
-            var corner = corners[i];
-            var towardNext = Vector2.Normalize(corners[(i + 1) % 4] - corner);
-            var towardPrevious = Vector2.Normalize(corners[(i + 3) % 4] - corner);
+            var corner = boardCorners[i];
+            var towardNext = Vector2.Normalize(boardCorners[(i + 1) % 4] - corner);
+            var towardPrevious = Vector2.Normalize(boardCorners[(i + 3) % 4] - corner);
             var length = arm * (float)ease;
             ds.DrawLine(corner, corner + towardNext * length, orange, thickness);
             ds.DrawLine(corner, corner + towardPrevious * length, orange, thickness);
         }
     }
 
-    private sealed record BoardGrid(Vector2[] Corners, (Vector2 First, Vector2 Last)[] Lines,
+    private sealed record BoardGrid(Vector2[] BoardCorners, Vector2[] GridCorners,
+                                    (Vector2 First, Vector2 Last)[] Lines,
                                     float InsetFraction)
     {
         public static BoardGrid Create(IReadOnlyList<Vector2> corners)
@@ -440,7 +477,7 @@ public sealed class SceneCompositor : IDisposable
                 lines[index] = (At(fraction, 0), At(fraction, 1));
                 lines[11 + index] = (At(0, fraction), At(1, fraction));
             }
-            return new BoardGrid(safeCorners, lines, inset);
+            return new BoardGrid(corners.ToArray(), safeCorners, lines, inset);
         }
     }
 

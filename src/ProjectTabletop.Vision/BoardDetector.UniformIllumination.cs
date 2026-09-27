@@ -29,7 +29,8 @@ public static partial class BoardDetector
     {
         using ScanFrame scan = new(width, height, stride, bgra);
         ScanQuad? board = FindDominantBrightQuad(scan);
-        return board is null ? null : ToDetection(board, scan, 0.55 + 0.4 * board.EdgeSupport);
+        return board is null ? null : ToDetection(board, scan, 0.55 + 0.4 * board.EdgeSupport,
+            refinePhysicalEdges: true);
     }
 
     /// <summary>
@@ -66,11 +67,13 @@ public static partial class BoardDetector
             .ThenByDescending(candidate => Math.Abs(candidate.MeanContrast))
             .FirstOrDefault();
         return board is null ? null : ToDetection(board, scan,
-            0.4 + 0.35 * board.EdgeSupport + Math.Min(0.2, Math.Abs(board.MeanContrast) / 150));
+            0.4 + 0.35 * board.EdgeSupport + Math.Min(0.2, Math.Abs(board.MeanContrast) / 150),
+            refinePhysicalEdges: true);
     }
 
-    private static BoardDetection ToDetection(ScanQuad quad, ScanFrame scan, double confidence) => new(
-        quad.Corners.Select(point => new PixelPoint(
+    private static BoardDetection ToDetection(ScanQuad quad, ScanFrame scan, double confidence,
+        bool refinePhysicalEdges = false) => new(
+        refinePhysicalEdges ? RefinePhysicalBoardCorners(quad, scan) : quad.Corners.Select(point => new PixelPoint(
             point.X * scan.SourceWidth / (double)scan.Gray.Width,
             point.Y * scan.SourceHeight / (double)scan.Gray.Height)).ToArray(),
         Math.Clamp(confidence, 0, 1));
@@ -89,6 +92,7 @@ public static partial class BoardDetector
     {
         public int SourceWidth { get; }
         public int SourceHeight { get; }
+        public Mat SourceGray { get; } = new();
         public Mat Gray { get; } = new();
         public Mat Edges { get; } = new();
         public List<ScanQuad> Quads { get; } = [];
@@ -106,6 +110,7 @@ public static partial class BoardDetector
             int rowBytes = checked(width * 4);
             for (int row = 0; row < height; row++)
                 Marshal.Copy(bgra, row * stride, IntPtr.Add(frame.Data, row * rowBytes), rowBytes);
+            Cv2.CvtColor(frame, SourceGray, ColorConversionCodes.BGRA2GRAY);
             double scale = Math.Min(1.0, WorkingWidth / (double)Math.Max(width, height));
             using Mat reduced = new();
             if (scale < 1.0)
@@ -171,6 +176,7 @@ public static partial class BoardDetector
 
         public void Dispose()
         {
+            SourceGray.Dispose();
             Gray.Dispose();
             Edges.Dispose();
         }

@@ -2,6 +2,17 @@ using System.Runtime.InteropServices;
 using OpenCvSharp;
 using ProjectTabletop.Vision;
 
+if (args is ["--markers"])
+{
+    CheckProjectedCornerMarkers();
+    return;
+}
+if (args is ["--markers", var extraMarkerFrame])
+{
+    CheckProjectedCornerMarkers(extraMarkerFrame);
+    return;
+}
+
 const int width = 512, height = 384;
 PixelPoint[] localOutline =
 [
@@ -69,6 +80,8 @@ CheckProjectorFieldIsNotBoard();
 CheckUniformIllumination();
 BoardDetection whiteHardwareBoard = CheckHardwareWhiteScan();
 CheckHardwareAmbientScan(whiteHardwareBoard);
+CheckMovedHardwareFrames(whiteHardwareBoard);
+CheckProjectedCornerMarkers();
 CheckCalibrationSpot();
 if (args.Length == 1)
 {
@@ -83,11 +96,98 @@ if (args.Length == 1)
         (int)bgra.Step(), BytesOf(bgra));
     BoardDetection? scanned = BoardDetector.DetectUniformIllumination(bgra.Width, bgra.Height,
         (int)bgra.Step(), BytesOf(bgra));
-    Console.WriteLine($"Uniform scan field: {Format(field)}; cardboard: {Format(scanned)}");
+    BoardDetection? ambient = BoardDetector.DetectAmbientBoard(bgra.Width, bgra.Height,
+        (int)bgra.Step(), BytesOf(bgra));
+    Console.WriteLine($"Uniform scan field: {Format(field)}; cardboard: {Format(scanned)}; " +
+        $"ambient board: {Format(ambient)}");
 }
 
 string Format(BoardDetection? detection) => detection is null ? "not found" :
-    string.Join(", ", detection.Corners.Select(p => $"({p.X:F0},{p.Y:F0})"));
+    string.Join(", ", detection.Corners.Select(p => $"({p.X:F1},{p.Y:F1})"));
+
+void CheckProjectedCornerMarkers(string? extraMarkerFrame = null)
+{
+    byte[] ReadFixture(string name, out int frameWidth, out int frameHeight,
+        out int frameStride)
+    {
+        string path = Path.IsPathRooted(name) ? name :
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", name);
+        using Mat original = Cv2.ImRead(path, ImreadModes.Color);
+        if (original.Empty()) throw new Exception($"Missing marker fixture: {path}");
+        using Mat camera = new();
+        Cv2.CvtColor(original, camera, ColorConversionCodes.BGR2BGRA);
+        frameWidth = camera.Width;
+        frameHeight = camera.Height;
+        frameStride = (int)camera.Step();
+        return BytesOf(camera);
+    }
+
+    byte[] ambientPixels = ReadFixture("moved-cardboard-ambient.png",
+        out int width, out int height, out int stride);
+    BoardDetection? board = BoardDetector.DetectAmbientBoard(width, height,
+        stride, ambientPixels);
+    if (board is null) throw new Exception("Marker fixture has no ambient board reference.");
+
+    var names = new List<string> { "moved-cardboard-projected-grid.png",
+        "moved-cardboard-projected-grid-repeat.png" };
+    if (extraMarkerFrame is not null) names.Add(extraMarkerFrame);
+    foreach (string name in names)
+    {
+        byte[] pixels = ReadFixture(name, out int gridWidth, out int gridHeight,
+            out int gridStride);
+        if (gridWidth != width || gridHeight != height || gridStride != stride)
+            throw new Exception("Projected-grid fixture dimensions changed.");
+        CornerMarkerDetection?[] measured = ProjectedCornerDetector.Detect(
+            width, height, stride, pixels, board.Corners);
+        int validMarkers = 0;
+        for (int corner = 0; corner < 4; corner++)
+        {
+            CornerMarkerDetection? marker = measured[corner];
+            if (marker is null)
+            {
+                Console.WriteLine($"{Path.GetFileName(name)}, corner {corner}: " +
+                    "marker rejected (arm clipped or occluded)");
+                continue;
+            }
+            validMarkers++;
+            double dx = marker.Intersection.X - board.Corners[corner].X;
+            double dy = marker.Intersection.Y - board.Corners[corner].Y;
+            Console.WriteLine($"{Path.GetFileName(name)}, corner {corner}: marker=" +
+                $"({marker.Intersection.X:F1},{marker.Intersection.Y:F1}); " +
+                $"board residual=({dx:+0.0;-0.0},{dy:+0.0;-0.0}) px; " +
+                $"arm RMS=({marker.FirstArmRmsPixels:F1},{marker.SecondArmRmsPixels:F1}) px; " +
+                $"confidence={marker.Confidence:F2}");
+            if (Math.Sqrt(dx * dx + dy * dy) > 9 || marker.Confidence < 0.25)
+                throw new Exception($"Unreliable projected marker {corner} in {name}.");
+        }
+        if (validMarkers < 3 ||
+            (name == "moved-cardboard-projected-grid.png" && validMarkers != 4))
+            throw new Exception($"Too few projected markers in {name}: {validMarkers}.");
+
+        // Cover most of the first top-left arm. A lone vertical stroke must
+        // not produce a correction, while the other three corners stay valid.
+        if (name == "moved-cardboard-projected-grid.png")
+        {
+            byte[] occluded = (byte[])pixels.Clone();
+            for (int y = 91; y <= 123; y++)
+                for (int x = 625; x <= 678; x++)
+                {
+                    int offset = y * stride + x * 4;
+                    occluded[offset] = occluded[offset + 1] = occluded[offset + 2] = 30;
+                }
+            CornerMarkerDetection?[] hidden = ProjectedCornerDetector.Detect(
+                width, height, stride, occluded, board.Corners);
+            if (hidden[0] is not null || hidden.Skip(1).Any(marker => marker is null))
+                throw new Exception("Occluded orange marker was not rejected independently.");
+        }
+    }
+
+    if (ProjectedCornerDetector.Detect(width, height, stride,
+        ambientPixels, board.Corners).Any(marker => marker is not null))
+        throw new Exception("Ambient cardboard edges were mislabeled orange markers.");
+    Console.WriteLine("Projected corner feedback regression: live grid captures detected; " +
+        "ambient-only and occluded-arm cases rejected");
+}
 
 void CheckUniformIllumination()
 {
@@ -162,6 +262,125 @@ void CheckHardwareAmbientScan(BoardDetection whiteBoard)
         throw new Exception($"Black-output ambient board did not match white-scan board: {Format(ambient)}");
     Console.WriteLine($"Hardware ambient regression: cardboard={Format(ambient)}; " +
         "all corners agree with white scan within 14 px");
+}
+
+void CheckMovedHardwareFrames(BoardDetection originalBoard)
+{
+    byte[] ReadFixture(string name, out int width, out int height, out int stride)
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "Fixtures", name);
+        using Mat image = Cv2.ImRead(path, ImreadModes.Color);
+        if (image.Empty()) throw new Exception($"Missing moved-board hardware frame: {path}");
+        using Mat camera = new();
+        Cv2.CvtColor(image, camera, ColorConversionCodes.BGR2BGRA);
+        width = camera.Width;
+        height = camera.Height;
+        stride = (int)camera.Step();
+        return BytesOf(camera);
+    }
+
+    byte[] black = ReadFixture("moved-cardboard-ambient.png",
+        out int width, out int height, out int stride);
+    byte[] white = ReadFixture("moved-cardboard-white-spot.png",
+        out int whiteWidth, out int whiteHeight, out int whiteStride);
+    if (width != whiteWidth || height != whiteHeight || stride != whiteStride)
+        throw new Exception("Moved-board camera frames have different dimensions.");
+    BoardDetection? ambient = BoardDetector.DetectAmbientBoard(width, height, stride, black);
+    BoardDetection? projected = BoardDetector.DetectUniformIllumination(width, height, stride, white);
+    Point[] expected = [new(604, 107), new(1669, 92), new(1687, 931), new(611, 946)];
+    if (!Near(ambient, expected, 5) || !Near(projected, expected, 5) ||
+        ambient is null || projected is null ||
+        Enumerable.Range(0, 4).Any(i =>
+            Math.Sqrt(Math.Pow(ambient.Corners[i].X - projected.Corners[i].X, 2) +
+                Math.Pow(ambient.Corners[i].Y - projected.Corners[i].Y, 2)) > 3) ||
+        originalBoard.Corners[0].X - ambient.Corners[0].X < 15)
+        throw new Exception($"Moved-board corner refinement failed: " +
+            $"ambient={Format(ambient)}; projected={Format(projected)}");
+    Console.WriteLine($"Moved-board hardware regression: ambient={Format(ambient)}; " +
+        $"white={Format(projected)}; all corners agree within 3 px");
+
+    // Drop each real edge in turn. The recovery is then allowed to inspect only
+    // the other three sides of the moved camera frame, with the earlier board
+    // pose supplying the missing fixed-size plane constraint.
+    for (int missing = 0; missing < 4; missing++)
+    {
+        BoardDetection? recovered = BoardDetector.RecoverAmbientBoardWithPrior(
+            width, height, stride, black, originalBoard, 0b1111 & ~(1 << missing));
+        if (recovered is null || Enumerable.Range(0, 4).Any(corner =>
+            Math.Sqrt(Math.Pow(recovered.Corners[corner].X - ambient.Corners[corner].X, 2) +
+                Math.Pow(recovered.Corners[corner].Y - ambient.Corners[corner].Y, 2)) > 6))
+            throw new Exception($"Three-edge moved-board recovery failed with side " +
+                $"{missing} hidden: recovered={Format(recovered)}, complete={Format(ambient)}");
+        Console.WriteLine($"Three-edge moved-board regression: side {missing} hidden; " +
+            $"recovered={Format(recovered)}");
+    }
+
+
+    // Erase each photographed side with a gradual interpolation across its
+    // normal. The automatic path must identify the surviving three lines in
+    // real shadowed camera pixels rather than receive an explicit side mask.
+    byte[] ErasePhotographedSide(int side)
+    {
+        byte[] obscured = (byte[])black.Clone();
+        PixelPoint start = ambient.Corners[side];
+        PixelPoint end = ambient.Corners[(side + 1) % 4];
+        bool horizontal = Math.Abs(end.X - start.X) > Math.Abs(end.Y - start.Y);
+        double alongStart = horizontal ? start.X : start.Y;
+        double alongEnd = horizontal ? end.X : end.Y;
+        int min = (int)Math.Ceiling(Math.Min(alongStart, alongEnd) +
+            Math.Abs(alongEnd - alongStart) * 0.04);
+        int max = (int)Math.Floor(Math.Max(alongStart, alongEnd) -
+            Math.Abs(alongEnd - alongStart) * 0.04);
+        for (int along = min; along <= max; along++)
+        {
+            double progress = (along - alongStart) / (alongEnd - alongStart);
+            int center = (int)Math.Round(horizontal
+                ? start.Y + progress * (end.Y - start.Y)
+                : start.X + progress * (end.X - start.X));
+            int first = center - 58, last = center + 58;
+            for (int across = first + 1; across < last; across++)
+            {
+                double t = (across - first) / (double)(last - first);
+                for (int channel = 0; channel < 3; channel++)
+                {
+                    int firstIndex = horizontal
+                        ? first * stride + along * 4 + channel
+                        : along * stride + first * 4 + channel;
+                    int lastIndex = horizontal
+                        ? last * stride + along * 4 + channel
+                        : along * stride + last * 4 + channel;
+                    int targetIndex = horizontal
+                        ? across * stride + along * 4 + channel
+                        : along * stride + across * 4 + channel;
+                    obscured[targetIndex] = (byte)Math.Clamp((int)Math.Round(
+                        black[firstIndex] * (1 - t) + black[lastIndex] * t), 0, 255);
+                }
+            }
+        }
+        return obscured;
+    }
+    for (int side = 0; side < 4; side++)
+    {
+        BoardDetection? recovered = BoardDetector.RecoverAmbientBoardWithPrior(
+            width, height, stride, ErasePhotographedSide(side), originalBoard);
+        if (recovered is null || Enumerable.Range(0, 4).Any(corner =>
+            Math.Sqrt(Math.Pow(recovered.Corners[corner].X - ambient.Corners[corner].X, 2) +
+                Math.Pow(recovered.Corners[corner].Y - ambient.Corners[corner].Y, 2)) > 6))
+            throw new Exception($"Obscured real edge {side} was not recovered: " +
+                $"{Format(recovered)}");
+        Console.WriteLine($"Obscured photographed edge {side} regression: {Format(recovered)}");
+    }
+
+    byte[] noEdges = new byte[black.Length];
+    if (BoardDetector.RecoverAmbientBoardWithPrior(width, height, stride,
+        noEdges, originalBoard) is not null)
+        throw new Exception("Three-edge recovery hallucinated cardboard in a blank frame.");
+    BoardDetection unrelatedPose = new(
+        originalBoard.Corners.Select(point => new PixelPoint(point.X + 150, point.Y)).ToArray(),
+        originalBoard.Confidence);
+    if (BoardDetector.RecoverAmbientBoardWithPrior(width, height, stride,
+        black, unrelatedPose) is not null)
+        throw new Exception("Three-edge recovery accepted a distant prior board pose.");
 }
 
 void CheckCalibrationSpot()

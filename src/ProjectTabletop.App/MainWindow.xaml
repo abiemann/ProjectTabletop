@@ -49,7 +49,7 @@
                     <Button x:Name="BoardSetupButton" Content="Start board setup" Click="BoardSetup_Click" />
                     <Button x:Name="RescanBoardButton" Content="Scan again" Click="RescanBoard_Click" IsEnabled="False" />
                 </StackPanel>
-                <TextBlock x:Name="BoardSetupStatusText" Text="Board setup first illuminates the full projector field to find the physical cardboard, then aligns a grid to it." TextWrapping="Wrap" />
+                <TextBlock x:Name="BoardSetupStatusText" Text="Board setup first finds the cardboard under black output, then uses white projection and nine alignment spots to fit its grid." TextWrapping="Wrap" />
 
                 <TextBlock Text="4  Learn a physical piece" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
                 <TextBox x:Name="PieceIdTextBox" Header="Piece ID" PlaceholderText="e.g. boat-1" Text="piece-1" />

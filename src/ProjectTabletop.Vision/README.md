@@ -50,28 +50,56 @@ ratio. It requires consistent brightness contrast across all four edges and
 rejects a field with no inner board contour. Only call it while the projector
 is actually showing the uniform scan image; a single camera frame cannot
 always distinguish an unpatterned projected rectangle from real cardboard.
+After the coarse contour search, each physical cardboard side is measured at
+the full camera resolution and fitted as a line. The intersections give
+fractional-pixel corner coordinates. The projector field remains a coarse
+camera-space outline because it is used only to check scan geometry.
 
 `BoardDetector.DetectAmbientBoard(...)` offers a separate check while the
 projector output is solid black. In the current room lighting, it finds the
 cardboard edge by ambient reflection. Its four corners should agree with the
 full-white scan. It will return `null` if the cardboard is not brighter than
-the surrounding floor or its edges are obscured.
+the surrounding floor or its edges are obscured. When the cardboard is only
+a few pixels from the projector field edge, prefer the black-output result
+for exact board corners and use the white result as an independent check.
+
+If the black-output scan loses one edge after a small move, call
+`BoardDetector.RecoverAmbientBoardWithPrior(...)` with the last trusted
+four-corner detection. It measures the three remaining ambient-light lines
+near their previous locations and fits a fixed-size cardboard pose on the
+same plane. It rejects large or geometrically inconsistent moves. Three
+image lines alone cannot determine the fourth under perspective, so the
+previous pose is essential; a recovered corner is less certain than a fresh
+four-edge measurement. Do not use this on a white or patterned projection.
+
+`ProjectedCornerDetector.Detect(...)` measures the orange L brackets after the
+grid appears. Supply the four physical board corners from the black-output
+scan as a search prior and a fresh BGRA camera frame. Its four nullable results
+give the intersections of the two projected arm centerlines, arm-fit RMS, and
+a relative confidence. It inspects only red/orange pixels in small regions
+around the expected corners, requires two long arms, and returns `null` for a
+clipped or occluded marker. Comparing an intersection to the independently
+measured board corner reveals a camera-pixel projection residual. This is a
+diagnostic measurement; the app does not currently use one frame to correct
+projector output.
 
 For projector mapping, retain a fresh camera frame of the white scan. Project
 one dark calibration disk at a time and call
 `BoardDetector.DetectDarkCalibrationSpot(width, height, stride,
 whiteBgra, spotBgra)` for each fresh camera frame. It returns a camera-pixel
-center and relative confidence. Four measured disk correspondences can define
-the camera-to-projector homography; validate it with a fifth point before
-placing a grid on the physical cardboard. The detector compensates for a
-global camera exposure shift, but movement between baseline and spot frames
-can still invalidate a measurement.
+center and relative confidence. The app first measures four central disks to
+form a provisional camera-to-projector homography. `NearEdgeRegistrationPlan`
+then places four more disks safely inside the detected physical corners; those
+measurements form the final homography. A ninth disk at the projector center
+validates the result before the app draws the grid and orange physical-corner
+brackets. The detector compensates for a global camera exposure shift, but
+movement between baseline and spot frames can still invalidate a measurement.
 
 The older `BoardDetector.Detect(...)` is kept for the projected-grid regression
 and compatibility. It requires a separately visible board contour outside a
 smaller grid and is not the full-white physical-cardboard scan.
 
-## Synthetic regression
+## Regression and hardware checks
 
 Run:
 
@@ -85,9 +113,27 @@ then checks two pieces in one frame and an unpatterned card with the same
 outline. It also checks independent bright and dark cardboard contours in a
 uniform light field, rejects a light field with no cardboard, checks clean
 hardware frames under both full-white and black projector output, and locates
-a dark calibration disk despite a global exposure shift. The older projected-grid
-checks remain for compatibility. This proves data flow, persistence,
-classification, and pose fitting against clean
-generated images. It does **not** establish accuracy under moving projected
-video, hand occlusion, glare, or retroreflective bead behavior. Real camera
+a dark calibration disk despite a global exposure shift. Two additional
+hardware frames show the board after it was moved: the black-output and
+projected-white estimates agree within 3 camera pixels at all four corners.
+The three-edge recovery also runs against those moved camera frames with each
+side withheld in turn, then each photographed edge gradually erased in turn;
+all recovered corners remain within 6 camera pixels of the complete black
+scan. A blank frame and an unrelated prior pose are rejected.
+This measures repeatability on those frames, not absolute geometric accuracy.
+Three live nine-spot scans with the moved cardboard completed with black/white
+corner disagreement of 3.9, 3.4, and 3.9 camera pixels and normalized center-check
+errors of 0.0007, 0.0018, and 0.0021. A first-run optical comparison placed the four orange
+bracket centerline intersections within 5.3 camera pixels of the black-frame board
+corners. This estimate depends on camera image thresholding and projected line
+blur. Three-edge recovery has not yet been tested with a live physical occlusion.
+The orange-bracket regression measures two saved live grid frames. Three
+corners fit in both, while the fourth fits in only one frame because its bottom
+arm is almost clipped by the projector field. The fixture rejects an erased
+arm and an ambient-only frame. The regression can also print the marker fits
+for another camera capture with `--markers <absolute-png-path>`.
+The older projected-grid checks remain for compatibility. The synthetic card
+checks establish data flow, persistence, classification, and pose fitting
+against clean generated images. They do **not** establish accuracy under moving
+projected video, hand occlusion, glare, or retroreflective bead behavior. Real camera
 captures must drive the final choice of segmentation and training data.
