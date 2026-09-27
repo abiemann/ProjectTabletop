@@ -20,7 +20,8 @@ public sealed partial class SceneCompositor
     private CanvasRenderTarget? _boardApplicationTarget;
     private BoardSurfaceState? _renderedBoardState;
 
-    private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int HandStatus);
+    private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int HandStatus,
+        int PhotoStampCount, string? PhotoStatus, long PhotoRevision);
 
     public BoardScreen CurrentBoardScreen
     {
@@ -38,6 +39,7 @@ public sealed partial class SceneCompositor
         {
             _blackOutput = false;
             _boardSession.ShowMenu();
+            SyncPhotoCopySession();
         }
     }
 
@@ -47,12 +49,26 @@ public sealed partial class SceneCompositor
         {
             _blackOutput = false;
             _boardSession.ShowHandTrackingTest();
+            SyncPhotoCopySession();
         }
     }
 
-    private void DrawBoardApplication(CanvasDrawingSession ds, Rect output)
+    private void DrawBoardApplication(CanvasDrawingSession ds, Rect output, bool preview)
+    {
+        try { DrawBoardApplicationCore(ds, output, preview); }
+        catch (Exception error) when (_boardSession.Screen == BoardScreen.PhotoCopy &&
+            !ds.Device.IsDeviceLost(error.HResult))
+        {
+            // EndDraw on the cached drawing session may report deferred GPU
+            // errors after individual stamp calls have already returned.
+            HandlePhotoCopyRenderFailure(error);
+        }
+    }
+
+    private void DrawBoardApplicationCore(CanvasDrawingSession ds, Rect output, bool preview)
     {
         if (_boardSurfaceMap is null) return;
+        SyncPhotoCopySession();
         if (_boardApplicationTarget is null || _boardApplicationTarget.Device != ds.Device)
         {
             _boardApplicationTarget?.Dispose();
@@ -62,6 +78,10 @@ public sealed partial class SceneCompositor
         }
 
         var now = DateTimeOffset.UtcNow;
+        var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
+        if (photoCopy && !preview && PhotoCopyCaptureAllowed &&
+            _photoCopyWhiteShownAt == DateTimeOffset.MinValue)
+            _photoCopyWhiteShownAt = now;
         var handsFresh = _handFrameTime <= now &&
             now - _handFrameTime <= TimeSpan.FromMilliseconds(350);
         var executing = handsFresh && _handTips.Any(cursor => now < cursor.ExecuteUntil);
@@ -70,14 +90,21 @@ public sealed partial class SceneCompositor
             if (handsFresh && _boardSession.HoveredButtonIds.Contains(_boardSession.Buttons[index].Id))
                 hoverMask |= 1 << index;
         var state = new BoardSurfaceState(_boardSession.Screen, hoverMask,
-            executing ? 2 : handsFresh && _handTips.Length > 0 ? 1 : 0);
+            executing ? 2 : handsFresh && _handTips.Length > 0 ? 1 : 0,
+            photoCopy ? PhotoCopyStampCount(now) : 0,
+            photoCopy ? PhotoCopyDisplayStatus(now) : null,
+            photoCopy ? _photoCopyRevision : 0);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
         {
             using var surface = _boardApplicationTarget.CreateDrawingSession();
-            surface.Clear(_boardSession.Screen == BoardScreen.HandTracking
+            surface.Clear(photoCopy ? Colors.White : _boardSession.Screen == BoardScreen.HandTracking
                 ? Colors.Transparent : Color.FromArgb(255, 8, 14, 24));
+            if (photoCopy)
+            {
+                DrawPhotoCopyStamps(surface, state.PhotoStampCount);
+            }
             using var heading = new CanvasTextFormat
             {
                 FontFamily = "Segoe UI",
@@ -109,13 +136,14 @@ public sealed partial class SceneCompositor
             if (_boardSession.Screen == BoardScreen.Menu)
             {
                 surface.DrawText("PROJECT TABLETOP", 80, 57, Colors.Cyan, small);
-                surface.DrawText("Choose an app", 76, 97, Colors.White, heading);
+                surface.DrawText("Choose a board", 76, 97, Colors.White, heading);
                 surface.DrawText("Point at a button. Pinch to select.", 80, 186, muted, body);
                 foreach (var button in _boardSession.Buttons)
                 {
                     var hovered = handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id);
                     DrawBoardButton(surface, button, hovered, label, small,
-                        button.Destination == BoardScreen.HandTracking ? "Gesture test" : "Coming soon");
+                        button.Destination == BoardScreen.HandTracking ? "Gesture test" :
+                        button.Destination == BoardScreen.PhotoCopy ? "Copy your hand" : "Coming soon");
                 }
                 surface.DrawLine(80, 862, 920, 862, Color.FromArgb(255, 44, 65, 83), 2);
                 surface.DrawText("Blue circle = fingertip     Red circle = pinch", 80, 890, muted, small);
@@ -127,7 +155,23 @@ public sealed partial class SceneCompositor
                     DrawBoardButton(surface, button,
                         handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id), label, small);
 
-                if (_boardSession.Screen == BoardScreen.HandTracking)
+                if (photoCopy)
+                {
+                    // Keep the controls and instructions legible over the copies,
+                    // while letting the pattern reach the top edge between them.
+                    surface.FillRoundedRectangle(new Rect(380, 70, 240, 75), 12, 12, Colors.White);
+                    surface.DrawText("Photo Copy", 394, 87, Colors.Black, label);
+                    using var photoStatus = new CanvasTextFormat
+                    {
+                        FontFamily = "Segoe UI",
+                        FontSize = 18,
+                        WordWrapping = CanvasWordWrapping.Wrap
+                    };
+                    surface.FillRoundedRectangle(new Rect(50, 165, 900, 50), 10, 10, Colors.White);
+                    surface.DrawText(state.PhotoStatus ?? PhotoCopyReadyMessage,
+                        new Rect(60, 170, 880, 44), Colors.Black, photoStatus);
+                }
+                else if (_boardSession.Screen == BoardScreen.HandTracking)
                 {
                     surface.FillRoundedRectangle(new Rect(390, 55, 550, 105), 18, 18,
                         Color.FromArgb(255, 20, 33, 49));

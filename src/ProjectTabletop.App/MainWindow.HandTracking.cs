@@ -109,6 +109,7 @@ public sealed partial class MainWindow
             _handLatencyWarning = null;
             _lastHandDetectionTick = 0;
             _scene.ClearHandTips();
+            _scene.InvalidatePhotoCopyCapture();
         }
         if (_initialized && !_closing)
             DispatcherQueue.TryEnqueue(() => { if (!_closing) CameraCanvas.Invalidate(); });
@@ -160,6 +161,7 @@ public sealed partial class MainWindow
                                     DateTimeOffset.UtcNow).ToArray();
                                 _handPreview = new HandPreview(cursors, frame.Width, frame.Height, frame.Timestamp);
                                 _scene.SetHandCursors(cursors, frame.Timestamp);
+                                QueuePhotoCopyCapture(frame, visibleHands, cursors);
                             }
                         }
                         if (_frozenFrame is null) CameraCanvas.Invalidate();
@@ -227,6 +229,7 @@ public sealed partial class MainWindow
         Task? pending;
         lock (_handGate) pending = _handDetectionTask;
         if (pending is not null) await pending;
+        if (_photoCopyTask is { } photoCopyTask) await photoCopyTask;
         _handEngine?.Dispose();
         _handEngine = null;
     }

@@ -2,6 +2,11 @@ using System.Runtime.InteropServices;
 using OpenCvSharp;
 using ProjectTabletop.Vision;
 
+if (args is ["--photo-copy"])
+{
+    PhotoCopyRegression.Run();
+    return;
+}
 if (args is ["--hands"])
 {
     HandTrackingRegression.Run();
@@ -89,6 +94,7 @@ CheckMovedHardwareFrames(whiteHardwareBoard);
 CheckProjectedCornerMarkers();
 CheckCalibrationSpot();
 HandTrackingRegression.Run();
+PhotoCopyRegression.Run();
 if (args.Length == 1)
 {
     using Mat actual = Cv2.ImRead(args[0], ImreadModes.Unchanged);

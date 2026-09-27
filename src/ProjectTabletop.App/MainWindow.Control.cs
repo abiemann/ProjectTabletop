@@ -28,6 +28,10 @@ public sealed partial class MainWindow
         if (_closing) throw new InvalidOperationException("The app is closing.");
         switch (method)
         {
+#if DEBUG
+            case "verify_photo_copy_render":
+                return await VerifyPhotoCopyRenderAsync();
+#endif
             case "get_status":
                 var frame = Volatile.Read(ref _latestCameraFrame);
                 return new
@@ -56,6 +60,9 @@ public sealed partial class MainWindow
                     handExecuteActive = ExecutingHandCount > 0,
                     boardApp = _scene.CurrentBoardScreen.ToString(),
                     boardAppTitle = _scene.CurrentBoardTitle,
+                    photoCopyStatus = _scene.PhotoCopyStatus,
+                    photoCopyCount = _scene.PhotoCopyCount,
+                    lastPhotoCopyCapture = _lastPhotoCopyCapture,
                     renderStatus = RenderStatusText.Text,
                     status = StatusText.Text
                 };
@@ -104,6 +111,10 @@ public sealed partial class MainWindow
                     boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
             case "capture_projection_preview":
                 return new { path = await SaveProjectionPreviewAsync() };
+            case "show_photo_copy":
+                ShowPhotoCopy();
+                return new { boardApp = _scene.CurrentBoardScreen.ToString(),
+                    boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
             case "capture_raw_frame":
                 return new { path = await SaveRawSnapshotAsync() };
             case "start_camera":

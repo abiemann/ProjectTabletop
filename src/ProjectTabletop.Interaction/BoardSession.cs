@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public enum BoardScreen { Menu, HandTracking, CopyMachine, Blackjack, Monopoly, Gta, Diablo, Media }
+public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Monopoly, Gta, Diablo, Media }
 
 /// <summary>A rectangle in the board's normalized, perspective-corrected coordinate system.</summary>
 public readonly record struct BoardRect(double X, double Y, double Width, double Height)
@@ -35,7 +35,7 @@ public sealed class BoardSession
     private static readonly IReadOnlyList<BoardButton> MenuButtons = Array.AsReadOnly(new[]
     {
         new BoardButton("hand-tracking", "Hand-Tracking", new(.08, .25, .40, .16), BoardScreen.HandTracking),
-        new BoardButton("copy-machine", "Copy-Machine", new(.52, .25, .40, .16), BoardScreen.CopyMachine),
+        new BoardButton("photo-copy", "Photo Copy", new(.52, .25, .40, .16), BoardScreen.PhotoCopy),
         new BoardButton("blackjack", "Blackjack", new(.08, .45, .40, .16), BoardScreen.Blackjack),
         new BoardButton("monopoly", "Monopoly", new(.52, .45, .40, .16), BoardScreen.Monopoly),
         new BoardButton("gta", "GTA", new(.08, .65, .40, .16), BoardScreen.Gta),
@@ -45,6 +45,11 @@ public sealed class BoardSession
     {
         new BoardButton("menu", "Back to menu", new(.06, .055, .30, .105), BoardScreen.Menu)
     });
+    private static readonly IReadOnlyList<BoardButton> PhotoCopyButtons = Array.AsReadOnly(new[]
+    {
+        AppButtons[0],
+        new BoardButton("capture-again", "Capture again", new(.64, .055, .30, .105), BoardScreen.PhotoCopy)
+    });
     private DateTimeOffset? _lastFrameTime;
     private DateTimeOffset? _lastNow;
     private DateTimeOffset _ignoreExecutionsThrough = DateTimeOffset.MinValue;
@@ -52,11 +57,13 @@ public sealed class BoardSession
     private long _consumedEventId;
 
     public BoardScreen Screen { get; private set; } = BoardScreen.Menu;
+    /// <summary>Changes on every navigation, including restarting the current application.</summary>
+    public long Revision { get; private set; }
     public string Title => Screen switch
     {
         BoardScreen.Menu => "Project Tabletop",
         BoardScreen.HandTracking => "Hand-Tracking",
-        BoardScreen.CopyMachine => "Copy-Machine",
+        BoardScreen.PhotoCopy => "Photo Copy",
         BoardScreen.Blackjack => "Blackjack",
         BoardScreen.Monopoly => "Monopoly",
         BoardScreen.Gta => "GTA",
@@ -67,6 +74,7 @@ public sealed class BoardSession
     public IReadOnlyList<BoardButton> Buttons => Screen switch
     {
         BoardScreen.Menu => MenuButtons,
+        BoardScreen.PhotoCopy => PhotoCopyButtons,
         BoardScreen.Media => Array.Empty<BoardButton>(),
         _ => AppButtons
     };
@@ -105,6 +113,7 @@ public sealed class BoardSession
             if (selected is null) continue;
             var result = new BoardNavigation(Screen, selected.Destination, selected.Id);
             Screen = selected.Destination;
+            Revision++;
             HoveredButtonIds = Array.Empty<string>();
             return result;
         }
@@ -113,6 +122,7 @@ public sealed class BoardSession
 
     public void ShowMenu(DateTimeOffset? now = null) => Show(BoardScreen.Menu, now ?? DateTimeOffset.UtcNow);
     public void ShowHandTrackingTest(DateTimeOffset? now = null) => Show(BoardScreen.HandTracking, now ?? DateTimeOffset.UtcNow);
+    public void ShowPhotoCopy(DateTimeOffset? now = null) => Show(BoardScreen.PhotoCopy, now ?? DateTimeOffset.UtcNow);
     public void ShowMedia(DateTimeOffset? now = null) => Show(BoardScreen.Media, now ?? DateTimeOffset.UtcNow);
 
     /// <summary>Clear hover and reject observations/pulses that predate a camera or calibration reset.</summary>
@@ -129,6 +139,7 @@ public sealed class BoardSession
     private void Show(BoardScreen screen, DateTimeOffset now)
     {
         Screen = screen;
+        Revision++;
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
     }

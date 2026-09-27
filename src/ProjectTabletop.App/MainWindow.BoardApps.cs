@@ -1,5 +1,6 @@
 using Microsoft.Graphics.Canvas;
 using Microsoft.UI.Xaml;
+using ProjectTabletop.Interaction;
 
 namespace ProjectTabletop.App;
 
@@ -8,6 +9,8 @@ public sealed partial class MainWindow
     private void BoardMenu_Click(object sender, RoutedEventArgs e) => ShowBoardMenu();
 
     private void HandTrackingTest_Click(object sender, RoutedEventArgs e) => ShowHandTrackingTest();
+
+    private void PhotoCopy_Click(object sender, RoutedEventArgs e) => ShowPhotoCopy();
 
     private void ShowBoardMenu()
     {
@@ -40,7 +43,20 @@ public sealed partial class MainWindow
             (IsBoardScanMeasuring ? "Board alignment is in progress." :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :
+             _scene.CurrentBoardScreen == BoardScreen.PhotoCopy ? _scene.PhotoCopyStatus :
              "Point and pinch to select. Release before selecting again.");
+    }
+
+    private void ShowPhotoCopy()
+    {
+        StopBoardSetup();
+        PrepareBoardApp();
+        _scene.ShowPhotoCopy();
+        if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
+        UpdateBoardAppStatus();
+        SetStatus(_scene.HasBoardMediaClip
+            ? "Photo Copy: show both hands, then pinch with the hand you do not want photographed."
+            : "Photo Copy selected. Scan the board before capturing a hand.");
     }
 
     private void PrepareBoardApp()

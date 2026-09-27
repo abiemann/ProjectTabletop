@@ -108,6 +108,7 @@ public sealed partial class SceneCompositor : IDisposable
             _boardSurfaceMap = null;
             _handTips = [];
             _boardSession.ResetInput(DateTimeOffset.UtcNow);
+            InvalidatePhotoCopyCapture();
         }
     }
 
@@ -160,6 +161,7 @@ public sealed partial class SceneCompositor : IDisposable
             _handTips = projectedTips.ToArray();
             _handFrameTime = frameTime;
             _boardSession.Update(boardSamples, frameTime, now);
+            SyncPhotoCopySession();
         }
     }
 
@@ -269,6 +271,7 @@ public sealed partial class SceneCompositor : IDisposable
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)], mediaClip.Corners);
             _handTips = [];
             _boardSession.ResetInput(DateTimeOffset.UtcNow);
+            InvalidatePhotoCopyCapture();
             _boardSetupStarted = DateTimeOffset.UtcNow;
         }
         return grid.InsetFraction;
@@ -316,6 +319,7 @@ public sealed partial class SceneCompositor : IDisposable
         {
             _blackOutput = false;
             _boardSession.ShowMedia();
+            SyncPhotoCopySession();
             var old = _background;
             _background = asset;
             BackgroundLabel = asset is null ? "Test grid" : Path.GetFileName(asset.Path);
@@ -413,7 +417,7 @@ public sealed partial class SceneCompositor : IDisposable
             {
                 if (_boardSession.Screen == BoardScreen.HandTracking)
                     DrawTestGrid(ds, mediaRect);
-                DrawBoardApplication(ds, output);
+                DrawBoardApplication(ds, output, preview);
             }
             else
             {
@@ -464,6 +468,9 @@ public sealed partial class SceneCompositor : IDisposable
 
     private void DrawHandCursor(CanvasDrawingSession ds, Rect output)
     {
+        // The projected marker would become part of the camera photograph.
+        // Camera-preview markers remain available while Photo Copy is active.
+        if (_boardSession.Screen == BoardScreen.PhotoCopy) return;
         var now = DateTimeOffset.UtcNow;
         if (_boardMediaClip is not { } clip || _boardCameraMap is null ||
             _handTips.Length == 0 || _handFrameTime > now ||
@@ -695,6 +702,10 @@ public sealed partial class SceneCompositor : IDisposable
             _overlays.Clear();
             _boardApplicationTarget?.Dispose();
             _boardApplicationTarget = null;
+            _photoCopyBitmap?.Dispose();
+            _photoCopyBitmap = null;
+            _photoCopyCutout = null;
+            _photoCopyPremultipliedPixels = null;
         }
     }
 }

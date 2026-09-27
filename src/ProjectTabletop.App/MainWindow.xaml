@@ -13,7 +13,7 @@
         <ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Padding="18" Spacing="12">
                 <TextBlock Text="PROJECT TABLETOP" FontSize="23" FontWeight="Bold" />
-                <TextBlock x:Name="StatusText" Text="Ready. Scan the board to open its menu, then point and pinch to choose an app." TextWrapping="Wrap" />
+                <TextBlock x:Name="StatusText" Text="Ready. Scan the board to open its menu, then point and pinch to choose a board." TextWrapping="Wrap" />
 
                 <TextBlock Text="1  Webcam" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
                 <ComboBox x:Name="CameraComboBox" PlaceholderText="Select webcam" HorizontalAlignment="Stretch" SelectionChanged="CameraComboBox_SelectionChanged" />
@@ -40,6 +40,8 @@
                     <Button Content="Hand-Tracking test" Click="HandTrackingTest_Click" />
                 </StackPanel>
                 <TextBlock x:Name="BoardAppStatusText" Text="Board menu. Complete board setup to project it." TextWrapping="Wrap" />
+                <Button Content="Photo Copy" Click="PhotoCopy_Click" />
+                <TextBlock Text="Photo Copy: hold the hand you want photographed in the white area. Keep both hands visible, then pinch with the other hand. Copies spiral inward with the middle finger pointing toward the center." TextWrapping="Wrap" />
                 <TextBlock Text="Point at a board button with the blue circle, then pinch thumb and index finger to open it. Release before selecting again. Each app has a Back to menu button." TextWrapping="Wrap" />
                 <TextBlock Text="Background media (optional)" FontWeight="SemiBold" />
                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -57,7 +59,7 @@
                 <ToggleSwitch x:Name="HandTrackingToggle" Header="Index fingertip circle" IsOn="True" Toggled="HandTrackingToggle_Toggled" />
                 <TextBlock x:Name="HandTrackingStatusText" Text="Start the webcam to track your index fingertip." TextWrapping="Wrap" />
                 <TextBlock Text="The camera circle works immediately. After board setup, the circle also follows your fingertip on the board. Keep your fingertip close to the board surface; lifting it causes projection offset. No piece training or raised-top calibration is needed." TextWrapping="Wrap" />
-                <TextBlock Text="Hand-Tracking opens the familiar grid with fingertip circles. Briefly pinch your thumb and index fingertip together: the circle turns red for one second. Separate them before pinching again. The other five apps show Coming soon for now." TextWrapping="Wrap" />
+                <TextBlock Text="Hand-Tracking opens the familiar grid with fingertip circles. Briefly pinch your thumb and index fingertip together: the circle turns red for one second. Separate them before pinching again. Blackjack, Monopoly, GTA, and Diablo show Coming soon for now." TextWrapping="Wrap" />
                 <Button Content="Save raw camera PNG" Click="SaveRawSnapshot_Click" />
 
                 <Expander Header="Physical pieces (optional / later)" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
