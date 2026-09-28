@@ -32,13 +32,28 @@ public sealed record PhotoObjectSpotlight(PhotoObjectSpotlightShape Shape, Pixel
         Cv2.MorphologyEx(source, opened, MorphTypes.Open, kernel);
         Cv2.FindContours(opened, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
         Point[]? contour = contours.OrderByDescending(points => Math.Abs(Cv2.ContourArea(points))).FirstOrDefault();
+        double minimumCoreArea = Cv2.CountNonZero(source) * .75;
+        if (contour is null || Math.Abs(Cv2.ContourArea(contour)) < minimumCoreArea)
+        {
+            // Dense gaps around printing can make opening erase the face and
+            // leave only its shadow. Retry the outside outline in that case.
+            // Keep the original cleanup when it already retains the body: its
+            // narrow loops/protrusions should not become part of the shape fit.
+            Cv2.FindContours(source, out Point[][] outlines, out _, RetrievalModes.External,
+                ContourApproximationModes.ApproxSimple);
+            using Mat silhouette = new(height, width, MatType.CV_8UC1, Scalar.Black);
+            Cv2.DrawContours(silhouette, outlines, -1, Scalar.White, -1);
+            Cv2.MorphologyEx(silhouette, opened, MorphTypes.Open, kernel);
+            Cv2.FindContours(opened, out contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+            contour = contours.OrderByDescending(points => Math.Abs(Cv2.ContourArea(points))).FirstOrDefault();
+        }
         if (contour is null || contour.Length < 4) return circle;
         Point[] hull = Cv2.ConvexHull(contour);
         Point[] corners = Cv2.ApproxPolyDP(hull, Cv2.ArcLength(hull, true) * .025, true);
         RotatedRect core = Cv2.MinAreaRect(contour);
         double rectangleArea = core.Size.Width * core.Size.Height;
         double coreArea = Math.Abs(Cv2.ContourArea(contour));
-        if (rectangleArea < 100 || coreArea < Cv2.CountNonZero(source) * .75) return circle;
+        if (rectangleArea < 100 || coreArea < minimumCoreArea) return circle;
         double angle, shear;
         if (!TryParallelEdges(corners, hull, coreArea, out angle, out shear))
         {

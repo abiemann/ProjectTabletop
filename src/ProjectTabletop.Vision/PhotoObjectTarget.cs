@@ -28,11 +28,11 @@ public sealed class PhotoObjectTarget
     public PhotoObjectSpotlight Spotlight { get; }
     public int ForegroundArea { get; }
     public IReadOnlyList<byte> Alpha => _alpha;
-    // Pale printed surfaces can have a visible perimeter while their blank face
-    // matches the board. Keep their measured ink/edge evidence separate from the
-    // photographed silhouette, so white light alone can never prove presence.
+    // Pale faces can match the board under white light, whether recovered from
+    // separate rim/ink components or acquired as one complete silhouette. Keep
+    // stable measured contrast separate from the photographed silhouette.
     public IReadOnlyList<byte>? ContrastEvidence { get; }
-    public bool HasRecoveredSurface => ContrastEvidence is not null;
+    public bool HasRecoveredSurface { get; internal init; }
 
     internal PhotoObjectTarget(int left, int top, int width, int height, byte[] alpha, int foregroundArea,
         byte[]? contrastEvidence = null)
@@ -44,6 +44,7 @@ public sealed class PhotoObjectTarget
             if (contrastEvidence.Length != alpha.Length)
                 throw new ArgumentException("Contrast evidence must match the silhouette dimensions.", nameof(contrastEvidence));
             ContrastEvidence = Array.AsReadOnly((byte[])contrastEvidence.Clone());
+            HasRecoveredSurface = true;
         }
         ForegroundArea = foregroundArea;
         Center = new(left + (width - 1) / 2.0, top + (height - 1) / 2.0);

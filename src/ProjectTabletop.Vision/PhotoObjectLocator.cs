@@ -80,6 +80,7 @@ public static partial class PhotoObjectLocator
             }
             foregroundArea = area[selected];
             for (int index = 0; index < pixels.Length; index++) pixels[index] = ids[index] == selected ? (byte)255 : (byte)0;
+            contrastEvidence = SelectIlluminationStableEvidence(photo, pixels, background, illumination, threshold);
         }
         Marshal.Copy(pixels, 0, mask.Data, pixels.Length);
         using Mat feather = new();
@@ -105,7 +106,38 @@ public static partial class PhotoObjectLocator
                 Array.Copy(contrastEvidence!, (top + y) * BoardSize + left, croppedEvidence, y * targetWidth, targetWidth);
         }
         failure = null;
-        return new(left, top, targetWidth, targetHeight, alpha, foregroundArea, croppedEvidence);
+        return new(left, top, targetWidth, targetHeight, alpha, foregroundArea, croppedEvidence)
+            { HasRecoveredSurface = candidates.Length != 1 && croppedEvidence is not null };
+    }
+
+    // A pale face and its dark printing can join into a single component on
+    // grey. White projection can erase the face's brightness contrast without
+    // moving the object. Keep the complete silhouette for capture, but verify
+    // its measured darker features when it contains substantial light AND dark
+    // regions. Uniform subjects keep their original whole-silhouette check.
+    private static byte[]? SelectIlluminationStableEvidence(byte[] photo, byte[] silhouette,
+        double[][] background, float[] illumination, double threshold)
+    {
+        byte[] evidence = new byte[silhouette.Length];
+        int area = 0, bright = 0, dark = 0;
+        for (int y = Capture.Top; y < Capture.Bottom; y++)
+            for (int x = Capture.Left; x < Capture.Right; x++)
+            {
+                int index = y * BoardSize + x;
+                if (silhouette[index] == 0) continue;
+                area++;
+                double difference = 0;
+                for (int channel = 0; channel < 3; channel++)
+                {
+                    double correction = illumination[index * 4 + 3] > .005
+                        ? illumination[index * 4 + channel] / illumination[index * 4 + 3] : 0;
+                    difference += photo[index * 4 + channel] - BackgroundAt(background[channel], x, y) - correction;
+                }
+                difference /= 3;
+                if (difference > threshold) bright++;
+                if (difference < -threshold) { evidence[index] = 255; dark++; }
+            }
+        return bright >= area * .15 && dark >= Math.Max(400, area * .12) ? evidence : null;
     }
 
     /// <summary>
