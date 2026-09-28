@@ -9,6 +9,7 @@ public sealed partial class MainWindow
     // Only the single inference worker accesses this image history.
     private readonly HandAcquisitionPresenceTracker _handAcquisitionPresence = new();
     private long _handAcquisitionContextRevision = -1;
+    private long _handAcquisitionGeneration = -1;
     private object? _lastHandAcquisitionDetection;
 
     private sealed record HandAcquisitionQuery(IReadOnlyList<HandAcquisitionHint> Hints,
@@ -19,10 +20,14 @@ public sealed partial class MainWindow
     }
 
     private HandAcquisitionQuery FindHandAcquisitionHints(CameraFrame frame,
-        SceneCompositor.HandAcquisitionContext? context, bool engineReset)
+        SceneCompositor.HandAcquisitionContext? context, long generation)
     {
-        if (engineReset || context?.Revision != _handAcquisitionContextRevision)
+        // A landmark-tracking gap invalidates hand identity, not the optics of
+        // the unchanged generated labels. Keep that bounded registration cache;
+        // presence confirmation independently requires fresh nearby timestamps.
+        if (generation != _handAcquisitionGeneration || context?.Revision != _handAcquisitionContextRevision)
             _handAcquisitionPresence.Reset();
+        _handAcquisitionGeneration = generation;
         _handAcquisitionContextRevision = context?.Revision ?? -1;
         return CreateHandAcquisitionQuery(frame, context, _handAcquisitionPresence, DateTimeOffset.UtcNow);
     }
@@ -79,6 +84,11 @@ public sealed partial class MainWindow
             hints = query.Hints, lightingHints = query.LightingHints,
             searchRegions = query.SearchRegions, presence = query.Presence,
             handCount, searches = trace?.Searches,
+            candidates = trace?.Candidates.Select(candidate => new
+            {
+                candidate.Index, candidate.Source, candidate.PalmScore,
+                candidate.HandConfidence, candidate.Result, candidate.NmsResult
+            }).ToArray(),
             selectedSources = trace?.SelectedCandidateIndices.Select(index =>
                 trace.Candidates.First(candidate => candidate.Index == index).Source).ToArray()
         };

@@ -109,10 +109,10 @@ public sealed partial class SceneCompositor
                 return new(_acquisitionRevision, observe, polygon, illuminated,
                     _acquisitionExpectedScene, _acquisitionLightStarted, centers,
                     RestrictAcquisitionToSearchRegions: _boardSession.Screen != BoardScreen.HandTracking,
-                    RequiresSearchIllumination: _boardSession.Screen != BoardScreen.Paint,
+                    RequiresSearchIllumination: true,
                     ContinuousSearchPolygon: capturePolygon);
             }
-            if (animating || HasAcquiredHandOrSuppression(now))
+            if (animating || AcquisitionMustYieldToHandOrExecute(now))
             {
                 ClearAcquisitionLight();
                 _acquisitionQuietUntil = now + AcquisitionSettle;
@@ -145,6 +145,11 @@ public sealed partial class SceneCompositor
         _spotlightCursors.Length > 0 && now >= _spotlightCursorFrameTime &&
         now - _spotlightCursorFrameTime <= TimeSpan.FromMilliseconds(350);
 
+    // Paint keeps only its button-triggered search light while the recognized
+    // hand is aiming there. Its ordinary hand/canvas spotlight remains disabled.
+    private bool AcquisitionMustYieldToHandOrExecute(DateTimeOffset now) =>
+        _boardSession.Screen == BoardScreen.Paint ? _suppressedHandLights.Count > 0 : HasAcquiredHandOrSuppression(now);
+
     public void CompleteHandAcquisition(HandAcquisitionContext? requested,
         IReadOnlyList<HandAcquisitionHint> hints, IReadOnlyList<HandDetection> hands, DateTimeOffset frameTime,
         bool? illuminatedPresence = null)
@@ -154,13 +159,7 @@ public sealed partial class SceneCompositor
             var now = _blackjackClock();
             var current = GetHandAcquisitionContext(frameTime);
             if (current is null || requested is null || requested.Revision != current.Revision) return;
-            if (_boardSession.Screen == BoardScreen.Paint)
-            {
-                // Paint uses disturbances as input, with no exploratory spotlight.
-                ClearAcquisitionLight();
-                return;
-            }
-            if (hands.Count > 0)
+            if (hands.Count > 0 && _boardSession.Screen != BoardScreen.Paint)
             {
                 ClearAcquisitionLight();
                 _acquisitionQuietUntil = now + AcquisitionSettle;
@@ -174,7 +173,10 @@ public sealed partial class SceneCompositor
                 // camera evidence. The projected white disk alone cannot renew it.
                 if (illuminatedPresence == true && hints.Any(hint =>
                     HasCurrentControlObstruction(hint, frameTime) && hint.Center == current.IlluminatedHint.Center))
+                {
                     _acquisitionLightUntil = frameTime + TimeSpan.FromMilliseconds(800);
+                    RetainPaintButtonLightExclusion();
+                }
                 else if (illuminatedPresence is not null)
                 {
                     ClearAcquisitionLight();
@@ -204,14 +206,17 @@ public sealed partial class SceneCompositor
             _acquisitionLight = new(new(center.X, center.Y), Math.Min(radius, .24));
             _acquisitionLightUntil = now + AcquisitionLightDuration;
             _acquisitionLightStarted = now;
+            RetainPaintButtonLightExclusion();
             _acquisitionLightCount++;
             _acquisitionReason = "illuminated-search";
         }
     }
 
-    private static bool HasCurrentControlObstruction(HandAcquisitionHint hint, DateTimeOffset frameTime) =>
+    private bool HasCurrentControlObstruction(HandAcquisitionHint hint, DateTimeOffset frameTime) =>
         hint.ObservedAt == frameTime && hint.ControlCoverage is double coverage &&
-        double.IsFinite(coverage) && coverage >= HandAcquisitionPresenceTracker.MinimumControlCoverage;
+        double.IsFinite(coverage) && coverage >= HandAcquisitionPresenceTracker.MinimumControlCoverage &&
+        hint.ControlTriggerCoverage is double triggerCoverage &&
+        double.IsFinite(triggerCoverage) && triggerCoverage >= HandAcquisitionPresenceTracker.MinimumControlCoverage;
 
     public object GetHandAcquisitionDiagnostics()
     {
@@ -235,6 +240,7 @@ public sealed partial class SceneCompositor
 
     private void ClearAcquisitionLight()
     {
+        RetainPaintButtonLightExclusion();
         _acquisitionHint = null;
         _acquisitionLight = null;
         _acquisitionLightUntil = DateTimeOffset.MinValue;
@@ -316,7 +322,9 @@ public sealed partial class SceneCompositor
                 _ => null
             };
             return new((int)BoardSurfaceSize, (int)BoardSurfaceSize, pixels, cameraToBoard,
-                BoardSearchRegions: regions, BoardReferenceRegions: referenceRegions);
+                BoardSearchRegions: regions, BoardReferenceRegions: referenceRegions,
+                BoardTriggerRegions: _boardSession.Buttons
+                    .Select(button => BoardButtonTextRegion(_acquisitionReferenceTarget.Device, button)).ToArray());
         }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or
             InvalidOperationException or ObjectDisposedException)
@@ -335,7 +343,7 @@ public sealed partial class SceneCompositor
     private void DrawHandAcquisitionLight(CanvasDrawingSession ds, Rect output)
     {
         var now = _blackjackClock();
-        if (_boardSession.Screen == BoardScreen.Paint || !AcquisitionBoardReady || HasAcquiredHandOrSuppression(now) ||
+        if (!AcquisitionBoardReady || AcquisitionMustYieldToHandOrExecute(now) ||
             now >= _acquisitionLightUntil || _acquisitionLight is not { } light ||
             _acquisitionScene != CurrentAcquisitionState() ||
             !_acquisitionButtons.SequenceEqual(_boardSession.Buttons) ||

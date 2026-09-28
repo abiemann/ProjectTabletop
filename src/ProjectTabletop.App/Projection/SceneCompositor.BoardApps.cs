@@ -5,6 +5,7 @@ using Microsoft.Graphics.Canvas.Text;
 using Microsoft.UI;
 using Microsoft.UI.Text;
 using ProjectTabletop.Interaction;
+using ProjectTabletop.Vision;
 using Windows.Foundation;
 
 namespace ProjectTabletop.App.Projection;
@@ -172,13 +173,7 @@ public sealed partial class SceneCompositor
                 FontWeight = FontWeights.SemiBold,
                 WordWrapping = CanvasWordWrapping.NoWrap
             };
-            using var label = new CanvasTextFormat
-            {
-                FontFamily = "Segoe UI",
-                FontSize = 32,
-                FontWeight = FontWeights.SemiBold,
-                WordWrapping = CanvasWordWrapping.NoWrap
-            };
+            using var label = BoardButtonTextFormat();
             using var body = new CanvasTextFormat
             {
                 FontFamily = "Segoe UI",
@@ -369,16 +364,33 @@ public sealed partial class SceneCompositor
         var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
             bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
         DrawButtonSurface(ds, rect, hovered && button.Enabled);
-        using var text = new CanvasTextFormat
-        {
-            FontFamily = "Segoe UI", FontSize = 26, FontWeight = FontWeights.SemiBold,
-            HorizontalAlignment = CanvasHorizontalAlignment.Center,
-            VerticalAlignment = CanvasVerticalAlignment.Center,
-            WordWrapping = CanvasWordWrapping.NoWrap
-        };
+        using var text = PaintButtonTextFormat();
         ds.DrawText(button.Label, new Rect(rect.X + 20, rect.Y + 6, rect.Width - 40, rect.Height - 18),
             button.Enabled ? AppPalette.ButtonText : AppPalette.MutedText, text);
         DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, AppPalette.IndicatorOn);
+    }
+
+    private static CanvasTextFormat PaintButtonTextFormat() => new()
+    {
+        FontFamily = "Segoe UI", FontSize = 26, FontWeight = FontWeights.SemiBold,
+        HorizontalAlignment = CanvasHorizontalAlignment.Center,
+        VerticalAlignment = CanvasVerticalAlignment.Center,
+        WordWrapping = CanvasWordWrapping.NoWrap
+    };
+
+    private static CanvasTextFormat BoardButtonTextFormat() => new()
+    {
+        FontFamily = "Segoe UI", FontSize = 32, FontWeight = FontWeights.SemiBold,
+        WordWrapping = CanvasWordWrapping.NoWrap
+    };
+
+    private static HandTrackingBounds PaintButtonTextRegion(CanvasDevice device, BoardButton button)
+    {
+        var b = button.Bounds;
+        using var format = PaintButtonTextFormat();
+        using var layout = new CanvasTextLayout(device, button.Label, format,
+            (float)(b.Width * BoardSurfaceSize - 40), (float)(b.Height * BoardSurfaceSize - 18));
+        return ButtonInkRegion(button, layout.DrawBounds, b.X * BoardSurfaceSize + 20, b.Y * BoardSurfaceSize + 6);
     }
 
     private static void DrawBoardButton(CanvasDrawingSession ds, BoardButton button,

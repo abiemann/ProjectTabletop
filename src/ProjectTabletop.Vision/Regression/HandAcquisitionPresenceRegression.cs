@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using OpenCvSharp;
 using ProjectTabletop.Vision;
 
 internal static class HandAcquisitionPresenceRegression
@@ -15,12 +17,18 @@ internal static class HandAcquisitionPresenceRegression
         OwnLightPresenceAndRemoval();
         IlluminatedControlAreaFloor();
         PointOfInterestSampling();
+        CompactReferenceControlOcclusion();
+        ControlTriggerRegions();
+        RenderedCompactControls();
+        RenderedLocalCaptionLoss();
         BaselineFallbackAndBarriers();
         PhotoCopyControlRegionsRegression.Run();
         Console.WriteLine("Hand acquisition presence regression: stationary foreground present at startup, persistent " +
             "known-render comparison, native projective geometry, photometric/exposure compensation, raster-edge/noise " +
             "rejection, point-of-interest-only camera sampling, bounded crops, own-white-light exclusion, " +
-            "lit foreground versus empty light, removal, and reset/time barriers passed.");
+            "lit foreground versus empty light, compact-control reference obstruction safeguards, paired fresh text-trigger " +
+            "coverage with independent 7% floors, generated bright/dark glyph structure, palette/noise/blur " +
+            "rejection, bounded cached registration, removal, and reset/time barriers passed.");
     }
 
     private static void StationaryAtStartupAndRemoval()
@@ -233,6 +241,534 @@ internal static class HandAcquisitionPresenceRegression
         }
         Require(Feed(new(), covered, scene, 0).Hints.Count > 0,
             "A hand already covering a uniquely colored control supplied its own false empty-color reference.");
+    }
+
+    private static void CompactReferenceControlOcclusion()
+    {
+        const int size = 1000;
+        PixelPoint[] polygon = [new(0, 0), new(size, 0), new(size, size), new(0, size)];
+        HandTrackingBounds[] controls = [new(.072, .892, .116, .051), new(.812, .892, .116, .051)];
+        var empty = new byte[size * size * 4];
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+        {
+            int pixel = (y * size + x) * 4;
+            empty[pixel] = 12; empty[pixel + 1] = 5; empty[pixel + 2] = 3; empty[pixel + 3] = 255;
+            if ((x is >= 60 and < 200 || x is >= 800 and < 940) && y is >= 880 and < 955)
+            {
+                double fraction = (y - 880) / 75.0;
+                empty[pixel] = (byte)(94 - 55 * fraction);
+                empty[pixel + 1] = (byte)(73 - 49 * fraction);
+                empty[pixel + 2] = (byte)(49 - 36 * fraction);
+            }
+        }
+        var scene = new HandAcquisitionSceneImage(size, size, empty,
+            [1.0 / 999, 0, 0, 0, 1.0 / 999, 0, 0, 0, 1], controls, controls);
+        // These compact controls are also their own appearance references. A
+        // broad neutral/dark obstruction previously trained a false exposure
+        // gradient between them and made even full coverage disappear.
+        foreach (int target in new[] { 0, 1 })
+        foreach (double coverage in new[] { .5, .75, 1.0 })
+        {
+            var tracker = new HandAcquisitionPresenceTracker();
+            Require(FeedLocal(tracker, empty, 0).Hints.Count == 0, "Compact controls appeared obstructed while empty.");
+            byte[] occupied = (byte[])empty.Clone();
+            int left = target == 0 ? 72 : 812;
+            for (int y = 892; y < 943; y++)
+            for (int x = left; x < left + (int)Math.Round(116 * coverage); x++)
+            for (int channel = 0; channel < 3; channel++)
+            {
+                int pixel = (y * size + x) * 4 + channel;
+                occupied[pixel] = (byte)Math.Max(0, occupied[pixel] - 40);
+            }
+            for (int frame = 1; frame <= 12; frame++)
+            {
+                var observed = FeedLocal(tracker, occupied, frame * 100);
+                Require(observed.Hints.Count == 1 && observed.Hints[0].ControlCoverage >= .30 &&
+                        Math.Abs(observed.Hints[0].Center.X - (left + 116 * coverage / 2)) < 12,
+                    "An obstructed compact control poisoned its reference, lost stationary evidence, or acquired the other control.");
+            }
+            Require(FeedLocal(tracker, empty, 1300).Hints.Count == 0, "Removed compact-control obstruction left a presence ghost.");
+        }
+        var exposureTracker = new HandAcquisitionPresenceTracker();
+        FeedLocal(exposureTracker, empty, 0);
+        int exposureFrame = 0;
+        foreach (int change in new[] { 40, -15, 20 })
+        {
+            byte[] exposed = (byte[])empty.Clone();
+            for (int pixel = 0; pixel < exposed.Length; pixel += 4)
+            for (int channel = 0; channel < 3; channel++)
+                exposed[pixel + channel] = (byte)Math.Clamp(exposed[pixel + channel] + change + (pixel % 7 - 3), 0, 255);
+            var observed = FeedLocal(exposureTracker, exposed, ++exposureFrame * 100);
+            Require(observed.BaselineReady && observed.Reason == "rendered-scene-foreground" && observed.Hints.Count == 0,
+                "Global exposure/noise on compact reference controls became foreground.");
+        }
+        byte[] fragment = (byte[])empty.Clone();
+        for (int y = 908; y < 922; y++)
+        for (int x = 111; x < 131; x++)
+        for (int channel = 0; channel < 3; channel++) fragment[(y * size + x) * 4 + channel] = 0;
+        var fragmentTracker = new HandAcquisitionPresenceTracker();
+        FeedLocal(fragmentTracker, empty, 0);
+        Require(FeedLocal(fragmentTracker, fragment, 100).Hints.Count == 0,
+            "A compact-control disturbance below the 7% area floor became an acquisition hint.");
+
+        HandAcquisitionPresenceResult FeedLocal(HandAcquisitionPresenceTracker tracker, byte[] pixels, int milliseconds)
+        {
+            var now = Epoch.AddMilliseconds(milliseconds);
+            return tracker.Update(size, size, size * 4, pixels, polygon, scene, now, now);
+        }
+    }
+
+    private static void ControlTriggerRegions()
+    {
+        const int size = 1000;
+        PixelPoint[] polygon = [new(0, 0), new(size, 0), new(size, size), new(0, size)];
+        HandTrackingBounds[] controls = [new(.072, .892, .116, .051), new(.812, .892, .116, .051)];
+        HandTrackingBounds[] triggers = [new(.105, .90, .05, .035), new(.845, .90, .05, .035)];
+        var pixels = new byte[size * size * 4];
+        for (int pixel = 0; pixel < pixels.Length; pixel += 4)
+        {
+            pixels[pixel] = 85; pixels[pixel + 1] = 65; pixels[pixel + 2] = 40; pixels[pixel + 3] = 255;
+        }
+        var scene = new HandAcquisitionSceneImage(size, size, pixels,
+            [1.0 / 999, 0, 0, 0, 1.0 / 999, 0, 0, 0, 1], controls, controls, triggers);
+        var empty = FeedLocal(new(), pixels, scene, 0);
+        Require(empty.BaselineReady && empty.Hints.Count == 0,
+            "A generated control with a trigger-region requirement acquired itself.");
+        var tracker = new HandAcquisitionPresenceTracker();
+        FeedLocal(tracker, pixels, scene, 0);
+        byte[] text = Patch(pixels, 97, 896, 71, 45, 40, 35, 20);
+        var obstructed = FeedLocal(tracker, text, scene, 100);
+        Require(obstructed.Hints.Count == 1 && obstructed.Hints[0].ControlCoverage >= .07 &&
+                obstructed.Hints[0].ControlTriggerCoverage >= .07,
+            "A current text obstruction lost its paired trigger/control area measurements.");
+        for (int frame = 2; frame <= 8; frame++)
+            Require(FeedLocal(tracker, text, scene, frame * 100).Hints.Count == 1,
+                "A stationary control-label obstruction stopped producing fresh evidence.");
+        byte[] nonText = Patch(pixels, 75, 895, 25, 46, 40, 35, 20);
+        Require(FeedLocal(tracker, nonText, scene, 900).Hints.Count == 0,
+            "A substantial control disturbance outside its text trigger acquired a light.");
+        byte[] small = Patch(pixels, 115, 905, 20, 14, 40, 35, 20);
+        Require(FeedLocal(tracker, small, scene, 1000).Hints.Count == 0,
+            "Text coverage bypassed the separate 7% whole-control requirement.");
+
+        var withoutTrigger = scene with { BoardTriggerRegions = null };
+        var genericTracker = new HandAcquisitionPresenceTracker();
+        FeedLocal(genericTracker, pixels, withoutTrigger, 0);
+        var generic = FeedLocal(genericTracker, nonText, withoutTrigger, 100);
+        Require(generic.Hints.Count == 1 && generic.Hints[0].ControlTriggerCoverage is null,
+            "An ordinary board acquired a new text requirement or invented trigger coverage.");
+        foreach (HandTrackingBounds[] invalid in new[]
+        {
+            new[] { triggers[0] },
+            new[] { triggers[0] with { Width = double.NaN }, triggers[1] },
+            new[] { triggers[0] with { X = .01 }, triggers[1] },
+            new[] { triggers[0] with { Y = .99 }, triggers[1] }
+        })
+        {
+            var rejected = FeedLocal(new(), text, scene with { BoardTriggerRegions = invalid }, 0);
+            Require(rejected.Reason == "invalid-rendered-scene" && !rejected.BaselineReady && rejected.Hints.Count == 0,
+                "Invalid or unpaired control trigger geometry silently acquired a hand.");
+        }
+        var hint = obstructed.Hints[0] with { Center = new(132, 918), RadiusPixels = 75,
+            ControlCoverage = .99, ControlTriggerCoverage = .99 };
+        byte[] lit = (byte[])pixels.Clone();
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+            if (Math.Pow(x - hint.Center.X, 2) + Math.Pow(y - hint.Center.Y, 2) < hint.RadiusPixels * hint.RadiusPixels)
+                for (int channel = 0; channel < 3; channel++) lit[(y * size + x) * 4 + channel] = 220;
+        var litTracker = new HandAcquisitionPresenceTracker();
+        FeedLocal(litTracker, pixels, scene, 0);
+        var litText = FeedLocal(litTracker, Patch(lit, 103, 900, 55, 36, 55, 75, 95), scene, 350, hint, 100);
+        Require(litText.IlluminatedPresence == true && litText.Hints.Count == 1 &&
+                litText.Hints[0].ControlCoverage is >= .07 and < .99 &&
+                litText.Hints[0].ControlTriggerCoverage is >= .07 and < .99 &&
+                litText.Hints[0].ObservedAt == Epoch.AddMilliseconds(350),
+            "An illuminated text obstruction reused old trigger evidence or lost fresh paired coverage.");
+        var litNonText = FeedLocal(litTracker, Patch(lit, 75, 895, 25, 46, 55, 75, 95), scene, 500, hint, 100);
+        Require(litNonText.IlluminatedPresence == false && litNonText.Hints.Count == 0,
+            "Nontext foreground under a search light inherited a previous text obstruction.");
+        var litSmall = FeedLocal(litTracker, Patch(lit, 115, 905, 20, 14, 55, 75, 95), scene, 600, hint, 100);
+        Require(litSmall.IlluminatedPresence == false && litSmall.Hints.Count == 0,
+            "Illuminated text interference bypassed the 7% whole-control requirement.");
+        var wrongRegion = FeedLocal(litTracker, Patch(lit, 103, 900, 55, 36, 55, 75, 95), scene,
+            700, hint with { Center = new(870, 918) }, 100);
+        Require(wrongRegion.IlluminatedPresence != true && wrongRegion.Hints.Count == 0,
+            "A search light renewed from text obstruction on a different control.");
+        var removed = FeedLocal(litTracker, lit, scene, 800, hint, 100);
+        Require(removed.IlluminatedPresence == false && removed.Hints.Count == 0,
+            "An empty search light renewed itself using stored trigger coverage.");
+
+        HandAcquisitionPresenceResult FeedLocal(HandAcquisitionPresenceTracker detector, byte[] current,
+            HandAcquisitionSceneImage expected, int milliseconds, HandAcquisitionHint? light = null, int? started = null)
+        {
+            var now = Epoch.AddMilliseconds(milliseconds);
+            return detector.Update(size, size, size * 4, current, polygon, expected, now, now, light,
+                started is null ? null : Epoch.AddMilliseconds(started.Value));
+        }
+        static byte[] Patch(byte[] source, int left, int top, int width, int height, byte blue, byte green, byte red)
+        {
+            byte[] result = (byte[])source.Clone();
+            for (int y = top; y < top + height; y++)
+            for (int x = left; x < left + width; x++)
+            {
+                int pixel = (y * size + x) * 4;
+                result[pixel] = blue; result[pixel + 1] = green; result[pixel + 2] = red;
+            }
+            return result;
+        }
+    }
+
+    private static void RenderedCompactControls()
+    {
+        const int size = 1000;
+        // Actual Win2D-generated compact controls and a native projection of
+        // them. The occupied fixture adds four synthetic strips over Exit;
+        // these contain no user camera pixels. A free spatial fit previously
+        // explained away Exit and confidently acquired untouched Save instead.
+        byte[] expected = ReadPixels("paint-compact-controls-expected.png");
+        byte[] empty = ReadPixels("paint-compact-controls-empty.png");
+        byte[] occupied = ReadPixels("paint-compact-controls-occupied.png");
+        PixelPoint[] polygon = [new(44.253500513732384, 44.253500513732384),
+            new(955.746477134526, 44.253500513732384), new(955.746477134526, 955.746477134526),
+            new(44.253500513732384, 955.746477134526)];
+        HandTrackingBounds[] controls = [new(.072, .892, .11600000000000002, .051),
+            new(.812, .892, .11600000000000002, .051)];
+        HandTrackingBounds[] text = [new(.107, .902, .048, .027), new(.840, .903, .060, .026)];
+        var scene = new HandAcquisitionSceneImage(size, size, expected,
+            [.0010861301462467192, 0, -.04306506098490942, 0, .0010861301462467192,
+                -.04306506098490942, 0, 0, 1], controls, controls, text);
+        foreach (bool warm in new[] { false, true })
+        {
+            var tracker = new HandAcquisitionPresenceTracker();
+            if (warm)
+                Require(FeedLocal(tracker, empty, 0).Hints.Count == 0,
+                    "The actual rendered compact controls acquired an empty-table light.");
+            var pending = FeedLocal(tracker, occupied, 100);
+            Require(pending.Hints.Count == 0 && pending.TextPatterns!.Any(pattern =>
+                pattern.ControlRegion == 0 && pattern.ShapeCorrupted && pattern.ConfirmationFrames == 1),
+                "A single generated-label corruption frame started an acquisition light.");
+            var observed = FeedLocal(tracker, occupied, 200);
+            Require(observed.Hints.Count == 1 && Math.Abs(observed.Hints[0].Center.X - 159.341) < 10 &&
+                    Math.Abs(observed.Hints[0].Center.Y - 884.392) < 10 &&
+                    observed.Hints[0].ControlCoverage >= .07 && observed.Hints[0].ControlTriggerCoverage >= .07,
+                "The native rendered Exit fixture disappeared into a spatial fit or acquired untouched Save.");
+            var stationary = FeedLocal(tracker, occupied, 300);
+            var removed = FeedLocal(tracker, empty, 400);
+            Require(stationary.Hints.Count == 1 && removed.Hints.Count == 0,
+                "Native stationary text obstruction was absorbed or left an empty-table ghost: " +
+                System.Text.Json.JsonSerializer.Serialize(new { stationary, removed }));
+        }
+        // Preserve actual generated glyph geometry under camera color/exposure,
+        // optical blur and registration changes. Both bright and dark ink must
+        // be recognizable; broad panel color residuals cannot acquire a light.
+        foreach (bool darkInk in new[] { false, true })
+        {
+            byte[] rendered = darkInk ? Invert(expected) : expected;
+            byte[] clean = darkInk ? Invert(empty) : empty;
+            byte[] obstructed = darkInk ? Invert(occupied) : occupied;
+            var textScene = scene with { Bgra = rendered };
+            var patterns = new HandAcquisitionTextPatterns(textScene);
+            var cleanPatterns = patterns.Observe(size, size, size * 4, clean, null);
+            Require(cleanPatterns.Count == 2 && cleanPatterns.All(pattern => pattern.Clean),
+                "Known generated compact labels did not establish clean bright/dark glyph shapes.");
+            foreach (byte[] changedAppearance in new[] { Appearance(clean), Blurred(clean) })
+            {
+                var shapes = patterns.Observe(size, size, size * 4, changedAppearance, null);
+                Require(shapes.Count == 2 && shapes.All(pattern => pattern.Clean),
+                    "Exposure, palette, noise or optical blur was mistaken for damaged generated letters.");
+                var tracker = new HandAcquisitionPresenceTracker();
+                Require(tracker.Update(size, size, size * 4, changedAppearance, polygon, textScene,
+                    Epoch, Epoch).Hints.Count == 0,
+                    "An intact generated caption acquired a spotlight after a camera-appearance change.");
+            }
+            var occupiedPatterns = patterns.Observe(size, size, size * 4, obstructed, null);
+            Require(occupiedPatterns.Single(pattern => pattern.Region == 0).Clean == false &&
+                occupiedPatterns.Single(pattern => pattern.Region == 1).Clean,
+                "Four strips over the generated Exit caption did not damage its letter structure independently of untouched Save.");
+            var lightTracker = new HandAcquisitionPresenceTracker();
+            FeedLocal(lightTracker, occupied, 400);
+            var occupiedHint = FeedLocal(lightTracker, occupied, 500).Hints.Single();
+            var underLight = patterns.Observe(size, size, size * 4, obstructed, occupiedHint);
+            Require(underLight.Single(pattern => pattern.Region == 0) is { Clean: false, StrongCorruption: false, Correlation: 0 } unknown &&
+                unknown.ChangedBoardPixels.Count == 0,
+                "The intentional white acquisition light was compared against its replaced unlit label.");
+        }
+        // Phone auto-exposure clips bright strokes after their optical blur.
+        // Compare cold clipping and normal-clean -> clipped-clean transitions;
+        // a bounded exposure adaptation must not absorb a later real occlusion.
+        foreach (bool warm in new[] { false, true })
+        foreach (bool darkInk in new[] { false, true })
+        {
+            byte[] generated = darkInk ? Invert(expected) : expected;
+            byte[] optical = Blurred(generated);
+            byte[] clipped = Clipped(generated);
+            var direct = scene with { Bgra = generated,
+                CameraToBoard = [1.0 / 999, 0, 0, 0, 1.0 / 999, 0, 0, 0, 1] };
+            PixelPoint[] directPolygon = [new(0,0),new(size,0),new(size,size),new(0,size)];
+            var detector = new HandAcquisitionPresenceTracker();
+            if (warm) Require(FeedDirect(optical,0).Hints.Count == 0,
+                "Normal generated lettering acquired a light before the clipping transition.");
+            for (int frame = 1; frame <= 3; frame++)
+            {
+                var intact = FeedDirect(clipped,frame*100);
+                Require(intact.Hints.Count == 0 && intact.TextPatterns!.All(pattern => !pattern.ShapeCorrupted),
+                    $"Optically blurred, exposure-clipped intact lettering became hand evidence (warm={warm}, darkInk={darkInk}): " +
+                    System.Text.Json.JsonSerializer.Serialize(intact));
+            }
+            byte[] erased = (byte[])clipped.Clone();
+            for (int y = 896; y <= 939; y++)
+            for (int x = 109; x <= 155; x++)
+            {
+                int pixel = (y*size+x)*4;
+                erased[pixel] = 95; erased[pixel+1] = 115; erased[pixel+2] = 165;
+            }
+            Require(FeedDirect(erased,400).Hints.Count == 0 && FeedDirect(erased,500).Hints.Count == 1,
+                "Exposure adaptation absorbed a stationary obstruction of the clipped caption.");
+            Require(FeedDirect(clipped,600).Hints.Count == 0,
+                "Removing an obstruction from clipped lettering left a presence ghost.");
+            // An inference or camera gap invalidates temporal evidence, not
+            // the already verified projector/phone optical registration. Keep
+            // both facts observable: empty lettering remains clean afterward,
+            // and a later hand still needs two new nearby camera observations.
+            var gapClean = FeedDirect(clipped,1100);
+            Require(gapClean.Hints.Count == 0 && gapClean.TextPatterns!.All(pattern => !pattern.ShapeCorrupted),
+                "A long camera interval discarded usable clipped-letter optics.");
+            var gapPending = FeedDirect(erased,1500);
+            Require(gapPending.Hints.Count == 0 && gapPending.TextPatterns!.Single(pattern =>
+                pattern.ControlRegion == 0).ConfirmationFrames == 1,
+                "A later caption obstruction borrowed confirmation from before a camera gap.");
+            Require(FeedDirect(erased,1600).Hints.Count == 1 && FeedDirect(clipped,1700).Hints.Count == 0,
+                "Retained optical registration could not confirm a fresh stationary hand after a camera gap.");
+            HandAcquisitionPresenceResult FeedDirect(byte[] pixels,int milliseconds)
+            {
+                var at = Epoch.AddMilliseconds(milliseconds);
+                return detector.Update(size,size,size*4,pixels,directPolygon,direct,at,at);
+            }
+        }
+        // Auto-exposure often moves a little on every frame. No single step
+        // needs to exceed the registration-change threshold before its cached
+        // exposure becomes obsolete. Keep every intact intermediate label
+        // quiet, then retain real stationary obstruction acquisition.
+        foreach (bool darkInk in new[] { false,true })
+        {
+            byte[] generated = darkInk ? Invert(expected) : expected;
+            var gradualScene = scene with { Bgra = generated,
+                CameraToBoard = [1.0 / 999,0,0,0,1.0 / 999,0,0,0,1] };
+            PixelPoint[] gradualPolygon = [new(0,0),new(size,0),new(size,size),new(0,size)];
+            var gradual = new HandAcquisitionPresenceTracker();
+            byte[] final = generated;
+            for (int step = 0; step <= 32; step++)
+            {
+                final = Clipped(generated,4+step*.25,120);
+                var time = Epoch.AddMilliseconds(step*100);
+                var observed = gradual.Update(size,size,size*4,final,gradualPolygon,gradualScene,time,time);
+                Require(observed.Hints.Count == 0 && observed.TextPatterns!.All(pattern => !pattern.ShapeCorrupted),
+                    $"Gradual exposure drift became damaged text (darkInk={darkInk}, step={step}): " +
+                    System.Text.Json.JsonSerializer.Serialize(observed));
+            }
+            byte[] occupiedAfterDrift = (byte[])final.Clone();
+            for (int y = 896; y <= 939; y++)
+            for (int x = 109; x <= 155; x++)
+            {
+                int pixel = (y*size+x)*4;
+                int texture = (x*13+y*7)%23;
+                occupiedAfterDrift[pixel] = (byte)(85+texture);
+                occupiedAfterDrift[pixel+1] = (byte)(105+texture);
+                occupiedAfterDrift[pixel+2] = (byte)(155+texture);
+            }
+            var firstTime = Epoch.AddMilliseconds(3300);
+            var nextTime = Epoch.AddMilliseconds(3400);
+            var pending = gradual.Update(size,size,size*4,occupiedAfterDrift,gradualPolygon,gradualScene,firstTime,firstTime);
+            var confirmed = gradual.Update(size,size,size*4,occupiedAfterDrift,gradualPolygon,gradualScene,nextTime,nextTime);
+            Require(pending.Hints.Count == 0 && confirmed.TextPatterns!.Single(pattern => pattern.ControlRegion == 0).ShapeCorrupted &&
+                confirmed.Hints.All(hint => hint.ControlCoverage >= .07 && hint.ControlTriggerCoverage >= .07),
+                $"Gradual exposure compensation absorbed missing letters or bypassed their measured area floors (darkInk={darkInk}): " +
+                System.Text.Json.JsonSerializer.Serialize(new { pending, confirmed }));
+            // Return to usable exposure and verify acquisition after the entire
+            // drift history. Saturation may erase too much projected contrast
+            // to measure 7% of a control; a shape score cannot invent that area.
+            final = Clipped(generated);
+            var recovered = Epoch.AddMilliseconds(3500);
+            Require(gradual.Update(size,size,size*4,final,gradualPolygon,gradualScene,recovered,recovered).Hints.Count == 0,
+                "Exposure recovery left a false caption obstruction.");
+            for (int y = 896; y <= 939; y++)
+            for (int x = 109; x <= 155; x++)
+            {
+                int pixel = (y*size+x)*4;
+                final[pixel] = 95; final[pixel+1] = 115; final[pixel+2] = 165;
+            }
+            var recoveringHandTime = Epoch.AddMilliseconds(3600);
+            var confirmedHandTime = Epoch.AddMilliseconds(3700);
+            Require(gradual.Update(size,size,size*4,final,gradualPolygon,gradualScene,recoveringHandTime,recoveringHandTime).Hints.Count == 0 &&
+                gradual.Update(size,size,size*4,final,gradualPolygon,gradualScene,confirmedHandTime,confirmedHandTime).Hints.Count == 1,
+                "A later stationary hand could not be acquired after gradual exposure drift and recovery.");
+        }
+        var duplicateTracker = new HandAcquisitionPresenceTracker();
+        Require(FeedLocal(duplicateTracker, occupied, 0).Hints.Count == 0 &&
+            FeedLocal(duplicateTracker, occupied, 0).Hints.Count == 0 &&
+            FeedLocal(duplicateTracker, occupied, 100).Hints.Count == 1,
+            "A duplicate camera timestamp confirmed corruption or erased consecutive distinct camera evidence.");
+        var gapTracker = new HandAcquisitionPresenceTracker();
+        FeedLocal(gapTracker, occupied, 0);
+        Require(FeedLocal(gapTracker, occupied, 500).Hints.Count == 0 &&
+            FeedLocal(gapTracker, occupied, 600).Hints.Count == 1,
+            "Separated one-off glyph disturbances combined across the confirmation lifetime.");
+        var staleTracker = new HandAcquisitionPresenceTracker();
+        FeedLocal(staleTracker, occupied, 0);
+        Require(staleTracker.Update(size, size, size * 4, occupied, polygon, scene,
+            Epoch.AddMilliseconds(100), Epoch.AddMilliseconds(450)).Hints.Count == 0 &&
+            FeedLocal(staleTracker, occupied, 200).Hints.Count == 0 &&
+            FeedLocal(staleTracker, occupied, 300).Hints.Count == 1,
+            "Rejected stale evidence preserved a prior pending glyph confirmation.");
+        var backwardTracker = new HandAcquisitionPresenceTracker();
+        FeedLocal(backwardTracker, occupied, 100);
+        Require(FeedLocal(backwardTracker, occupied, 0).Hints.Count == 0 &&
+            FeedLocal(backwardTracker, occupied, 200).Hints.Count == 0 &&
+            FeedLocal(backwardTracker, occupied, 300).Hints.Count == 1,
+            "Rejected backwards evidence preserved a prior pending glyph confirmation.");
+        // A matte object can erase the generated caption without supplying any
+        // local texture. Gain=0 must not explain missing glyphs away, while a
+        // camera-wide exposure blackout must not be called an object.
+        byte[] flat = (byte[])empty.Clone();
+        int flatColor = (901 * size + 116) * 4;
+        byte flatBlue = empty[flatColor], flatGreen = empty[flatColor + 1], flatRed = empty[flatColor + 2];
+        for (int y = 858; y <= 910; y++)
+        for (int x = 104; x <= 215; x++)
+        {
+            int pixel = (y * size + x) * 4;
+            flat[pixel] = flatBlue; flat[pixel + 1] = flatGreen; flat[pixel + 2] = flatRed;
+        }
+        var flatTracker = new HandAcquisitionPresenceTracker();
+        Require(FeedLocal(flatTracker, flat, 0).Hints.Count == 0 &&
+            FeedLocal(flatTracker, flat, 100).Hints.Count == 1,
+            "A stationary complete flat caption obstruction was explained away by zero optical gain.");
+        byte[] blackout = new byte[empty.Length];
+        for (int index = 3; index < blackout.Length; index += 4) blackout[index] = 255;
+        var blackoutTracker = new HandAcquisitionPresenceTracker();
+        Require(FeedLocal(blackoutTracker, blackout, 0).Hints.Count == 0 &&
+            FeedLocal(blackoutTracker, blackout, 100).Hints.Count == 0,
+            "Camera-wide exposure blackout fabricated missing-caption acquisition evidence.");
+        HandAcquisitionPresenceResult FeedLocal(HandAcquisitionPresenceTracker tracker, byte[] pixels, int milliseconds)
+        {
+            var now = Epoch.AddMilliseconds(milliseconds);
+            return tracker.Update(size, size, size * 4, pixels, polygon, scene, now, now);
+        }
+        static byte[] ReadPixels(string filename)
+        {
+            using var image = Cv2.ImRead(Path.Combine(AppContext.BaseDirectory, "Fixtures", filename), ImreadModes.Unchanged);
+            Require(image.Width == size && image.Height == size && image.Channels() == 4 && image.IsContinuous(),
+                "The native compact-control fixture dimensions or BGRA format changed.");
+            byte[] pixels = new byte[size * size * 4];
+            Marshal.Copy(image.Data, pixels, 0, pixels.Length);
+            return pixels;
+        }
+        static byte[] Invert(byte[] source)
+        {
+            byte[] result = (byte[])source.Clone();
+            for (int index = 0; index < result.Length; index++)
+                if (index % 4 != 3) result[index] = (byte)(255 - result[index]);
+            return result;
+        }
+        static byte[] Appearance(byte[] source)
+        {
+            byte[] result = (byte[])source.Clone();
+            for (int index = 0; index < result.Length; index++)
+            {
+                int channel = index % 4;
+                if (channel == 3) continue;
+                double gain = channel == 0 ? .7 : channel == 1 ? .92 : .85;
+                double offset = channel == 0 ? 30 : channel == 1 ? 17 : 23;
+                int noise = (index * 13 % 7) - 3;
+                result[index] = (byte)Math.Clamp((int)(result[index] * gain + offset + noise), 0, 255);
+            }
+            return result;
+        }
+        static byte[] Blurred(byte[] source)
+        {
+            using var pixels = new Mat(size, size, MatType.CV_8UC4);
+            Marshal.Copy(source, 0, pixels.Data, source.Length);
+            using var blurred = new Mat();
+            Cv2.GaussianBlur(pixels, blurred, new Size(0, 0), .8);
+            byte[] result = new byte[source.Length];
+            Marshal.Copy(blurred.Data, result, 0, result.Length);
+            return result;
+        }
+        byte[] Clipped(byte[] source,double exposureGain = 6,double exposureBackground = 160)
+        {
+            byte[] blurred = Blurred(source);
+            byte[] result = (byte[])source.Clone();
+            foreach (var label in text)
+            {
+                int left = (int)(label.X*size)-10, top = (int)(label.Y*size)-10;
+                int right = (int)((label.X+label.Width)*size)+10;
+                int bottom = (int)((label.Y+label.Height)*size)+10;
+                var backgroundSamples = new List<double>();
+                for (int y = top; y < bottom; y++)
+                for (int x = left; x < right; x++) backgroundSamples.Add(Luminance(source,(y*size+x)*4));
+                double background = backgroundSamples.Order().ElementAt(backgroundSamples.Count/10);
+                for (int y = top; y < bottom; y++)
+                for (int x = left; x < right; x++)
+                {
+                    int pixel = (y*size+x)*4;
+                    byte value = (byte)Math.Clamp(exposureBackground+exposureGain*(Luminance(blurred,pixel)-background),0,255);
+                    result[pixel] = result[pixel+1] = result[pixel+2] = value;
+                }
+            }
+            return result;
+            static double Luminance(byte[] pixels,int index) =>
+                pixels[index]*.114+pixels[index+1]*.587+pixels[index+2]*.299;
+        }
+    }
+
+    private static void RenderedLocalCaptionLoss()
+    {
+        const int size = 1000;
+        byte[] expected = Read("menu-local-caption-expected.png");
+        byte[] empty = Read("menu-local-caption-empty.png");
+        byte[] occupied = Read("menu-local-caption-occupied.png");
+        PixelPoint[] polygon = [new(44.253500513732384, 44.253500513732384),
+            new(955.746477134526, 44.253500513732384), new(955.746477134526, 955.746477134526),
+            new(44.253500513732384, 955.746477134526)];
+        HandTrackingBounds[] controls = [new(.092,.262,.376,.136),new(.532,.262,.376,.136),
+            new(.092,.462,.376,.136),new(.532,.462,.376,.136),new(.092,.662,.376,.136),new(.532,.662,.376,.136)];
+        HandTrackingBounds[] labels = [new(.110765625,.30884375,.215671875,.03921875),
+            new(.550765625,.30884375,.1754375,.03921875),new(.110765625,.50884375,.138453125,.03921875),
+            new(.550765625,.509046875,.077546875,.031859375),new(.109328125,.70975,.06478125,.03115625),
+            new(.550765625,.70884375,.098671875,.0320625)];
+        var scene = new HandAcquisitionSceneImage(size,size,expected,
+            [.0010861301462467192,0,-.04306506098490942,0,.0010861301462467192,-.04306506098490942,0,0,1],
+            controls,null,labels);
+        foreach (bool warm in new[] { false,true })
+        {
+            var tracker = new HandAcquisitionPresenceTracker();
+            if (warm) Require(Feed(empty,0).Hints.Count == 0,"Empty generated Menu captions acquired a light.");
+            var pending = Feed(occupied,100);
+            var confirmed = Feed(occupied,200);
+            Require(pending.Hints.Count == 0 && confirmed.Hints.Count == 1 &&
+                confirmed.Hints[0].ControlCoverage >= .07 && confirmed.Hints[0].ControlTriggerCoverage >= .07,
+                "Localized missing letters were hidden by their intact whole-word shape.");
+            var damaged = confirmed.TextPatterns!.Single(pattern => pattern.ControlRegion == 0);
+            Require(damaged.ShapeCorrupted && damaged.LocalDamageCoverage >= .07 &&
+                damaged.SectorCorrelations!.Count(correlation => correlation < .4) >= 2 &&
+                confirmed.TextPatterns!.Where(pattern => pattern.ControlRegion != 0).All(pattern => pattern.LabelIntact),
+                "Localized loss invented damaged letter area or acquired an untouched Menu control.");
+            Require(Feed(empty,300).Hints.Count == 0,"Removed local letter obstruction left a presence ghost.");
+            HandAcquisitionPresenceResult Feed(byte[] pixels,int milliseconds)
+            {
+                var time = Epoch.AddMilliseconds(milliseconds);
+                return tracker.Update(size,size,size*4,pixels,polygon,scene,time,time);
+            }
+        }
+        static byte[] Read(string name)
+        {
+            using var image = Cv2.ImRead(Path.Combine(AppContext.BaseDirectory,"Fixtures",name),ImreadModes.Unchanged);
+            Require(image.Width == size && image.Height == size && image.Channels() == 4 && image.IsContinuous(),
+                "The generated local-caption fixture dimensions or BGRA format changed.");
+            byte[] pixels = new byte[size*size*4];
+            Marshal.Copy(image.Data,pixels,0,pixels.Length);
+            return pixels;
+        }
     }
 
     private static void BaselineFallbackAndBarriers()

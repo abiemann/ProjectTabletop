@@ -49,9 +49,13 @@ public sealed partial class MainWindow
         // No elapsed hold, however long, is an execute command.
         for (int i = 0; i < 11; i++) await Send(menuHand);
         Require(scene.CurrentBoardScreen == BoardScreen.Menu, "Holding grouped fingers caused an automatic click.");
-        await Select(menuHand, () => scene.CurrentBoardScreen == BoardScreen.Blackjack);
+        Require(scene.GetLastHandBoardSelection() is null, "Invalid, idle or grouped observations fabricated a successful selection.");
+        await Select(menuHand, "blackjack", () => scene.CurrentBoardScreen == BoardScreen.Blackjack);
+        var menuSelection = scene.GetLastHandBoardSelection();
         for (int i = 0; i < 3; i++) await Send(Separate(menuHand));
         Require(scene.BlackjackState.Phase == BlackjackPhase.Betting, "Held separation crossed into the next screen.");
+        Require(ReferenceEquals(menuSelection, scene.GetLastHandBoardSelection()),
+            "Held separation overwrote the menu selection route after navigation.");
 
         var deal = AtButton("bj-deal");
         var dealBounds = scene.CurrentBoardButtons.Single(button => button.Id == "bj-deal").Bounds;
@@ -61,24 +65,42 @@ public sealed partial class MainWindow
         Require(Differences(beforeDeal, casinoImage.GetPixelBytes(),
             PointAt(dealBounds.X + dealBounds.Width * .4, dealBounds.Y + dealBounds.Height - .007), 5, false) > 12,
             "The ready-state gold indicator did not redraw on the casino table.");
-        await Select(deal, () => scene.BlackjackState.Phase == BlackjackPhase.PlayerTurn);
+        await Select(deal, "bj-deal", () => scene.BlackjackState.Phase == BlackjackPhase.PlayerTurn);
+        var dealSelection = scene.GetLastHandBoardSelection();
         // Keep source-frame timestamps real while the opening presentation finishes.
         await Task.Delay(1850);
         Draw(casinoImage);
         // Split replaces Deal at the same position. Continued separation cannot click it.
         for (int i = 0; i < 4; i++) await Send(Separate(deal));
         Require(scene.BlackjackState.Hands.Count == 1, "Held separation clicked the newly drawn Split control.");
+        Require(ReferenceEquals(dealSelection, scene.GetLastHandBoardSelection()),
+            "A held gesture overwrote the successful Deal route.");
 
         var hit = AtButton("bj-hit");
         await Arm(hit);
-        await Select(hit, () => scene.BlackjackState.Hands.Single().Cards.Count == 3);
+        await Select(hit, "bj-hit", () => scene.BlackjackState.Hands.Single().Cards.Count == 3);
+        var hitSelection = scene.GetLastHandBoardSelection();
         for (int i = 0; i < 4; i++) await Send(Separate(hit));
         Require(scene.BlackjackState.Hands.Single().Cards.Count == 3, "Keeping index apart repeated HIT.");
+        Require(ReferenceEquals(hitSelection, scene.GetLastHandBoardSelection()),
+            "A held gesture overwrote the successful Hit route.");
         // Rearm at precisely the same point without folding or moving away.
         await Arm(hit);
-        await Select(hit, () => scene.BlackjackState.Hands.Single().Cards.Count == 4);
+        await Select(hit, "bj-hit", () => scene.BlackjackState.Hands.Single().Cards.Count == 4);
         Require(scene.BlackjackState.Phase == BlackjackPhase.PlayerTurn, "The repeated HIT fixture ended too early.");
         Require(new[] { menuHand, deal, hit }.All(hand => hand.ExecuteEventId == 0), "Selection generated a pinch event.");
+        var lastHitSelection = scene.GetLastHandBoardSelection();
+        scene.ShowPaint();
+        scene.SetHandCursors([], DateTimeOffset.UtcNow);
+        Require(ReferenceEquals(lastHitSelection, scene.GetLastHandBoardSelection()),
+            "Programmatic navigation or an idle Paint frame overwrote the last successful hand selection.");
+        var exit = AtButton("menu") with { TrackingId = 812 };
+        await Arm(exit);
+        await Select(exit, "menu", () => scene.CurrentBoardScreen == BoardScreen.Menu);
+        var exitSelection = scene.GetLastHandBoardSelection();
+        for (int i = 0; i < 3; i++) await Send(Separate(exit));
+        Require(scene.CurrentBoardScreen == BoardScreen.Menu && ReferenceEquals(exitSelection, scene.GetLastHandBoardSelection()),
+            "Paint Exit lost its successful route or replayed a held gesture after returning to the menu.");
         string directory = Path.Combine(_appDataDirectory, "FingerSelectionSnapshots", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         string menuPath = Path.Combine(directory, "menu-ready.png"), casinoPath = Path.Combine(directory, "blackjack-ready.png");
@@ -90,22 +112,33 @@ public sealed partial class MainWindow
         return new { passed = true, middleAim = true, offProjectorIndexKeepsMiddleVisible = true,
             groupedHoldNeverExecutes = true, separationSelectsOnce = true, sameTargetRearms = true,
             readyFeedbackRendered = true, noPinchEvents = true, liveHardwareUnchanged = true,
+            exactIndexSelectionRouteRetained = true, paintExitRouteRetainedAcrossNavigation = true,
+            rejectedAndHeldObservationsDoNotOverwriteSelection = true,
             directory, images = new[] { menuPath, casinoPath } };
 
         async Task Arm(HandCursor hand, CanvasRenderTarget? target = null)
         {
+            var previousSelection = scene.GetLastHandBoardSelection();
             await Send(hand);
             await Send(hand);
             Require(scene.CurrentFingerSelectionFeedback.Any(item => item.Stage == BoardFingerSelectionStage.Armed),
                 "Two grouped observations did not arm the middle-tip target.");
+            Require(ReferenceEquals(previousSelection, scene.GetLastHandBoardSelection()),
+                "Arming a target fabricated or overwrote a successful selection route.");
             if (target is not null) Draw(target);
         }
-        async Task Select(HandCursor hand, Func<bool> completed)
+        async Task Select(HandCursor hand, string buttonId, Func<bool> completed)
         {
+            var previous = scene.CurrentBoardScreen;
+            var previousSelection = scene.GetLastHandBoardSelection();
             await Send(Separate(hand));
             Require(!completed(), "A single separated observation selected a button.");
-            await Send(Separate(hand));
+            Require(ReferenceEquals(previousSelection, scene.GetLastHandBoardSelection()),
+                "Unconfirmed index separation overwrote the last successful selection route.");
+            var frameTime = await Send(Separate(hand));
             Require(completed(), "Confirmed index separation did not select the armed target.");
+            AssertHandSelectionDiagnostic(scene, previous, scene.CurrentBoardScreen,
+                buttonId, "IndexSeparation", hand.TrackingId, frameTime);
         }
         HandCursor AtButton(string id)
         {
@@ -117,7 +150,13 @@ public sealed partial class MainWindow
         }
         static HandCursor Separate(HandCursor hand) => hand with { FingersTogether = false, IndexFingerSeparated = true };
         PixelPoint PointAt(double u, double v) => new(.035 + .93 * (inset / 2 + u * (1 - inset)), .035 + .93 * (inset / 2 + v * (1 - inset)));
-        async Task Send(HandCursor hand) { await Task.Delay(110); scene.SetHandCursors([hand], DateTimeOffset.UtcNow); }
+        async Task<DateTimeOffset> Send(HandCursor hand)
+        {
+            await Task.Delay(110);
+            var frameTime = DateTimeOffset.UtcNow;
+            scene.SetHandCursors([hand], frameTime);
+            return frameTime;
+        }
         byte[] Draw(CanvasRenderTarget target)
         {
             using (var drawing = target.CreateDrawingSession()) scene.Draw(drawing, size, size, preview: false, runningSlowly: false);

@@ -247,6 +247,10 @@ public sealed partial class SceneCompositor : IDisposable
             var shutterContext = PreparePhotoCopyGesture(cursors, frameTime, acceptVisual, photoCopyCaptureBusy);
             _boardSession.PaintSaveEnabled = CanSavePaint;
             var selectionResult = _boardSession.Update(boardSamples, frameTime, now);
+            if (selectionResult is not null)
+                _lastHandBoardSelection = new { frameTime, observedAt = now,
+                    previous = selectionResult.Previous.ToString(), current = selectionResult.Current.ToString(),
+                    selectionResult.ButtonId, selectionResult.TrackingId, gesture = selectionResult.Gesture.ToString() };
             if (selectionResult is { ButtonId: "paint-save" } && acceptVisual)
                 QueuePaintSaveRequest(frameTime);
             if (selectionResult is { ButtonId: "photo-save" } && acceptVisual && !photoCopyCaptureBusy &&

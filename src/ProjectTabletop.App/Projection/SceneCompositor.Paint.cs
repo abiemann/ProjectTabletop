@@ -105,6 +105,8 @@ public sealed partial class SceneCompositor
             _paintDropCount = 0;
             _paintLastDropAt = default;
             _paintRecentDrops.Clear();
+            _paintButtonLightIgnoreRegion = null;
+            _paintButtonLightIgnoreUntil = default;
             _paintDropsAtLastTimestamp = 0;
             _paintRevision++;
             _renderedBoardState = null;

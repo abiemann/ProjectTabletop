@@ -12,6 +12,7 @@ public sealed partial class MainWindow
     private long _handDetectionSequence;
     private DateTimeOffset _lastHandLogStatusRefresh;
     private DateTimeOffset _handVideoNotBefore;
+    private volatile bool _boardHandDiagnosticLogging;
 
     private bool IsHandTrackingTester => _scene.CurrentBoardScreen == BoardScreen.HandTracking;
     private string? ActiveHandRecordingId => _handVideoRecorder?.Status is { IsRecording: true } video
@@ -54,7 +55,7 @@ public sealed partial class MainWindow
 
     private void LogHandTrackingEvent(string kind, object? details = null, bool force = false)
     {
-        if (!force && !IsHandTrackingTester) return;
+        if (!force && !IsHandTrackingTester && !_boardHandDiagnosticLogging) return;
         RecordHandDiagnostic(new
         {
             schemaVersion = 1, type = kind, loggedAt = DateTimeOffset.UtcNow,
@@ -69,7 +70,7 @@ public sealed partial class MainWindow
         IReadOnlyList<HandDetection> hands, IReadOnlyList<HandDetection> visibleHands,
         IReadOnlyList<HandCursor> cursors, string outcome)
     {
-        if (!requestedInTester && !IsHandTrackingTester) return;
+        if (!requestedInTester && !IsHandTrackingTester && !_boardHandDiagnosticLogging) return;
         var now = DateTimeOffset.UtcNow;
         // Do not let a menu inference that navigated into the tester start a clip,
         // or an obsolete/stale inference restart recording after a reset.
@@ -80,11 +81,15 @@ public sealed partial class MainWindow
         RecordHandDiagnostic(new
         {
             schemaVersion = 1, type = "detection", loggedAt = now, sequence,
+            board = _scene.CurrentBoardScreen.ToString(),
+            lastBoardSelection = _scene.GetLastHandBoardSelection(),
             recordingId = ActiveHandRecordingId,
             frameTime = frame.Timestamp, width = frame.Width, height = frame.Height,
             generation, currentGeneration = _handGeneration, engineReset,
             inferenceMilliseconds, resultAgeMilliseconds = (now - frame.Timestamp).TotalMilliseconds,
             frameIntervalMilliseconds, outcome, detectorTrace,
+            acquisition = outcome == "accepted" ? _lastHandAcquisitionDetection : null,
+            acquisitionLighting = _scene.GetHandAcquisitionDiagnostics(),
             hands = hands.Select((hand, index) => new
             {
                 index, hand.Confidence, hand.RightHandProbability,
@@ -132,7 +137,7 @@ public sealed partial class MainWindow
         _lastHandLogStatusRefresh = now;
         var status = _handDetectionLog?.Status;
         HandDetectionLogStatusText.Text = status?.Error is { } error ? "Detection log error: " + error :
-            board == BoardScreen.HandTracking
+            board == BoardScreen.HandTracking || _boardHandDiagnosticLogging
                 ? $"Detection logging on: {status?.WrittenRecords ?? 0} records, {status?.DroppedRecords ?? 0} dropped.\n" +
                   (status?.CurrentPath ?? Path.Combine(_appDataDirectory, "HandTrackingLogs"))
                 : "Full detection logging starts automatically in the Hand-Tracking tester.";

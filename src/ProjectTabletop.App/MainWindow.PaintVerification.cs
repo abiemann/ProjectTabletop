@@ -1,6 +1,7 @@
 #if DEBUG
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
+using ProjectTabletop.App.Camera;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
@@ -46,8 +47,8 @@ public sealed partial class MainWindow
                 scene.GetPaintDiagnostics().Fluid!.SimulationSteps == blankFluid.SimulationSteps,
             "An idle painting changed without an observed disturbance.");
 
-        // Both ordinary hand lighting and preliminary acquisition lighting must
-        // stay dark on Paint, even when their real inputs are valid and fresh.
+        // Paint's canvas never uses hand lighting. Its navigation assistance is
+        // separate and must first prove interference with a control's label.
         scene.GetHandAcquisitionContext(now);
         now += TimeSpan.FromMilliseconds(600);
         var acquisition = scene.GetHandAcquisitionContext(now);
@@ -55,10 +56,10 @@ public sealed partial class MainWindow
         var exitCenter = new PixelPoint(inset / 2 + (exit.Bounds.X + exit.Bounds.Width / 2) * (1 - inset),
             inset / 2 + (exit.Bounds.Y + exit.Bounds.Height / 2) * (1 - inset));
         var acquisitionHint = new HandAcquisitionHint(new(exitCenter.X - .1, exitCenter.Y - .1, .2, .2),
-            exitCenter, .1, now, .1);
+            exitCenter, .1, now, .1, ControlCoverage: .1);
         scene.CompleteHandAcquisition(acquisition, [acquisitionHint], [], now);
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && blank.SequenceEqual(Draw(scene)),
-            "A valid Paint Exit disturbance switched on an acquisition spotlight.");
+            "A Paint control disturbance without measured label corruption switched on a spotlight.");
         await Task.Delay(2);
         var handTime = DateTimeOffset.UtcNow;
         var hand = Hand(.5, .55);
@@ -69,6 +70,7 @@ public sealed partial class MainWindow
                 ChangedPixels(blank, Draw(scene), canvas) == 0,
             "A real hand input illuminated Paint or drew its fingertip marker over the painting.");
         scene.ClearHandTips();
+        VerifyPaintButtonLighting();
 
         var firstCenter = new Point2(.47, .55);
         Require(scene.AddPaintDrop(firstCenter, .075, now) && firstOnly.AddPaintDrop(firstCenter, .075, now) &&
@@ -411,7 +413,9 @@ public sealed partial class MainWindow
             progressiveSpreading = true, overlappingPigmentsBlend = true, exitProtected = true,
             boundedBoardClip = true, invalidAndRepeatedObservationsRejected = true, freshSessionClearsPainting = true,
             nativePaintRaster = paintRaster, nativeBoardRaster = boardRaster, previewCannotShrinkPaint = true,
-            allPaintSpotlightsDisabled = true, animationFramesCompared, cameraDelayMilliseconds = 250,
+            paintCanvasSpotlightsDisabled = true, paintControlLabelSpotlightLifecycle = true,
+            paintControlLightExcludedFromDropsIncludingCameraDelay = true,
+            animationFramesCompared, cameraDelayMilliseconds = 250,
             renderedAnimationDoesNotRetrigger = true, twoStationaryObstructionsApplyIndependently = true,
             fullCanvasBeneathFloatingControls = true,
             completedInputReplayAndNavigationCalibrationBarriers = true,
@@ -420,6 +424,174 @@ public sealed partial class MainWindow
             boundedLongGapCatchUp = true, zeroAndBackwardsTimeCannotAdvance = true,
             framesObservedBeforeProjectionWarmupRejected = true,
             liveHardwareUnchanged = true, directory, images };
+
+        void VerifyPaintButtonLighting()
+        {
+            using var lightingScene = NewScene(out double lightingInset, nativeCamera: true);
+            for (int frame = 0; frame < 9; frame++)
+            {
+                Draw(lightingScene);
+                lightingScene.GetHandAcquisitionContext(now);
+                now += TimeSpan.FromMilliseconds(125);
+            }
+            var empty = Draw(lightingScene);
+            var context = lightingScene.GetHandAcquisitionContext(now)!;
+            Require(context is { ObserveMotion: true, RequiresSearchIllumination: true,
+                    ExpectedScene.BoardTriggerRegions.Count: 2 },
+                "Paint did not expose settled label-gated Exit/Save acquisition.");
+            var emptyQuery = Query(empty, context);
+            Require(emptyQuery.Hints.Count == 0 && emptyQuery.LightingHints.Count == 0 &&
+                    emptyQuery.SearchRegions.Count == 0 && context.IlluminatedHint is null,
+                "An idle Paint board illuminated or searched its controls.");
+            var canvasOnly = (byte[])empty.Clone();
+            FillObstruction(canvasOnly, .5, .55, lightingInset);
+            var canvasQuery = Query(canvasOnly, context);
+            lightingScene.CompleteHandAcquisition(context, canvasQuery.LightingHints, [], now);
+            Require(canvasQuery.Hints.Count == 0 && canvasQuery.SearchRegions.Count == 0 &&
+                    lightingScene.GetHandAcquisitionContext(now)?.IlluminatedHint is null &&
+                    empty.SequenceEqual(Draw(lightingScene)),
+                "An ordinary canvas disturbance illuminated Paint or searched for a navigation gesture.");
+
+            var exitButton = lightingScene.CurrentBoardButtons.Single(button => button.Id == "menu");
+            var exitBounds = exitButton.Bounds;
+            double exitU = exitBounds.X + exitBounds.Width / 2, exitV = exitBounds.Y + exitBounds.Height / 2;
+            var occupied = (byte[])empty.Clone();
+            FillObstruction(occupied, exitU, exitV, lightingInset);
+            var captionTracker = new HandAcquisitionPresenceTracker();
+            var firstArrival = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
+                context, captionTracker, now);
+            Require(firstArrival.LightingHints.Count == 0 && firstArrival.SearchRegions.Count == 0,
+                "One generated Exit-label obstruction frame started Paint assistance before confirmation.");
+            now += TimeSpan.FromMilliseconds(125);
+            var query = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
+                context, captionTracker, now);
+            if (query.LightingHints.Count != 1)
+            {
+                File.WriteAllBytes(Path.Combine(directory, "button-empty.bgra"), empty);
+                File.WriteAllBytes(Path.Combine(directory, "button-occupied.bgra"), occupied);
+                File.WriteAllBytes(Path.Combine(directory, "button-expected.bgra"), context.ExpectedScene!.Bgra);
+                File.WriteAllText(Path.Combine(directory, "button-presence.json"),
+                    System.Text.Json.JsonSerializer.Serialize(new { size, lightingInset,
+                        context.SearchPolygon, context.ExpectedScene.CameraToBoard,
+                        context.ExpectedScene.BoardSearchRegions, context.ExpectedScene.BoardReferenceRegions,
+                        context.ExpectedScene.BoardTriggerRegions, query.Presence }));
+            }
+            Require(query.LightingHints.Count == 1,
+                "Stationary Exit fingers did not produce exactly one label-triggered candidate. " +
+                System.Text.Json.JsonSerializer.Serialize(new { query.Presence,
+                    context.ExpectedScene!.BoardSearchRegions, context.ExpectedScene.BoardTriggerRegions }) +
+                " Diagnostic: " + directory);
+            var hint = query.LightingHints[0];
+            Require(hint.ControlCoverage is >= .07 && hint.ControlTriggerCoverage is >= .07 &&
+                    query.SearchRegions.Count == 0,
+                "Stationary fingers over Exit did not request label-gated illumination before model acquisition.");
+            foreach (double? textCoverage in new double?[] { null, .069999, double.NaN,
+                         double.PositiveInfinity, double.NegativeInfinity })
+            {
+                lightingScene.CompleteHandAcquisition(context,
+                    [hint with { ControlTriggerCoverage = textCoverage }], [], now);
+                Require(lightingScene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
+                    "Missing, sub-7%, or non-finite Exit-text interference switched on a Paint spotlight.");
+            }
+            lightingScene.CompleteHandAcquisition(context, [hint with { ObservedAt = now.AddMilliseconds(-1) }], [], now);
+            Require(lightingScene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
+                "An older frame's Exit-text measurement switched on a Paint spotlight.");
+            var beforeLightIgnored = lightingScene.GetPaintDisturbanceContext()!.IgnoredRegions!.ToArray();
+            lightingScene.CompleteHandAcquisition(context, [hint], [], now);
+            var searching = lightingScene.GetHandAcquisitionContext(now)!;
+            var litPixels = Draw(lightingScene);
+            Require(searching.IlluminatedHint is not null &&
+                    Query(occupied, searching).SearchRegions.Contains(hint.SearchBounds) &&
+                    ChangedPixels(empty, litPixels, exitBounds) > 300,
+                "Exit text interference did not illuminate its hand region and focus the subsequent model search.");
+
+            // A real landmark result must not extinguish this control-specific
+            // light. Paint's ordinary hand spotlight still remains disabled.
+            var hand = new HandDetection(Hand(exitU, exitV + .03).Landmarks.Select(point =>
+                new PixelPoint(size * (lightingInset / 2 + point.X * (1 - lightingInset)),
+                    size * (lightingInset / 2 + point.Y * (1 - lightingInset)))).ToArray(), .95, .5);
+            var sourceTime = DateTimeOffset.UtcNow;
+            lightingScene.SetHandSpotlights([hand], sourceTime);
+            for (int frame = 0; frame < 3; frame++)
+            {
+                now += TimeSpan.FromMilliseconds(400);
+                hint = hint with { ObservedAt = now };
+                lightingScene.CompleteHandAcquisition(searching, [hint], [hand], now, illuminatedPresence: true);
+                searching = lightingScene.GetHandAcquisitionContext(now)!;
+                Require(searching.IlluminatedHint is not null && lightingScene.ActiveHandSpotlightCount == 0,
+                    "Acquiring real fingers extinguished Paint's Exit light or enabled ordinary canvas hand lighting.");
+                litPixels = Draw(lightingScene);
+            }
+            var paintContext = lightingScene.GetPaintDisturbanceContext()!;
+            var lightMask = paintContext.IgnoredRegions!.Except(beforeLightIgnored).Single();
+            var outsideControlPoint = new PixelPoint(lightMask.X + lightMask.Width / 2, lightMask.Y + .01);
+            Require(!beforeLightIgnored.Any(bounds => Contains(bounds, outsideControlPoint)),
+                "The light-exclusion fixture did not extend beyond the ordinary control mask.");
+            var syntheticLightDrop = new PaintDisturbanceResult(
+                [new(outsideControlPoint, .05, .01, now)], 1, .01, true, "own-button-light");
+            Require(lightingScene.CompletePaintDisturbance(paintContext, syntheticLightDrop, now) == 0,
+                "Paint accepted its own control spotlight as a drop outside the button mask.");
+            var lightDetector = new PaintDisturbanceTracker();
+            for (int frame = 0; frame < 2; frame++)
+            {
+                now += TimeSpan.FromMilliseconds(125);
+                hint = hint with { ObservedAt = now };
+                lightingScene.CompleteHandAcquisition(searching, [hint], [hand], now, illuminatedPresence: true);
+                searching = lightingScene.GetHandAcquisitionContext(now)!;
+                litPixels = Draw(lightingScene);
+                paintContext = lightingScene.GetPaintDisturbanceContext()!;
+                var result = lightDetector.Update(size, size, size * 4, litPixels, paintContext, now, now);
+                Require(result.ReferenceReady && result.CandidateCount == 0 && result.Drops.Count == 0,
+                    "The rendered Exit spotlight seeded Paint canvas candidates.");
+            }
+
+            lightingScene.CompleteHandAcquisition(searching, [], [hand], now, illuminatedPresence: false);
+            Require(lightingScene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
+                "Removing current Exit-text obstruction retained the Paint spotlight after real fingers were acquired.");
+            for (int frame = 0; frame < 2; frame++)
+            {
+                now += TimeSpan.FromMilliseconds(125);
+                Draw(lightingScene);
+                paintContext = lightingScene.GetPaintDisturbanceContext()!;
+                var result = lightDetector.Update(size, size, size * 4, litPixels, paintContext, now, now);
+                Require(result.ReferenceReady && result.CandidateCount == 0 && result.Drops.Count == 0 &&
+                        paintContext.IgnoredRegions!.Contains(lightMask),
+                    "The webcam's delayed view of a switched-off Exit light seeded a Paint drop.");
+                var delayedDrop = syntheticLightDrop with
+                    { Drops = [syntheticLightDrop.Drops[0] with { ObservedAt = now }] };
+                Require(lightingScene.CompletePaintDisturbance(paintContext, delayedDrop, now) == 0,
+                    "A late camera result bypassed the recently switched-off light's Paint exclusion.");
+            }
+            now += TimeSpan.FromMilliseconds(1000);
+            Draw(lightingScene);
+            Require(!lightingScene.GetPaintDisturbanceContext()!.IgnoredRegions!.Contains(lightMask),
+                "The temporary navigation-light exclusion permanently disabled part of the Paint canvas.");
+
+            // Ordinary tracked hands remain dark after navigation assistance is
+            // gone. Execution suppression also wins over label measurements.
+            context = lightingScene.GetHandAcquisitionContext(now)!;
+            hint = hint with { ObservedAt = now };
+            lightingScene.CompleteHandAcquisition(context, [hint], [], now);
+            Require(lightingScene.GetHandAcquisitionContext(now)?.IlluminatedHint is not null,
+                "Paint did not rearm label-gated Exit assistance after departure.");
+            sourceTime = DateTimeOffset.UtcNow;
+            lightingScene.SetHandCursors([new HandCursor(new(size * .5, size * .5), sourceTime.AddSeconds(1), 7871)
+                { TrackingId = 7871 }], sourceTime);
+            Require(lightingScene.GetHandLightingDiagnostics().SuppressedHandIds.Contains(7871) &&
+                    lightingScene.GetHandAcquisitionContext(now)?.IlluminatedHint is null &&
+                    lightingScene.ActiveHandSpotlightCount == 0,
+                "An execute gesture retained Paint's navigation spotlight.");
+            lightingScene.ShowBoardMenu();
+            Require(lightingScene.GetPaintDisturbanceContext() is null,
+                "Leaving Paint retained its control-light exclusion context.");
+
+            HandAcquisitionQuery Query(byte[] pixels, SceneCompositor.HandAcquisitionContext request) =>
+                CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, pixels, now), request,
+                    new HandAcquisitionPresenceTracker(), now);
+            static bool Contains(HandTrackingBounds bounds, PixelPoint point) =>
+                point.X >= bounds.X && point.X <= bounds.X + bounds.Width &&
+                point.Y >= bounds.Y && point.Y <= bounds.Y + bounds.Height;
+        }
 
         SceneCompositor NewScene(out double safetyInset, bool nativeCamera = false)
         {

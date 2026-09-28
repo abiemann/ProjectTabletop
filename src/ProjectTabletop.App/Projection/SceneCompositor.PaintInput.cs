@@ -14,10 +14,14 @@ public sealed partial class SceneCompositor
     private static readonly HandTrackingBounds PaintInputBounds = new(.01, .01, .98, .98);
     private static readonly BoardRect PaintTitleBounds = new(.06, .018, .10, .028);
     private static readonly BoardRect PaintStatusBounds = new(.28, .895, .44, .045);
+    private HandTrackingBounds? _paintButtonLightIgnoreRegion;
+    private DateTimeOffset _paintButtonLightIgnoreUntil;
 
     // Paint may spread beneath every overlay. Only new physical disturbances
     // inside the floating controls are excluded, so operating Save does not paint.
-    private HandTrackingBounds[] PaintIgnoredRegions() => _boardSession.Buttons
+    private HandTrackingBounds[] PaintIgnoredRegions()
+    {
+        var regions = _boardSession.Buttons
         .Select(button => button.Bounds).Append(PaintTitleBounds).Append(PaintStatusBounds)
         .Select(bounds =>
         {
@@ -28,7 +32,30 @@ public sealed partial class SceneCompositor
             double left = Math.Max(0, bounds.X - margin), top = Math.Max(0, bounds.Y - margin);
             return new HandTrackingBounds(left, top, Math.Min(1, bounds.X + bounds.Width + margin) - left,
                 Math.Min(1, bounds.Y + bounds.Height + margin) - top);
+        }).ToList();
+        if (_paintButtonLightIgnoreRegion is { } light && _paintClock() <= _paintButtonLightIgnoreUntil)
+            regions.Add(light);
+        return regions.ToArray();
+    }
+
+    private void RetainPaintButtonLightExclusion()
+    {
+        if (_boardSession.Screen != BoardScreen.Paint || _acquisitionLight is not { } light ||
+            _boardSurfaceMap is null) return;
+        var perimeter = Enumerable.Range(0, 24).Select(index =>
+        {
+            double angle = index * Math.PI / 12;
+            return _boardSurfaceMap.InverseTransform(new(light.Center.X +
+                light.Radius / _displayAspect * Math.Cos(angle), light.Center.Y + light.Radius * Math.Sin(angle)));
         }).ToArray();
+        double left = Math.Max(0, perimeter.Min(point => point.X) - .02);
+        double top = Math.Max(0, perimeter.Min(point => point.Y) - .02);
+        double right = Math.Min(1, perimeter.Max(point => point.X) + .02);
+        double bottom = Math.Min(1, perimeter.Max(point => point.Y) + .02);
+        _paintButtonLightIgnoreRegion = new(left, top, right - left, bottom - top);
+        // The delayed webcam may still show our light after it has switched off.
+        _paintButtonLightIgnoreUntil = _paintClock().AddMilliseconds(1000);
+    }
     private readonly List<PaintExpectedFrame> _paintExpectedFrames = [];
     private CanvasRenderTarget? _paintReferenceTarget;
     private Homography? _paintReferenceCameraMap, _paintReferenceSurfaceMap;
@@ -146,7 +173,9 @@ public sealed partial class SceneCompositor
                 newestExpectedUtc = _paintExpectedFrames.LastOrDefault()?.PresentedAt,
                 readyAfterUtc = _paintInputReadyAfter,
                 minimumForegroundBoardArea = PaintDisturbanceTracker.MinimumBoardArea,
-                spotlightsEnabled = false, error = _paintReferenceError };
+                spotlightsEnabled = false, buttonSpotlightsEnabled = true,
+                buttonLightIgnoreRegion = _paintClock() <= _paintButtonLightIgnoreUntil
+                    ? _paintButtonLightIgnoreRegion : null, error = _paintReferenceError };
     }
 
     private void DrawPaintNavigationCursor(CanvasDrawingSession drawing, Rect output)

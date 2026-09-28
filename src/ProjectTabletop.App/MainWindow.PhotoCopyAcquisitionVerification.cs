@@ -141,7 +141,7 @@ public sealed partial class MainWindow
         ready = Ready();
         var handCenter = CameraPoint(.5, .8875);
         var hint = new HandAcquisitionHint(new(handCenter.X - 100, handCenter.Y - 100, 200, 200),
-            handCenter, 75, now, .08, ControlCoverage: .10);
+            handCenter, 75, now, .08, ControlCoverage: .10, ControlTriggerCoverage: .10);
         scene.CompleteHandAcquisition(ready, [hint], [], now.AddSeconds(-1));
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null, "A stale camera frame relit the controls.");
         scene.CompleteHandAcquisition(ready, [hint], [], now.AddSeconds(1));

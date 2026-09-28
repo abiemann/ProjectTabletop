@@ -10,7 +10,7 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
-    // Compare real rendered boards with a stationary first-frame finger occlusion.
+    // Compare real rendered boards with a stationary arriving finger occlusion.
     // This isolated scene cannot operate the user's camera or projector.
     private async Task<object> VerifySharedBoardAcquisitionAsync()
     {
@@ -72,7 +72,8 @@ public sealed partial class MainWindow
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
                 Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "The shared-board verification changed live hardware or navigation.");
-        return new { passed = true, stationaryFirstFrameForEveryControl = true, controls = tested,
+        return new { passed = true, stationaryArrivalWithoutMotionForEveryControl = true, controls = tested,
+            generatedCaptionCorruptionNeedsTwoFreshFrames = true,
             noEmptyBoardCandidates = true, assistanceCannotSelect = true,
             sevenPercentCoverageRequiredAcrossBoards = true,
             buttonRegionsOnlyBeforeIllumination = true, illuminationBeforeFocusedModelSearch = true,
@@ -80,7 +81,10 @@ public sealed partial class MainWindow
             resetClearsForegroundQueryHistory = true,
             boundedPhotoCopyFieldAndUnrestrictedGestureTesterPreserved = true,
             rectangularPhotoCopyFieldCoveredWithoutStretching = true,
-            paintControlSearchWithoutSpotlight = true,
+            paintControlTextCorruptionRequiredBeforeSpotlight = true,
+            renderedLabelMasksContainLightAndDarkInkAcrossBoards = true,
+            foregroundFixturesCoverActualLabels = true,
+            untouchedLabelRejectsControlEdgeDisturbanceAcrossBoards = true,
             topBlackjackBackAndResetIncluded = true, mediaAndCalibrationInactive = true,
             liveHardwareUnchanged = true };
 
@@ -97,19 +101,29 @@ public sealed partial class MainWindow
                 label + " omitted a button from its camera centers or foreground masks.");
             var screen = scene.CurrentBoardScreen;
             Require(context.RestrictAcquisitionToSearchRegions == (screen != BoardScreen.HandTracking) &&
-                    context.RequiresSearchIllumination == (screen != BoardScreen.Paint) &&
+                    context.RequiresSearchIllumination &&
                     (context.ContinuousSearchPolygon is not null) == (screen == BoardScreen.PhotoCopy),
                 label + " did not preserve its intended acquisition policy.");
+            Require(context.ExpectedScene!.BoardTriggerRegions?.Count == scene.CurrentBoardButtons.Count,
+                label + " omitted its generated control-label trigger masks.");
             long gameRevision = scene.BlackjackState.Revision;
             var ids = scene.CurrentBoardButtons.Select(button => button.Id).ToArray();
             for (int index = 0; index < ids.Length; index++)
             {
                 context = scene.GetHandAcquisitionContext(now)!;
                 var button = scene.CurrentBoardButtons[index];
-                var center = CameraPoint(button.Bounds.X + button.Bounds.Width / 2,
+                var buttonCenter = CameraPoint(button.Bounds.X + button.Bounds.Width / 2,
                     button.Bounds.Y + button.Bounds.Height / 2);
+                var trigger = context.ExpectedScene!.BoardTriggerRegions![index];
+                var control = context.ExpectedScene.BoardSearchRegions![index];
+                Require(trigger.Width > 0 && trigger.Height > 0 && trigger.X >= control.X && trigger.Y >= control.Y &&
+                        trigger.X + trigger.Width <= control.X + control.Width + 1e-9 &&
+                        trigger.Y + trigger.Height <= control.Y + control.Height + 1e-9 &&
+                        ContainsGeneratedInk(context.ExpectedScene, trigger),
+                    label + "/" + button.Label + " has no actual rendered letter ink in its label mask.");
+                var center = CameraPoint(trigger.X + trigger.Width / 2, trigger.Y + trigger.Height / 2);
                 var cameraCenter = context.StationarySearchCenters![index];
-                Require(Math.Abs(cameraCenter.X - center.X) < .1 && Math.Abs(cameraCenter.Y - center.Y) < .1,
+                Require(Math.Abs(cameraCenter.X - buttonCenter.X) < .1 && Math.Abs(cameraCenter.Y - buttonCenter.Y) < .1,
                     label + "/" + button.Label + " has the wrong camera crop center.");
                 var empty = Draw();
                 var emptyResult = new HandAcquisitionPresenceTracker().Update(size, size, size * 4, empty,
@@ -172,8 +186,16 @@ public sealed partial class MainWindow
                 for (int finger = 0; finger < 4; finger++)
                     Fill(occupied, (int)center.X - (loneBack ? 107 : 38) + finger * (loneBack ? 55 : 20),
                         (int)center.Y - height / 2, loneBack ? 49 : 18, height, 75, 95, 185);
-                var presence = new HandAcquisitionPresenceTracker().Update(size, size, size * 4, occupied,
-                    context.SearchPolygon, context.ExpectedScene, now, now);
+                var occupiedTracker = new HandAcquisitionPresenceTracker();
+                var firstArrival = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
+                    context, occupiedTracker, now);
+                Require(firstArrival.LightingHints.Count == 0 &&
+                        firstArrival.SearchRegions.SequenceEqual(emptyQuery.SearchRegions),
+                    label + "/" + button.Label + " accepted a single unconfirmed generated-label obstruction.");
+                now += TimeSpan.FromMilliseconds(125);
+                var pendingQuery = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
+                    context, occupiedTracker, now);
+                var presence = pendingQuery.Presence!;
                 if (!presence.Hints.Any(hint => Math.Abs(hint.Center.X - center.X) < 65 &&
                         Math.Abs(hint.Center.Y - center.Y) < 65 &&
                         hint.ControlCoverage is double coverage && double.IsFinite(coverage) && coverage >= .07))
@@ -189,23 +211,52 @@ public sealed partial class MainWindow
                         center, now, context.SearchPolygon,
                         expected = new { context.ExpectedScene.Width, context.ExpectedScene.Height,
                             context.ExpectedScene.CameraToBoard, context.ExpectedScene.BoardSearchRegions,
-                            context.ExpectedScene.BoardReferenceRegions },
+                            context.ExpectedScene.BoardReferenceRegions, context.ExpectedScene.BoardTriggerRegions },
                         presence
                     }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
                     throw new InvalidOperationException(label + "/" + button.Label +
-                        " missed stationary fingers on its first frame: " + presence.Reason + ". Diagnostic: " + directory);
+                        " missed stationary fingers after two fresh frames: " + presence.Reason + ". Diagnostic: " + directory);
                 }
                 var measured = presence.Hints.First(hint => Math.Abs(hint.Center.X - center.X) < 65 &&
                     Math.Abs(hint.Center.Y - center.Y) < 65 && hint.ControlCoverage is double coverage &&
                     double.IsFinite(coverage) && coverage >= .07);
-                var pendingQuery = Query(occupied, context);
                 Require(pendingQuery.LightingHints.Any(hint => hint.Center == measured.Center),
                     label + "/" + button.Label + " did not pass measured control evidence to illumination.");
-                Require(screen == BoardScreen.Paint
-                        ? pendingQuery.SearchRegions.Count > 0 &&
-                            pendingQuery.SearchRegions.Any(region => region == measured.SearchBounds)
-                        : pendingQuery.SearchRegions.Count == 0,
-                    label + "/" + button.Label + " searched before its spotlight, or lost Paint's unlit control crop.");
+                Require(pendingQuery.SearchRegions.Count == 0,
+                    label + "/" + button.Label + " searched before its spotlight was projected.");
+                Require(measured.ControlTriggerCoverage is double textCoverage && textCoverage >= .07,
+                    label + "/" + button.Label + " did not measure at least 7% of its actual control-label obstruction.");
+                var edge = LargestUnlabelledPart(control, trigger);
+                if (edge.Width * edge.Height >= control.Width * control.Height * .07)
+                {
+                    var edgeOnly = (byte[])empty.Clone();
+                    var edgeTopLeft = CameraPoint(edge.X, edge.Y);
+                    var edgeBottomRight = CameraPoint(edge.X + edge.Width, edge.Y + edge.Height);
+                    Fill(edgeOnly, (int)edgeTopLeft.X, (int)edgeTopLeft.Y,
+                        (int)(edgeBottomRight.X - edgeTopLeft.X),
+                        (int)(edgeBottomRight.Y - edgeTopLeft.Y), 75, 95, 185);
+                    var edgeTracker = new HandAcquisitionPresenceTracker();
+                    var edgeQuery = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, edgeOnly, now),
+                        context, edgeTracker, now);
+                    now += TimeSpan.FromMilliseconds(125);
+                    edgeQuery = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, edgeOnly, now),
+                        context, edgeTracker, now);
+                    Require(edgeQuery.Hints.Count == 0 && edgeQuery.LightingHints.Count == 0 &&
+                            edgeQuery.SearchRegions.SequenceEqual(emptyQuery.SearchRegions),
+                        label + "/" + button.Label + " illuminated or searched a control edge while its label remained intact.");
+                }
+                // The edge-only comparison advanced the fixture clock. Refresh
+                // measured obstruction before the scene accepts its exact frame.
+                if (edge.Width * edge.Height >= control.Width * control.Height * .07)
+                {
+                    pendingQuery = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
+                        context, occupiedTracker, now);
+                    Require(pendingQuery.Presence is { Hints.Count: > 0 },
+                        label + "/" + button.Label + " lost a confirmed stationary text obstruction.");
+                    presence = pendingQuery.Presence!;
+                    measured = presence.Hints.First(hint => Math.Abs(hint.Center.X - center.X) < 65 &&
+                        Math.Abs(hint.Center.Y - center.Y) < 65 && hint.ControlCoverage is >= .07);
+                }
                 var resetTracker = new HandAcquisitionPresenceTracker();
                 CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
                     context, resetTracker, now);
@@ -221,20 +272,22 @@ public sealed partial class MainWindow
                     Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
                         label + "/" + button.Label + " accepted motion-only or sub-7% foreground evidence.");
                 }
+                foreach (double? coverage in new double?[] { null, .069999, double.NaN,
+                             double.PositiveInfinity, double.NegativeInfinity })
+                {
+                    scene.CompleteHandAcquisition(context,
+                        [measured with { ControlTriggerCoverage = coverage }], [], now);
+                    Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
+                        label + "/" + button.Label + " accepted missing, sub-7%, or non-finite label obstruction.");
+                }
                 scene.CompleteHandAcquisition(context, presence.Hints, [], now);
                 var lit = scene.GetHandAcquisitionContext(now)!;
-                if (screen == BoardScreen.Paint)
-                    Require(lit.IlluminatedHint is null && CountWhite(Draw(), center) == CountWhite(empty, center),
-                        "Paint must retain its Exit search crop without projecting a spotlight.");
-                else
-                {
-                    Require(lit.IlluminatedHint is not null && CountWhite(Draw(), center) > CountWhite(empty, center) + 800,
-                        label + "/" + button.Label + " did not illuminate its control.");
-                    var focusedQuery = Query(occupied, lit);
-                    Require(focusedQuery.SearchRegions.Count is > 0 and <= 2 &&
-                            focusedQuery.SearchRegions.Contains(lit.IlluminatedHint!.SearchBounds),
-                        label + "/" + button.Label + " did not focus inference on its illuminated point of interest.");
-                }
+                Require(lit.IlluminatedHint is not null && CountWhite(Draw(), center) > CountWhite(empty, center) + 800,
+                    label + "/" + button.Label + " did not illuminate its control.");
+                var focusedQuery = Query(occupied, lit);
+                Require(focusedQuery.SearchRegions.Count is > 0 and <= 2 &&
+                        focusedQuery.SearchRegions.Contains(lit.IlluminatedHint!.SearchBounds),
+                    label + "/" + button.Label + " did not focus inference on its illuminated point of interest.");
                 Require(scene.CurrentBoardScreen == screen && scene.BlackjackState.Revision == gameRevision &&
                         scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(ids) &&
                         scene.ActiveHandSpotlightCount == 0 && scene.HoveredBoardButtons.Count == 0 &&
@@ -274,6 +327,40 @@ public sealed partial class MainWindow
                 if (pixels[offset] > 245 && pixels[offset + 1] > 245 && pixels[offset + 2] > 245) count++;
             }
             return count;
+        }
+        static HandTrackingBounds LargestUnlabelledPart(HandTrackingBounds control, HandTrackingBounds text)
+        {
+            const double gap = .004;
+            HandTrackingBounds[] regions =
+            [
+                new(control.X, control.Y, Math.Max(0, text.X - gap - control.X), control.Height),
+                new(text.X + text.Width + gap, control.Y,
+                    Math.Max(0, control.X + control.Width - text.X - text.Width - gap), control.Height),
+                new(control.X, control.Y, control.Width, Math.Max(0, text.Y - gap - control.Y)),
+                new(control.X, text.Y + text.Height + gap, control.Width,
+                    Math.Max(0, control.Y + control.Height - text.Y - text.Height - gap))
+            ];
+            return regions.MaxBy(region => region.Width * region.Height);
+        }
+        static bool ContainsGeneratedInk(HandAcquisitionSceneImage expected, HandTrackingBounds text)
+        {
+            int left = (int)Math.Ceiling(text.X * expected.Width), top = (int)Math.Ceiling(text.Y * expected.Height);
+            int right = (int)Math.Floor((text.X + text.Width) * expected.Width);
+            int bottom = (int)Math.Floor((text.Y + text.Height) * expected.Height);
+            var values = new List<double>();
+            for (int y = top; y <= bottom; y++)
+            for (int x = left; x <= right; x++)
+            {
+                int offset = (y * expected.Width + x) * 4;
+                values.Add(expected.Bgra[offset] * .114 + expected.Bgra[offset + 1] * .587 + expected.Bgra[offset + 2] * .299);
+            }
+            if (values.Count < 20) return false;
+            values.Sort();
+            double median = values[values.Count / 2];
+            int ink = values.Count(value => Math.Abs(value - median) > 24);
+            // This detects either bright letters on a dark pane or dark letters
+            // on a gold control; a flat control-color patch cannot satisfy it.
+            return ink >= 20 && ink < values.Count * .75;
         }
         static void Require(bool condition, string message)
         {

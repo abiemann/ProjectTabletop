@@ -20,7 +20,7 @@ public sealed partial class MainWindow
         {
             frame.Timestamp, cameraWidth = frame.Width, cameraHeight = frame.Height, frame.Stride,
             expected.Width, expected.Height, expected.CameraToBoard, expected.BoardSearchRegions,
-            expected.BoardReferenceRegions, context!.Revision,
+            expected.BoardReferenceRegions, expected.BoardTriggerRegions, context!.Revision,
             context.SearchPolygon, context.IlluminatedHint, context.IlluminationStartedAt,
             lighting = _scene.GetHandAcquisitionDiagnostics(), detection = _lastHandAcquisitionDetection
         });
@@ -52,7 +52,7 @@ public sealed partial class MainWindow
         Require(ready.ObserveMotion, "The settled Blackjack button area did not start watching.");
         var center = BoardPoint(.55, .83);
         var hint = new HandAcquisitionHint(new(center.X - 140, center.Y - 140, 280, 280),
-            center, 82, now, .05, ControlCoverage: .10);
+            center, 82, now, .05, ControlCoverage: .10, ControlTriggerCoverage: .10);
         var baseline = Draw();
         ready = scene.GetHandAcquisitionContext(now)!;
         Require(ready.ExpectedScene is { Width: 1000, Height: 1000 } expected &&
@@ -67,11 +67,14 @@ public sealed partial class MainWindow
             scene.CompleteHandAcquisition(ready, [hint with { ControlCoverage = coverage }], [], now);
             Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && !IsWhite(Draw(), center),
                 "Unmeasured, sub-7%, or non-finite foreground evidence started acquisition illumination.");
+            scene.CompleteHandAcquisition(ready, [hint with { ControlTriggerCoverage = coverage }], [], now);
+            Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && !IsWhite(Draw(), center),
+                "Unmeasured, sub-7%, or non-finite label evidence started acquisition illumination.");
         }
         scene.CompleteHandAcquisition(ready, [hint with { ObservedAt = now.AddMilliseconds(-1) }], [], now);
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
             "Foreground evidence from another camera frame started acquisition illumination.");
-        scene.CompleteHandAcquisition(ready, [hint with { ControlCoverage = .07 }], [], now);
+        scene.CompleteHandAcquisition(ready, [hint with { ControlCoverage = .07, ControlTriggerCoverage = .07 }], [], now);
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is not null,
             "Fresh foreground covering exactly 7% of a control did not get acquisition illumination.");
         var lit = Draw();
@@ -102,7 +105,10 @@ public sealed partial class MainWindow
         // and the original illuminated control, even when the hand holds still.
         foreach (double? coverage in new double?[] { null, .069999, double.NaN,
                      double.PositiveInfinity, double.NegativeInfinity })
+        {
             AssertInvalidRenewal([hint with { ControlCoverage = coverage }], refreshObservation: true);
+            AssertInvalidRenewal([hint with { ControlTriggerCoverage = coverage }], refreshObservation: true);
+        }
         AssertInvalidRenewal([], refreshObservation: true);
         AssertInvalidRenewal([hint], refreshObservation: false);
         AssertInvalidRenewal([hint with { Center = BoardPoint(.3, .83) }], refreshObservation: true);

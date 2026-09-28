@@ -199,8 +199,6 @@ public sealed partial class SceneCompositor
         bool selected = bet && decimal.TryParse(button.Id[7..], NumberStyles.Integer,
             CultureInfo.InvariantCulture, out var amount) && amount == selectedBet;
         bool primary = button.Id == "bj-deal";
-        bool isMenu = button.Id == "menu";
-        bool reset = button.Id == "bj-reset";
         hovered &= enabled;
         Color top = !enabled ? ThemeColor(30, 52, 43) : primary ? ThemeColor(235, 208, 148)
             : hovered ? ThemeColor(51, 99, 77) : ThemeColor(28, 61, 48);
@@ -233,14 +231,8 @@ public sealed partial class SceneCompositor
         }
         else
         {
-            string caption = button.Id switch
-            {
-                "bj-deal" => "DEAL", "bj-hit" => "HIT", "bj-stand" => "STAND",
-                "bj-double" => "DOUBLE", "bj-split" => "SPLIT", "bj-reset" => "Reset chips",
-                "menu" => "‹  Back to menu", _ => button.Label
-            };
-            CasinoText(ds, caption, new Rect(rect.X + 8, rect.Y + (primary ? -7 : 0), rect.Width - 16, rect.Height),
-                isMenu ? 21 : reset ? 18 : 27, ink, "Bahnschrift", true);
+            var text = CasinoButtonTextSpec(button);
+            CasinoText(ds, text.Caption, text.Bounds, text.Size, ink, "Bahnschrift", true);
             if (primary)
                 CasinoText(ds, "NEW HAND", new Rect(rect.X + 8, rect.Bottom - 33, rect.Width - 16, 22), 13,
                     ThemeColor(63, 55, 29), "Bahnschrift", true);
@@ -491,7 +483,11 @@ public sealed partial class SceneCompositor
     private static void CasinoText(CanvasDrawingSession ds, string text, Rect rect, float size, Color color,
         string family = "Segoe UI", bool bold = false)
     {
-        using var format = new CanvasTextFormat
+        using var format = CasinoTextFormat(size, family, bold);
+        ds.DrawText(text, rect, color, format);
+    }
+
+    private static CanvasTextFormat CasinoTextFormat(float size, string family, bool bold) => new()
         {
             FontFamily = family, FontSize = size,
             FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal,
@@ -499,6 +495,24 @@ public sealed partial class SceneCompositor
             VerticalAlignment = CanvasVerticalAlignment.Center,
             WordWrapping = CanvasWordWrapping.NoWrap
         };
-        ds.DrawText(text, rect, color, format);
+    private static (string Caption, Rect Bounds, float Size) CasinoButtonTextSpec(BoardButton button)
+    {
+        var b = button.Bounds;
+        var rect = new Rect(b.X * BoardSurfaceSize, b.Y * BoardSurfaceSize,
+            b.Width * BoardSurfaceSize, b.Height * BoardSurfaceSize);
+        if (button.Id.StartsWith("bj-bet-", StringComparison.Ordinal))
+        {
+            string value = button.Id[7..];
+            return (value, new Rect(rect.X + rect.Width / 2 - 24,
+                rect.Y + rect.Height / 2 - 18, 48, 36), value.Length >= 3 ? 19 : 23);
+        }
+        string caption = button.Id switch
+        {
+            "bj-deal" => "DEAL", "bj-hit" => "HIT", "bj-stand" => "STAND",
+            "bj-double" => "DOUBLE", "bj-split" => "SPLIT", "bj-reset" => "Reset chips",
+            "menu" => "‹  Back to menu", _ => button.Label
+        };
+        return (caption, new Rect(rect.X + 8, rect.Y + (button.Id == "bj-deal" ? -7 : 0),
+            rect.Width - 16, rect.Height), button.Id == "menu" ? 21 : button.Id == "bj-reset" ? 18 : 27);
     }
 }

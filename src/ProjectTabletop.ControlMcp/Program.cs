@@ -70,7 +70,7 @@ static async Task RunMcpAsync()
             Tool("show_board_menu", "Show the board app menu and enable hand tracking for pinch selection."),
             Tool("show_hand_tracking_test", "Open the built-in Hand-Tracking gesture test and enable hand tracking."),
             Tool("show_photo_copy", "Open Photo Copy on grey output: bottom controls offer Exit, Swirl and Copy. Swirl repeats an object photo and becomes Clear; Copy immediately saves a PNG with a photocopier sound."),
-            Tool("show_paint", "Open GPU fluid Paint: physical disturbances deposit spreading, blending pigment and metallic particles. Exit and Save float at the bottom sides; spotlights are disabled."),
+            Tool("show_paint", "Open GPU fluid Paint: physical disturbances deposit spreading, blending pigment and metallic particles. Exit and Save float at the bottom sides; only interference with their text enables a local button light. Canvas hand spotlights stay disabled."),
             Tool("show_blackjack", "Open the virtual-chip Blackjack table and laptop preview without opening projector output or starting the camera."),
             BlackjackActionTool(),
             Tool("capture_blackjack_preview", "Save the current Blackjack table as an unmapped laptop-preview PNG."),

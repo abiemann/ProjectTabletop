@@ -198,7 +198,7 @@ public sealed partial class MainWindow
                     }
                     _lastHandEngineFrameTime = frame.Timestamp;
                     var detectionStarted = Stopwatch.GetTimestamp();
-                    var acquisitionHints = FindHandAcquisitionHints(frame, acquisitionContext, engineReset);
+                    var acquisitionHints = FindHandAcquisitionHints(frame, acquisitionContext, generation);
                     var hands = _handEngine.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
                         acquisitionHints.SearchRegions,
                         restrictAcquisitionToSearchRegions: acquisitionContext?.RestrictAcquisitionToSearchRegions == true);

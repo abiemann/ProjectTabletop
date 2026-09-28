@@ -33,6 +33,10 @@ public sealed partial class MainWindow
             case "set_board_facing":
                 return SetBoardFacingForControl(parameters);
 #if DEBUG
+            case "set_hand_diagnostic_logging":
+                _boardHandDiagnosticLogging = parameters.GetProperty("enabled").GetBoolean();
+                LogHandTrackingEvent("board_diagnostic_logging", new { enabled = _boardHandDiagnosticLogging }, force: true);
+                return new { enabled = _boardHandDiagnosticLogging, status = _handDetectionLog?.Status };
             case "verify_photo_copy_memory_save":
                 return await VerifyPhotoCopyMemorySaveAsync();
             case "verify_board_resolution":
@@ -165,6 +169,7 @@ public sealed partial class MainWindow
                     spreadOutHandCount = SpreadOutHandCount,
                     fourFingerHandCount = FourFingerHandCount,
                     fingerSelectionFeedback = _scene.CurrentFingerSelectionFeedback,
+                    lastBoardSelection = _scene.GetLastHandBoardSelection(),
                     handTestStatus = _scene.HandTrackingTestStatus,
                     lastHandDetection = _lastHandDetection,
                     handDetectionLog = _handDetectionLog?.Status,
