@@ -14,7 +14,7 @@ internal static class MonopolyBoardRegression
         CheckExitSaveAndResume();
         CheckBackgroundSaveKeepsOtherBoard();
         Console.WriteLine("Monopoly board verification passed: 2-6 human/AI setup, shared pinch and finger controls, " +
-            "disabled/held/stale event barriers, turn actions, exit confirmation, failed save recovery, resume and background save isolation.");
+            "disabled/held/stale event barriers, turn actions, exit drawer, failed save recovery, resume and background save isolation.");
     }
 
     private static void CheckSetupAndSharedTargets()
@@ -111,11 +111,16 @@ internal static class MonopolyBoardRegression
         Pinch(board, "mp-roll"); Pinch(board, "mp-buy");
         var preserved = board.MonopolyState;
         Separate(board, "mp-exit");
-        Require(board.Screen == BoardScreen.Monopoly && board.MonopolyState.Phase == MonopolyPhase.ExitConfirmation &&
-            board.Buttons.All(button => button.Id != "mp-roll"), "Mid-game Exit navigated before asking to save.");
+        Require(board.Screen == BoardScreen.Monopoly && board.MonopolyDrawerOpen &&
+            board.MonopolyState.Phase == MonopolyPhase.ExitConfirmation &&
+            board.Buttons.All(button => button.Id != "mp-roll") &&
+            Button(board, "mp-exit-cancel").Label == "v" && Button(board, "mp-save-exit").Label == "Save and Exit" &&
+            board.Buttons.All(button => button.Id != "mp-exit-without-saving"),
+            "The active drawer navigated before saving or exposed the old discard route.");
         Targets(board);
         Pinch(board, "mp-exit-cancel");
-        Require(board.Screen == BoardScreen.Monopoly && board.MonopolyState.Phase == preserved.Phase &&
+        Require(board.Screen == BoardScreen.Monopoly && !board.MonopolyDrawerOpen &&
+            Button(board, "mp-exit").Label == "^" && board.MonopolyState.Phase == preserved.Phase &&
             board.MonopolyState.Players.SequenceEqual(preserved.Players), "Cancel exit changed the game instead of keeping it open.");
         Pinch(board, "mp-exit"); Separate(board, "mp-save-exit");
         Require(board.MonopolySaveRequested && board.MonopolyState.Phase == MonopolyPhase.Saving,
@@ -126,7 +131,7 @@ internal static class MonopolyBoardRegression
             !board.CompleteMonopolySave(firstRequest - 1, success: true, Next()),
             "Busy or stale save actions changed the open game.");
         Require(board.CompleteMonopolySave(firstRequest, success: false, Next(), "Disk is full") &&
-            !board.MonopolySaveRequested && board.Screen == BoardScreen.Monopoly &&
+            !board.MonopolySaveRequested && board.Screen == BoardScreen.Monopoly && board.MonopolyDrawerOpen &&
             board.MonopolyState.Phase == MonopolyPhase.ExitConfirmation && board.MonopolyState.Status.Contains("Disk is full"),
             "A failed save closed the game, left it busy or hid its error.");
         Require(!board.CompleteMonopolySave(firstRequest, success: true, Next()), "A failed request later accepted a stale success.");
@@ -154,11 +159,17 @@ internal static class MonopolyBoardRegression
         Pinch(loaded, "mp-resume");
         Require(loaded.MonopolyState.Phase == preserved.Phase && loaded.MonopolyState.Players.SequenceEqual(preserved.Players),
             "A fresh board did not resume the persisted game.");
-        Pinch(loaded, "mp-exit"); Pinch(loaded, "mp-exit-without-saving");
-        Require(loaded.Screen == BoardScreen.Menu && !loaded.MonopolySaveRequested,
-            "Exit without saving failed to return to the launcher.");
+        Pinch(loaded, "mp-exit"); Pinch(loaded, "mp-save-exit");
+        Require(loaded.Screen == BoardScreen.Monopoly && loaded.MonopolySaveRequested &&
+            loaded.CompleteMonopolySave(loaded.MonopolySaveRequestId, success: true, Next()) && loaded.Screen == BoardScreen.Menu,
+            "The resumed game's Save and Exit route did not retain the game until its save completed.");
         var landing = new BoardSession(); landing.ShowMonopoly(Next()); Pinch(landing, "mp-exit");
-        Require(landing.Screen == BoardScreen.Menu, "Exit from an unstarted board asked to save an empty game.");
+        Require(landing.Screen == BoardScreen.Monopoly && landing.MonopolyDrawerOpen &&
+            Button(landing, "mp-exit-game").Label == "Exit Game" && !landing.MonopolySaveRequested,
+            "The unstarted board did not open an Exit Game drawer without a save request.");
+        Pinch(landing, "mp-exit-game");
+        Require(landing.Screen == BoardScreen.Menu && !landing.MonopolyDrawerOpen,
+            "Exit Game from an unstarted board failed to close the drawer and return to the launcher.");
     }
 
     private static void CheckAiTurnInputBarrier()
@@ -224,12 +235,14 @@ internal static class MonopolyBoardRegression
     }
     private static void Pinch(BoardSession board, string id)
     {
+        if (id is "mp-save-exit" or "mp-exit-game") Next(350);
         var time = Next(); var button = Button(board, id);
         Require(board.Update([Sample(button, ++_eventId, time)], time, time)?.ButtonId == id,
             $"Shared pinch rejected {id} during {board.MonopolyState.Phase}.");
     }
     private static void Separate(BoardSession board, string id)
     {
+        if (id is "mp-save-exit" or "mp-exit-game") Next(350);
         var aim = Aim(Button(board, id));
         var hand = new BoardHandSample(double.NaN, double.NaN, DateTimeOffset.MinValue, 0)
             { TrackingId = 902, FourFingersExtended = true, FingerAim = aim, FingersTogether = true };

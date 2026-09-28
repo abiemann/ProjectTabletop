@@ -9,7 +9,7 @@ public sealed partial class SceneCompositor
 {
     private readonly Func<DateTimeOffset> _monopolyClock;
     private CanvasRenderTarget? _monopolyPreviewTarget;
-    private (long Revision, long DiceRevision, string Hover, int Feedback, double Aspect)? _monopolyPreviewState;
+    private (long Revision, long DiceRevision, long SessionRevision, int DrawerFrame, string Hover, int Feedback, double Aspect)? _monopolyPreviewState;
     public double MonopolyPreviewAspect { get { lock (_gate) return PaintBoardAspect(); } }
 
     public MonopolySnapshot MonopolyState { get { lock (_gate) return _boardSession.MonopolyState; } }
@@ -103,14 +103,16 @@ public sealed partial class SceneCompositor
             bool dicePresented = HasMonopolyDicePresentation(now);
             var hovered = HoveredBoardButtons;
             var feedback = CurrentFingerSelectionFeedback;
-            var key = (state.Revision, MonopolyDicePresentationRevision, string.Join(",", hovered),
+            var key = (state.Revision, MonopolyDicePresentationRevision, _boardSession.Revision,
+                MonopolyDrawerFrame(now), string.Join(",", hovered),
                 FingerSelectionRenderStep(feedback), aspect);
             if (_monopolyPreviewState != key)
             {
                 using var surface = _monopolyPreviewTarget!.CreateDrawingSession();
                 surface.Transform = BoardRasterTransform(_monopolyPreviewTarget);
                 DrawMonopolyBoard(surface, state, _boardSession.Buttons, hovered, feedback, aspect,
-                    hideDiceDisplay: dicePresented, rolling: HasMonopolyDiceAnimation(now));
+                    hideDiceDisplay: dicePresented, rolling: HasMonopolyDiceAnimation(now),
+                    drawerOpen: _boardSession.MonopolyDrawerOpen, drawerProgress: MonopolyDrawerProgress(now));
                 _monopolyPreviewState = key;
             }
             var rendered = _monopolyPreviewTarget!;

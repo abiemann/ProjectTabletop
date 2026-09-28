@@ -194,6 +194,7 @@ public sealed partial class BoardSession
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
         ClearMonopolyPresentationHold();
+        ClearMonopolyDrawerUi();
         AdvanceMonopolyPresentation(now);
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
@@ -210,6 +211,7 @@ public sealed partial class BoardSession
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
         ClearMonopolyPresentationHold();
+        ClearMonopolyDrawerUi();
         AdvanceMonopolyPresentation(now);
         if (screen == BoardScreen.Globe) _globe.Start(now);
         Screen = screen;

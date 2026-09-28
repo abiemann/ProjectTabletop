@@ -48,25 +48,42 @@ public sealed partial class SceneCompositor
     private static void DrawMonopolyBoard(CanvasDrawingSession ds, MonopolySnapshot game,
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
         IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback, double boardAspect = 1, bool hideDiceDisplay = false,
-        bool rolling = false)
+        bool rolling = false, bool drawerOpen = false, float drawerProgress = 1)
     {
         DrawMonopolyFrame(ds);
         for (int index = 0; index < MonopolyGame.Spaces.Count; index++)
             DrawMonopolySpace(ds, MonopolyGame.Spaces[index], game, boardAspect);
-        DrawMonopolyCenter(ds, game, boardAspect, hideDiceDisplay);
-
-        if (game.Phase is MonopolyPhase.ExitConfirmation or MonopolyPhase.Saving)
-            DrawMonopolyExitPanel(ds, game, boardAspect);
-
-        foreach (var button in buttons)
+        DrawMonopolyCenter(ds, game, boardAspect, hideDiceDisplay, drawerOpen);
+        if (drawerOpen)
         {
-            if (rolling && button.Id != "mp-exit") continue;
-            DrawMonopolyButton(ds, button, hovered.Contains(button.Id), boardAspect);
-            DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, MonopolyGold);
+            // Slide within the felt; the drawer never covers property tiles.
+            using var clip = CanvasGeometry.CreateRectangle(ds.Device, new Rect(180, 180, 640, 640));
+            using var layer = ds.CreateLayer(1, clip);
+            float slide = MonopolyDrawerSlide(drawerProgress);
+            DrawMonopolyDrawer(ds, game, slide);
+            DrawButtons(slide);
         }
+        else DrawButtons(0);
         MonopolyText(ds, rolling ? "Rolling the dice…" :
             FingerSelectionCaption(selectionFeedback, "Bring fingers together. Aim, then separate index."),
             new Rect(145, 958, 710, 24), 14, MonopolyGold);
+
+        void DrawButtons(float slide)
+        {
+            foreach (var button in buttons)
+            {
+                if (rolling && button.Id != "mp-exit") continue;
+                var previous = ds.Transform;
+                if (drawerOpen && button.Id != "mp-exit-cancel")
+                    ds.Transform = Matrix3x2.CreateTranslation(0, slide) * previous;
+                try
+                {
+                    DrawMonopolyButton(ds, button, hovered.Contains(button.Id), boardAspect);
+                    DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, MonopolyGold);
+                }
+                finally { ds.Transform = previous; }
+            }
+        }
     }
 
     private static void DrawMonopolyFrame(CanvasDrawingSession ds)
@@ -314,7 +331,7 @@ public sealed partial class SceneCompositor
     }
 
     private static void DrawMonopolyCenter(CanvasDrawingSession ds, MonopolySnapshot game, double boardAspect,
-        bool hideDiceDisplay = false)
+        bool hideDiceDisplay = false, bool drawerOpen = false)
     {
         if (game.Phase == MonopolyPhase.Landing)
         {
@@ -326,12 +343,10 @@ public sealed partial class SceneCompositor
             MonopolyText(ds, "Human players and AI opponents share one beautiful board.", new Rect(242, 687, 516, 42), 16, MonopolyMuted, wrap: true);
             return;
         }
-        bool headerExit = game.Phase is not MonopolyPhase.ExitConfirmation and not MonopolyPhase.Saving;
-        // Leave a full gesture-sized Exit plate on the felt, clear of the
-        // property perimeter and every phase's status/actions below the header.
-        MonopolyText(ds, "MONOPOLY", headerExit ? new Rect(465, 207, 340, 49) : new Rect(230, 207, 540, 49),
+        bool headerCaret = !drawerOpen;
+        MonopolyText(ds, "MONOPOLY", headerCaret ? new Rect(465, 207, 340, 49) : new Rect(230, 207, 540, 49),
             36, MonopolyIvory, "Georgia", true);
-        DrawMonopolyRule(ds, 266, 100, headerExit ? 635 : 500);
+        DrawMonopolyRule(ds, 266, 100, headerCaret ? 635 : 500);
         if (game.Phase == MonopolyPhase.Setup)
         {
             MonopolyText(ds, "YOUR TABLE, YOUR COMPANY", new Rect(226, 287, 548, 28), 18, MonopolyGold);
@@ -363,6 +378,7 @@ public sealed partial class SceneCompositor
             return;
         }
         DrawMonopolyRoster(ds, game, boardAspect);
+        if (drawerOpen) return;
         DrawMonopolyPlaque(ds, new Rect(224, 474, 552, 119));
         var active = game.Players.ElementAtOrDefault(game.ActivePlayerIndex);
         string phase = game.Phase switch
@@ -447,18 +463,6 @@ public sealed partial class SceneCompositor
         MonopolyText(ds, game.Status, new Rect(245, 768, 510, 27), 13, MonopolyMuted);
     }
 
-    private static void DrawMonopolyExitPanel(CanvasDrawingSession ds, MonopolySnapshot game, double boardAspect)
-    {
-        // Modal ink and all actions remain on a flat opaque interior. Shared
-        // text-corruption acquisition sees the same captions that players see.
-        ds.FillRectangle(new Rect(180, 180, 640, 640), ThemeColor(3, 17, 12, 220));
-        DrawMonopolyPlaque(ds, new Rect(237, 279, 526, 487), true);
-        DrawMonopolyCrown(ds, new Vector2(500, 327), 25, MonopolyGold, boardAspect);
-        MonopolyText(ds, game.Phase == MonopolyPhase.Saving ? "Saving your empire" : "Leaving the table?", new Rect(260, 365, 480, 50), 30, MonopolyIvory, "Georgia", true);
-        MonopolyText(ds, string.IsNullOrWhiteSpace(game.Status) ? "Save this game and return to it later." : game.Status,
-            new Rect(268, 421, 464, 42), 16, MonopolyMuted, wrap: true);
-    }
-
     private static void DrawMonopolyPlaque(CanvasDrawingSession ds, Rect rect, bool active = false)
     {
         ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 3, rect.Width, rect.Height), 13, 13, ThemeColor(2, 13, 8, 100));
@@ -480,7 +484,7 @@ public sealed partial class SceneCompositor
     private static CanvasTextFormat MonopolyButtonTextFormat(BoardButton button) => new()
     {
         FontFamily = "Bahnschrift", FontWeight = FontWeights.SemiBold,
-        FontSize = button.Id == "mp-exit" ? 36 : button.Label is "+" or "−" or "-" ? 28 : button.Id == "mp-roll" ? 26 :
+        FontSize = button.Label is "^" or "v" ? 34 : button.Label is "+" or "−" or "-" ? 28 : button.Id == "mp-roll" ? 26 :
             button.Bounds.Height < .05 ? 17 : button.Id is "mp-start-game" or "mp-start" ? 26 :
             button.Bounds.Width < .1 ? 24 : button.Label.Length > 15 ? 18 : 22,
         HorizontalAlignment = CanvasHorizontalAlignment.Center,
@@ -492,12 +496,13 @@ public sealed partial class SceneCompositor
     {
         var b = button.Bounds;
         var rect = new Rect(b.X * BoardSurfaceSize, b.Y * BoardSurfaceSize, b.Width * BoardSurfaceSize, b.Height * BoardSurfaceSize);
-        bool primary = button.Id is "mp-roll" or "mp-start-game" or "mp-start" or "mp-buy" or "mp-end-turn" or "mp-save-exit" or "mp-new-game";
+        bool caret = button.Label is "^" or "v";
+        bool primary = button.Id is "mp-roll" or "mp-start-game" or "mp-start" or "mp-buy" or "mp-end-turn" or "mp-save-exit" or "mp-exit-game" or "mp-new-game";
         bool danger = button.Id is "mp-bankrupt" or "mp-exit-without-saving";
         bool enabled = button.Enabled;
         hovered &= enabled;
-        float radius = button.Id == "mp-roll" ? (float)rect.Height / 2 : (float)Math.Min(13, rect.Height / 3);
-        Color top = !enabled ? ThemeColor(40, 56, 42) : primary ? ThemeColor(241, 216, 152) : danger ? ThemeColor(90, 42, 36) : hovered ? ThemeColor(47, 91, 65) : ThemeColor(31, 66, 47);
+        float radius = button.Id == "mp-roll" || caret ? (float)rect.Height / 2 : (float)Math.Min(13, rect.Height / 3);
+        Color top = !enabled ? ThemeColor(40, 56, 42) : primary ? ThemeColor(241, 216, 152) : danger ? ThemeColor(90, 42, 36) : hovered ? ThemeColor(47, 91, 65) : caret ? ThemeColor(22, 56, 39) : ThemeColor(31, 66, 47);
         Color bottom = !enabled ? ThemeColor(24, 39, 29) : primary ? ThemeColor(179, 139, 67) : danger ? ThemeColor(56, 24, 21) : ThemeColor(13, 36, 26);
         ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 4, rect.Width, rect.Height), radius, radius, ThemeColor(0, 12, 5, 140));
         using var surface = new CanvasLinearGradientBrush(ds.Device, top, bottom)
@@ -648,25 +653,53 @@ public sealed partial class SceneCompositor
             DrawMonopolyCrown(ds, new Vector2(0, -3), 22, MonopolyGold);
             for (int side = -1; side <= 1; side += 2)
             {
+                var root = new Vector2(side * 14, 50);
+                var firstControl = new Vector2(side * 66, 32);
+                var secondControl = new Vector2(side * 76, -2);
+                var tip = new Vector2(side * 52, -36);
                 using var path = new CanvasPathBuilder(ds.Device);
-                path.BeginFigure(new Vector2(side * 14, 50));
-                path.AddCubicBezier(new(side * 66, 32), new(side * 76, -2), new(side * 52, -36));
+                path.BeginFigure(root);
+                path.AddCubicBezier(firstControl, secondControl, tip);
                 path.EndFigure(CanvasFigureLoop.Open);
                 using var stem = CanvasGeometry.CreatePath(path);
                 ds.DrawGeometry(stem, ThemeColor(224, 192, 121, 160), 1.5f);
                 for (int leaf = 0; leaf < 6; leaf++)
                 {
-                    float angle = (.24f + leaf * .20f) * MathF.PI;
-                    var point = new Vector2(side * (44 + MathF.Sin(angle) * 19), 38 - leaf * 12);
-                    var leafPrevious = ds.Transform;
-                    ds.Transform = Matrix3x2.CreateRotation(side * (-.50f + leaf * .13f), point) * ds.Transform;
-                    ds.FillEllipse(point, 4.7f, 9, ThemeColor(224, 192, 121, 170));
-                    ds.Transform = leafPrevious;
+                    // Share the branch's exact curve, so every leaf grows
+                    // from the stem instead of floating beside the crest.
+                    float t = .12f + leaf * .14f, u = 1 - t;
+                    var attachment = u * u * u * root + 3 * u * u * t * firstControl +
+                        3 * u * t * t * secondControl + t * t * t * tip;
+                    var tangent = Vector2.Normalize(3 * u * u * (firstControl - root) +
+                        6 * u * t * (secondControl - firstControl) + 3 * t * t * (tip - secondControl));
+                    var outward = side * new Vector2(-tangent.Y, tangent.X);
+                    var direction = Vector2.Normalize(.83f * tangent + .55f * outward);
+                    DrawMonopolyLaurelLeaf(ds, attachment, direction, 18 - leaf * .7f);
                 }
             }
             DrawMonopolyDiamond(ds, new Vector2(0, 51), 5, MonopolyGold);
         }
         finally { ds.Transform = previous; }
+    }
+
+    private static void DrawMonopolyLaurelLeaf(CanvasDrawingSession ds, Vector2 attachment,
+        Vector2 direction, float length)
+    {
+        var normal = new Vector2(-direction.Y, direction.X);
+        var root = attachment + direction * 1.5f;
+        var tip = attachment + direction * length;
+        float width = length * .25f;
+        using var path = new CanvasPathBuilder(ds.Device);
+        path.BeginFigure(root);
+        path.AddCubicBezier(root + direction * length * .24f + normal * width,
+            tip - direction * length * .30f + normal * width, tip);
+        path.AddCubicBezier(tip - direction * length * .30f - normal * width,
+            root + direction * length * .24f - normal * width, root);
+        path.EndFigure(CanvasFigureLoop.Closed);
+        using var leaf = CanvasGeometry.CreatePath(path);
+        ds.DrawLine(attachment, root + direction * 2, MonopolyGold, 1.3f);
+        ds.FillGeometry(leaf, ThemeColor(224, 192, 121, 220));
+        ds.DrawLine(root + direction, tip - direction * 2, ThemeColor(45, 76, 43, 180), .65f);
     }
 
     private static void DrawMonopolyCrown(CanvasDrawingSession ds, Vector2 center, float size, Color color, double boardAspect = 1)

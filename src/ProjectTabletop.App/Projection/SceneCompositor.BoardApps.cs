@@ -23,6 +23,7 @@ public sealed partial class SceneCompositor
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision,
         long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long MonopolyRevision, long MonopolyDiceRevision,
+        long MonopolySessionRevision, int MonopolyDrawerFrame,
         long GlobeRevision, long GlobeFrame);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
@@ -163,6 +164,8 @@ public sealed partial class SceneCompositor
             paint ? GetPaintSaveStatus(paintNow) : null, paint && _boardSession.PaintSaveEnabled,
             _boardSession.Screen == BoardScreen.Monopoly ? _boardSession.MonopolyState.Revision : 0,
             _boardSession.Screen == BoardScreen.Monopoly ? MonopolyDicePresentationRevision : 0,
+            _boardSession.Screen == BoardScreen.Monopoly ? _boardSession.Revision : 0,
+            _boardSession.Screen == BoardScreen.Monopoly ? MonopolyDrawerFrame(monopolyNow) : -1,
             globe ? _boardSession.GetGlobeSnapshot(globeNow).Revision : 0,
             globe ? GlobeVisualFrame(globeNow) : 0);
         // Cursor motion is drawn separately. Reuse the UI texture until its
@@ -215,7 +218,8 @@ public sealed partial class SceneCompositor
                 DrawMonopolyBoard(surface, monopolyPresented, _boardSession.Buttons,
                     handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback,
                     PaintBoardAspect(), hideDiceDisplay: monopolyDicePresented,
-                    rolling: HasMonopolyDiceAnimation(monopolyNow));
+                    rolling: HasMonopolyDiceAnimation(monopolyNow), drawerOpen: _boardSession.MonopolyDrawerOpen,
+                    drawerProgress: MonopolyDrawerProgress(monopolyNow));
             }
             else if (globe)
             {

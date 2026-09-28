@@ -2,14 +2,21 @@ namespace ProjectTabletop.Interaction;
 
 public sealed partial class BoardSession
 {
+    public static readonly TimeSpan MonopolyDrawerOpeningDuration = TimeSpan.FromMilliseconds(300);
     private readonly MonopolyGame _monopoly;
     private long _monopolySaveRequestId;
     private long _lastRelayedMonopolyRollSequence;
     private DateTimeOffset? _monopolyPresentationUntil;
     private DateTimeOffset _monopolyPresentationObservedAt = DateTimeOffset.MinValue;
+    private bool _monopolyInactiveDrawerOpen;
+    private DateTimeOffset? _monopolyDrawerOpenedAt;
+    private bool _monopolyDrawerOpeningReady;
     public MonopolySnapshot MonopolyState => _monopoly.Snapshot;
     public bool MonopolySaveRequested => _monopoly.Snapshot.Phase == MonopolyPhase.Saving;
     public long MonopolySaveRequestId => _monopolySaveRequestId;
+    public bool MonopolyDrawerOpen => Screen == BoardScreen.Monopoly && (_monopolyInactiveDrawerOpen ||
+        MonopolyState.Phase is MonopolyPhase.ExitConfirmation or MonopolyPhase.Saving);
+    public DateTimeOffset? MonopolyDrawerOpenedAt => MonopolyDrawerOpen ? _monopolyDrawerOpenedAt : null;
 
     /// <summary>Raised after each human or AI roll and its shared input barrier are committed.</summary>
     public event Action<MonopolyRoll>? MonopolyRollOccurred;
@@ -59,7 +66,11 @@ public sealed partial class BoardSession
     public bool LoadMonopolySave(string json, DateTimeOffset now, bool resume = false)
     {
         if (resume) _monopoly.LoadSave(json, now); else _monopoly.StageSave(json);
-        if (resume) ClearMonopolyPresentationHold();
+        if (resume)
+        {
+            ClearMonopolyPresentationHold();
+            ClearMonopolyDrawerUi();
+        }
         if (Screen == BoardScreen.Monopoly) MonopolyInputBarrier(now);
         return true;
     }
@@ -69,6 +80,7 @@ public sealed partial class BoardSession
     {
         if (requestId != _monopolySaveRequestId || !MonopolySaveRequested) return false;
         _monopoly.CompleteSave(success, now, error);
+        if (success) ClearMonopolyDrawerUi();
         if (Screen == BoardScreen.Monopoly)
         {
             MonopolyInputBarrier(now);
@@ -79,14 +91,34 @@ public sealed partial class BoardSession
 
     private bool SelectMonopolyButton(BoardButton button, DateTimeOffset now)
     {
+        if (now < _monopolyPresentationObservedAt) return false;
         if (_monopolyPresentationUntil is not null && !IsMonopolyNavigation(button.Id)) return false;
-        bool immediateExit = button.Id == "mp-exit" && !MonopolyState.IsActiveGame;
+        if (button.Id is "mp-save-exit" or "mp-exit-game" && !_monopolyDrawerOpeningReady) return false;
+        if (button.Id == "mp-exit" && !MonopolyState.IsActiveGame)
+        {
+            _monopolyInactiveDrawerOpen = true;
+            BeginMonopolyDrawer(now);
+            ClearMonopolyPresentationHold();
+            MonopolyInputBarrier(now);
+            return true;
+        }
+        if (button.Id == "mp-exit-cancel" && _monopolyInactiveDrawerOpen)
+        {
+            ClearMonopolyDrawerUi();
+            ClearMonopolyPresentationHold();
+            MonopolyInputBarrier(now);
+            return true;
+        }
+        bool immediateExit = button.Id == "mp-exit-game" && !MonopolyState.IsActiveGame;
+        if (button.Id == "mp-exit-game" && (!MonopolyDrawerOpen || !immediateExit)) return false;
         long previousRoll = _lastRelayedMonopolyRollSequence;
-        if (!_monopoly.HandleAction(button.Id, now)) return false;
+        if (!_monopoly.HandleAction(immediateExit ? "mp-exit" : button.Id, now)) return false;
+        if (button.Id == "mp-exit") BeginMonopolyDrawer(now);
         if (IsMonopolyNavigation(button.Id)) ClearMonopolyPresentationHold();
+        if (button.Id == "mp-exit-cancel" || immediateExit) ClearMonopolyDrawerUi();
         if (button.Id == "mp-save-exit") _monopolySaveRequestId++;
         if (_lastRelayedMonopolyRollSequence == previousRoll) MonopolyInputBarrier(now);
-        if (immediateExit || button.Id == "mp-exit-without-saving") Show(BoardScreen.Menu, now);
+        if (immediateExit) Show(BoardScreen.Menu, now);
         return true;
     }
 
@@ -104,6 +136,14 @@ public sealed partial class BoardSession
     private void AdvanceMonopolyPresentation(DateTimeOffset now)
     {
         _monopolyPresentationObservedAt = Later(_monopolyPresentationObservedAt, now);
+        if (MonopolyDrawerOpen && _monopolyDrawerOpenedAt is { } opened && !_monopolyDrawerOpeningReady &&
+            now >= opened + MonopolyDrawerOpeningDuration)
+        {
+            _monopolyDrawerOpeningReady = true;
+            // The moving drawer is not a live Save/Exit target. Release it once,
+            // rejecting frames and gesture origins captured during its entrance.
+            MonopolyInputBarrier(opened + MonopolyDrawerOpeningDuration);
+        }
         if (_monopolyPresentationUntil is not { } until || now < until) return;
         _monopolyPresentationUntil = null;
         // Old frames, pulse origins and pointing anchors from the animation cannot
@@ -112,8 +152,23 @@ public sealed partial class BoardSession
     }
 
     private void ClearMonopolyPresentationHold() => _monopolyPresentationUntil = null;
+    private void BeginMonopolyDrawer(DateTimeOffset now)
+    {
+        _monopolyDrawerOpenedAt = now;
+        _monopolyDrawerOpeningReady = false;
+    }
+
+    private void ClearMonopolyDrawerUi()
+    {
+        _monopolyInactiveDrawerOpen = false;
+        // An interrupted active confirmation remains open when this board returns;
+        // hiding it must not discard the game or silently resume an AI turn.
+        if (MonopolyState.Phase is MonopolyPhase.ExitConfirmation or MonopolyPhase.Saving) return;
+        _monopolyDrawerOpenedAt = null;
+        _monopolyDrawerOpeningReady = false;
+    }
     private static bool IsMonopolyNavigation(string id) => id is
-        "mp-exit" or "mp-exit-cancel" or "mp-save-exit" or "mp-exit-without-saving";
+        "mp-exit" or "mp-exit-cancel" or "mp-save-exit" or "mp-exit-game";
 
     private void MonopolyInputBarrier(DateTimeOffset now)
     {
@@ -129,8 +184,17 @@ public sealed partial class BoardSession
     {
         var game = MonopolyState;
         var result = new List<BoardButton>();
-        if (game.Phase is not MonopolyPhase.ExitConfirmation and not MonopolyPhase.Saving)
-            Add("mp-exit", "Exit", new(.19, .175, .26, .105));
+        if (MonopolyDrawerOpen)
+        {
+            bool enabled = game.Phase != MonopolyPhase.Saving;
+            result.Add(new("mp-exit-cancel", "v", new(.34, .752, .32, .06), BoardScreen.Monopoly, enabled));
+            result.Add(new(game.IsActiveGame ? "mp-save-exit" : "mp-exit-game",
+                game.IsActiveGame ? "Save and Exit" : "Exit Game", new(.32, .632, .36, .08),
+                BoardScreen.Monopoly, enabled && _monopolyDrawerOpeningReady));
+            return result.AsReadOnly();
+        }
+        Add("mp-exit", "^", game.Phase == MonopolyPhase.Landing
+            ? new(.34, .752, .32, .06) : new(.215, .215, .26, .06));
         switch (game.Phase)
         {
             case MonopolyPhase.Landing:
@@ -186,11 +250,6 @@ public sealed partial class BoardSession
                 break;
             case MonopolyPhase.GameOver:
                 Add("mp-new-game", "Play again", new(.365, .62, .27, .072));
-                break;
-            case MonopolyPhase.ExitConfirmation:
-                Add("mp-save-exit", "Save & Exit", new(.31, .48, .38, .072));
-                Add("mp-exit-without-saving", "Exit without saving", new(.31, .58, .38, .072));
-                Add("mp-exit-cancel", "Cancel", new(.395, .69, .21, .055));
                 break;
         }
         return result.AsReadOnly();

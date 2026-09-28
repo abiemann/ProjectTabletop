@@ -2,6 +2,7 @@ using ProjectTabletop.Interaction;
 
 MonopolyRegression.Run();
 MonopolyBoardRegression.Run();
+MonopolyDrawerRegression.Run();
 MonopolyRollEventRegression.Run();
 MonopolyPresentationRegression.Run();
 GlobeBoardRegression.Run();
@@ -32,6 +33,7 @@ static void CheckMenuAndNavigation()
     string[] names = ["Hand-Tracking", "Photo Copy", "Blackjack", "Paint", "Monopoly", "Globe"];
     Require(session.Buttons.Select(button => button.Label).SequenceEqual(names), "Menu order or labels differ from the requested menu.");
     BoardButton[] buttons = session.Buttons.ToArray();
+    long eventId = 0;
     for (int index = 0; index < buttons.Length; index++)
     {
         var button = buttons[index];
@@ -42,18 +44,28 @@ static void CheckMenuAndNavigation()
         Require(buttons.Count(other => other.Bounds.Contains(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2)) == 1,
             "Menu targets overlap at a button's center.");
 
-        int time = 100 + index * 100;
+        int time = 100 + index * 1000;
         Require(Update(session, time, Over(button)) is null, "Hover alone selected an application.");
         Require(session.HoveredButtonIds.SequenceEqual([button.Id]), "Hover did not use the shared target rectangle.");
-        BoardNavigation? navigation = Update(session, time + 10, Over(button, 2 * index + 1, time + 10));
+        BoardNavigation? navigation = Update(session, time + 10, Over(button, ++eventId, time + 10));
         Require(navigation is { Previous: BoardScreen.Menu } && navigation.Current == button.Destination &&
             navigation.ButtonId == button.Id && session.Screen == button.Destination, "Menu pinch opened the wrong application.");
         Require(session.Title == names[index], "The application title is incorrect.");
         Require(session.Buttons.Count >= 1 && (session.Buttons[0].Destination == BoardScreen.Menu ||
             button.Destination == BoardScreen.Monopoly && session.Buttons[0].Id == "mp-exit"),
             "An application lacks a back-to-menu target.");
-        Require(Update(session, time + 20, Over(session.Buttons[0], 2 * index + 2, time + 20))?.Current == BoardScreen.Menu,
-            "The back-to-menu target did not return to the launcher.");
+        if (button.Destination == BoardScreen.Monopoly)
+        {
+            Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is
+                { Current: BoardScreen.Monopoly, ButtonId: "mp-exit" } && session.MonopolyDrawerOpen,
+                "The Monopoly caret did not open its drawer.");
+            var exit = session.Buttons.Single(item => item.Id == "mp-exit-game");
+            Require(Update(session, time + 321, Over(exit, ++eventId, time + 321))?.Current == BoardScreen.Menu,
+                "The drawer's Exit Game target did not return to the launcher.");
+        }
+        else
+            Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20))?.Current == BoardScreen.Menu,
+                "The back-to-menu target did not return to the launcher.");
     }
 }
 

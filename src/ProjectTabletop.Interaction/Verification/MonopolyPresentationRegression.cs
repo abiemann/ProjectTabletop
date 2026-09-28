@@ -148,23 +148,24 @@ internal static class MonopolyPresentationRegression
                 ? board.Update([Pinch(Button(board, "mp-exit"), 1, 300)], Time(300), Time(300))?.ButtonId == "mp-exit"
                 : board.ActivateButton("mp-exit", Time(300));
             Require(exited && board.Screen == BoardScreen.Monopoly && board.MonopolyState.Phase == MonopolyPhase.ExitConfirmation &&
-                !board.IsMonopolyPresentationActive(Time(300)) && board.Buttons.All(button => button.Enabled),
+                !board.IsMonopolyPresentationActive(Time(300)) && Button(board, "mp-exit-cancel").Enabled,
                 "Presentation blocked Exit/save choices or left their animation lock behind.");
             Require(board.ActivateButton("mp-exit-cancel", Time(400)) && Button(board, "mp-buy").Enabled,
                 "Cancel Exit restored the old presentation lock.");
             board.HoldMonopolyPresentationUntil(Time(5000));
-            Require(board.ActivateButton("mp-exit", Time(500)) && board.ActivateButton("mp-save-exit", Time(600)),
+            Require(board.ActivateButton("mp-exit", Time(500)) && board.ActivateButton("mp-save-exit", Time(800)),
                 "A roll presentation blocked saving the already committed game.");
             string saved = board.ExportMonopolySave();
-            Require(board.CompleteMonopolySave(board.MonopolySaveRequestId, true, Time(700)) && board.Screen == BoardScreen.Menu,
+            Require(board.CompleteMonopolySave(board.MonopolySaveRequestId, true, Time(900)) && board.Screen == BoardScreen.Menu,
                 "Successful save failed to leave the board.");
-            board.LoadMonopolySave(saved, Time(800), resume: true); board.ShowMonopoly(Time(810));
-            Require(!board.IsMonopolyPresentationActive(Time(810)) && board.MonopolyState.ActivePlayer!.Position == 3 &&
+            board.LoadMonopolySave(saved, Time(1000), resume: true); board.ShowMonopoly(Time(1010));
+            Require(!board.IsMonopolyPresentationActive(Time(1010)) && board.MonopolyState.ActivePlayer!.Position == 3 &&
                 board.MonopolyState.Dice == new MonopolyDice(1, 2) && Button(board, "mp-buy").Enabled,
                 "Save/load retained the animation hold or saved an uncommitted previous roll.");
             board.HoldMonopolyPresentationUntil(Time(5000));
-            Require(board.ActivateButton("mp-exit", Time(820)) && board.ActivateButton("mp-exit-without-saving", Time(830)) &&
-                board.Screen == BoardScreen.Menu, "Exit without saving was blocked by the presentation.");
+            Require(board.ActivateButton("mp-exit", Time(1020)) && board.ActivateButton("mp-save-exit", Time(1320)) &&
+                board.CompleteMonopolySave(board.MonopolySaveRequestId, true, Time(1330)) &&
+                board.Screen == BoardScreen.Menu, "The drawer's saving exit was blocked by the presentation.");
         }
 
         var reset = Rolled();

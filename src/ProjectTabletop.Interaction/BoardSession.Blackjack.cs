@@ -117,6 +117,7 @@ public sealed partial class BoardSession
         {
             ClearBlackjackPresentationHold();
             ClearMonopolyPresentationHold();
+            ClearMonopolyDrawerUi();
             Screen = button.Destination;
             if (Screen == BoardScreen.Globe) _globe.Start(now);
             Revision++;

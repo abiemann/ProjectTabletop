@@ -60,6 +60,8 @@ public sealed partial class MainWindow
             scene.MonopolyState.Properties.Single(property => property.SpaceIndex == 3).OwnerId == scene.MonopolyState.Players[0].Id,
             "A native rendered move and purchase disagree with the game state.");
         Act("mp-exit");
+        now += TimeSpan.FromMilliseconds(320);
+        scene.TickMonopoly(now);
         await Capture("exit-confirmation");
         await CheckAcquisition("exit-confirmation");
         Require(scene.CurrentBoardScreen == BoardScreen.Monopoly && scene.MonopolyState.Phase == MonopolyPhase.ExitConfirmation,
@@ -91,7 +93,10 @@ public sealed partial class MainWindow
         Act("mp-exit-cancel");
         Require(scene.MonopolyState.Phase == MonopolyPhase.AwaitingEndTurn && scene.MonopolyState.Players[0].Money == 1440,
             "Cancel after a failed save lost the interrupted game.");
-        Act("mp-exit"); Act("mp-save-exit");
+        Act("mp-exit");
+        now += TimeSpan.FromMilliseconds(320);
+        scene.TickMonopoly(now);
+        Act("mp-save-exit");
         Require(scene.TryGetMonopolySaveRequest(out long retryId, out string retryJson) && retryId > requestId,
             "A save failure blocked a fresh retry.");
         await MonopolySaveStore.SaveAsync(savePath, retryJson);

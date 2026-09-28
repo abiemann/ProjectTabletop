@@ -99,6 +99,8 @@ public sealed partial class MainWindow
                 return await VerifyMonopolyAsync();
             case "verify_monopoly_dice":
                 return await VerifyMonopolyDiceAnimationAsync();
+            case "verify_monopoly_drawer":
+                return await VerifyMonopolyDrawerAsync();
             case "verify_globe":
                 return await VerifyGlobeAsync();
             case "verify_blackjack_animation":
@@ -199,6 +201,7 @@ public sealed partial class MainWindow
                     monopolySaveError = _monopolySaveError,
                     blackjackAnimation = _scene.GetBlackjackAnimationDiagnostics(),
                     monopolyDiceAnimation = _scene.GetMonopolyDiceAnimationDiagnostics(DateTimeOffset.UtcNow),
+                    monopolyDrawer = _scene.GetMonopolyDrawerDiagnostics(DateTimeOffset.UtcNow),
                     hoveredBoardButtons = _scene.HoveredBoardButtons,
                     photoCopyStatus = _scene.PhotoCopyStatus,
                     photoCopyLighting = _scene.PhotoCopyLightingStatus,
@@ -283,7 +286,8 @@ public sealed partial class MainWindow
                 bool monopolyAccepted = _scene.ActivateMonopolyButton(monopolyAction.GetString()!);
                 QueueMonopolySave();
                 UpdateBoardAppStatus();
-                return new { accepted = monopolyAccepted, monopoly = _scene.MonopolyState };
+                return new { accepted = monopolyAccepted, monopoly = _scene.MonopolyState,
+                    drawerOpen = _scene.MonopolyDrawerOpen };
             case "capture_monopoly_preview":
                 return new { path = await SaveMonopolyPreviewAsync() };
             case "show_globe":
