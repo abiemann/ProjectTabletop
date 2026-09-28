@@ -19,9 +19,11 @@ public sealed partial class MainWindow
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip);
         const int size = 1000;
         var now = DateTimeOffset.UtcNow.AddMinutes(1);
+        var globeNow = now;
         var game = new BlackjackGame(41, new[] { 2, 6, 2, 10, 2, 2, 3, 4 }
             .Select(rank => new BlackjackCard(rank, BlackjackSuit.Clubs)));
-        using var scene = new SceneCompositor(game, blackjackClock: () => now);
+        using var scene = new SceneCompositor(game, blackjackClock: () => now, globeClock: () => globeNow);
+        await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96);
         scene.SetDisplayAspect(1);
         scene.SetBoardSetup(true);
@@ -35,7 +37,7 @@ public sealed partial class MainWindow
         scene.ShowHandTrackingTest(); VerifyButtons("Hand-Tracking");
         scene.ShowPhotoCopy(); VerifyButtons("Photo Copy");
         long selectionId = 770000;
-        foreach (var (id, title) in new[] { ("paint", "Paint"), ("monopoly", "Monopoly"), ("diablo", "Diablo") })
+        foreach (var (id, title) in new[] { ("paint", "Paint"), ("monopoly", "Monopoly"), ("globe", "Globe") })
         {
             scene.ShowBoardMenu();
             var button = scene.CurrentBoardButtons.Single(button => button.Id == id);
@@ -86,6 +88,7 @@ public sealed partial class MainWindow
             foregroundFixturesCoverActualLabels = true,
             untouchedLabelRejectsControlEdgeDisturbanceAcrossBoards = true,
             topBlackjackBackAndResetIncluded = true, mediaAndCalibrationInactive = true,
+            globeAllFiveControlsCovered = tested.Count(label => label.StartsWith("Globe/", StringComparison.Ordinal)) == 5,
             liveHardwareUnchanged = true };
 
         void VerifyButtons(string label)

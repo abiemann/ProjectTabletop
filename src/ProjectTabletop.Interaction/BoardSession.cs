@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, Monopoly, Diablo, Media }
+public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, Monopoly, Globe, Media }
 
 /// <summary>A rectangle in the board's normalized, perspective-corrected coordinate system.</summary>
 public readonly record struct BoardRect(double X, double Y, double Width, double Height)
@@ -62,7 +62,7 @@ public sealed partial class BoardSession
         new BoardButton("blackjack", "Blackjack", new(.08, .45, .40, .16), BoardScreen.Blackjack),
         new BoardButton("paint", "Paint", new(.52, .45, .40, .16), BoardScreen.Paint),
         new BoardButton("monopoly", "Monopoly", new(.08, .65, .40, .16), BoardScreen.Monopoly),
-        new BoardButton("diablo", "Diablo", new(.52, .65, .40, .16), BoardScreen.Diablo)
+        new BoardButton("globe", "Globe", new(.52, .65, .40, .16), BoardScreen.Globe)
     });
     private static readonly IReadOnlyList<BoardButton> AppButtons = Array.AsReadOnly(new[]
     {
@@ -97,7 +97,7 @@ public sealed partial class BoardSession
         BoardScreen.Blackjack => "Blackjack",
         BoardScreen.Paint => "Paint",
         BoardScreen.Monopoly => "Monopoly",
-        BoardScreen.Diablo => "Diablo",
+        BoardScreen.Globe => "Globe",
         BoardScreen.Media => "Media",
         _ => throw new InvalidOperationException("Unknown board screen.")
     };
@@ -108,6 +108,7 @@ public sealed partial class BoardSession
         BoardScreen.Paint => CurrentPaintButtons(),
         BoardScreen.Blackjack => BlackjackButtons(),
         BoardScreen.Monopoly => MonopolyButtons(),
+        BoardScreen.Globe => CurrentGlobeButtons(),
         BoardScreen.Media => Array.Empty<BoardButton>(),
         _ => AppButtons
     };
@@ -205,6 +206,7 @@ public sealed partial class BoardSession
     {
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
+        if (screen == BoardScreen.Globe) _globe.Start(now);
         Screen = screen;
         Revision++;
         HoveredButtonIds = Array.Empty<string>();

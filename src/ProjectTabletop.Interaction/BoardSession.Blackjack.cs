@@ -22,10 +22,11 @@ public sealed partial class BoardSession
     /// <summary>Raised after DEAL state and input barriers are committed, once per accepted action.</summary>
     public event Action<BlackjackDeal>? BlackjackDealOccurred;
 
-    public BoardSession(BlackjackGame? blackjack = null, MonopolyGame? monopoly = null)
+    public BoardSession(BlackjackGame? blackjack = null, MonopolyGame? monopoly = null, GlobeState? globe = null)
     {
         _blackjack = blackjack ?? new BlackjackGame();
         _monopoly = monopoly ?? new MonopolyGame();
+        _globe = globe ?? new GlobeState();
     }
     public BlackjackSnapshot BlackjackState => _blackjack.Snapshot;
 
@@ -78,6 +79,10 @@ public sealed partial class BoardSession
         {
             return SelectMonopolyButton(button, now);
         }
+        if (Screen == BoardScreen.Globe)
+        {
+            return SelectGlobeButton(button, now);
+        }
         if (button.Id == "paint-save")
         {
             if (Screen != BoardScreen.Paint || !PaintSaveEnabled) return false;
@@ -109,6 +114,7 @@ public sealed partial class BoardSession
         {
             ClearBlackjackPresentationHold();
             Screen = button.Destination;
+            if (Screen == BoardScreen.Globe) _globe.Start(now);
             Revision++;
         }
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

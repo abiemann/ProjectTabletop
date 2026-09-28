@@ -42,8 +42,9 @@ public sealed partial class MainWindow
         UpdateHandDetectionLogStatus();
         bool blackjack = _scene.CurrentBoardScreen == BoardScreen.Blackjack;
         bool monopoly = _scene.CurrentBoardScreen == BoardScreen.Monopoly;
-        bool boardGame = blackjack || monopoly;
-        BoardGamePreviewTitle.Text = monopoly ? "MONOPOLY  ·  click the table to play" :
+        bool globe = _scene.CurrentBoardScreen == BoardScreen.Globe;
+        bool boardGame = blackjack || monopoly || globe;
+        BoardGamePreviewTitle.Text = globe ? "GLOBE  ·  zoom and rotate Earth" : monopoly ? "MONOPOLY  ·  click the table to play" :
             "BLACKJACK  ·  click the table to play  ·  virtual chips";
         BlackjackPreviewPanel.Visibility = boardGame ? Visibility.Visible : Visibility.Collapsed;
         CameraPreviewPanel.Visibility = ProjectionPreviewPanel.Visibility = boardGame ? Visibility.Collapsed : Visibility.Visible;
@@ -51,6 +52,7 @@ public sealed partial class MainWindow
             (IsBoardScanMeasuring ? "Board alignment is in progress." :
              blackjack ? _scene.BlackjackState.Status :
              monopoly ? _scene.MonopolyState.Status :
+             globe ? "Earth spins slowly. Use Zoom +, Zoom -, < Rotate and Rotate > to explore; Exit returns to the menu." :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :
              _scene.CurrentBoardScreen == BoardScreen.PhotoCopy ? _scene.PhotoCopyStatus :

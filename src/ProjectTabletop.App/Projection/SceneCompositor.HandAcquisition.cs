@@ -46,7 +46,8 @@ public sealed partial class SceneCompositor
 
     private AcquisitionSceneState CurrentAcquisitionState() => new(_boardSession.Revision,
         _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision :
-        _boardSession.Screen == BoardScreen.Monopoly ? _boardSession.MonopolyState.Revision : 0,
+        _boardSession.Screen == BoardScreen.Monopoly ? _boardSession.MonopolyState.Revision :
+        _boardSession.Screen == BoardScreen.Globe ? _boardSession.GetGlobeSnapshot(_globeClock()).Revision : 0,
         _boardSession.Screen == BoardScreen.Blackjack ? _blackjackFlightRevision : 0, _spotlightResetCount,
         _boardSession.Screen == BoardScreen.PhotoCopy ? _photoCopyRevision : 0);
 
@@ -252,15 +253,17 @@ public sealed partial class SceneCompositor
     {
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
         var paint = _boardSession.Screen == BoardScreen.Paint;
+        var globe = _boardSession.Screen == BoardScreen.Globe;
         if (_boardApplicationTarget is null || _renderedBoardState is not { } rendered ||
             rendered.Screen != _boardSession.Screen) return null;
-        if (!photoCopy && (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
+        if (!photoCopy && !globe && (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
         if (_boardSession.Screen == BoardScreen.Blackjack &&
             (rendered.BlackjackRevision != _boardSession.BlackjackState.Revision ||
             rendered.BlackjackFlightRevision != _blackjackFlightRevision ||
             HasBlackjackCardAnimation(_blackjackClock()))) return null;
         if (_boardSession.Screen == BoardScreen.Monopoly &&
             rendered.MonopolyRevision != _boardSession.MonopolyState.Revision) return null;
+        if (globe && rendered.GlobeRevision != _boardSession.GetGlobeSnapshot(_globeClock()).Revision) return null;
         var cameraToProjector = _boardCameraMap!.ToMatrix();
         var projectorToBoard = _boardSurfaceMap!.Inverse().ToMatrix();
         var cameraToBoard = new double[9];
@@ -285,7 +288,14 @@ public sealed partial class SceneCompositor
             var sourceSize = _boardApplicationTarget.SizeInPixels;
             using (var drawing = _acquisitionReferenceTarget.CreateDrawingSession())
             {
-                if (photoCopy || paint)
+                if (globe)
+                {
+                    // The sphere rotates independently. Only fixed, opaque controls
+                    // may explain camera interference or suggest hand illumination.
+                    drawing.Clear(Colors.Black);
+                    DrawGlobeControls(drawing, _boardSession.Buttons, [], []);
+                }
+                else if (photoCopy || paint)
                 {
                     // Compare only the opaque interiors of the generated controls.
                     // Swirl stamps, object lighting and status text change independently
@@ -319,8 +329,7 @@ public sealed partial class SceneCompositor
                 // The plain Paint title and surrounding artwork have no opaque
                 // panel. Use the generated button interiors as lighting anchors.
                 BoardScreen.Paint => regions,
-                BoardScreen.Diablo =>
-                    [new(.10, .29, .78, .40)],
+                BoardScreen.Globe => regions,
                 // Fixed ivory spaces and gold trim constrain the camera response
                 // when a hand covers the only gold action panel. These bands
                 // calibrate colour only; searches remain inside the controls.

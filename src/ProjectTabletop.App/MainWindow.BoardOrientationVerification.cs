@@ -20,10 +20,12 @@ public sealed partial class MainWindow
             _scene.HasBoardMediaClip, _scene.GetBoardFacingDegrees());
         const int width = 1600, height = 900, cameraSize = 1000;
         var now = DateTimeOffset.UtcNow.AddMinutes(1);
+        var globeStartedAt = now;
+        var globeNow = globeStartedAt;
         Vector2[] physicalCorners = [new(.10f, .14f), new(.90f, .14f), new(.90f, .86f), new(.10f, .86f)];
         Point2[] unit = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
         BoardScreen[] boards = [BoardScreen.Menu, BoardScreen.HandTracking, BoardScreen.PhotoCopy,
-            BoardScreen.Paint, BoardScreen.Blackjack, BoardScreen.Monopoly];
+            BoardScreen.Paint, BoardScreen.Blackjack, BoardScreen.Monopoly, BoardScreen.Globe];
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
         var referencePixels = new Dictionary<BoardScreen, byte[]>();
         var comparisons = new List<object>();
@@ -37,6 +39,7 @@ public sealed partial class MainWindow
         for (int quarterTurn = 0; quarterTurn < 4; quarterTurn++)
         {
             using var scene = NewScene(quarterTurn, out var cameraMap, out double inset);
+            await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
             var expectedSurface = SurfaceMap(inset, halfTurn: false);
             Require(scene.GetBoardFacingDegrees() == 0,
                 "A rotated camera replaced the configured projector-space board facing.");
@@ -88,7 +91,8 @@ public sealed partial class MainWindow
                 for (int first = 0; first < 4; first++)
                 {
                     using var scene = new SceneCompositor(new BlackjackGame(seed: 173),
-                        blackjackClock: () => now, paintClock: () => now);
+                        blackjackClock: () => now, paintClock: () => now, globeClock: () => globeNow);
+                    await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
                     scene.SetDisplayAspect((double)width / height);
                     Require(scene.GetBoardFacingDegrees() is null,
                         "The first-scan fixture unexpectedly had a saved facing direction.");
@@ -122,6 +126,7 @@ public sealed partial class MainWindow
         }
 
         using var turned = NewScene(0, out var originalCameraMap, out double originalInset);
+        await turned.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
         turned.ShowBoardMenu();
         var upright = Draw(turned);
         var oldRaster = turned.GetBoardResolutionDiagnostics();
@@ -208,7 +213,8 @@ public sealed partial class MainWindow
 
         SceneCompositor NewScene(int cameraQuarterTurn, out Homography map, out double inset)
         {
-            var result = new SceneCompositor(new BlackjackGame(seed: 173), blackjackClock: () => now, paintClock: () => now);
+            var result = new SceneCompositor(new BlackjackGame(seed: 173), blackjackClock: () => now,
+                paintClock: () => now, globeClock: () => globeNow);
             result.SetDisplayAspect((double)width / height);
             result.SetBoardFacingDegrees(0);
             result.SetBoardSetup(true);
@@ -238,7 +244,7 @@ public sealed partial class MainWindow
                 .Select(corner => new Point2(corner.X, corner.Y)).ToArray();
             return Homography.FromFourPoints(unit, halfTurn ? [clipped[2], clipped[3], clipped[0], clipped[1]] : clipped);
         }
-        static void Show(SceneCompositor scene, BoardScreen board)
+        void Show(SceneCompositor scene, BoardScreen board)
         {
             switch (board)
             {
@@ -248,6 +254,13 @@ public sealed partial class MainWindow
                 case BoardScreen.Paint: scene.ShowPaint(); break;
                 case BoardScreen.Blackjack: scene.ShowBlackjack(); break;
                 case BoardScreen.Monopoly: scene.ShowMonopoly(); break;
+                case BoardScreen.Globe:
+                    // Each camera orientation samples the same fully approached
+                    // Earth. Paint's separate evolving clock cannot turn it.
+                    globeNow = globeStartedAt;
+                    scene.ShowGlobe();
+                    globeNow = globeStartedAt.AddSeconds(4);
+                    break;
                 default: throw new InvalidOperationException("Unexpected board orientation fixture.");
             }
         }

@@ -96,6 +96,8 @@ public sealed partial class MainWindow
                 return await VerifyBlackjackAsync();
             case "verify_monopoly":
                 return await VerifyMonopolyAsync();
+            case "verify_globe":
+                return await VerifyGlobeAsync();
             case "verify_blackjack_animation":
                 return await VerifyBlackjackAnimationAsync();
             case "verify_board_reveal":
@@ -189,6 +191,7 @@ public sealed partial class MainWindow
                     boardAppTitle = _scene.CurrentBoardTitle,
                     blackjack = _scene.BlackjackState,
                     monopoly = _scene.MonopolyState,
+                    globe = _scene.GlobeState,
                     monopolySavePath = MonopolySavePath,
                     monopolySaveError = _monopolySaveError,
                     blackjackAnimation = _scene.GetBlackjackAnimationDiagnostics(),
@@ -279,6 +282,17 @@ public sealed partial class MainWindow
                 return new { accepted = monopolyAccepted, monopoly = _scene.MonopolyState };
             case "capture_monopoly_preview":
                 return new { path = await SaveMonopolyPreviewAsync() };
+            case "show_globe":
+                ShowGlobe();
+                return new { boardApp = _scene.CurrentBoardScreen.ToString(), globe = _scene.GlobeState };
+            case "globe_action":
+                if (!parameters.TryGetProperty("id", out var globeAction) || globeAction.ValueKind != JsonValueKind.String)
+                    throw new ArgumentException("Provide a Globe button id.");
+                bool globeAccepted = _scene.ActivateGlobeButton(globeAction.GetString()!);
+                UpdateBoardAppStatus();
+                return new { accepted = globeAccepted, globe = _scene.GlobeState };
+            case "capture_globe_preview":
+                return new { path = await SaveGlobePreviewAsync() };
             case "capture_raw_frame":
                 return new { path = await SaveRawSnapshotAsync() };
             case "start_camera":

@@ -141,11 +141,11 @@ public sealed partial class SceneCompositor
                     ds.DrawLine(-21, -10, -12, -10, color, 1.5f);
                     ds.DrawLine(12, 10, 21, 10, color, 1.5f);
                     break;
-                case BoardScreen.Diablo:
-                    Stroke([0, -22, 17, -3, 0, 24, -17, -3, 0, -22]);
-                    ds.DrawLine(0, -17, 0, 18, color, 2);
-                    Stroke([-16, -5, -23, -18, -15, -14]);
-                    Stroke([16, -5, 23, -18, 15, -14]);
+                case BoardScreen.Globe:
+                    ds.DrawCircle(Vector2.Zero, 22, color, 2.5f);
+                    ds.DrawEllipse(Vector2.Zero, 10, 22, color, 1.5f);
+                    ds.DrawEllipse(Vector2.Zero, 22, 9, color, 1.5f);
+                    ds.DrawLine(-22, 0, 22, 0, color, 1.5f);
                     break;
             }
         }

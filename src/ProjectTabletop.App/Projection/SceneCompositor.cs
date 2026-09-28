@@ -843,6 +843,9 @@ public sealed partial class SceneCompositor : IDisposable
             _blackjackPreviewTarget = null;
             _monopolyPreviewTarget?.Dispose();
             _monopolyPreviewTarget = null;
+            _globePreviewTarget?.Dispose();
+            _globePreviewTarget = null;
+            DisposeGlobeRenderer();
             _blackjackFlightTarget?.Dispose();
             _blackjackFlightTarget = null;
             _blackjackFlights.Clear();

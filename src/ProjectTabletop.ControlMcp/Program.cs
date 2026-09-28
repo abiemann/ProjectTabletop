@@ -20,7 +20,7 @@ if (args.Length == 0)
 
 if (args.Length < 2 || args[0] != "--once" || args.Length > 3)
 {
-    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|show_monopoly|show_paint|blackjack_action|monopoly_action|capture_blackjack_preview|capture_monopoly_preview|shutdown> [JSON object]");
+    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|show_monopoly|show_globe|show_paint|blackjack_action|monopoly_action|globe_action|capture_blackjack_preview|capture_monopoly_preview|capture_globe_preview|shutdown> [JSON object]");
     return 2;
 }
 
@@ -57,6 +57,13 @@ static async Task RunMcpAsync()
                 Name = "monopoly_action",
                 Description = "Activate an enabled Monopoly button by its current id. Player setup, turn actions and save-on-exit use the same board controls."
             });
+    static McpServerTool GlobeActionTool() =>
+        McpServerTool.Create((Func<string, Task<string>>)GlobeActionAsync,
+            new McpServerToolCreateOptions
+            {
+                Name = "globe_action",
+                Description = "Activate a Globe control: globe-zoom-in, globe-zoom-out, globe-rotate-left, globe-rotate-right or globe-exit."
+            });
     var options = new McpServerOptions
     {
         ServerInfo = new Implementation { Name = "ProjectTabletop.ControlMcp", Version = "0.1.0" },
@@ -82,6 +89,9 @@ static async Task RunMcpAsync()
             BlackjackActionTool(),
             Tool("show_monopoly", "Open the regal Monopoly board with human/AI player setup and a clickable laptop preview, without starting camera or projector."),
             MonopolyActionTool(),
+            Tool("show_globe", "Open the high-resolution Earth globe with a distant arrival, slow spin and clickable zoom/rotate controls, without starting camera or projector."),
+            GlobeActionTool(),
+            Tool("capture_globe_preview", "Save the current Globe view as a 3840 × 2160 unmapped laptop-preview PNG."),
             Tool("capture_monopoly_preview", "Save the current Monopoly board as an unmapped laptop-preview PNG."),
             Tool("capture_blackjack_preview", "Save the current Blackjack table as an unmapped laptop-preview PNG."),
             Tool("capture_projection_preview", "Save the current compositor scene as a PNG, without capturing desktop windows."),
@@ -103,6 +113,9 @@ static Task<string> BlackjackActionAsync(string id) =>
 
 static Task<string> MonopolyActionAsync(string id) =>
     CallToolAsync("monopoly_action", JsonSerializer.SerializeToElement(new { id }));
+
+static Task<string> GlobeActionAsync(string id) =>
+    CallToolAsync("globe_action", JsonSerializer.SerializeToElement(new { id }));
 
 static async Task<string> CallToolAsync(string method, JsonElement? parameters = null)
 {

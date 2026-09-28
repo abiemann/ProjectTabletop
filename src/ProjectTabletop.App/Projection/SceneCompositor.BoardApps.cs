@@ -22,17 +22,20 @@ public sealed partial class SceneCompositor
 
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision,
-        long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long MonopolyRevision);
+        long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long MonopolyRevision,
+        long GlobeRevision, long GlobeFrame);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
         Func<DateTimeOffset>? boardRevealClock = null, Func<DateTimeOffset>? paintClock = null,
-        MonopolyGame? monopoly = null, Func<DateTimeOffset>? monopolyClock = null)
+        MonopolyGame? monopoly = null, Func<DateTimeOffset>? monopolyClock = null,
+        GlobeState? globe = null, Func<DateTimeOffset>? globeClock = null)
     {
-        _boardSession = new BoardSession(blackjack, monopoly);
+        _boardSession = new BoardSession(blackjack, monopoly, globe);
         _blackjackClock = blackjackClock ?? (() => DateTimeOffset.UtcNow);
         _boardRevealClock = boardRevealClock ?? (() => DateTimeOffset.UtcNow);
         _paintClock = paintClock ?? (() => DateTimeOffset.UtcNow);
         _monopolyClock = monopolyClock ?? blackjackClock ?? (() => DateTimeOffset.UtcNow);
+        _globeClock = globeClock ?? blackjackClock ?? (() => DateTimeOffset.UtcNow);
         _boardSession.BlackjackHitOccurred += OnBlackjackHit;
         _boardSession.BlackjackDealOccurred += OnBlackjackDeal;
     }
@@ -132,6 +135,8 @@ public sealed partial class SceneCompositor
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
         var paint = _boardSession.Screen == BoardScreen.Paint;
         var paintNow = _paintClock();
+        var globeNow = _globeClock();
+        var globe = _boardSession.Screen == BoardScreen.Globe;
         _boardSession.PaintSaveEnabled = paint && CanSavePaint;
         if (photoCopy && !preview && PhotoCopyCaptureAllowed)
             MarkPhotoCopySurfacePresented(now);
@@ -152,7 +157,9 @@ public sealed partial class SceneCompositor
             _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision : 0,
             _blackjackFlightRevision, paint ? PaintVisualRevision(paintNow) : 0,
             paint ? GetPaintSaveStatus(paintNow) : null, paint && _boardSession.PaintSaveEnabled,
-            _boardSession.Screen == BoardScreen.Monopoly ? _boardSession.MonopolyState.Revision : 0);
+            _boardSession.Screen == BoardScreen.Monopoly ? _boardSession.MonopolyState.Revision : 0,
+            globe ? _boardSession.GetGlobeSnapshot(globeNow).Revision : 0,
+            globe ? GlobeVisualFrame(globeNow) : 0);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
@@ -168,7 +175,7 @@ public sealed partial class SceneCompositor
                 DrawPhotoCopyStamps(surface, state.PhotoStampCount);
                 DrawPhotoCopyObjectSpotlight(surface);
             }
-            else if (_boardSession.Screen is not (BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.Monopoly))
+            else if (_boardSession.Screen is not (BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.Monopoly or BoardScreen.Globe))
                 DrawMetalBackdrop(surface);
             using var heading = new CanvasTextFormat
             {
@@ -201,6 +208,11 @@ public sealed partial class SceneCompositor
             else if (_boardSession.Screen == BoardScreen.Monopoly)
             {
                 DrawMonopolyBoard(surface, _boardSession.MonopolyState, _boardSession.Buttons,
+                    handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback, PaintBoardAspect());
+            }
+            else if (globe)
+            {
+                DrawGlobeBoard(surface, _boardSession.GetGlobeSnapshot(globeNow), _boardSession.Buttons,
                     handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback, PaintBoardAspect());
             }
             else if (_boardSession.Screen == BoardScreen.Menu)
@@ -351,6 +363,8 @@ public sealed partial class SceneCompositor
             BoardScreen.PhotoCopy => "Copy hands and objects",
             BoardScreen.Blackjack => "Play against the dealer",
             BoardScreen.Paint => "Liquid colour & metallic ink",
+            BoardScreen.Monopoly => "Play with humans and AI",
+            BoardScreen.Globe => "Zoom and rotate Earth",
             _ => "Coming soon"
         };
         ds.DrawText(description, (float)rect.X + 32, (float)rect.Y + 111, AppPalette.MutedText, small);

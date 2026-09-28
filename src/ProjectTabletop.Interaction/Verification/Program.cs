@@ -2,6 +2,7 @@ using ProjectTabletop.Interaction;
 
 MonopolyRegression.Run();
 MonopolyBoardRegression.Run();
+GlobeBoardRegression.Run();
 CheckMenuAndNavigation();
 CheckOffTargetAndBounds();
 CheckHeldPinchAndDropout();
@@ -26,7 +27,7 @@ static void CheckMenuAndNavigation()
 {
     var session = new BoardSession();
     Require(session.Screen == BoardScreen.Menu, "The board did not start at the menu.");
-    string[] names = ["Hand-Tracking", "Photo Copy", "Blackjack", "Paint", "Monopoly", "Diablo"];
+    string[] names = ["Hand-Tracking", "Photo Copy", "Blackjack", "Paint", "Monopoly", "Globe"];
     Require(session.Buttons.Select(button => button.Label).SequenceEqual(names), "Menu order or labels differ from the requested menu.");
     BoardButton[] buttons = session.Buttons.ToArray();
     for (int index = 0; index < buttons.Length; index++)

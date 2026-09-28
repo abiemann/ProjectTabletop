@@ -79,6 +79,7 @@ public sealed partial class MainWindow : Window
         SyncVisionSettingsControls();
         _ = TryLoadAutosavedVisionAsync();
         _ = InitializeMonopolySaveAsync();
+        _ = WarmGlobeResourcesAsync();
         StartControlHost();
     }
 

@@ -18,7 +18,9 @@ public sealed partial class MainWindow
     private async Task<object> VerifyThemeAsync()
     {
         const int size = 1200;
-        using var scene = new SceneCompositor();
+        var globeNow = DateTimeOffset.UtcNow.AddMinutes(1);
+        using var scene = new SceneCompositor(globeClock: () => globeNow);
+        await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
         scene.SetDisplayAspect(1);
         scene.SetBoardSetup(true);
         var inset = scene.SetDetectedBoardGrid([new(.015f, .015f), new(.985f, .015f), new(.985f, .985f), new(.015f, .985f)],
@@ -52,7 +54,7 @@ public sealed partial class MainWindow
         }
 
         long eventId = 0;
-        foreach (BoardScreen screen in new[] { BoardScreen.Blackjack, BoardScreen.Paint, BoardScreen.Monopoly, BoardScreen.Diablo })
+        foreach (BoardScreen screen in new[] { BoardScreen.Blackjack, BoardScreen.Paint, BoardScreen.Monopoly, BoardScreen.Globe })
         {
             scene.ShowBoardMenu();
             await Task.Delay(2); // A new selection must follow external navigation.
@@ -63,6 +65,7 @@ public sealed partial class MainWindow
             if (scene.CurrentBoardScreen != screen)
                 throw new InvalidOperationException("The theme fixture could not open " + screen + ".");
             scene.ClearHandTips(resetInput: false);
+            if (screen == BoardScreen.Globe) globeNow += TimeSpan.FromSeconds(4);
             await Save(screen.ToString().ToLowerInvariant());
         }
         images.Add(await SaveLaptopThemeSnapshotAsync(directory));
