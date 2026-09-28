@@ -16,12 +16,16 @@ internal sealed record PaintFluidDiagnostics(
     double DroppedSeconds, int DropCount, double ActiveSecondsRemaining, string BufferFormat);
 
 internal sealed record PaintFluidFieldStatistics(
-    double HeightMass, double PigmentMass, double MaximumHeight,
-    double MaximumSpeed, int NonFiniteValues, int NegativeDensityValues);
+    double HeightMass, double SurfaceColorSum, double MaximumHeight,
+    double MaximumSpeed, int NonFiniteValues, int NegativeMaterialValues,
+    int OutOfRangeSurfaceColorValues);
+
+internal sealed record PaintFluidFieldProbe(
+    double Height, Vector3 SurfaceColor, double Speed, double MetallicDensity);
 
 /// <summary>
-/// GPU-only thin-film paint. Each drop joins shared velocity, height and pigment
-/// fields rather than becoming a separately rendered animated decal.
+/// GPU-only viscous paint. Shared velocity and cumulative height model settling;
+/// the newest visible coat covers older colour with a thin optical fringe.
 /// </summary>
 internal sealed class PaintFluidSimulation : IDisposable
 {
@@ -32,8 +36,8 @@ internal sealed class PaintFluidSimulation : IDisposable
     private readonly Float2 _size;
     private CanvasRenderTarget _flow;
     private CanvasRenderTarget _flowNext;
-    private CanvasRenderTarget _pigment;
-    private CanvasRenderTarget _pigmentNext;
+    private CanvasRenderTarget _surfaceColor;
+    private CanvasRenderTarget _surfaceColorNext;
     private CanvasRenderTarget _metal;
     private CanvasRenderTarget _metalNext;
     private CanvasRenderTarget _pressure;
@@ -45,7 +49,7 @@ internal sealed class PaintFluidSimulation : IDisposable
     private readonly PixelShaderEffect<FluidPressureShader> _pressureEffect = new();
     private readonly PixelShaderEffect<FluidProjectShader> _projectEffect = new();
     private readonly PixelShaderEffect<FluidHeightShader> _heightEffect = new();
-    private readonly PixelShaderEffect<FluidPigmentShader> _pigmentEffect = new();
+    private readonly PixelShaderEffect<FluidMaterialShader> _materialEffect = new();
     private readonly PixelShaderEffect<FluidSurfaceShader> _surfaceEffect = new();
     private double _accumulator;
     private double _activeSecondsRemaining;
@@ -81,7 +85,7 @@ internal sealed class PaintFluidSimulation : IDisposable
                 return field;
             }
             _flow = CreateField(); _flowNext = CreateField();
-            _pigment = CreateField(); _pigmentNext = CreateField();
+            _surfaceColor = CreateField(); _surfaceColorNext = CreateField();
             _metal = CreateField(); _metalNext = CreateField();
             _pressure = CreateField(); _pressureNext = CreateField();
             _divergence = CreateField();
@@ -117,23 +121,47 @@ internal sealed class PaintFluidSimulation : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         byte[] flow = _flow.GetPixelBytes();
-        byte[] pigment = _pigment.GetPixelBytes();
-        double heightMass = 0, pigmentMass = 0, maxHeight = 0, maxSpeed = 0;
-        int nonFinite = 0, negative = 0;
+        byte[] surfaceColor = _surfaceColor.GetPixelBytes();
+        byte[] metal = _metal.GetPixelBytes();
+        double heightMass = 0, surfaceColorSum = 0, maxHeight = 0, maxSpeed = 0;
+        int nonFinite = 0, negative = 0, outOfRangeColor = 0;
         static float ReadFloat(byte[] bytes, int offset) => BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(offset, 4));
         for (int i = 0; i < flow.Length; i += 16)
         {
             float vx = ReadFloat(flow, i), vy = ReadFloat(flow, i + 4), height = ReadFloat(flow, i + 8);
-            float red = ReadFloat(pigment, i), green = ReadFloat(pigment, i + 4), blue = ReadFloat(pigment, i + 8);
+            float red = ReadFloat(surfaceColor, i), green = ReadFloat(surfaceColor, i + 4), blue = ReadFloat(surfaceColor, i + 8);
+            float metallicDensity = ReadFloat(metal, i);
             if (!float.IsFinite(vx) || !float.IsFinite(vy) || !float.IsFinite(height)
-                || !float.IsFinite(red) || !float.IsFinite(green) || !float.IsFinite(blue)) nonFinite++;
-            if (height < -0.00001f || red < -0.00001f || green < -0.00001f || blue < -0.00001f) negative++;
+                || !float.IsFinite(red) || !float.IsFinite(green) || !float.IsFinite(blue)
+                || !float.IsFinite(metallicDensity)) nonFinite++;
+            if (height < -0.00001f || red < -0.00001f || green < -0.00001f || blue < -0.00001f
+                || metallicDensity < -0.00001f) negative++;
+            if (red < -0.00001f || red > 1.00001f || green < -0.00001f || green > 1.00001f
+                || blue < -0.00001f || blue > 1.00001f) outOfRangeColor++;
             heightMass += height;
-            pigmentMass += red + green + blue;
+            surfaceColorSum += red + green + blue;
             maxHeight = Math.Max(maxHeight, height);
             maxSpeed = Math.Max(maxSpeed, Math.Sqrt((double)vx * vx + (double)vy * vy));
         }
-        return new(heightMass, pigmentMass, maxHeight, maxSpeed, nonFinite, negative);
+        return new(heightMass, surfaceColorSum, maxHeight, maxSpeed, nonFinite, negative, outOfRangeColor);
+    }
+
+    public PaintFluidFieldProbe GetFieldProbe(Vector2 boardUv)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!float.IsFinite(boardUv.X) || !float.IsFinite(boardUv.Y)
+            || boardUv.X < 0 || boardUv.X > 1 || boardUv.Y < 0 || boardUv.Y > 1)
+            throw new ArgumentOutOfRangeException(nameof(boardUv));
+        int x = Math.Min(FieldWidth - 1, (int)(boardUv.X * FieldWidth));
+        int y = Math.Min(FieldHeight - 1, (int)(boardUv.Y * FieldHeight));
+        static float ReadFloat(byte[] bytes, int offset) => BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(offset, 4));
+        byte[] flow = _flow.GetPixelBytes(x, y, 1, 1);
+        byte[] surfaceColor = _surfaceColor.GetPixelBytes(x, y, 1, 1);
+        byte[] metal = _metal.GetPixelBytes(x, y, 1, 1);
+        double vx = ReadFloat(flow, 0), vy = ReadFloat(flow, 4);
+        return new(ReadFloat(flow, 8),
+            new(ReadFloat(surfaceColor, 0), ReadFloat(surfaceColor, 4), ReadFloat(surfaceColor, 8)),
+            Math.Sqrt(vx * vx + vy * vy), ReadFloat(metal, 0));
     }
 #endif
 
@@ -147,16 +175,17 @@ internal sealed class PaintFluidSimulation : IDisposable
         var center = new Float2(Math.Clamp(boardUv.X, 0, 1), Math.Clamp(boardUv.Y, 0, 1));
         float radius = Math.Clamp(radiusUv, 0.009f, 0.18f);
         float volume = Math.Clamp(amount, 0.05f, 1.5f);
-        // Three-channel Beer-Lambert absorption preserves supplied colours
-        // while mixtures remain subtractive rather than averaging RGB light.
-        var color = new Float3(-MathF.Log(Math.Clamp(pigment.X, 0.008f, 1)),
-            -MathF.Log(Math.Clamp(pigment.Y, 0.008f, 1)), -MathF.Log(Math.Clamp(pigment.Z, 0.008f, 1)));
-        _dropEffect.ConstantBuffer = new FluidDropShader(_size, center, radius, volume, color, _aspect, seed, 0);
-        Run(_dropEffect, _flowNext, _flow); Swap(ref _flow, ref _flowNext);
+        // Material RGB is bounded surface reflectance. Depositing it covers the
+        // former visible coat rather than summing colours or absorption density.
+        var color = new Float3(Math.Clamp(pigment.X, 0, 1),
+            Math.Clamp(pigment.Y, 0, 1), Math.Clamp(pigment.Z, 0, 1));
+        // Both colour and flakes need the old height before the volume update.
         _dropEffect.ConstantBuffer = new FluidDropShader(_size, center, radius, volume, color, _aspect, seed, 1);
-        Run(_dropEffect, _pigmentNext, _pigment); Swap(ref _pigment, ref _pigmentNext);
+        Run(_dropEffect, _surfaceColorNext, _surfaceColor, _flow); Swap(ref _surfaceColor, ref _surfaceColorNext);
         _dropEffect.ConstantBuffer = new FluidDropShader(_size, center, radius, volume, color, _aspect, seed, 2);
-        Run(_dropEffect, _metalNext, _metal); Swap(ref _metal, ref _metalNext);
+        Run(_dropEffect, _metalNext, _metal, _flow); Swap(ref _metal, ref _metalNext);
+        _dropEffect.ConstantBuffer = new FluidDropShader(_size, center, radius, volume, color, _aspect, seed, 0);
+        Run(_dropEffect, _flowNext, _flow, _flow); Swap(ref _flow, ref _flowNext);
         _dropCount++;
         _activeSecondsRemaining = 20;
         Revision++;
@@ -214,10 +243,10 @@ internal sealed class PaintFluidSimulation : IDisposable
         Run(_projectEffect, _flowNext, _flow, _pressure); Swap(ref _flow, ref _flowNext);
         _heightEffect.ConstantBuffer = new FluidHeightShader(_size, (float)FixedStep);
         Run(_heightEffect, _flowNext, _flow); Swap(ref _flow, ref _flowNext);
-        _pigmentEffect.ConstantBuffer = new FluidPigmentShader(_size, (float)FixedStep, 3);
-        Run(_pigmentEffect, _pigmentNext, _pigment, _flow); Swap(ref _pigment, ref _pigmentNext);
-        _pigmentEffect.ConstantBuffer = new FluidPigmentShader(_size, (float)FixedStep, 0.05f);
-        Run(_pigmentEffect, _metalNext, _metal, _flow); Swap(ref _metal, ref _metalNext);
+        _materialEffect.ConstantBuffer = new FluidMaterialShader(_size, (float)FixedStep, 0);
+        Run(_materialEffect, _surfaceColorNext, _surfaceColor, _flow); Swap(ref _surfaceColor, ref _surfaceColorNext);
+        _materialEffect.ConstantBuffer = new FluidMaterialShader(_size, (float)FixedStep, 1);
+        Run(_materialEffect, _metalNext, _metal, _flow); Swap(ref _metal, ref _metalNext);
     }
 
     private static void Swap(ref CanvasRenderTarget first, ref CanvasRenderTarget second) => (first, second) = (second, first);
@@ -234,14 +263,14 @@ internal sealed class PaintFluidSimulation : IDisposable
     private void BindSurface()
     {
         _surfaceEffect.Sources[0] = _flow;
-        _surfaceEffect.Sources[1] = _pigment;
+        _surfaceEffect.Sources[1] = _surfaceColor;
         _surfaceEffect.Sources[2] = _metal;
     }
 
     private void DisposeEffects()
     {
         _dropEffect.Dispose(); _velocityEffect.Dispose(); _divergenceEffect.Dispose();
-        _pressureEffect.Dispose(); _projectEffect.Dispose(); _heightEffect.Dispose(); _pigmentEffect.Dispose(); _surfaceEffect.Dispose();
+        _pressureEffect.Dispose(); _projectEffect.Dispose(); _heightEffect.Dispose(); _materialEffect.Dispose(); _surfaceEffect.Dispose();
     }
 
     public void Dispose()
@@ -249,7 +278,7 @@ internal sealed class PaintFluidSimulation : IDisposable
         if (_disposed) return;
         _disposed = true;
         DisposeEffects();
-        _flow.Dispose(); _flowNext.Dispose(); _pigment.Dispose(); _pigmentNext.Dispose();
+        _flow.Dispose(); _flowNext.Dispose(); _surfaceColor.Dispose(); _surfaceColorNext.Dispose();
         _metal.Dispose(); _metalNext.Dispose(); _pressure.Dispose(); _pressureNext.Dispose(); _divergence.Dispose();
     }
 }

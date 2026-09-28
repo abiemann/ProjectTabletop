@@ -79,58 +79,96 @@ public sealed partial class MainWindow
         var initial = Draw(scene);
         var injectedField = scene.CapturePaintFieldStatisticsForVerification();
         int initialArea = ChangedPixels(blank, initial, canvas);
-        await Save(target, "paint-single-liquid-injected");
-        Require(initialArea > 100 && injectedField.HeightMass > 0 && injectedField.PigmentMass > 0 &&
-                injectedField.NonFiniteValues == 0 && injectedField.NegativeDensityValues == 0,
-            "The new drop has no visible pigment/positive fluid volume or contains invalid floating-point fields.");
+        var injectedCenter = scene.CapturePaintFieldProbeForVerification(firstCenter);
+        var injectedHalfRadius = scene.CapturePaintFieldProbeForVerification(new(firstCenter.X + .075 * .5, firstCenter.Y));
+        var injectedOuterRadius = scene.CapturePaintFieldProbeForVerification(new(firstCenter.X + .075 * .8, firstCenter.Y));
+        var injectedThinRim = scene.CapturePaintFieldProbeForVerification(new(firstCenter.X + .075 * .95, firstCenter.Y));
+        await Save(target, "paint-single-thick-coat-injected");
+        Require(initialArea > 100 && injectedField.HeightMass > 0 && injectedField.SurfaceColorSum > 0 &&
+                injectedField.NonFiniteValues == 0 && injectedField.NegativeMaterialValues == 0 &&
+                injectedField.OutOfRangeSurfaceColorValues == 0,
+            "The new drop has no visible color/positive paint volume or contains invalid floating-point fields.");
+        Require(injectedCenter.Height > injectedHalfRadius.Height &&
+                injectedHalfRadius.Height > injectedOuterRadius.Height * 1.5 &&
+                injectedOuterRadius.Height > injectedThinRim.Height * 2 && injectedThinRim.Height > 0,
+            "The deposited paint mound does not taper continuously toward a thinner outer rim.");
         Require(!scene.AddPaintDrop(firstCenter, .075, now), "One camera observation deposited paint twice.");
         Advance(2, scene, firstOnly, secondReference);
         var afterTwo = Draw(scene);
         var evolvedField = scene.CapturePaintFieldStatisticsForVerification();
-        await Save(target, "paint-single-liquid-2s");
+        await Save(target, "paint-single-thick-coat-2s");
         double heightMassRatio = evolvedField.HeightMass / injectedField.HeightMass;
-        double pigmentMassRatio = evolvedField.PigmentMass / injectedField.PigmentMass;
-        Require(evolvedField.NonFiniteValues == 0 && evolvedField.NegativeDensityValues == 0 &&
-                evolvedField.MaximumHeight <= 5.001 && evolvedField.MaximumSpeed < 500 &&
-                heightMassRatio is > .95 and < 1.05 && pigmentMassRatio is > .95 and < 1.05,
-            $"The wet field became invalid or gained/lost excessive mass: height {heightMassRatio:F3}, pigment {pigmentMassRatio:F3}. " +
-            $"Height {injectedField.HeightMass:F3} -> {evolvedField.HeightMass:F3}, pigment {injectedField.PigmentMass:F3} -> {evolvedField.PigmentMass:F3}. Images: {directory}");
+        Require(evolvedField.NonFiniteValues == 0 && evolvedField.NegativeMaterialValues == 0 &&
+                evolvedField.OutOfRangeSurfaceColorValues == 0 &&
+                evolvedField.MaximumHeight <= 12.001 && evolvedField.MaximumSpeed < 3 &&
+                heightMassRatio is > .95 and < 1.05,
+            $"The paint field became invalid or gained/lost excessive volume: ratio {heightMassRatio:F3}. " +
+            $"Height {injectedField.HeightMass:F3} -> {evolvedField.HeightMass:F3}. Images: {directory}");
         int twoSecondArea = ChangedPixels(blank, afterTwo, canvas);
         Advance(2, scene, firstOnly, secondReference);
         var afterFour = Draw(scene);
         int fourSecondArea = ChangedPixels(blank, afterFour, canvas);
-        Require(twoSecondArea > initialArea && ChangedPixels(initial, afterFour, canvas) > 100,
-            $"Liquid did not spread and evolve: areas {initialArea}, {twoSecondArea}, {fourSecondArea} at 0, 2, 4 seconds.");
-        await Save(target, "paint-single-liquid-4s");
+        var fourSecondField = scene.CapturePaintFieldStatisticsForVerification();
+        double fourSecondAreaRatio = fourSecondArea / (double)initialArea;
+        double fourSecondPeakRatio = fourSecondField.MaximumHeight / injectedField.MaximumHeight;
+        Require(twoSecondArea > initialArea && ChangedPixels(initial, afterFour, canvas) > 100 &&
+                fourSecondAreaRatio < 1.60 && fourSecondPeakRatio > .65,
+            $"Paint does not spread gradually while retaining a thick mound: areas {initialArea}, {twoSecondArea}, {fourSecondArea}; " +
+            $"4 s area ratio {fourSecondAreaRatio:F3}, peak retained {fourSecondPeakRatio:F3}. Images: {directory}");
+        await Save(target, "paint-single-thick-coat-4s");
         Require(ChangedPixels(blank, afterFour, exit.Bounds) == 0,
             "Spreading paint changed the Exit control.");
 
-        // The comparison scene has the same drop sequence and second-drop age,
-        // but its first pigment is far away. This distinguishes mixed overlap
-        // from painting a completely opaque second blob over the old color.
+        // Use identical seeds and ages, with the first coat moved away in the
+        // comparison scene. Probe unshaded color separately from accumulated
+        // height: reflections must not be mistaken for pigment mixing.
         Advance(1, scene, firstOnly, secondReference);
-        var secondCenter = new Point2(.54, .55);
+        var secondCenter = firstCenter;
         Require(scene.AddPaintDrop(secondCenter, .075, now) &&
                 secondReference.AddPaintDrop(secondCenter, .075, now),
             "An overlapping second disturbance did not add new paint.");
+        Draw(scene);
+        Draw(secondReference);
+        var stackedCenter = scene.CapturePaintFieldProbeForVerification(secondCenter);
+        var separateCenter = secondReference.CapturePaintFieldProbeForVerification(secondCenter);
+        var oldCenter = firstOnly.CapturePaintFieldProbeForVerification(secondCenter);
+        Require(ColorDifference(stackedCenter.SurfaceColor, separateCenter.SurfaceColor) < .02 &&
+                ColorDifference(stackedCenter.SurfaceColor, oldCenter.SurfaceColor) > .40 &&
+                stackedCenter.Height > separateCenter.Height * 1.5,
+            "A thick new coat averaged the previous pigment or failed to build up additional paint height.");
+        var fringePoint = new Point2(secondCenter.X + .075 * .94, secondCenter.Y);
+        var stackedFringe = scene.CapturePaintFieldProbeForVerification(fringePoint);
+        var oldFringe = firstOnly.CapturePaintFieldProbeForVerification(fringePoint);
+        var separateFringe = secondReference.CapturePaintFieldProbeForVerification(fringePoint);
+        Require(ColorDifference(stackedFringe.SurfaceColor, separateFringe.SurfaceColor) > .05 &&
+                ColorDifference(stackedFringe.SurfaceColor, oldFringe.SurfaceColor) > .01 &&
+                ColorDifference(stackedFringe.SurfaceColor, oldFringe.SurfaceColor) <
+                    ColorDifference(stackedCenter.SurfaceColor, oldCenter.SurfaceColor) &&
+                stackedFringe.Height < stackedCenter.Height * .35,
+            "Only the thinner coat rim should reveal some of the previous surface color.");
         Advance(2, scene, firstOnly, secondReference);
         var combined = Draw(scene);
-        var oldPigmentOnly = Draw(firstOnly);
-        var newPigmentOnly = Draw(secondReference);
-        var overlap = new BoardRect(.493, .529, .024, .042);
-        int mixedPixels = PixelsDifferentFromBoth(combined, oldPigmentOnly, newPigmentOnly, overlap);
-        Require(mixedPixels > 30,
-            $"Overlapping pigment does not visibly combine the old and new colors ({mixedPixels} mixed pixels).");
+        var evolvedStackedCenter = scene.CapturePaintFieldProbeForVerification(secondCenter);
+        var evolvedSeparateCenter = secondReference.CapturePaintFieldProbeForVerification(secondCenter);
+        Require(ColorDifference(evolvedStackedCenter.SurfaceColor, evolvedSeparateCenter.SurfaceColor) < .04 &&
+                evolvedStackedCenter.Height > evolvedSeparateCenter.Height * 1.4,
+            "Flow mixed away the newest thick-coat color or flattened the accumulated layers.");
         Draw(scene);
-        await Save(target, "paint-liquid-pigments-merging");
+        await Save(target, "paint-new-color-over-thick-base");
         long dropsBeforeFlow = scene.GetPaintDiagnostics().DropCount;
         var beforeFlow = scene.GetPaintDiagnostics().Fluid!;
-        Advance(1, scene);
+        Advance(1, scene, firstOnly, secondReference);
         var continuingFlow = Draw(scene);
+        var eightSecondField = firstOnly.CapturePaintFieldStatisticsForVerification();
+        double eightSecondPeakRatio = eightSecondField.MaximumHeight / injectedField.MaximumHeight;
+        Require(eightSecondPeakRatio > .55 && eightSecondField.NonFiniteValues == 0 &&
+                eightSecondField.NegativeMaterialValues == 0 && eightSecondField.OutOfRangeSurfaceColorValues == 0 &&
+                eightSecondField.HeightMass / injectedField.HeightMass is > .95 and < 1.05,
+            $"A deposited coat lost its thick center too quickly: peak retained at 8 s {eightSecondPeakRatio:F3}.");
         Require(scene.GetPaintDiagnostics().DropCount == dropsBeforeFlow &&
                 scene.GetPaintDiagnostics().Fluid!.SimulationSteps > beforeFlow.SimulationSteps &&
                 ChangedPixels(combined, continuingFlow, new(.35, .40, .32, .30)) > 30,
-            "Merged liquid stopped evolving unless another camera event deposited paint.");
+            "Layered paint stopped settling unless another camera event deposited paint.");
 
         long countBeforeRejectedInput = scene.GetPaintDiagnostics().DropCount;
         foreach (var point in new[] { new Point2(.2, -.01), new Point2(-.1, .5), new Point2(.5, 1.1),
@@ -180,7 +218,7 @@ public sealed partial class MainWindow
             "The wet surface/UI is not native 4K or the bounded fluid field stretches the physical board's proportions.");
         Require(OutsideBorderIsBlack(native.GetPixelBytes(), 3840, 2160, inset),
             "The native 4K painting escaped its calibrated board boundary.");
-        await Save(native, "paint-metallic-blends-native-4k");
+        await Save(native, "paint-layered-metallic-coats-native-4k");
         DrawNative(scene, preview, 400, 300, true);
         var afterPreview = scene.GetPaintDiagnostics();
         Require(afterPreview.NativeWidth == paintRaster.NativeWidth && afterPreview.NativeHeight == paintRaster.NativeHeight &&
@@ -218,21 +256,39 @@ public sealed partial class MainWindow
             "Paint must reach the top and flow below both bottom controls while their interiors remain opaque above it.");
         await Save(target, "paint-beneath-floating-controls");
 
-        // A liquid field should transport pigment and merge neighbouring drops,
-        // rather than choose a different decorative silhouette for each seed.
-        // Save an isolated three-colour field at native output size for visual QA.
+        // Adjacent paint mounds can meet while their opaque centers keep their
+        // own pigments. Save the current layered surface at native density.
         using var liquidGallery = NewScene(out _);
         liquidGallery.SetDisplayAspect(16d / 9);
         DrawNative(liquidGallery, native, 3840, 2160);
         foreach (var position in new Point2[] { new(.42, .49), new(.52, .49), new(.47, .59) })
         {
             now += TimeSpan.FromSeconds(1);
-            Require(liquidGallery.AddPaintDrop(position, .09, now), "The merging-liquid gallery rejected a distinct drop.");
+            Require(liquidGallery.AddPaintDrop(position, .09, now), "The layered-paint gallery rejected a distinct drop.");
             Advance(1, liquidGallery);
         }
         Advance(2, liquidGallery);
         DrawNative(liquidGallery, native, 3840, 2160);
-        await Save(native, "paint-liquid-three-pigments-native-4k");
+        await Save(native, "paint-layered-three-colors-native-4k");
+
+        // Separate drops at their true native raster let visual review compare
+        // thick centers and thinning edges without enlarging camera imagery.
+        using var coatingGallery = NewScene(out _);
+        coatingGallery.SetDisplayAspect(16d / 9);
+        DrawNative(coatingGallery, native, 3840, 2160);
+        foreach (var position in new Point2[] { new(.30, .50), new(.50, .50), new(.70, .50) })
+        {
+            now += TimeSpan.FromMilliseconds(250);
+            Require(coatingGallery.AddPaintDrop(position, .085, now), "The coating time-series rejected a distinct drop.");
+        }
+        DrawNative(coatingGallery, native, 3840, 2160);
+        await Save(native, "paint-native-coats-0s");
+        foreach (double age in new[] { 2d, 4d, 8d })
+        {
+            Advance(age == 8 ? 4 : 2, coatingGallery);
+            DrawNative(coatingGallery, native, 3840, 2160);
+            await Save(native, $"paint-native-coats-{age:0}s");
+        }
 
         // The fluid solver uses fixed steps rather than scaling displacement by
         // rendering frequency. Drive three equal drop sequences at 30/60/120 Hz.
@@ -408,9 +464,11 @@ public sealed partial class MainWindow
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
                 Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "The isolated Paint verification changed the live camera, projector or board.");
-        return new { passed = true, initialArea, twoSecondArea, fourSecondArea, mixedPixels,
-            heightMassRatio, pigmentMassRatio, finiteNonnegativeFlowAndPigmentFields = true,
-            progressiveSpreading = true, overlappingPigmentsBlend = true, exitProtected = true,
+        return new { passed = true, initialArea, twoSecondArea, fourSecondArea,
+            heightMassRatio, fourSecondAreaRatio, fourSecondPeakRatio, eightSecondPeakRatio,
+            finiteNonnegativeFlowAndSurfaceColorFields = true,
+            restrainedSpreadingAndThickCenterRetained = true, newestThickCoatKeepsItsColor = true,
+            accumulatedLayerHeight = true, thinningFringeRevealsPreviousCoat = true, exitProtected = true,
             boundedBoardClip = true, invalidAndRepeatedObservationsRejected = true, freshSessionClearsPainting = true,
             nativePaintRaster = paintRaster, nativeBoardRaster = boardRaster, previewCannotShrinkPaint = true,
             paintCanvasSpotlightsDisabled = true, paintControlLabelSpotlightLifecycle = true,
@@ -419,7 +477,7 @@ public sealed partial class MainWindow
             renderedAnimationDoesNotRetrigger = true, twoStationaryObstructionsApplyIndependently = true,
             fullCanvasBeneathFloatingControls = true,
             completedInputReplayAndNavigationCalibrationBarriers = true,
-            sharedLiquidContinuesWithoutNewCameraEvents = true,
+            layeredPaintContinuesWithoutNewCameraEvents = true,
             fixedTimeStepIndependentOfRenderFrequency = true, changedAtThirtyHz, changedAtOneTwentyHz,
             boundedLongGapCatchUp = true, zeroAndBackwardsTimeCannotAdvance = true,
             framesObservedBeforeProjectionWarmupRejected = true,
@@ -644,9 +702,8 @@ public sealed partial class MainWindow
         }
         int ChangedPixels(byte[] first, byte[] second, BoardRect region) =>
             RegionOffsets(region).Count(offset => MaxDifference(first, second, offset) > 12);
-        int PixelsDifferentFromBoth(byte[] combinedPixels, byte[] first, byte[] second, BoardRect region) =>
-            RegionOffsets(region).Count(offset => MaxDifference(combinedPixels, first, offset) > 12 &&
-                MaxDifference(combinedPixels, second, offset) > 12);
+        static double ColorDifference(Vector3 first, Vector3 second) =>
+            Math.Max(Math.Abs(first.X - second.X), Math.Max(Math.Abs(first.Y - second.Y), Math.Abs(first.Z - second.Z)));
         static int MaxDifference(byte[] first, byte[] second, int offset) =>
             Math.Max(Math.Abs(first[offset] - second[offset]), Math.Max(Math.Abs(first[offset + 1] - second[offset + 1]),
                 Math.Abs(first[offset + 2] - second[offset + 2])));

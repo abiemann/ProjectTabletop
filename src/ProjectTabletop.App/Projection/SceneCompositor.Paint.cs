@@ -23,8 +23,8 @@ public sealed partial class SceneCompositor
 
     private sealed record PaintDrop(Point2 Center, float Radius, Vector3 Pigment, int Seed);
 
-    // Pigments enter the same transported field; their boundaries and mixtures
-    // come from the solver rather than a palette of pre-drawn splat silhouettes.
+    // Deposits build the shared height field while their visible surface coats
+    // keep separate colors. Thin rims reveal the paint underneath.
     private static readonly Vector3[] PaintPigments =
     [
         new(.03f, .65f, .85f), new(.85f, .035f, .24f), new(.95f, .60f, .035f),
@@ -191,6 +191,11 @@ public sealed partial class SceneCompositor
     internal PaintFluidFieldStatistics CapturePaintFieldStatisticsForVerification()
     {
         lock (_gate) return _paintFluid!.GetFieldStatistics();
+    }
+
+    internal PaintFluidFieldProbe CapturePaintFieldProbeForVerification(Point2 boardUv)
+    {
+        lock (_gate) return _paintFluid!.GetFieldProbe(new((float)boardUv.X, (float)boardUv.Y));
     }
 #endif
 

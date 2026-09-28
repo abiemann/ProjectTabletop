@@ -40,13 +40,23 @@ public sealed partial class MainWindow
                 !scene.CanSavePaint && !scene.TryBeginPaintSave(out _),
             "A blank Paint board did not expose Exit and an unavailable Save.");
 
-        // One drop lies in the old reserved header. Another evolves in the
-        // body, so an export of a static cache cannot substitute for the field.
+        // One drop lies in the old reserved header. The body receives a second
+        // coat, so exports must preserve piled paint and its newest pigment.
         Require(scene.AddPaintDrop(new(.50, .085), .10, now),
             "The former Paint header cannot retain paint beneath its floating overlays.");
         now += TimeSpan.FromMilliseconds(250);
         Require(scene.AddPaintDrop(new(.50, .55), .09, now), "The active artwork fixture rejected its body drop.");
         Advance(2);
+        var previousBodyCoat = scene.CapturePaintFieldProbeForVerification(new(.50, .55));
+        Require(scene.AddPaintDrop(new(.50, .55), .075, now), "The save fixture rejected a new coat over existing paint.");
+        Draw();
+        var stackedBodyCoat = scene.CapturePaintFieldProbeForVerification(new(.50, .55));
+        Require(stackedBodyCoat.Height > previousBodyCoat.Height + .8 &&
+                Math.Abs(stackedBodyCoat.SurfaceColor.X - .95) < .02 &&
+                Math.Abs(stackedBodyCoat.SurfaceColor.Y - .60) < .02 &&
+                Math.Abs(stackedBodyCoat.SurfaceColor.Z - .035) < .02,
+            "The saved-artwork fixture averaged its newest color or failed to retain layered thickness.");
+        Advance(.5);
         var beforeSnapshot = scene.GetPaintDiagnostics();
         Require(beforeSnapshot.ActiveDrops > 0 && scene.CanSavePaint && scene.CurrentBoardButtons[1].Enabled,
             "The evolving wet field did not enable Save.");
@@ -188,6 +198,7 @@ public sealed partial class MainWindow
             savesInMemoryArtworkWithoutCamera = true, pngMatchesSnapshotExactly = true,
             floatingControlsAndStatusExcluded = true, formerHeaderContainsPaint = true,
             activeAnimationCapturedWithoutFinishing = true, snapshotImmutableWhilePaintingContinues = true,
+            accumulatedPaintWithNewestCoatColorSaved = true,
             physicalAspectPreserved = true, previewCannotResizeExport = true,
             projectedGestureRoute = true, uniqueFiles = true, busyAndReplayRejected = true,
             failureRecoversWithoutFalseSuccess = true, temporaryBlankingReleasesBusyState = true,
