@@ -22,10 +22,10 @@ internal static class GlobeBoardRegression
         GlobeSnapshot start = board.GetGlobeSnapshot(Time(100));
         GlobeSnapshot middle = board.GetGlobeSnapshot(Time(1600));
         GlobeSnapshot finished = board.GetGlobeSnapshot(Time(3100));
-        Require(start is { IntroProgress: 0, ElapsedSeconds: 0, TargetZoom: 1 } && Near(start.Zoom, .04),
+        Require(start is { IntroProgress: 0, ElapsedSeconds: 0, TargetZoom: 1.5 } && Near(start.Zoom, .06),
             "Earth did not start far away at its default zoom.");
         Require(Near(middle.IntroProgress, .5) && middle.Zoom > start.Zoom && middle.Zoom < finished.Zoom &&
-            Near(finished.IntroProgress, 1) && Near(finished.Zoom, 1), "The three-second approach did not fill the default view.");
+            Near(finished.IntroProgress, 1) && Near(finished.Zoom, 1.5), "The three-second approach did not fill the default view.");
         Require(Near(finished.RotationDegrees, 3) && Near(board.GetGlobeSnapshot(Time(60100)).RotationDegrees, 60),
             "Earth did not spin slowly at one degree per second.");
         Require(board.GetGlobeSnapshot(Time(1600)) == middle && board.Revision == revision &&
@@ -34,7 +34,7 @@ internal static class GlobeBoardRegression
             board.GetGlobeSnapshot(Time(99)) is { IntroProgress: 0, ElapsedSeconds: 0 },
             "Long-running spin wrapping or a pre-launch clock produced invalid globe geometry.");
         board.ShowMenu(Time(361000)); board.ShowGlobe(Time(362000));
-        Require(board.GetGlobeSnapshot(Time(362000)) is { TargetZoom: 1, IntroProgress: 0, RotationDegrees: 0 },
+        Require(board.GetGlobeSnapshot(Time(362000)) is { TargetZoom: 1.5, IntroProgress: 0, RotationDegrees: 0 },
             "Returning to Globe did not restart the approach and orientation.");
     }
 
@@ -61,11 +61,11 @@ internal static class GlobeBoardRegression
         GlobeSnapshot instant = board.GetGlobeSnapshot(Time(4000));
         GlobeSnapshot halfway = board.GetGlobeSnapshot(Time(4175));
         GlobeSnapshot final = board.GetGlobeSnapshot(Time(4350));
-        Require(Near(instant.Zoom, before.Zoom) && Near(instant.TargetZoom, 1.25) && halfway.Zoom > instant.Zoom &&
-            halfway.Zoom < final.Zoom && Near(final.Zoom, 1.25), "Zooming jumped immediately or failed to settle smoothly.");
+        Require(Near(instant.Zoom, before.Zoom) && Near(instant.TargetZoom, 1.875) && halfway.Zoom > instant.Zoom &&
+            halfway.Zoom < final.Zoom && Near(final.Zoom, 1.875), "Zooming jumped immediately or failed to settle smoothly.");
         Require(board.ActivateButton("globe-zoom-in", Time(4350)) && board.ActivateButton("globe-zoom-in", Time(4350)),
             "Consecutive zoom selections were lost.");
-        Require(Near(board.GetGlobeSnapshot(Time(4700)).TargetZoom, Math.Pow(1.25, 3)), "Quick selections failed to accumulate zoom targets.");
+        Require(Near(board.GetGlobeSnapshot(Time(4700)).TargetZoom, 1.5 * Math.Pow(1.25, 3)), "Quick selections failed to accumulate zoom targets.");
         for (int time = 5000; time < 15000; time += 400) board.ActivateButton("globe-zoom-in", Time(time));
         Require(Near(board.GetGlobeSnapshot(Time(15000)).Zoom, GlobeState.MaximumZoom) &&
             !Button(board, "globe-zoom-in").Enabled && !board.ActivateButton("globe-zoom-in", Time(15000)),
@@ -84,7 +84,7 @@ internal static class GlobeBoardRegression
         Require(!board.ActivateButton("globe-rotate-right", Time(37999)) && !board.ActivateButton("unknown", Time(39000)) &&
             board.Revision == revision, "Rejected actions changed Globe state.");
         board.ShowGlobe(Time(40000));
-        Require(board.GetGlobeSnapshot(Time(43000)) is { TargetZoom: 1 } && Near(board.GetGlobeSnapshot(Time(43000)).Zoom, 1),
+        Require(board.GetGlobeSnapshot(Time(43000)) is { TargetZoom: 1.5 } && Near(board.GetGlobeSnapshot(Time(43000)).Zoom, 1.5),
             "Restarting Globe retained the previous zoom.");
     }
 
@@ -94,12 +94,12 @@ internal static class GlobeBoardRegression
         Require(At(board, 100, Pinch(globe, 1, 100)) is { Previous: BoardScreen.Menu, Current: BoardScreen.Globe,
             ButtonId: "globe", Gesture: BoardSelectionGesture.Pinch } && board.Title == "Globe", "A menu pinch did not launch Globe.");
         BoardButton zoom = Button(board, "globe-zoom-in");
-        Require(At(board, 140, Pinch(zoom, 1, 100)) is null && Near(board.GetGlobeSnapshot(Time(140)).TargetZoom, 1),
+        Require(At(board, 140, Pinch(zoom, 1, 100)) is null && Near(board.GetGlobeSnapshot(Time(140)).TargetZoom, 1.5),
             "A held launch pinch also zoomed Earth.");
         Require(At(board, 180, Pinch(zoom, 2, 180)) is { Previous: BoardScreen.Globe, Current: BoardScreen.Globe,
             ButtonId: "globe-zoom-in" }, "A fresh pinch failed to zoom Globe.");
         Require(At(board, 220, Pinch(zoom, 2, 180)) is null && At(board, 260) is null &&
-            At(board, 300, Pinch(zoom, 2, 180)) is null && Near(board.GetGlobeSnapshot(Time(300)).TargetZoom, 1.25),
+            At(board, 300, Pinch(zoom, 2, 180)) is null && Near(board.GetGlobeSnapshot(Time(300)).TargetZoom, 1.875),
             "A held or briefly missing pinch replayed a Globe action.");
         Require(At(board, 400, Pinch(Button(board, "globe-exit"), 3, 400)) is
             { Previous: BoardScreen.Globe, Current: BoardScreen.Menu, ButtonId: "globe-exit" },

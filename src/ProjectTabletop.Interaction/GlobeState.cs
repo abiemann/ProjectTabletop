@@ -10,6 +10,7 @@ public sealed record GlobeSnapshot(double TargetZoom, double Zoom, double Rotati
 /// </summary>
 public sealed class GlobeState
 {
+    public const double DefaultZoom = 1.5;
     public const double MinimumZoom = .6;
     public const double MaximumZoom = 3;
     public const double ZoomStep = 1.25;
@@ -21,8 +22,8 @@ public sealed class GlobeState
     private DateTimeOffset? _startedAt;
     private DateTimeOffset _transitionAt;
     private DateTimeOffset _lastActionAt;
-    private double _zoomFrom = 1;
-    private double _targetZoom = 1;
+    private double _zoomFrom = DefaultZoom;
+    private double _targetZoom = DefaultZoom;
     private double _rotationFrom;
     private double _targetRotation;
     public long Revision { get; private set; }
@@ -32,7 +33,7 @@ public sealed class GlobeState
         _startedAt = now;
         _transitionAt = now;
         _lastActionAt = now;
-        _zoomFrom = _targetZoom = 1;
+        _zoomFrom = _targetZoom = DefaultZoom;
         _rotationFrom = _targetRotation = 0;
         Revision++;
     }

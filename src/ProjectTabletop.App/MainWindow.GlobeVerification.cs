@@ -39,22 +39,24 @@ public sealed partial class MainWindow
             "Globe did not load its full-resolution Earth surface and separate cloud textures.");
 
         var distant = scene.GlobeState;
-        Require(distant.IntroProgress == 0 && distant.Zoom < .05,
+        Require(distant.IntroProgress == 0 && distant.Zoom < GlobeState.DefaultZoom * .05,
             "Globe did not begin with the Earth far away.");
         byte[] farPixels = await Capture("entrance-far-away");
-        now += TimeSpan.FromSeconds(1.5);
+        now += TimeSpan.FromSeconds(.65);
         var approaching = scene.GlobeState;
         byte[] approachingPixels = await Capture("entrance-approaching");
         Require(approaching.IntroProgress is > 0 and < 1 && approaching.Zoom > distant.Zoom * 10 &&
             ChangedPixels(farPixels, approachingPixels) > 100000,
             "The Earth did not visibly approach during its entrance.");
-        now += TimeSpan.FromSeconds(1.6);
+        // Measure the limb during approach while it is wholly visible and
+        // clear of the controls. The larger default fills the short board axis.
+        var circle = CheckCircularLimb(approachingPixels, width, height, CameraPoint(.5, .5),
+            335 * approaching.Zoom / 1000 * height * .93 * (1 - inset));
+        now += TimeSpan.FromSeconds(2.45);
         byte[] arrivedPixels = await Capture("earth-native-4k");
         var arrived = scene.GlobeState;
-        Require(arrived.IntroProgress == 1 && Math.Abs(arrived.Zoom - 1) < .000001,
+        Require(arrived.IntroProgress == 1 && Math.Abs(arrived.Zoom - GlobeState.DefaultZoom) < .000001,
             "The Earth entrance did not finish at its initial viewing scale.");
-        var circle = CheckCircularLimb(arrivedPixels, width, height, CameraPoint(.5, .438),
-            335 * arrived.Zoom / 1000 * height * .93 * (1 - inset));
         var initialButtons = scene.CurrentBoardButtons.ToArray();
         string[] captions = ["Exit", "Zoom -", "Zoom +", "< Rotate", "Rotate >"];
         Require(initialButtons.Count() == 5 && initialButtons.Select(button => button.Label).SequenceEqual(captions) &&
@@ -233,16 +235,19 @@ public sealed partial class MainWindow
             portrait.SetBoardSetup(false);
             portrait.ShowGlobe();
             await portrait.EnsureGlobeResourcesAsync(target.Device);
-            portraitNow += GlobeState.EntranceDuration + TimeSpan.FromMilliseconds(100);
+            portraitNow += TimeSpan.FromSeconds(.65);
             using (var drawing = portraitTarget.CreateDrawingSession())
                 portrait.Draw(drawing, portraitWidth, portraitHeight, preview: false, runningSlowly: false);
             byte[] pixels = portraitTarget.GetPixelBytes();
             Require(pixels.Take(4).SequenceEqual(new byte[] { 0, 0, 0, 255 }),
                 "Portrait Globe drawing escaped the physical board clip.");
             var center = new PixelPoint(portraitWidth * (.035 + .93 * (portraitInset / 2 + .5 * (1 - portraitInset))),
-                portraitHeight * (.035 + .93 * (portraitInset / 2 + .438 * (1 - portraitInset))));
+                portraitHeight * (.035 + .93 * (portraitInset / 2 + .5 * (1 - portraitInset))));
             object limb = CheckCircularLimb(pixels, portraitWidth, portraitHeight, center,
                 .335 * portrait.GlobeState.Zoom * portraitWidth * .93 * (1 - portraitInset));
+            portraitNow += TimeSpan.FromSeconds(2.45);
+            using (var drawing = portraitTarget.CreateDrawingSession())
+                portrait.Draw(drawing, portraitWidth, portraitHeight, preview: false, runningSlowly: false);
             string path = Path.Combine(directory, "earth-portrait-native-4k.png");
             await portraitTarget.SaveAsync(path, CanvasBitmapFileFormat.Png);
             images.Add(path);

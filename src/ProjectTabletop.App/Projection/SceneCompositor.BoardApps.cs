@@ -247,7 +247,7 @@ public sealed partial class SceneCompositor
 
                 if (paint)
                 {
-                    surface.DrawText("PAINT", 61, 18, AppPalette.MutedText, small);
+                    DrawBoardTitle(surface, "PAINT");
                     if (state.PaintStatus is { } paintStatus)
                     {
                         using var statusFormat = new CanvasTextFormat
@@ -269,7 +269,7 @@ public sealed partial class SceneCompositor
                 {
                     // Opaque panels keep copied images behind the lower controls.
                     // Hand illumination is drawn later, across the whole board.
-                    surface.DrawText("PHOTO COPY", 61, 18, AppPalette.MutedText, small);
+                    DrawBoardTitle(surface, "PHOTO COPY");
                     using var photoStatus = new CanvasTextFormat
                     {
                         FontFamily = "Segoe UI",
@@ -378,6 +378,16 @@ public sealed partial class SceneCompositor
         ds.DrawLine(arrowX - 6, arrowY - 6, arrowX, arrowY, hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 2);
         ds.DrawLine(arrowX - 6, arrowY + 6, arrowX, arrowY, hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 2);
         DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, AppPalette.IndicatorOn);
+    }
+
+    private static void DrawBoardTitle(CanvasDrawingSession ds, string title)
+    {
+        using var format = new CanvasTextFormat
+        {
+            FontFamily = "Segoe UI", FontSize = 20,
+            WordWrapping = CanvasWordWrapping.NoWrap
+        };
+        ds.DrawText(title, 61, 18, AppPalette.MutedText, format);
     }
 
     private static void DrawPaintButton(CanvasDrawingSession ds, BoardButton button, bool hovered,

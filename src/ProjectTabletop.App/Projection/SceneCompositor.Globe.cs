@@ -25,7 +25,7 @@ public sealed partial class SceneCompositor
             double radius = .335 * Math.Clamp(state.Zoom, .01, 10);
             return new(_globeRenderer?.IsReady == true, _globeRenderer?.SurfaceWidth ?? 0,
                 _globeRenderer?.SurfaceHeight ?? 0, _globeRenderer?.CloudWidth ?? 0, _globeRenderer?.CloudHeight ?? 0,
-                .5, .438, boardAspect >= 1 ? radius / boardAspect : radius,
+                .5, .5, boardAspect >= 1 ? radius / boardAspect : radius,
                 boardAspect >= 1 ? radius : radius * boardAspect, _globeRenderer?.Error);
         }
     }
@@ -75,12 +75,8 @@ public sealed partial class SceneCompositor
     private static void DrawGlobeControls(CanvasDrawingSession ds, IReadOnlyList<BoardButton> buttons,
         IReadOnlyList<string> hovered, IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback)
     {
-        // This quiet border and instrument typography remain still while the
-        // globe rotates. The control interiors are fully opaque, including at
-        // maximum zoom when Earth extends behind them.
-        ds.DrawRoundedRectangle(new Rect(18, 18, 964, 964), 24, 24, ThemeColor(83, 132, 164, 75), 1);
-        ds.DrawLine(39, 41, 39, 67, ThemeColor(116, 220, 252), 3);
-        GlobeText(ds, "GLOBE", new Rect(58, 34, 300, 41), 26, ThemeColor(205, 237, 255), false);
+        // The control interiors stay opaque as Earth rotates behind them.
+        DrawBoardTitle(ds, "GLOBE");
         GlobeText(ds, "EARTH  /  BLUE MARBLE", new Rect(658, 41, 300, 27), 15,
             ThemeColor(137, 174, 195), true);
 

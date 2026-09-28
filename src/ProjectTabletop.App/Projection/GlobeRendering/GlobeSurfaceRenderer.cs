@@ -57,7 +57,7 @@ internal sealed class GlobeSurfaceRenderer : IDisposable
         _effect.ConstantBuffer = new EarthSurfaceShader(
             new Float2((float)_textures.Day.Size.Width, (float)_textures.Day.Size.Height),
             new Float2((float)_textures.Clouds.Size.Width, (float)_textures.Clouds.Size.Height),
-            new Float2(500, 438), radii, rotationDegrees * (MathF.PI / 180), edgeWidth);
+            new Float2(500, 500), radii, rotationDegrees * (MathF.PI / 180), edgeWidth);
         // A source rectangle bounds the otherwise texture-sized effect. The
         // drawing transform gives Direct2D its real destination sampling rate.
         drawing.DrawImage(_effect, new Rect(0, 0, 1000, 1000), new Rect(0, 0, 1000, 1000));
