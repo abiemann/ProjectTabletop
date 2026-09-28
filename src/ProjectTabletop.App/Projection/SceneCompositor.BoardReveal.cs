@@ -3,6 +3,7 @@ using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.UI;
 using ProjectTabletop.Calibration;
+using ProjectTabletop.Interaction;
 using Windows.Foundation;
 
 namespace ProjectTabletop.App.Projection;
@@ -48,6 +49,8 @@ public sealed partial class SceneCompositor
             _boardRevealCenter = center;
             _boardRevealStartedAt = _boardRevealClock();
             _boardRevealInputPending = true;
+            if (_boardSession.Screen == BoardScreen.Monopoly)
+                StartMonopolyEntrance(_monopolyClock() + BoardRevealDuration);
             return inset;
         }
     }
@@ -69,7 +72,7 @@ public sealed partial class SceneCompositor
         if (_boardRevealInputPending)
         {
             _boardRevealInputPending = false;
-            ClearHandTips();
+            ClearHandTipsCore(resetInput: true, cancelMonopolyEntrance: false);
         }
         return false;
     }

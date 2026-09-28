@@ -150,6 +150,8 @@ public sealed partial class SceneCompositor
     {
         CancelMonopolyDiceAnimation();
         DisposeMonopolyDiceLayer();
+        CancelMonopolyEntrance();
+        DisposeMonopolyEntranceLayers();
         _boardRasterPixels = new(1000, 1000);
         _boardRasterDevice = null;
         _projectorPixelWidth = _projectorPixelHeight = 0;

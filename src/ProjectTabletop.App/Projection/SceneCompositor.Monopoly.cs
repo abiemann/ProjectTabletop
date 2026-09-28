@@ -45,14 +45,31 @@ public sealed partial class SceneCompositor
     // The perimeter and every UI control use the same square board coordinates.
     // Fine material detail is part of the cached board texture, never a moving
     // effect over the camera's text-acquisition regions.
-    private static void DrawMonopolyBoard(CanvasDrawingSession ds, MonopolySnapshot game,
+    private void DrawMonopolyBoard(CanvasDrawingSession ds, MonopolySnapshot game,
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
         IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback, double boardAspect = 1, bool hideDiceDisplay = false,
-        bool rolling = false, bool drawerOpen = false, float drawerProgress = 1)
+        bool rolling = false, bool drawerOpen = false, float drawerProgress = 1,
+        MonopolyEntranceFrame? entrance = null)
     {
+        if (entrance is { Active: true } frame)
+        {
+            DrawMonopolyEntrance(ds, game, buttons, hovered, selectionFeedback, boardAspect,
+                hideDiceDisplay, rolling, drawerOpen, drawerProgress, frame);
+            return;
+        }
         DrawMonopolyFrame(ds);
         for (int index = 0; index < MonopolyGame.Spaces.Count; index++)
             DrawMonopolySpace(ds, MonopolyGame.Spaces[index], game, boardAspect);
+        DrawMonopolyCenterContents(ds, game, buttons, hovered, selectionFeedback, boardAspect,
+            hideDiceDisplay, rolling, drawerOpen, drawerProgress);
+        DrawMonopolyRailCaptions(ds, rolling, selectionFeedback);
+    }
+
+    private static void DrawMonopolyCenterContents(CanvasDrawingSession ds, MonopolySnapshot game,
+        IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
+        IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback, double boardAspect,
+        bool hideDiceDisplay, bool rolling, bool drawerOpen, float drawerProgress)
+    {
         DrawMonopolyCenter(ds, game, boardAspect, hideDiceDisplay, drawerOpen);
         if (drawerOpen)
         {
@@ -64,10 +81,6 @@ public sealed partial class SceneCompositor
             DrawButtons(slide);
         }
         else DrawButtons(0);
-        MonopolyText(ds, rolling ? "Rolling the dice…" :
-            FingerSelectionCaption(selectionFeedback, "Bring fingers together. Aim, then separate index."),
-            new Rect(145, 958, 710, 24), 14, MonopolyGold);
-
         void DrawButtons(float slide)
         {
             foreach (var button in buttons)
@@ -86,7 +99,7 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private static void DrawMonopolyFrame(CanvasDrawingSession ds)
+    private static void DrawMonopolyFrame(CanvasDrawingSession ds, bool entranceBase = false)
     {
         ds.Clear(ThemeColor(12, 15, 12));
         using var wood = new CanvasLinearGradientBrush(ds.Device,
@@ -116,30 +129,53 @@ public sealed partial class SceneCompositor
         ]) { StartPoint = new(50, 42), EndPoint = new(50, 960) };
         ds.FillRoundedRectangle(new Rect(44, 44, 912, 912), 7, 7, gold);
         ds.FillRectangle(new Rect(49, 49, 902, 902), ThemeColor(11, 30, 22));
+        DrawMonopolyFelt(ds, entranceBase ? new Rect(50, 50, 900, 900) : new Rect(168, 168, 664, 664));
+        if (entranceBase) return;
+        DrawMonopolyCenterDecoration(ds);
+        DrawMonopolyRailTitle(ds);
+    }
+
+    private static void DrawMonopolyFelt(CanvasDrawingSession ds, Rect bounds)
+    {
         using var felt = new CanvasRadialGradientBrush(ds.Device,
         [
             new() { Position = 0, Color = ThemeColor(27, 89, 61) },
             new() { Position = .55f, Color = ThemeColor(16, 63, 43) },
             new() { Position = 1, Color = ThemeColor(9, 41, 30) }
         ]) { Center = new(500, 405), RadiusX = 510, RadiusY = 650 };
-        ds.FillRectangle(new Rect(168, 168, 664, 664), felt);
-        using (var clip = CanvasGeometry.CreateRectangle(ds.Device, new Rect(168, 168, 664, 664)))
+        ds.FillRectangle(bounds, felt);
+        using (var clip = CanvasGeometry.CreateRectangle(ds.Device, bounds))
         using (ds.CreateLayer(1, clip))
         {
-            for (int offset = -700; offset < 1400; offset += 28)
+            bool expanded = bounds.Width > 664;
+            for (int offset = expanded ? -1008 : -700; offset < (expanded ? 1960 : 1400); offset += 28)
             {
-                ds.DrawLine(offset, 168, offset + 664, 832, ThemeColor(204, 213, 164, 10), .7f);
-                ds.DrawLine(offset, 168, offset - 664, 832, ThemeColor(204, 213, 164, 10), .7f);
+                ds.DrawLine(offset, (float)bounds.Y, offset + (float)bounds.Height, (float)bounds.Bottom,
+                    ThemeColor(204, 213, 164, 10), .7f);
+                ds.DrawLine(offset, (float)bounds.Y, offset - (float)bounds.Height, (float)bounds.Bottom,
+                    ThemeColor(204, 213, 164, 10), .7f);
             }
-            for (int y = 173; y < 832; y += 5)
-                ds.DrawLine(168, y, 832, y, ThemeColor(0, 18, 9, 7), .5f);
+            for (int y = expanded ? 53 : 173; y < bounds.Bottom; y += 5)
+                ds.DrawLine((float)bounds.X, y, (float)bounds.Right, y, ThemeColor(0, 18, 9, 7), .5f);
         }
+    }
+
+    private static void DrawMonopolyCenterDecoration(CanvasDrawingSession ds)
+    {
         ds.DrawRectangle(new Rect(173, 173, 654, 654), ThemeColor(231, 204, 134, 165), 1.25f);
         ds.DrawRectangle(new Rect(179, 179, 642, 642), ThemeColor(231, 204, 134, 50), .75f);
         foreach (var center in new[] { new Vector2(189, 189), new Vector2(811, 189), new Vector2(189, 811), new Vector2(811, 811) })
             DrawMonopolyFiligree(ds, center, center.X > 500, center.Y > 500);
-        MonopolyText(ds, "P R O J E C T   T A B L E T O P", new Rect(252, 14, 496, 24), 13, MonopolyGold);
     }
+
+    private static void DrawMonopolyRailTitle(CanvasDrawingSession ds) =>
+        MonopolyText(ds, "P R O J E C T   T A B L E T O P", new Rect(252, 14, 496, 24), 13, MonopolyGold);
+
+    private static void DrawMonopolyRailCaptions(CanvasDrawingSession ds, bool rolling,
+        IReadOnlyList<BoardFingerSelectionFeedback> feedback) =>
+        MonopolyText(ds, rolling ? "Rolling the dice…" :
+            FingerSelectionCaption(feedback, "Bring fingers together. Aim, then separate index."),
+            new Rect(145, 958, 710, 24), 14, MonopolyGold);
 
     private static void DrawMonopolyFiligree(CanvasDrawingSession ds, Vector2 center, bool flipX, bool flipY)
     {

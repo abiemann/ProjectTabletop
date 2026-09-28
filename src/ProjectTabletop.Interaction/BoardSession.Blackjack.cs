@@ -78,6 +78,7 @@ public sealed partial class BoardSession
         AdvanceMonopolyPresentation(now);
         BlackjackHit? hit = null;
         BlackjackDeal? deal = null;
+        bool openedBoard = false;
         if (Screen == BoardScreen.Monopoly)
         {
             return SelectMonopolyButton(button, now);
@@ -121,11 +122,13 @@ public sealed partial class BoardSession
             Screen = button.Destination;
             if (Screen == BoardScreen.Globe) _globe.Start(now);
             Revision++;
+            openedBoard = true;
         }
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);
         HoveredButtonIds = Array.Empty<string>();
         InvalidateFingerSelection(now);
         if (pointerAction) _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
+        if (openedBoard) BoardOpened?.Invoke(Screen);
         if (hit is not null) BlackjackHitOccurred?.Invoke(hit);
         if (deal is not null) BlackjackDealOccurred?.Invoke(deal);
         return true;

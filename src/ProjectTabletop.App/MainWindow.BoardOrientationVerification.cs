@@ -22,6 +22,7 @@ public sealed partial class MainWindow
         var now = DateTimeOffset.UtcNow.AddMinutes(1);
         var globeStartedAt = now;
         var globeNow = globeStartedAt;
+        var monopolyNow = DateTimeOffset.UtcNow;
         Vector2[] physicalCorners = [new(.10f, .14f), new(.90f, .14f), new(.90f, .86f), new(.10f, .86f)];
         Point2[] unit = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
         BoardScreen[] boards = [BoardScreen.Menu, BoardScreen.HandTracking, BoardScreen.PhotoCopy,
@@ -91,7 +92,8 @@ public sealed partial class MainWindow
                 for (int first = 0; first < 4; first++)
                 {
                     using var scene = new SceneCompositor(new BlackjackGame(seed: 173),
-                        blackjackClock: () => now, paintClock: () => now, globeClock: () => globeNow);
+                        blackjackClock: () => now, paintClock: () => now, globeClock: () => globeNow,
+                        monopolyClock: () => monopolyNow);
                     await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
                     scene.SetDisplayAspect((double)width / height);
                     Require(scene.GetBoardFacingDegrees() is null,
@@ -214,7 +216,7 @@ public sealed partial class MainWindow
         SceneCompositor NewScene(int cameraQuarterTurn, out Homography map, out double inset)
         {
             var result = new SceneCompositor(new BlackjackGame(seed: 173), blackjackClock: () => now,
-                paintClock: () => now, globeClock: () => globeNow);
+                paintClock: () => now, globeClock: () => globeNow, monopolyClock: () => monopolyNow);
             result.SetDisplayAspect((double)width / height);
             result.SetBoardFacingDegrees(0);
             result.SetBoardSetup(true);
@@ -253,7 +255,14 @@ public sealed partial class MainWindow
                 case BoardScreen.PhotoCopy: scene.ShowPhotoCopy(); break;
                 case BoardScreen.Paint: scene.ShowPaint(); break;
                 case BoardScreen.Blackjack: scene.ShowBlackjack(); break;
-                case BoardScreen.Monopoly: scene.ShowMonopoly(); break;
+                case BoardScreen.Monopoly:
+                    // Keep the completed barrier behind real camera timestamps;
+                    // the unrelated Paint clock deliberately runs in the future.
+                    monopolyNow = DateTimeOffset.UtcNow.AddMilliseconds(-5075);
+                    scene.ShowMonopoly();
+                    monopolyNow += TimeSpan.FromMilliseconds(4975);
+                    scene.TickMonopoly(monopolyNow);
+                    break;
                 case BoardScreen.Globe:
                     // Each camera orientation samples the same fully approached
                     // Earth. Paint's separate evolving clock cannot turn it.

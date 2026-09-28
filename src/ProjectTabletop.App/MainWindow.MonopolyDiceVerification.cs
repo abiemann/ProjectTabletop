@@ -178,6 +178,7 @@ public sealed partial class MainWindow
                 Homography.FromFourPoints([new(0, 0), new(outputWidth, 0), new(outputWidth, outputHeight), new(0, outputHeight)],
                     [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
             fixture.SetBoardSetup(false); fixture.ShowMonopoly();
+            now += TimeSpan.FromMilliseconds(4975); fixture.TickMonopoly(now);
             Act(fixture, "mp-start-game");
             if (humansOnly) { Act(fixture, "mp-ai-minus"); Act(fixture, "mp-human-plus"); }
             Act(fixture, "mp-start");
@@ -262,7 +263,10 @@ public sealed partial class MainWindow
                 else if (cause == "menu") cancelled.ShowMonopoly();
                 else if (cause == "setup") cancelled.SetBoardSetup(false);
                 else if (cause == "black") cancelled.SetBlackOutput(false);
-                now += TimeSpan.FromMilliseconds(3700);
+                // Relaunching the board first completes its entrance; the old
+                // dice must remain cancelled once game controls return.
+                now += TimeSpan.FromMilliseconds(cause is "menu" or "same-board" ? 4975 : 3700);
+                cancelled.TickMonopoly(now);
                 Require(cancelled.GetMonopolyDiceFrames(now).Count == 0,
                     $"Returning after {cause} replayed a stale roll.");
                 if (cause is "camera" or "exit" or "black")

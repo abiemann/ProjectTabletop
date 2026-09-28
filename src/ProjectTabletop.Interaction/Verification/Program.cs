@@ -1,5 +1,6 @@
 using ProjectTabletop.Interaction;
 
+BoardOpenedRegression.Run();
 MonopolyRegression.Run();
 MonopolyBoardRegression.Run();
 MonopolyDrawerRegression.Run();

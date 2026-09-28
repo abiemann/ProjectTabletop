@@ -113,6 +113,7 @@ public sealed partial class SceneCompositor : IDisposable
         lock (_gate)
         {
             CancelBoardReveal();
+            CancelMonopolyEntrance();
             _boardMediaClip = null;
             SetEstimatedBoardSize(null);
             _detectedBoardCorners = null;
@@ -129,6 +130,9 @@ public sealed partial class SceneCompositor : IDisposable
     }
 
     public void ClearHandTips(bool resetInput = true)
+        => ClearHandTipsCore(resetInput, cancelMonopolyEntrance: true);
+
+    private void ClearHandTipsCore(bool resetInput, bool cancelMonopolyEntrance)
     {
         lock (_gate)
         {
@@ -138,11 +142,14 @@ public sealed partial class SceneCompositor : IDisposable
             // already in flight. Camera/calibration resets still block old input.
             if (resetInput)
             {
+                if (cancelMonopolyEntrance) CancelMonopolyEntrance();
                 _handVisualResetThrough = DateTimeOffset.UtcNow;
                 ClearHandSpotlights();
                 _boardSession.ResetInput(DateTimeOffset.UtcNow);
                 CancelBlackjackDeal();
                 CancelMonopolyDiceAnimation();
+                if (!cancelMonopolyEntrance && _monopolyEntranceStartedAt is { } started && !_monopolyEntranceCompleted)
+                    _boardSession.HoldMonopolyPresentationUntil(started.AddMilliseconds(MonopolyEntranceDurationMilliseconds));
             }
         }
     }
@@ -152,7 +159,7 @@ public sealed partial class SceneCompositor : IDisposable
     {
         lock (_gate)
         {
-            if (BlockBoardRevealInput()) return;
+            if (BlockBoardRevealInput() || MonopolyEntranceActive) return;
             _handTips = [];
             var now = DateTimeOffset.UtcNow;
             var acceptVisual = frameTime <= now && now - frameTime <= TimeSpan.FromMilliseconds(350) &&
@@ -284,6 +291,7 @@ public sealed partial class SceneCompositor : IDisposable
         lock (_gate)
         {
             CancelBoardReveal();
+            CancelMonopolyEntrance();
             _displayAspect = double.IsFinite(aspect) && aspect > 0 ? aspect : 16.0 / 9;
             ClearHandSpotlights();
         }
@@ -322,6 +330,7 @@ public sealed partial class SceneCompositor : IDisposable
             {
                 CancelBoardReveal();
                 CancelMonopolyDiceAnimation();
+                CancelMonopolyEntrance();
             }
             _blackOutput = enabled;
             if (enabled) ClearHandSpotlights();
@@ -400,7 +409,11 @@ public sealed partial class SceneCompositor : IDisposable
             CancelBoardReveal();
             _calibrationTarget = index is >= 0 and < 4 ? index : -1;
             _calibrationTargetTop = pieceTop;
-            if (_calibrationTarget >= 0) ClearHandSpotlights();
+            if (_calibrationTarget >= 0)
+            {
+                CancelMonopolyEntrance();
+                ClearHandSpotlights();
+            }
         }
     }
 
@@ -597,7 +610,7 @@ public sealed partial class SceneCompositor : IDisposable
     {
         // Four-finger aiming is visible on each board. Red pinch feedback stays
         // confined to the gesture tester.
-        if (_boardSetup || _calibrationTarget >= 0) return;
+        if (_boardSetup || _calibrationTarget >= 0 || MonopolyEntranceActive) return;
         var now = DateTimeOffset.UtcNow;
         if (_boardMediaClip is not { } clip || _boardCameraMap is null ||
             _handTips.Length == 0 || _handFrameTime > now ||
@@ -838,6 +851,7 @@ public sealed partial class SceneCompositor : IDisposable
         lock (_gate)
         {
             if (_disposed) return;
+            CancelMonopolyEntrance();
             _disposed = true;
             foreach (var asset in _overlays.Values.Append(_background).OfType<MediaAsset>().Distinct()) asset.Dispose();
             _overlays.Clear();
@@ -850,6 +864,7 @@ public sealed partial class SceneCompositor : IDisposable
             _monopolyPreviewTarget?.Dispose();
             _monopolyPreviewTarget = null;
             DisposeMonopolyDiceLayer();
+            DisposeMonopolyEntranceLayers();
             _globePreviewTarget?.Dispose();
             _globePreviewTarget = null;
             DisposeGlobeRenderer();
@@ -860,6 +875,7 @@ public sealed partial class SceneCompositor : IDisposable
             _boardSession.BlackjackHitOccurred -= OnBlackjackHit;
             _boardSession.BlackjackDealOccurred -= OnBlackjackDeal;
             _boardSession.MonopolyRollOccurred -= OnMonopolyRoll;
+            _boardSession.BoardOpened -= OnBoardOpened;
             _photoCopyBitmap?.Dispose();
             _photoCopyBitmap = null;
             _photoCopyCameraTarget?.Dispose();

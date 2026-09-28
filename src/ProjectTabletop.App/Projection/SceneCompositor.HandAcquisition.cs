@@ -71,7 +71,7 @@ public sealed partial class SceneCompositor
             var blackjack = _boardSession.Screen == BoardScreen.Blackjack;
             var animating = blackjack && HasBlackjackCardAnimation(now) ||
                 _boardSession.Screen == BoardScreen.Monopoly &&
-                    (HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()));
+                    (MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()));
             var state = CurrentAcquisitionState();
             var buttons = _boardSession.Buttons;
             if (_acquisitionScene != state || !_acquisitionButtons.SequenceEqual(buttons))
@@ -271,7 +271,7 @@ public sealed partial class SceneCompositor
             (rendered.MonopolyRevision != _boardSession.MonopolyState.Revision ||
             rendered.MonopolyDiceRevision != MonopolyDicePresentationRevision ||
             rendered.MonopolySessionRevision != _boardSession.Revision ||
-            HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()))) return null;
+            MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()))) return null;
         if (globe && rendered.GlobeRevision != _boardSession.GetGlobeSnapshot(_globeClock()).Revision) return null;
         var cameraToProjector = _boardCameraMap!.ToMatrix();
         var projectorToBoard = _boardSurfaceMap!.Inverse().ToMatrix();
@@ -377,7 +377,7 @@ public sealed partial class SceneCompositor
             !_acquisitionButtons.SequenceEqual(_boardSession.Buttons) ||
             _boardSession.Screen == BoardScreen.Blackjack && HasBlackjackCardAnimation(now) ||
             _boardSession.Screen == BoardScreen.Monopoly &&
-                (HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()))) return;
+                (MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()))) return;
         var center = new Vector2((float)(output.X + light.Center.X * output.Width),
             (float)(output.Y + light.Center.Y * output.Height));
         float radius = (float)(light.Radius * output.Height);

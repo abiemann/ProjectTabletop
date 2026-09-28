@@ -23,7 +23,7 @@ public sealed partial class SceneCompositor
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision,
         long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long MonopolyRevision, long MonopolyDiceRevision,
-        long MonopolySessionRevision, int MonopolyDrawerFrame,
+        long MonopolySessionRevision, int MonopolyDrawerFrame, long MonopolyEntranceRevision, int MonopolyEntranceFrame,
         long GlobeRevision, long GlobeFrame);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
@@ -40,6 +40,7 @@ public sealed partial class SceneCompositor
         _boardSession.BlackjackHitOccurred += OnBlackjackHit;
         _boardSession.BlackjackDealOccurred += OnBlackjackDeal;
         _boardSession.MonopolyRollOccurred += OnMonopolyRoll;
+        _boardSession.BoardOpened += OnBoardOpened;
     }
 
     public BoardScreen CurrentBoardScreen
@@ -132,7 +133,8 @@ public sealed partial class SceneCompositor
         var blackjackNow = _blackjackClock();
         TickBlackjackVisuals(blackjackNow);
         var monopolyNow = _monopolyClock();
-        _boardSession.TickMonopoly(monopolyNow);
+        var monopolyEntrance = GetMonopolyEntranceFrame(monopolyNow);
+        if (monopolyEntrance?.Active != true) _boardSession.TickMonopoly(monopolyNow);
         var monopolyPresented = MonopolyPresentedState(monopolyNow);
         var monopolyDicePresented = HasMonopolyDicePresentation(monopolyNow);
         var flights = GetBlackjackFlights(blackjackNow);
@@ -166,6 +168,8 @@ public sealed partial class SceneCompositor
             _boardSession.Screen == BoardScreen.Monopoly ? MonopolyDicePresentationRevision : 0,
             _boardSession.Screen == BoardScreen.Monopoly ? _boardSession.Revision : 0,
             _boardSession.Screen == BoardScreen.Monopoly ? MonopolyDrawerFrame(monopolyNow) : -1,
+            _boardSession.Screen == BoardScreen.Monopoly ? MonopolyEntranceRevision : 0,
+            MonopolyEntranceRenderFrame(monopolyEntrance),
             globe ? _boardSession.GetGlobeSnapshot(globeNow).Revision : 0,
             globe ? GlobeVisualFrame(globeNow) : 0);
         // Cursor motion is drawn separately. Reuse the UI texture until its
@@ -219,7 +223,7 @@ public sealed partial class SceneCompositor
                     handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback,
                     PaintBoardAspect(), hideDiceDisplay: monopolyDicePresented,
                     rolling: HasMonopolyDiceAnimation(monopolyNow), drawerOpen: _boardSession.MonopolyDrawerOpen,
-                    drawerProgress: MonopolyDrawerProgress(monopolyNow));
+                    drawerProgress: MonopolyDrawerProgress(monopolyNow), entrance: monopolyEntrance);
             }
             else if (globe)
             {

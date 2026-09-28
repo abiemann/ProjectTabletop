@@ -30,6 +30,7 @@ public sealed partial class MainWindow
             Homography.FromFourPoints([new(0, 0), new(width, 0), new(width, height), new(0, height)],
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
         scene.SetBoardSetup(false); scene.ShowMonopoly();
+        now += TimeSpan.FromMilliseconds(4975); scene.TickMonopoly(now);
         await Capture("landing-closed");
         Require(!scene.MonopolyDrawerOpen && Button("mp-exit").Label == "^", "The landing drawer lacks its closed upward caret.");
         CheckAcquisition();
@@ -77,7 +78,9 @@ public sealed partial class MainWindow
         Require(scene.TryGetMonopolySaveRequest(out long retry, out string retryJson) && retry > first && retryJson == preservedSave &&
                 scene.CompleteMonopolySave(retry, true) && scene.CurrentBoardScreen == BoardScreen.Menu && !scene.MonopolyDrawerOpen,
             "A successful retry did not navigate after persistence completed.");
-        scene.ShowMonopoly(); Act("mp-resume");
+        scene.ShowMonopoly();
+        now += TimeSpan.FromMilliseconds(4975); scene.TickMonopoly(now);
+        Act("mp-resume");
         Require(!scene.MonopolyDrawerOpen && scene.ExportMonopolySave() == preservedSave,
             "Resume lost the saved turn or replayed the old drawer.");
         Require(tested.IsSupersetOf(["^", "v", "Exit Game", "Save and Exit"]), "Caption acquisition omitted a drawer label.");

@@ -34,6 +34,8 @@ public sealed partial class MainWindow
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
         scene.SetBoardSetup(false);
         scene.ShowMonopoly();
+        now += TimeSpan.FromMilliseconds(4975);
+        scene.TickMonopoly(now);
         await Capture("landing");
         Require(scene.CurrentBoardButtons.Any(button => button.Label == "Start Game"), "The landing board lacks Start Game.");
         await CheckAcquisition("landing");
@@ -105,6 +107,8 @@ public sealed partial class MainWindow
         using var resumed = new SceneCompositor(monopolyClock: () => now);
         Require(resumed.LoadMonopolySave((await MonopolySaveStore.LoadAsync(savePath))!), "A persisted Monopoly game could not be loaded.");
         resumed.ShowMonopoly();
+        now += TimeSpan.FromMilliseconds(4975);
+        resumed.TickMonopoly(now);
         Require(resumed.MonopolyState.Phase == MonopolyPhase.Landing && resumed.MonopolyState.CanResume &&
             resumed.ActivateMonopolyButton("mp-resume") && resumed.MonopolyState.Phase == MonopolyPhase.AwaitingEndTurn &&
             resumed.MonopolyState.Players[0].Money == 1440 && resumed.MonopolyState.Players[0].Position == 3,

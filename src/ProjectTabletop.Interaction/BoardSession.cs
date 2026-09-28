@@ -89,6 +89,8 @@ public sealed partial class BoardSession
     public BoardScreen Screen { get; private set; } = BoardScreen.Menu;
     /// <summary>Changes on every navigation, including restarting the current application.</summary>
     public long Revision { get; private set; }
+    /// <summary>Raised once after a board opens, including menu gestures and reopening the same board.</summary>
+    public event Action<BoardScreen>? BoardOpened;
     public string Title => Screen switch
     {
         BoardScreen.Menu => "Project Tabletop",
@@ -220,6 +222,7 @@ public sealed partial class BoardSession
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);
         InvalidateFingerSelection(now);
+        BoardOpened?.Invoke(screen);
     }
 
     private bool SelectionIsCurrent(BoardHandSample hand, DateTimeOffset frameTime) =>

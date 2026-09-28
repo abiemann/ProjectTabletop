@@ -19,7 +19,8 @@ public sealed partial class MainWindow
     {
         const int size = 1200;
         var globeNow = DateTimeOffset.UtcNow.AddMinutes(1);
-        using var scene = new SceneCompositor(globeClock: () => globeNow);
+        var monopolyNow = DateTimeOffset.UtcNow;
+        using var scene = new SceneCompositor(globeClock: () => globeNow, monopolyClock: () => monopolyNow);
         await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
         scene.SetDisplayAspect(1);
         scene.SetBoardSetup(true);
@@ -60,12 +61,18 @@ public sealed partial class MainWindow
             await Task.Delay(2); // A new selection must follow external navigation.
             BoardButton button = new BoardSession().Buttons.Single(item => item.Destination == screen);
             var time = DateTimeOffset.UtcNow;
+            monopolyNow = time.AddMilliseconds(-5075);
             scene.SetHandCursors([new(BoardPoint(button.Bounds.X + button.Bounds.Width / 2,
                 button.Bounds.Y + button.Bounds.Height / 2), time.AddSeconds(1), ++eventId)], time);
             if (scene.CurrentBoardScreen != screen)
                 throw new InvalidOperationException("The theme fixture could not open " + screen + ".");
             scene.ClearHandTips(resetInput: false);
             if (screen == BoardScreen.Globe) globeNow += TimeSpan.FromSeconds(4);
+            if (screen == BoardScreen.Monopoly)
+            {
+                monopolyNow += TimeSpan.FromMilliseconds(4975);
+                scene.TickMonopoly(monopolyNow);
+            }
             await Save(screen.ToString().ToLowerInvariant());
         }
         images.Add(await SaveLaptopThemeSnapshotAsync(directory));
