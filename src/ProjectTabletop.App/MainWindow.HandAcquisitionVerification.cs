@@ -19,7 +19,8 @@ public sealed partial class MainWindow
         var metadata = System.Text.Json.JsonSerializer.Serialize(new
         {
             frame.Timestamp, cameraWidth = frame.Width, cameraHeight = frame.Height, frame.Stride,
-            expected.Width, expected.Height, expected.CameraToBoard, context!.Revision,
+            expected.Width, expected.Height, expected.CameraToBoard, expected.BoardSearchRegions,
+            expected.BoardReferenceRegions, context!.Revision,
             context.SearchPolygon, context.IlluminatedHint, context.IlluminationStartedAt,
             lighting = _scene.GetHandAcquisitionDiagnostics(), detection = _lastHandAcquisitionDetection
         });
@@ -49,7 +50,7 @@ public sealed partial class MainWindow
         now += TimeSpan.FromMilliseconds(600);
         var ready = scene.GetHandAcquisitionContext(now)!;
         Require(ready.ObserveMotion, "The settled Blackjack button area did not start watching.");
-        var center = BoardPoint(.5, .83);
+        var center = BoardPoint(.55, .83);
         var hint = new HandAcquisitionHint(new(center.X - 140, center.Y - 140, 280, 280),
             center, 82, now, .05);
         var baseline = Draw();
@@ -57,8 +58,8 @@ public sealed partial class MainWindow
         Require(ready.ExpectedScene is { Width: 1000, Height: 1000 } expected &&
             expected.Bgra.Length == 1000 * 1000 * 4,
             "The generated unlit table was not available for stationary-hand comparison.");
-        Require(ready.StationarySearchCenters is { Length: 4 },
-            "Stationary button searches require four native-camera centers.");
+        Require(ready.StationarySearchCenters?.Length == scene.CurrentBoardButtons.Count,
+            "Stationary button searches must include every Blackjack control.");
         long gameRevision = scene.BlackjackState.Revision;
         scene.CompleteHandAcquisition(ready, [hint], [], now);
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is not null,
@@ -123,8 +124,10 @@ public sealed partial class MainWindow
         Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null },
             "Opening cards allowed acquisition before the final landing.");
         now += TimeSpan.FromMilliseconds(1200);
+        Draw(); // Present the landed deal and release the temporary disabled controls.
         scene.GetHandAcquisitionContext(now);
         now += TimeSpan.FromMilliseconds(600);
+        Draw();
         ready = scene.GetHandAcquisitionContext(now)!;
         scene.CompleteHandAcquisition(ready, [hint with { ObservedAt = now }], [], now);
         Require(IsWhite(Draw(), center), "Player-turn controls did not allow assistance.");
@@ -132,13 +135,16 @@ public sealed partial class MainWindow
         Require(!IsWhite(Draw(), center) && scene.GetHandAcquisitionContext(now) is { ObserveMotion: false },
             "A card flight kept the obsolete light or enabled motion scanning.");
         now += TimeSpan.FromMilliseconds(800);
+        Draw(); // Observe the completed HIT before requesting its new control template.
         scene.GetHandAcquisitionContext(now);
         now += TimeSpan.FromMilliseconds(600);
+        Draw();
         ready = scene.GetHandAcquisitionContext(now)!;
         Require(ready.ObserveMotion, "Motion watching did not recover after the HIT animation.");
         scene.ShowBoardMenu();
         scene.CompleteHandAcquisition(ready, [hint with { ObservedAt = now }], [], now);
-        Require(scene.GetHandAcquisitionContext(now) is null, "Blackjack assistance survived navigation.");
+        Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null },
+            "Blackjack's old acquisition result survived navigation to the menu.");
 
         scene.ShowBlackjack();
         scene.ClearHandTips();

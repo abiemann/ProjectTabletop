@@ -247,7 +247,7 @@ public sealed partial class MainWindow
                                 _handPreview = new HandPreview(cursors, visualCursors, frame.Width, frame.Height, frame.Timestamp);
                                 _scene.SetHandCursors(cursors, frame.Timestamp, _photoCopyTask is { IsCompleted: false }, visualCursors);
                                 _scene.SetHandSpotlights(visibleHands, frame.Timestamp);
-                                _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.Hints, visibleHands, frame.Timestamp,
+                                _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.LightingHints, visibleHands, frame.Timestamp,
                                     acquisitionHints.Presence?.IlluminatedPresence);
                                 DescribeHandAcquisition(frame, acquisitionContext, acquisitionHints, detectorTrace, visibleHands.Length);
                                 LogHandDetection(sequence, requestedInTester, frame, generation, engineReset,

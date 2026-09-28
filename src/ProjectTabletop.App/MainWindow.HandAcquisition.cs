@@ -14,7 +14,12 @@ public sealed partial class MainWindow
     private object? _lastHandAcquisitionDetection;
 
     private sealed record HandAcquisitionQuery(IReadOnlyList<HandAcquisitionHint> Hints,
-        IReadOnlyList<HandTrackingBounds> SearchRegions, HandAcquisitionPresenceResult? Presence);
+        IReadOnlyList<HandTrackingBounds> SearchRegions, HandAcquisitionPresenceResult? Presence)
+    {
+        // Motion may suggest a close model search, but cannot bypass the measured
+        // minimum obstruction required to start a projected search light.
+        public IReadOnlyList<HandAcquisitionHint> LightingHints => Presence?.Hints ?? [];
+    }
 
     private HandAcquisitionQuery FindHandAcquisitionHints(CameraFrame frame,
         SceneCompositor.HandAcquisitionContext? context, bool engineReset)
@@ -24,7 +29,8 @@ public sealed partial class MainWindow
             _handAcquisitionPresence.Reset();
             _handAcquisitionSweep = 0;
         }
-        if (engineReset || context?.Revision != _handAcquisitionContextRevision || context?.ObserveMotion != true)
+        if (engineReset || context?.Revision != _handAcquisitionContextRevision || context?.ObserveMotion != true ||
+            context?.MotionFallbackEnabled != true)
             _handAcquisitionMotion.Reset();
         _handAcquisitionContextRevision = context?.Revision ?? -1;
         if (context is null || !context.ObserveMotion && context.IlluminatedHint is null) return new([], [], null);
@@ -34,8 +40,9 @@ public sealed partial class MainWindow
                 context.IlluminatedHint, context.IlluminationStartedAt) : null;
         IReadOnlyList<HandAcquisitionHint> hints = context.IlluminatedHint is { } illuminated ? [illuminated] :
             presence is { Hints.Count: > 0 } ? presence.Hints :
-            _handAcquisitionMotion.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-                context.SearchPolygon, frame.Timestamp, DateTimeOffset.UtcNow);
+            context.MotionFallbackEnabled
+                ? _handAcquisitionMotion.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
+                    context.SearchPolygon, frame.Timestamp, DateTimeOffset.UtcNow) : [];
         var regions = new List<HandTrackingBounds>(2);
         if (hints.Count > 0) regions.Add(hints[0].SearchBounds);
         // Search the known controls even when a stationary hand produces no
@@ -65,7 +72,8 @@ public sealed partial class MainWindow
         _lastHandAcquisitionDetection = context is null ? null : new
         {
             frameTime = frame.Timestamp, context.Revision, context.ObserveMotion,
-            hints = query.Hints, searchRegions = query.SearchRegions, presence = query.Presence,
+            hints = query.Hints, lightingHints = query.LightingHints,
+            searchRegions = query.SearchRegions, presence = query.Presence,
             handCount, searches = trace?.Searches,
             selectedSources = trace?.SelectedCandidateIndices.Select(index =>
                 trace.Candidates.First(candidate => candidate.Index == index).Source).ToArray()

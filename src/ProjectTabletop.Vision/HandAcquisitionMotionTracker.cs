@@ -1,8 +1,10 @@
 namespace ProjectTabletop.Vision;
 
 /// <summary>A camera motion hint for a fresh palm search, never a detected hand or a gesture.</summary>
+/// <param name="ControlCoverage">For rendered-control foreground hints, residual area divided
+/// by that control's configured search-interior area in board coordinates; null for motion-only hints.</param>
 public sealed record HandAcquisitionHint(HandTrackingBounds SearchBounds, PixelPoint Center,
-    double RadiusPixels, DateTimeOffset ObservedAt, double MotionFraction);
+    double RadiusPixels, DateTimeOffset ObservedAt, double MotionFraction, double? ControlCoverage = null);
 
 /// <summary>
 /// Finds bounded local disturbances within a calibrated camera polygon. All returned geometry

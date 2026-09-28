@@ -1,10 +1,17 @@
 namespace ProjectTabletop.Vision;
 
 /// <summary>The exact rendered board and the calibrated native-camera to board-UV homography.</summary>
+/// <param name="BoardSearchRegions">Optional normalized board-UV rectangles whose union contains
+/// stable controls. Changes elsewhere in the rendered board cannot become foreground evidence.</param>
+/// <param name="BoardReferenceRegions">Optional normalized board-UV rectangles used to fit camera
+/// appearance independently of the candidate controls, such as unobscured static panels.</param>
 public sealed record HandAcquisitionSceneImage(int Width, int Height, byte[] Bgra,
-    IReadOnlyList<double> CameraToBoard);
+    IReadOnlyList<double> CameraToBoard, IReadOnlyList<HandTrackingBounds>? BoardSearchRegions = null,
+    IReadOnlyList<HandTrackingBounds>? BoardReferenceRegions = null);
 
 /// <summary>Foreground evidence for acquisition, never proof of a hand or a selection.</summary>
+/// <param name="ForegroundFraction">Foreground occupancy among eligible candidate samples.
+/// When separate reference regions are supplied, their fit quality is checked independently.</param>
 public sealed record HandAcquisitionPresenceResult(IReadOnlyList<HandAcquisitionHint> Hints,
     bool BaselineReady, bool? IlluminatedPresence, double ForegroundFraction, string Reason);
 
@@ -17,12 +24,22 @@ public sealed record HandAcquisitionPresenceResult(IReadOnlyList<HandAcquisition
 public sealed class HandAcquisitionPresenceTracker
 {
     private const int Features = 7;
+    // A live four-finger capture covered 7.2–9.0% of its control with residual
+    // evidence; empty-table nuisance stayed below 0.36%. Normalize per control,
+    // not by camera resolution or the number of buttons on a board.
+    public const double MinimumControlCoverage = .07;
     private PixelPoint[] _polygon = [];
     private PixelPoint[] _locations = [];
     private bool[] _mask = [];
     private double[]? _baseline;
     private double[]? _expected;
     private bool[]? _templateEdges;
+    private bool[]? _templateMask;
+    private bool[]? _templateReferenceMask;
+    private double[]?[]? _edgeColors;
+    private int[]? _controlRegions;
+    private double[]? _sampleBoardAreas;
+    private double[]? _controlBoardAreas;
     private HandAcquisitionSceneImage? _scene;
     private int _width, _height, _columns, _rows, _validCount;
     private double _left, _top, _scale;
@@ -54,13 +71,22 @@ public sealed class HandAcquisitionPresenceTracker
         if (_validCount < 48) return Empty("insufficient-board-area");
         double[] current = Sample(stride, bgra);
         if (!ReferenceEquals(_scene, expectedScene)) ConfigureTemplate(expectedScene);
+        // A supplied render is authoritative. Invalid geometry or an empty control
+        // mask must not silently learn a hand already present as empty camera background.
+        if (expectedScene is not null && _expected is null) return Empty("invalid-rendered-scene");
 
         bool activeLight = IsValidLight(illuminatedHint);
-        bool[] allowed = (bool[])_mask.Clone();
+        bool[] allowed = (bool[])(_templateMask ?? _mask).Clone();
+        // Compact labeled controls can consist almost entirely of raster edges.
+        // Keep those pixels as candidates, comparing nearby expected colors, but
+        // never use ambiguous edge pixels to train the photometric fit.
+        bool compareControlEdges = _templateMask is not null;
+        bool[] fitAllowed = _templateReferenceMask is not null ? (bool[])_templateReferenceMask.Clone()
+            : compareControlEdges ? (bool[])allowed.Clone() : allowed;
         if (activeLight)
             for (int index = 0; index < allowed.Length; index++)
                 if (Distance(_locations[index], illuminatedHint!.Center) < illuminatedHint.RadiusPixels * 1.28)
-                    allowed[index] = false;
+                    allowed[index] = fitAllowed[index] = false;
 
         // The immutable rendered image supports acquisition even when a hand is present in
         // the very first camera frame. A camera reference is only a fallback for callers
@@ -74,10 +100,13 @@ public sealed class HandAcquisitionPresenceTracker
         }
         if (usingTemplate)
             for (int index = 0; index < allowed.Length; index++)
-                allowed[index] &= !_templateEdges![index];
+            {
+                if (!compareControlEdges) allowed[index] &= !_templateEdges![index];
+                fitAllowed[index] &= !_templateEdges![index];
+            }
 
-        PhotometricFit? fit = Fit(reference, current, allowed);
-        var colorOffsets = fit is null ? null : ColorResiduals(reference, current, allowed, fit.Coefficients);
+        PhotometricFit? fit = Fit(reference, current, fitAllowed);
+        var colorOffsets = fit is null ? null : ColorResiduals(reference, current, fitAllowed, fit.Coefficients);
         bool[] foreground = new bool[_mask.Length];
         double threshold = fit is null ? double.PositiveInfinity : Math.Clamp(fit.MedianError * 3.5 + 10, 24, 52);
         int foregroundCount = 0, eligibleCount = 0;
@@ -87,12 +116,33 @@ public sealed class HandAcquisitionPresenceTracker
                 if (!allowed[index]) continue;
                 eligibleCount++;
                 colorOffsets!.TryGetValue(ColorKey(reference, index), out var colorOffset);
-                if (Error(fit.Coefficients, reference, current, index, colorOffset) <= threshold) continue;
+                double error = Error(fit.Coefficients, reference, current, index, colorOffset);
+                if (error > threshold && _edgeColors?[index] is { } alternatives)
+                    error = EdgeError(fit.Coefficients, alternatives, current, index, colorOffsets, error, threshold);
+                if (error <= threshold) continue;
                 foreground[index] = true;
                 foregroundCount++;
             }
         double fraction = foregroundCount / (double)Math.Max(1, eligibleCount);
-        bool modelReliable = fit is not null && fit.MedianError <= 18 && fraction < .40;
+        // An explicit reference patch may be much smaller than a covered Back
+        // button. Its own fit residuals determine whether camera compensation is
+        // trustworthy; the amount of foreground on a separate candidate cannot
+        // invalidate a clean reference. Report candidate occupancy consistently.
+        double referenceFraction = fraction;
+        if (fit is not null && _templateReferenceMask is not null)
+        {
+            int referenceForeground = 0, referenceEligible = 0;
+            for (int index = 0; index < fitAllowed.Length; index++)
+            {
+                if (!fitAllowed[index]) continue;
+                referenceEligible++;
+                colorOffsets!.TryGetValue(ColorKey(reference, index), out var colorOffset);
+                if (Error(fit.Coefficients, reference, current, index, colorOffset) > threshold)
+                    referenceForeground++;
+            }
+            referenceFraction = referenceForeground / (double)Math.Max(1, referenceEligible);
+        }
+        bool modelReliable = fit is not null && fit.MedianError <= 18 && referenceFraction < .40;
         if (!modelReliable) Array.Clear(foreground);
 
         bool? illuminatedPresence = null;
@@ -109,7 +159,8 @@ public sealed class HandAcquisitionPresenceTracker
             }
         }
 
-        var hints = modelReliable ? Components(foreground, frameTime) : new List<HandAcquisitionHint>();
+        var hints = modelReliable ? Components(foreground, frameTime,
+            searchMask: _templateMask, evidenceArea: _templateMask is null ? null : eligibleCount) : new List<HandAcquisitionHint>();
         if (illuminatedPresence == true)
         {
             hints.RemoveAll(hint => Distance(hint.Center, illuminatedHint!.Center) < illuminatedHint.RadiusPixels);
@@ -127,7 +178,8 @@ public sealed class HandAcquisitionPresenceTracker
     public void Reset()
     {
         _polygon = []; _locations = []; _mask = [];
-        _baseline = _expected = null; _templateEdges = null; _scene = null;
+        _baseline = _expected = null; _templateEdges = _templateMask = _templateReferenceMask = null;
+        _edgeColors = null; _controlRegions = null; _sampleBoardAreas = _controlBoardAreas = null; _scene = null;
         _width = _height = _columns = _rows = _validCount = 0;
         _lastTime = default;
     }
@@ -182,13 +234,20 @@ public sealed class HandAcquisitionPresenceTracker
 
     private void ConfigureTemplate(HandAcquisitionSceneImage? scene)
     {
-        _scene = scene; _expected = null; _templateEdges = null;
+        _scene = scene; _baseline = _expected = null; _templateEdges = _templateMask = _templateReferenceMask = null;
+        _edgeColors = null;
+        _controlRegions = null; _sampleBoardAreas = _controlBoardAreas = null;
         if (scene is null || scene.Width is <= 1 or > 16384 || scene.Height is <= 1 or > 16384 ||
             scene.Bgra is null || scene.Bgra.Length < scene.Width * (long)scene.Height * 4 ||
             scene.CameraToBoard is not { Count: 9 } || scene.CameraToBoard.Any(value => !double.IsFinite(value))) return;
+        var regions = scene.BoardSearchRegions;
+        var referenceRegions = scene.BoardReferenceRegions;
+        if (!ValidRegions(regions) || !ValidRegions(referenceRegions)) return;
         var expected = new double[_mask.Length * 3];
         var edges = new bool[_mask.Length];
-        int mapped = 0;
+        var templateMask = new bool[_mask.Length];
+        var referenceMask = new bool[_mask.Length];
+        int mapped = 0, selected = 0, referenceSelected = 0;
         double[] neighbor = new double[3];
         PixelPoint[] offsets = [new(-_scale * 2.5, 0), new(_scale * 2.5, 0),
             new(0, -_scale * 2.5), new(0, _scale * 2.5)];
@@ -198,6 +257,12 @@ public sealed class HandAcquisitionPresenceTracker
             PixelPoint point = _locations[index];
             if (!TemplateColor(scene, point, expected.AsSpan(index * 3, 3))) { edges[index] = true; continue; }
             mapped++;
+            templateMask[index] = WithinSampleRegions(scene, point, regions);
+            referenceMask[index] = referenceRegions is null ? templateMask[index] : WithinSampleRegions(scene, point, referenceRegions);
+            if (templateMask[index]) selected++;
+            if (referenceMask[index]) referenceSelected++;
+            if (!templateMask[index] && !referenceMask[index])
+            { edges[index] = true; continue; }
             foreach (var offset in offsets)
             {
                 if (!TemplateColor(scene, new(point.X + offset.X, point.Y + offset.Y), neighbor)) { edges[index] = true; break; }
@@ -205,18 +270,84 @@ public sealed class HandAcquisitionPresenceTracker
                 { edges[index] = true; break; }
             }
         }
-        if (mapped < _validCount * .75) return;
-        _expected = expected; _templateEdges = edges;
+        if (mapped < _validCount * .75 || selected < 80 || referenceSelected < 80) return;
+        _expected = expected; _templateEdges = edges; _templateMask = regions is null ? null : templateMask;
+        _templateReferenceMask = referenceRegions is null ? null : referenceMask;
+        if (regions is not null)
+        {
+            _edgeColors = new double[]?[_mask.Length];
+            _controlRegions = Enumerable.Repeat(-1, _mask.Length).ToArray();
+            _sampleBoardAreas = new double[_mask.Length];
+            _controlBoardAreas = regions.Select(region => region.Width * region.Height).ToArray();
+            double[] color = new double[3];
+            for (int index = 0; index < _mask.Length; index++)
+            {
+                if (!templateMask[index]) continue;
+                var colors = new List<double>(75);
+                var point = _locations[index];
+                BoardPosition(scene, point, out double u, out double v);
+                for (int region = 0; region < regions.Count; region++)
+                {
+                    var bounds = regions[region];
+                    if (u < bounds.X || u > bounds.X + bounds.Width || v < bounds.Y || v > bounds.Y + bounds.Height) continue;
+                    _controlRegions[index] = region;
+                    _sampleBoardAreas[index] = BoardSampleArea(scene, point);
+                    break;
+                }
+                // One sampling cell plus native rounding tolerates small calibration and raster shifts.
+                // Bilinear samples include antialiased text/chip transitions; a new
+                // foreground color must differ from this entire local neighborhood.
+                for (int dy = -2; dy <= 2; dy++)
+                for (int dx = -2; dx <= 2; dx++)
+                    if (TemplateColor(scene, new(point.X + dx * (_scale + 1) * .5,
+                        point.Y + dy * (_scale + 1) * .5), color)) colors.AddRange(color);
+                _edgeColors[index] = colors.ToArray();
+            }
+        }
+    }
+
+    private static bool ValidRegions(IReadOnlyList<HandTrackingBounds>? regions) => regions is null ||
+        regions.Count is >= 1 and <= 32 && regions.All(region =>
+            double.IsFinite(region.X) && double.IsFinite(region.Y) &&
+            double.IsFinite(region.Width) && double.IsFinite(region.Height) &&
+            region.X >= 0 && region.Y >= 0 && region.Width > 0 && region.Height > 0 &&
+            region.X + region.Width <= 1 && region.Y + region.Height <= 1);
+
+    private static bool WithinRegions(IReadOnlyList<HandTrackingBounds>? regions, double u, double v) => regions is null ||
+        regions.Any(region => u >= region.X && u <= region.X + region.Width &&
+            v >= region.Y && v <= region.Y + region.Height);
+
+    private bool WithinSampleRegions(HandAcquisitionSceneImage scene, PixelPoint point,
+        IReadOnlyList<HandTrackingBounds>? regions)
+    {
+        if (regions is null) return true;
+        // Sample() averages four native pixels. All of that footprint must lie
+        // inside the stable region, otherwise animation just beyond its boundary
+        // can leak into a candidate. One pixel covers integer sample rounding.
+        double radius = _scale * .25 + 1;
+        for (int dy = -1; dy <= 1; dy += 2)
+        for (int dx = -1; dx <= 1; dx += 2)
+            if (!BoardPosition(scene, new(point.X + dx * radius, point.Y + dy * radius), out double u, out double v) ||
+                !WithinRegions(regions, u, v)) return false;
+        return true;
+    }
+
+    private double BoardSampleArea(HandAcquisitionSceneImage scene, PixelPoint point)
+    {
+        Span<double> u = stackalloc double[4], v = stackalloc double[4];
+        for (int corner = 0; corner < 4; corner++)
+        {
+            double dx = corner is 0 or 3 ? -.5 : .5, dy = corner < 2 ? -.5 : .5;
+            if (!BoardPosition(scene, new(point.X + dx * _scale, point.Y + dy * _scale), out u[corner], out v[corner])) return 0;
+        }
+        double area = 0;
+        for (int corner = 0; corner < 4; corner++) area += u[corner] * v[(corner + 1) % 4] - u[(corner + 1) % 4] * v[corner];
+        return Math.Abs(area) / 2;
     }
 
     private static bool TemplateColor(HandAcquisitionSceneImage scene, PixelPoint point, Span<double> result)
     {
-        IReadOnlyList<double> matrix = scene.CameraToBoard;
-        double divisor = matrix[6] * point.X + matrix[7] * point.Y + matrix[8];
-        if (!double.IsFinite(divisor) || Math.Abs(divisor) < 1e-10) return false;
-        double u = (matrix[0] * point.X + matrix[1] * point.Y + matrix[2]) / divisor;
-        double v = (matrix[3] * point.X + matrix[4] * point.Y + matrix[5]) / divisor;
-        if (!double.IsFinite(u) || !double.IsFinite(v) || u < 0 || v < 0 || u > 1 || v > 1) return false;
+        if (!BoardPosition(scene, point, out double u, out double v)) return false;
         double x = u * (scene.Width - 1), y = v * (scene.Height - 1);
         int ix = (int)x, iy = (int)y, rx = Math.Min(scene.Width - 1, ix + 1), by = Math.Min(scene.Height - 1, iy + 1);
         double fx = x - ix, fy = y - iy;
@@ -226,6 +357,17 @@ public sealed class HandAcquisitionPresenceTracker
                 scene.Bgra[(by * scene.Width + ix) * 4 + channel] * (1 - fx) * fy +
                 scene.Bgra[(by * scene.Width + rx) * 4 + channel] * fx * fy;
         return true;
+    }
+
+    private static bool BoardPosition(HandAcquisitionSceneImage scene, PixelPoint point, out double u, out double v)
+    {
+        IReadOnlyList<double> matrix = scene.CameraToBoard;
+        u = v = double.NaN;
+        double divisor = matrix[6] * point.X + matrix[7] * point.Y + matrix[8];
+        if (!double.IsFinite(divisor) || Math.Abs(divisor) < 1e-10) return false;
+        u = (matrix[0] * point.X + matrix[1] * point.Y + matrix[2]) / divisor;
+        v = (matrix[3] * point.X + matrix[4] * point.Y + matrix[5]) / divisor;
+        return double.IsFinite(u) && double.IsFinite(v) && u >= 0 && v >= 0 && u <= 1 && v <= 1;
     }
 
     private sealed record PhotometricFit(double[][] Coefficients, double MedianError);
@@ -293,14 +435,60 @@ public sealed class HandAcquisitionPresenceTracker
     }
 
     private double Error(double[][] coefficients, double[] reference, double[] current, int index, double[]? colorOffset = null)
+        => ColorError(coefficients, reference, index, current, index, colorOffset);
+
+    private double ColorError(double[][] coefficients, double[] colors, int colorIndex,
+        double[] current, int index, double[]? colorOffset)
     {
         double squared = 0;
         for (int channel = 0; channel < 3; channel++)
         {
-            double prediction = Predict(coefficients[channel], reference[index * 3], reference[index * 3 + 1], reference[index * 3 + 2], index, channel);
+            double prediction = Predict(coefficients[channel], colors[colorIndex * 3], colors[colorIndex * 3 + 1],
+                colors[colorIndex * 3 + 2], index, channel);
             squared += Math.Pow(current[index * 3 + channel] - prediction - (colorOffset?[channel] ?? 0), 2);
         }
         return Math.Sqrt(squared / 3);
+    }
+
+    private double EdgeError(double[][] coefficients, double[] colors, double[] current, int index,
+        Dictionary<int, double[]> offsets, double best, double threshold)
+    {
+        Span<double> darkest = stackalloc double[3], brightest = stackalloc double[3], prediction = stackalloc double[3];
+        double minimumBrightness = double.PositiveInfinity, maximumBrightness = double.NegativeInfinity;
+        for (int color = 0; color < colors.Length / 3; color++)
+        {
+            offsets.TryGetValue(ColorKey(colors, color), out var offset);
+            double squared = 0;
+            for (int channel = 0; channel < 3; channel++)
+            {
+                prediction[channel] = Predict(coefficients[channel], colors[color * 3], colors[color * 3 + 1],
+                    colors[color * 3 + 2], index, channel) + (offset?[channel] ?? 0);
+                squared += Math.Pow(current[index * 3 + channel] - prediction[channel], 2);
+            }
+            best = Math.Min(best, Math.Sqrt(squared / 3));
+            if (best <= threshold) break;
+            double brightness = prediction[0] * .114 + prediction[1] * .587 + prediction[2] * .299;
+            if (brightness < minimumBrightness) { minimumBrightness = brightness; prediction.CopyTo(darkest); }
+            if (brightness > maximumBrightness) { maximumBrightness = brightness; prediction.CopyTo(brightest); }
+        }
+        if (best <= threshold || !double.IsFinite(minimumBrightness)) return best;
+        // Camera pixels and Sample() mix adjacent projected glyph/background
+        // colors. Accept mixtures along their local RGB segment, not arbitrary
+        // new colors inside a broad per-channel range.
+        double numerator = 0, denominator = 0;
+        for (int channel = 0; channel < 3; channel++)
+        {
+            double delta = brightest[channel] - darkest[channel];
+            numerator += (current[index * 3 + channel] - darkest[channel]) * delta;
+            denominator += delta * delta;
+        }
+        double amount = denominator > 1e-10 ? Math.Clamp(numerator / denominator, 0, 1) : 0;
+        double mixtureError = 0;
+        for (int channel = 0; channel < 3; channel++)
+            mixtureError += Math.Pow(current[index * 3 + channel] -
+                (darkest[channel] + amount * (brightest[channel] - darkest[channel])), 2);
+        best = Math.Min(best, Math.Sqrt(mixtureError / 3));
+        return best;
     }
 
     private static int ColorKey(double[] reference, int index) => (int)reference[index * 3] / 16 +
@@ -396,8 +584,12 @@ public sealed class HandAcquisitionPresenceTracker
         return plausibleWhite ? false : null;
     }
 
-    private List<HandAcquisitionHint> Components(bool[] foreground, DateTimeOffset observedAt, int? minimumEvidence = null)
+    private List<HandAcquisitionHint> Components(bool[] foreground, DateTimeOffset observedAt, int? minimumEvidence = null,
+        bool[]? searchMask = null, int? evidenceArea = null)
     {
+        var mask = searchMask ?? _mask;
+        int area = evidenceArea ?? _validCount;
+        bool controlled = searchMask is not null && ReferenceEquals(searchMask, _templateMask) && _controlBoardAreas is not null;
         bool[] joined = new bool[foreground.Length];
         for (int index = 0; index < foreground.Length; index++)
         {
@@ -407,12 +599,12 @@ public sealed class HandAcquisitionPresenceTracker
             for (int dx = -1; dx <= 1; dx++)
             {
                 int nx = x + dx, ny = y + dy;
-                if (nx >= 0 && ny >= 0 && nx < _columns && ny < _rows && _mask[ny * _columns + nx]) joined[ny * _columns + nx] = true;
+                if (nx >= 0 && ny >= 0 && nx < _columns && ny < _rows && mask[ny * _columns + nx]) joined[ny * _columns + nx] = true;
             }
         }
-        // A few misregistered text/chip pixels are not enough to illuminate the board.
-        // Motion remains a separate, more sensitive path for small arriving fingertips.
-        int minimum = minimumEvidence ?? Math.Max(12, (int)(_validCount * .006));
+        // Control-specific area rejects minor changes without imposing a minimum
+        // width proportional to the entire webcam on short on-board buttons.
+        int minimum = minimumEvidence ?? (controlled ? 12 : Math.Max(12, (int)(area * .006)));
         var candidates = new List<(HandAcquisitionHint Hint, int Count)>();
         int[] queue = new int[joined.Length];
         for (int start = 0; start < joined.Length; start++)
@@ -420,6 +612,7 @@ public sealed class HandAcquisitionPresenceTracker
             if (!joined[start]) continue;
             joined[start] = false;
             int count = 1, read = 0, evidence = 0, left = _columns, top = _rows, right = 0, bottom = 0;
+            double[]? controlEvidence = controlled ? new double[_controlBoardAreas!.Length] : null;
             queue[0] = start;
             while (read < count)
             {
@@ -428,6 +621,8 @@ public sealed class HandAcquisitionPresenceTracker
                 {
                     evidence++; left = Math.Min(left, x); right = Math.Max(right, x);
                     top = Math.Min(top, y); bottom = Math.Max(bottom, y);
+                    if (controlled && _controlRegions![index] is var region && region >= 0)
+                        controlEvidence![region] += _sampleBoardAreas![index];
                 }
                 for (int dy = -1; dy <= 1; dy++)
                 for (int dx = -1; dx <= 1; dx++)
@@ -439,8 +634,12 @@ public sealed class HandAcquisitionPresenceTracker
                     joined[adjacent] = false; queue[count++] = adjacent;
                 }
             }
-            if (evidence < minimum || Math.Min(right - left, bottom - top) * _scale <
-                Math.Max(3 * _scale, Math.Min(_width, _height) * .03)) continue;
+            double? controlCoverage = controlled ? Enumerable.Range(0, controlEvidence!.Length)
+                .Max(region => _controlBoardAreas![region] > 0 ? controlEvidence[region] / _controlBoardAreas[region] : 0) : null;
+            if (controlCoverage < MinimumControlCoverage) continue;
+            int occupiedCell = controlled ? 1 : 0;
+            double minimumSide = controlled ? 3 * _scale : Math.Max(3 * _scale, Math.Min(_width, _height) * .03);
+            if (evidence < minimum || Math.Min(right - left + occupiedCell, bottom - top + occupiedCell) * _scale < minimumSide) continue;
             var center = new PixelPoint(_left + (left + right + 1) * _scale / 2, _top + (top + bottom + 1) * _scale / 2);
             if (!Inside(center, _polygon)) continue;
             double extent = Math.Max(right - left + 1, bottom - top + 1) * _scale;
@@ -449,7 +648,8 @@ public sealed class HandAcquisitionPresenceTracker
             int cropX = Math.Clamp((int)Math.Round(center.X - side / 2.0), 0, _width - side);
             int cropY = Math.Clamp((int)Math.Round(center.Y - side / 2.0), 0, _height - side);
             double radius = Math.Clamp(extent * .55 + shortSide * .025, shortSide * .055, shortSide * .13);
-            candidates.Add((new(new(cropX, cropY, side, side), center, radius, observedAt, evidence / (double)_validCount), evidence));
+            candidates.Add((new(new(cropX, cropY, side, side), center, radius, observedAt,
+                evidence / (double)Math.Max(1, area), controlCoverage), evidence));
         }
         var result = new List<HandAcquisitionHint>();
         foreach (var item in candidates.OrderByDescending(item => item.Count))

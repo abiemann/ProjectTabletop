@@ -66,6 +66,10 @@ public sealed partial class MainWindow
                 return await VerifyHandVisualSmoothingAsync();
             case "verify_hand_acquisition":
                 return await VerifyHandAcquisitionAsync();
+            case "verify_photo_copy_acquisition":
+                return await VerifyPhotoCopyAcquisitionAsync();
+            case "verify_shared_board_acquisition":
+                return await VerifySharedBoardAcquisitionAsync();
             case "capture_hand_acquisition":
                 return await SaveHandAcquisitionSnapshotAsync();
             case "verify_hand_detection_log":

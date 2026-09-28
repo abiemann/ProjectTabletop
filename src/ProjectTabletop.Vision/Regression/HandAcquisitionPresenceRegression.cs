@@ -14,6 +14,7 @@ internal static class HandAcquisitionPresenceRegression
         UniqueControlCoveredAtStartup();
         OwnLightPresenceAndRemoval();
         BaselineFallbackAndBarriers();
+        PhotoCopyControlRegionsRegression.Run();
         Console.WriteLine("Hand acquisition presence regression: stationary foreground present at startup, persistent " +
             "known-render comparison, native projective geometry, photometric/exposure compensation, raster-edge/noise " +
             "rejection, bounded crops, own-white-light exclusion, lit foreground versus empty light, removal, and reset/time barriers passed.");

@@ -1,6 +1,7 @@
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Brushes;
+using Microsoft.Graphics.Canvas.Text;
 using Microsoft.UI;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
@@ -21,6 +22,7 @@ public sealed partial class SceneCompositor
     private static readonly TimeSpan AcquisitionLightOffSettle = TimeSpan.FromMilliseconds(900);
     private static readonly TimeSpan AcquisitionLightDuration = TimeSpan.FromMilliseconds(900);
     private AcquisitionSceneState? _acquisitionScene;
+    private BoardButton[] _acquisitionButtons = [];
     private long _acquisitionRevision;
     private DateTimeOffset _acquisitionQuietUntil;
     private HandAcquisitionHint? _acquisitionHint;
@@ -34,54 +36,68 @@ public sealed partial class SceneCompositor
     private string _acquisitionReason = "inactive";
     private long _acquisitionLightCount;
 
-    private readonly record struct AcquisitionSceneState(long Navigation, long Game, long Flights, long LightReset);
+    private readonly record struct AcquisitionSceneState(long Navigation, long Game, long Flights, long LightReset,
+        long PhotoRevision);
     public sealed record HandAcquisitionContext(long Revision, bool ObserveMotion,
         PixelPoint[] SearchPolygon, HandAcquisitionHint? IlluminatedHint,
         HandAcquisitionSceneImage? ExpectedScene = null, DateTimeOffset IlluminationStartedAt = default,
-        PixelPoint[]? StationarySearchCenters = null);
+        PixelPoint[]? StationarySearchCenters = null, bool MotionFallbackEnabled = true);
+
+    private AcquisitionSceneState CurrentAcquisitionState() => new(_boardSession.Revision,
+        _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision : 0,
+        _boardSession.Screen == BoardScreen.Blackjack ? _blackjackFlightRevision : 0, _spotlightResetCount,
+        _boardSession.Screen == BoardScreen.PhotoCopy ? _photoCopyRevision : 0);
 
     public HandAcquisitionContext? GetHandAcquisitionContext(DateTimeOffset frameTime)
     {
         lock (_gate)
         {
             var now = _blackjackClock();
+            if (_boardSession.Screen == BoardScreen.PhotoCopy) SyncPhotoCopySession();
             if (!AcquisitionBoardReady)
             {
                 ClearAcquisitionLight();
                 _acquisitionScene = null;
+                _acquisitionButtons = [];
                 _acquisitionExpectedScene = null;
                 _acquisitionReferenceError = null;
                 _acquisitionReferenceRetryAt = default;
                 _acquisitionReason = "inactive";
                 return null;
             }
-            var animating = HasBlackjackCardAnimation(now);
-            var state = new AcquisitionSceneState(_boardSession.Revision, _boardSession.BlackjackState.Revision,
-                _blackjackFlightRevision, _spotlightResetCount);
-            if (_acquisitionScene != state)
+            var blackjack = _boardSession.Screen == BoardScreen.Blackjack;
+            var animating = blackjack && HasBlackjackCardAnimation(now);
+            var state = CurrentAcquisitionState();
+            var buttons = _boardSession.Buttons;
+            if (_acquisitionScene != state || !_acquisitionButtons.SequenceEqual(buttons))
             {
                 _acquisitionScene = state;
+                _acquisitionButtons = buttons.ToArray();
                 _acquisitionRevision++;
                 _acquisitionExpectedScene = null;
                 _acquisitionReferenceRetryAt = default;
                 ClearAcquisitionLight();
                 _acquisitionQuietUntil = now + AcquisitionSettle;
             }
-            // Include the lower felt around the controls so entering fingers can
-            // suggest a crop even when the palm is just outside the board.
-            var polygon = new[] { new Point2(.025, .64), new Point2(.975, .64),
-                new Point2(.975, .995), new Point2(.025, .995) }
+            // Use the whole calibrated board to size native-camera crops, even
+            // when only one small Back button is visible. The expected image's
+            // button masks decide which pixels may supply foreground evidence.
+            var polygon = new[] { new Point2(.005, .005), new Point2(.995, .005),
+                new Point2(.995, .995), new Point2(.005, .995) }
                 .Select(point => _boardCameraMap!.InverseTransform(_boardSurfaceMap!.Transform(point)))
                 .Select(point => new PixelPoint(point.X, point.Y)).ToArray();
             HandAcquisitionContext Context(bool observe, HandAcquisitionHint? illuminated)
             {
                 if ((observe || illuminated is not null) && _acquisitionExpectedScene is null && now >= _acquisitionReferenceRetryAt)
                     _acquisitionExpectedScene = CaptureExpectedAcquisitionScene();
-                var centers = new[] { .13, .37, .63, .87 }.Select(u =>
-                    _boardCameraMap!.InverseTransform(_boardSurfaceMap!.Transform(new(u, .90))))
+                var boardCenters = _boardSession.Buttons.Select(button =>
+                    new Point2(button.Bounds.X + button.Bounds.Width / 2, button.Bounds.Y + button.Bounds.Height / 2));
+                var centers = boardCenters.Select(point =>
+                    _boardCameraMap!.InverseTransform(_boardSurfaceMap!.Transform(point)))
                     .Select(point => new PixelPoint(point.X, point.Y)).ToArray();
                 return new(_acquisitionRevision, observe, polygon, illuminated,
-                    _acquisitionExpectedScene, _acquisitionLightStarted, centers);
+                    _acquisitionExpectedScene, _acquisitionLightStarted, centers,
+                    MotionFallbackEnabled: _boardSession.Screen != BoardScreen.PhotoCopy);
             }
             if (animating || HasAcquiredHandOrSuppression(now))
             {
@@ -107,7 +123,7 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private bool AcquisitionBoardReady => !_disposed && _boardSession.Screen == BoardScreen.Blackjack &&
+    private bool AcquisitionBoardReady => !_disposed && _boardSession.Buttons.Count > 0 &&
         !_blackOutput && !_boardSetup && !IsBoardRevealActive && _calibrationTarget < 0 &&
         _boardMediaClip is not null && _boardCameraMap is not null && _boardSurfaceMap is not null;
 
@@ -153,7 +169,7 @@ public sealed partial class SceneCompositor
                 !double.IsFinite(hint.RadiusPixels) || hint.RadiusPixels <= 0) return;
             var center = _boardCameraMap!.Transform(new(hint.Center.X, hint.Center.Y));
             var board = _boardSurfaceMap!.InverseTransform(center);
-            if (board.X is < .025 or > .975 || board.Y is < .64 or > .995) return;
+            if (!_boardSession.Buttons.Any(button => button.Bounds.Contains(board.X, board.Y))) return;
             double radius = 0;
             for (int i = 0; i < 8; i++)
             {
@@ -180,6 +196,7 @@ public sealed partial class SceneCompositor
             var now = _blackjackClock();
             var context = GetHandAcquisitionContext(now);
             return new { revision = _acquisitionRevision, reason = _acquisitionReason,
+                minimumControlCoverage = HandAcquisitionPresenceTracker.MinimumControlCoverage,
                 observingMotion = context?.ObserveMotion ?? false, searchPolygon = context?.SearchPolygon,
                 searchLightActive = context?.IlluminatedHint is not null, light = _acquisitionLight,
                 lightUntil = _acquisitionLightUntil, lightCount = _acquisitionLightCount,
@@ -199,10 +216,14 @@ public sealed partial class SceneCompositor
 
     private HandAcquisitionSceneImage? CaptureExpectedAcquisitionScene()
     {
-        if (_boardApplicationTarget is null || _renderedBoardState is not { Screen: BoardScreen.Blackjack } rendered ||
-            rendered.BlackjackRevision != _boardSession.BlackjackState.Revision ||
+        var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
+        if (_boardApplicationTarget is null || _renderedBoardState is not { } rendered ||
+            rendered.Screen != _boardSession.Screen) return null;
+        if (!photoCopy && (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
+        if (_boardSession.Screen == BoardScreen.Blackjack &&
+            (rendered.BlackjackRevision != _boardSession.BlackjackState.Revision ||
             rendered.BlackjackFlightRevision != _blackjackFlightRevision ||
-            rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0) return null;
+            HasBlackjackCardAnimation(_blackjackClock()))) return null;
         var cameraToProjector = _boardCameraMap!.ToMatrix();
         var projectorToBoard = _boardSurfaceMap!.Inverse().ToMatrix();
         var cameraToBoard = new double[9];
@@ -227,15 +248,43 @@ public sealed partial class SceneCompositor
             var sourceSize = _boardApplicationTarget.SizeInPixels;
             using (var drawing = _acquisitionReferenceTarget.CreateDrawingSession())
             {
-                drawing.Clear(Colors.Transparent);
-                drawing.DrawImage(_boardApplicationTarget,
-                    new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize),
-                    new Rect(0, 0, sourceSize.Width, sourceSize.Height),
-                    1, CanvasImageInterpolation.HighQualityCubic);
+                if (photoCopy)
+                {
+                    // Compare only the opaque interiors of the generated controls.
+                    // Swirl stamps, object lighting and status text change independently
+                    // and must never look like an arriving hand.
+                    drawing.Clear(AppPalette.PhotoCopyBackground);
+                    using var small = new CanvasTextFormat { FontFamily = "Segoe UI", FontSize = 20 };
+                    foreach (var button in _boardSession.Buttons)
+                        DrawPhotoCopyButton(drawing, button, false, small, []);
+                }
+                else
+                {
+                    drawing.Clear(Colors.Transparent);
+                    drawing.DrawImage(_boardApplicationTarget,
+                        new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize),
+                        new Rect(0, 0, sourceSize.Width, sourceSize.Height),
+                        1, CanvasImageInterpolation.HighQualityCubic);
+                }
             }
             var pixels = _acquisitionReferenceTarget.GetPixelBytes();
             _acquisitionReferenceError = null;
-            return new((int)BoardSurfaceSize, (int)BoardSurfaceSize, pixels, cameraToBoard);
+            var regions = _boardSession.Buttons.Select(button =>
+                new HandTrackingBounds(button.Bounds.X + .012, button.Bounds.Y + .012,
+                    button.Bounds.Width - .024, button.Bounds.Height - .024)).ToArray();
+            // One Back button is not enough to fit the camera's color response
+            // when fingers cover most of it. Include fixed, opaque UI nearby as
+            // a lighting reference, without allowing it to suggest a search light.
+            IReadOnlyList<HandTrackingBounds>? referenceRegions = _boardSession.Screen switch
+            {
+                BoardScreen.HandTracking => [new(.40, .065, .53, .04)],
+                BoardScreen.Monopoly or BoardScreen.Gta or BoardScreen.Diablo =>
+                    [new(.10, .29, .78, .40)],
+                BoardScreen.Blackjack => [new(.05, .24, .90, .50), new(.31, .05, .63, .095)],
+                _ => null
+            };
+            return new((int)BoardSurfaceSize, (int)BoardSurfaceSize, pixels, cameraToBoard,
+                BoardSearchRegions: regions, BoardReferenceRegions: referenceRegions);
         }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or
             InvalidOperationException or ObjectDisposedException)
@@ -256,9 +305,9 @@ public sealed partial class SceneCompositor
         var now = _blackjackClock();
         if (!AcquisitionBoardReady || HasAcquiredHandOrSuppression(now) ||
             now >= _acquisitionLightUntil || _acquisitionLight is not { } light ||
-            _acquisitionScene is not { } state || state.Navigation != _boardSession.Revision ||
-            state.Game != _boardSession.BlackjackState.Revision || state.LightReset != _spotlightResetCount ||
-            HasBlackjackCardAnimation(now)) return;
+            _acquisitionScene != CurrentAcquisitionState() ||
+            !_acquisitionButtons.SequenceEqual(_boardSession.Buttons) ||
+            _boardSession.Screen == BoardScreen.Blackjack && HasBlackjackCardAnimation(now)) return;
         var center = new Vector2((float)(output.X + light.Center.X * output.Width),
             (float)(output.Y + light.Center.Y * output.Height));
         float radius = (float)(light.Radius * output.Height);

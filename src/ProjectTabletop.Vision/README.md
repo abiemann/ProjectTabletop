@@ -44,11 +44,21 @@ are acquisition aids only; they never supply gesture observations.
 
 `HandAcquisitionPresenceTracker` accepts an immutable `HandAcquisitionSceneImage`
 containing the generated BGRA board surface and native-camera-to-board-UV mapping.
+Optional normalized `BoardSearchRegions` restrict foreground candidates to button
+interiors on every interactive board. Separate `BoardReferenceRegions` can include
+stable interface areas for photometric fitting without letting them trigger a
+spotlight. This preserves a lighting reference when a hand covers most of a lone
+Back button. Photo Copy excludes swirl animation, status text and object lighting
+from both masks while looking for still fingers covering its three controls.
 It samples expected colours without deforming camera images, fits a robust camera
 RGB mixing response and illumination gradient, retains dark controls while trimming
 outliers, and uses distributed matching colours to correct remaining camera response.
-It rejects narrow projected edges and small residuals,
-and returns up to two stationary foreground regions. It can start with a hand
+For button masks, it compares dense edge pixels with nearby expected colours and
+antialiased mixtures, while excluding edges from photometric fitting. A connected
+candidate must cover at least 7% of one control's eligible interior, independently
+of how many other controls are visible. Occupied cell extents include the full
+last sample cell. Unmasked and illuminated-core checks keep their existing rules.
+It returns up to two stationary foreground regions. It can start with a hand
 already present and does not absorb that hand into its background. A fixed camera
 reference is available only as a fallback without a usable rendered scene and
 cannot identify objects already present in that reference. Reset on scene,
