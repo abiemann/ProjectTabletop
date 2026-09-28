@@ -158,6 +158,36 @@ internal sealed class HandAcquisitionTextPatterns
                         fullSearch ? 1 : cachedScaleY, cachedExposure,
                         template.ExposureGain, template.ExposureBackground);
             }
+            // A camera frame captured while the projector is changing can leave
+            // a previously verified label at the wrong bounded registration.
+            // Searching only its two-pixel neighborhood then compares readable
+            // letters with the panel above them indefinitely. Retry the original
+            // bounded geometry when that local match fails. A hand cannot train
+            // this recovery: registration is committed below only after the
+            // generated letters match and their local sectors remain intact.
+            if (template.RegisteredVariant is not null && best < .82)
+            {
+                var fixedRegistration = (best, bestMeanExpected, bestMeanCurrent, bestGain, bestStd,
+                    bestVariant, bestDx, bestDy, bestScaleX, bestScaleY, bestExpected,
+                    bestExposureGain, bestExposureBackground);
+                for (int variant = 0; variant < Blurs.Length; variant++)
+                for (int dy = -8; dy <= 8; dy++)
+                for (int dx = -8; dx <= 8; dx++)
+                    Evaluate(variant, dx, dy, template.RegisteredScaleX, template.RegisteredScaleY);
+                if (template.ExposureHighPass is { } recoveryExposure)
+                    for (int dy = -8; dy <= 8; dy++)
+                    for (int dx = -8; dx <= 8; dx++)
+                        Evaluate(template.ExposureVariant, dx, dy,
+                            template.RegisteredScaleX, template.RegisteredScaleY,
+                            recoveryExposure, template.ExposureGain, template.ExposureBackground);
+                // A merely less-bad match is still an obstruction. Measure it
+                // at the last verified geometry rather than moving the letters
+                // toward whatever fragment remains visible around the hand.
+                if (best < .82)
+                    (best, bestMeanExpected, bestMeanCurrent, bestGain, bestStd,
+                        bestVariant, bestDx, bestDy, bestScaleX, bestScaleY, bestExpected,
+                        bestExposureGain, bestExposureBackground) = fixedRegistration;
+            }
             // Auto-exposure can clip bright glyphs after the optical blur, merging
             // strokes that a linear high-pass gain cannot explain. Forward-model
             // only that bounded camera effect; covered/missing letters still have
@@ -240,8 +270,11 @@ internal sealed class HandAcquisitionTextPatterns
                 template.ExposureVariant = bestVariant;
             }
             bool verified = template.CleanCorrelation >= .82;
-            bool clean = best >= (verified ? Math.Max(.80, template.CleanCorrelation * .90) : .82);
-            bool stronglyCorrupted = best < (verified ? Math.Max(.78, template.CleanCorrelation * .86) : .78);
+            // .82 is already sufficient to verify this generated shape. An
+            // earlier unusually sharp frame must not raise that acceptance
+            // threshold forever when normal exposure or focus later returns.
+            bool clean = best >= (verified ? Math.Min(.82, Math.Max(.80, template.CleanCorrelation * .90)) : .82);
+            bool stronglyCorrupted = best < (verified ? Math.Min(.82, Math.Max(.78, template.CleanCorrelation * .86)) : .78);
             // Only a close match to the generated glyphs can establish a clean
             // appearance. A covered label is never learned merely because a color
             // fit happened to explain its current pixels.

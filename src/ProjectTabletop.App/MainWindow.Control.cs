@@ -77,7 +77,8 @@ public sealed partial class MainWindow
             case "verify_photo_copy_acquisition":
                 return await VerifyPhotoCopyAcquisitionAsync();
             case "verify_shared_board_acquisition":
-                return await VerifySharedBoardAcquisitionAsync();
+                return await VerifySharedBoardAcquisitionAsync(parameters.TryGetProperty("board", out var acquisitionBoard)
+                    ? acquisitionBoard.GetString() : null);
             case "verify_paint":
                 return await VerifyPaintAsync();
             case "verify_paint_save":

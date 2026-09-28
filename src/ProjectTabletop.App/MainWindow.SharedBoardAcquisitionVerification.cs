@@ -12,8 +12,18 @@ public sealed partial class MainWindow
 {
     // Compare real rendered boards with a stationary arriving finger occlusion.
     // This isolated scene cannot operate the user's camera or projector.
-    private async Task<object> VerifySharedBoardAcquisitionAsync()
+    private async Task<object> VerifySharedBoardAcquisitionAsync(string? board = null)
     {
+        // A single-board run keeps native diagnostics within the pipe's bounded
+        // timeout. Omitting the filter still verifies every board and control.
+        BoardScreen? selectedBoard = null;
+        if (board is not null)
+        {
+            if (!Enum.TryParse<BoardScreen>(board, ignoreCase: true, out var requestedBoard) ||
+                !Enum.IsDefined(requestedBoard) || requestedBoard == BoardScreen.Media)
+                throw new ArgumentException("Provide an interactive board name.");
+            selectedBoard = requestedBoard;
+        }
         var liveOutput = _output;
         var liveState = (_camera.IsRunning, _output?.AppWindow.IsVisible,
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip);
@@ -74,7 +84,7 @@ public sealed partial class MainWindow
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
                 Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "The shared-board verification changed live hardware or navigation.");
-        return new { passed = true, stationaryArrivalWithoutMotionForEveryControl = true, controls = tested,
+        return new { passed = true, scope = selectedBoard?.ToString() ?? "All", stationaryArrivalWithoutMotionForEveryControl = true, controls = tested,
             generatedCaptionCorruptionNeedsTwoFreshFrames = true,
             noEmptyBoardCandidates = true, assistanceCannotSelect = true,
             sevenPercentCoverageRequiredAcrossBoards = true,
@@ -93,6 +103,7 @@ public sealed partial class MainWindow
 
         void VerifyButtons(string label)
         {
+            if (selectedBoard is not null && scene.CurrentBoardScreen != selectedBoard) return;
             Draw();
             scene.GetHandAcquisitionContext(now);
             now += TimeSpan.FromMilliseconds(600);

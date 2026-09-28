@@ -11,13 +11,15 @@ public sealed partial class MainWindow
 {
     private async Task<object> SaveHandAcquisitionSnapshotAsync()
     {
-        var frame = Volatile.Read(ref _latestCameraFrame) ?? throw new InvalidOperationException("No camera frame.");
-        var context = _scene.GetHandAcquisitionContext(frame.Timestamp);
+        var frame = _lastHandAcquisitionFrame ?? throw new InvalidOperationException("No acquisition camera frame.");
+        var context = _lastHandAcquisitionContext;
         var expected = context?.ExpectedScene ?? throw new InvalidOperationException("No generated acquisition reference yet.");
         string directory = Path.Combine(_appDataDirectory, "HandAcquisitionSnapshots",
             $"{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
         var metadata = System.Text.Json.JsonSerializer.Serialize(new
         {
+            capturedAtUtc = DateTimeOffset.UtcNow,
+            latestCameraFrameUtc = Volatile.Read(ref _latestCameraFrame)?.Timestamp,
             frame.Timestamp, cameraWidth = frame.Width, cameraHeight = frame.Height, frame.Stride,
             expected.Width, expected.Height, expected.CameraToBoard, expected.BoardSearchRegions,
             expected.BoardReferenceRegions, expected.BoardTriggerRegions, context!.Revision,

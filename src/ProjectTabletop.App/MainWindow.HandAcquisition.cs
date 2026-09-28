@@ -11,6 +11,10 @@ public sealed partial class MainWindow
     private long _handAcquisitionContextRevision = -1;
     private long _handAcquisitionGeneration = -1;
     private object? _lastHandAcquisitionDetection;
+#if DEBUG
+    private CameraFrame? _lastHandAcquisitionFrame;
+    private SceneCompositor.HandAcquisitionContext? _lastHandAcquisitionContext;
+#endif
 
     private sealed record HandAcquisitionQuery(IReadOnlyList<HandAcquisitionHint> Hints,
         IReadOnlyList<HandTrackingBounds> SearchRegions, HandAcquisitionPresenceResult? Presence)
@@ -77,6 +81,12 @@ public sealed partial class MainWindow
     private void DescribeHandAcquisition(CameraFrame frame, SceneCompositor.HandAcquisitionContext? context,
         HandAcquisitionQuery query, HandTrackingDiagnostics? trace, int handCount)
     {
+#if DEBUG
+        // Keep the exact inference input paired with its decision. The latest
+        // camera frame may already show a different phase of our search light.
+        _lastHandAcquisitionFrame = frame;
+        _lastHandAcquisitionContext = context;
+#endif
         _lastHandAcquisitionDetection = context is null ? null : new
         {
             frameTime = frame.Timestamp, context.Revision, context.ObserveMotion,
