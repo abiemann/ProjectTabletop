@@ -5,9 +5,54 @@ namespace ProjectTabletop.Vision;
 /// by that control's configured search-interior area in board coordinates; null for motion-only hints.</param>
 /// <param name="ControlTriggerCoverage">Fresh residual area within the paired trigger region,
 /// divided by that region's area; null when the rendered scene has no trigger-region requirement.</param>
+/// <param name="CandidateBounds">Optional connected foreground geometry around a qualified
+/// control in native camera pixels. It may fit acquisition assistance but never supplies
+/// control coverage, a recognized hand, or a gesture.</param>
 public sealed record HandAcquisitionHint(HandTrackingBounds SearchBounds, PixelPoint Center,
     double RadiusPixels, DateTimeOffset ObservedAt, double MotionFraction, double? ControlCoverage = null,
-    double? ControlTriggerCoverage = null);
+    double? ControlTriggerCoverage = null, HandTrackingBounds? CandidateBounds = null)
+{
+    // The trigger stays on its control even when assistance follows connected
+    // foreground beyond it. Keep the measured control core inside opaque light.
+    public PixelPoint IlluminationCenter => ValidatedCandidateBounds is { } bounds
+        ? new(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2) : Center;
+
+    public double IlluminationRadiusPixels
+    {
+        get
+        {
+            if (ValidatedCandidateBounds is not { } bounds) return RadiusPixels;
+            PixelPoint center = IlluminationCenter;
+            double offset = Math.Sqrt(Math.Pow(center.X - Center.X, 2) + Math.Pow(center.Y - Center.Y, 2));
+            double extent = Math.Sqrt(bounds.Width * bounds.Width + bounds.Height * bounds.Height) / 2;
+            return Math.Max(extent * 1.05, offset + RadiusPixels * .64) / .82;
+        }
+    }
+
+    public HandTrackingBounds? ValidatedCandidateBounds => CandidateBounds is { } bounds &&
+        double.IsFinite(bounds.X) && double.IsFinite(bounds.Y) &&
+        double.IsFinite(bounds.Width) && double.IsFinite(bounds.Height) &&
+        double.IsFinite(bounds.X + bounds.Width) && double.IsFinite(bounds.Y + bounds.Height) &&
+        bounds.X >= 0 && bounds.Y >= 0 && bounds.Width > 0 && bounds.Height > 0 &&
+        double.IsFinite(SearchBounds.Width) && SearchBounds.Width > 0 &&
+        double.IsFinite(Center.X) && double.IsFinite(Center.Y) && double.IsFinite(RadiusPixels) && RadiusPixels > 0 &&
+        bounds.Width <= SearchBounds.Width * 2 && bounds.Height <= SearchBounds.Width * 2 &&
+        Center.X + RadiusPixels * .64 >= bounds.X && Center.X - RadiusPixels * .64 <= bounds.X + bounds.Width &&
+        Center.Y + RadiusPixels * .64 >= bounds.Y && Center.Y - RadiusPixels * .64 <= bounds.Y + bounds.Height ? bounds : null;
+
+    public HandAcquisitionHint ConstrainToFrame(int width, int height)
+    {
+        if (CandidateBounds is null) return this;
+        if (ValidatedCandidateBounds is not { } bounds || width <= 0 || height <= 0 ||
+            bounds.X + bounds.Width > width || bounds.Y + bounds.Height > height)
+            return this with { CandidateBounds = null };
+        double core = RadiusPixels * .64;
+        double spanX = Math.Max(bounds.X + bounds.Width, Center.X + core) - Math.Min(bounds.X, Center.X - core);
+        double spanY = Math.Max(bounds.Y + bounds.Height, Center.Y + core) - Math.Min(bounds.Y, Center.Y - core);
+        return Math.Max(spanX, spanY) <= Math.Floor(Math.Min(width, height) * .60)
+            ? this : this with { CandidateBounds = null };
+    }
+}
 
 /// <summary>
 /// Finds bounded local disturbances within a calibrated camera polygon. All returned geometry

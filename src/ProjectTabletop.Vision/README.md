@@ -79,6 +79,8 @@ caption area floors, and two fresh observations. Panel-only tint, global colour
 or exposure drift, and illumination itself cannot qualify. Diagnostics retain
 the structural text result separately from `CaptionReflectanceChanged` and its
 measured coverage, so readable letters are not reported as missing glyphs.
+With `AllowsLocalForegroundContext` enabled for a static generated scene, confirmed control interference can sample one bounded local context (at most 60% of the native camera short side). Connected residual geometry is attached as `CandidateBounds`; weak connected residuals may grow its outline but never contribute to control coverage or confirmation. Fixed artwork, disconnected changes, broad mismatches, and idle frames cannot start this stage. The original `Center`, `RadiusPixels` and coverage remain the control witness; `IlluminationCenter` and `IlluminationRadiusPixels` fit assistance around the candidate while retaining opaque light over the measured control core. The app uses a native square crop containing both. Own-light fitting masks follow this illumination geometry, while renewal still measures the original control. Dynamic scenes leave this option off.
+
 It returns up to two stationary foreground regions. It can start with a hand
 already present and does not absorb that hand into its background. A fixed camera
 reference is available only as a fallback without a usable rendered scene and

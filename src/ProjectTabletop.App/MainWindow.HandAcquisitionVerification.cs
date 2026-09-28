@@ -22,7 +22,7 @@ public sealed partial class MainWindow
             latestCameraFrameUtc = Volatile.Read(ref _latestCameraFrame)?.Timestamp,
             frame.Timestamp, cameraWidth = frame.Width, cameraHeight = frame.Height, frame.Stride,
             expected.Width, expected.Height, expected.CameraToBoard, expected.BoardSearchRegions,
-            expected.BoardReferenceRegions, expected.BoardTriggerRegions, context!.Revision,
+            expected.BoardReferenceRegions, expected.BoardTriggerRegions, expected.AllowsLocalForegroundContext, context!.Revision,
             context.SearchPolygon, context.IlluminatedHint, context.IlluminationStartedAt,
             lighting = _scene.GetHandAcquisitionDiagnostics(), detection = _lastHandAcquisitionDetection
         });
@@ -205,6 +205,34 @@ public sealed partial class MainWindow
         now += TimeSpan.FromMilliseconds(600);
         ready = scene.GetHandAcquisitionContext(now)!;
         scene.CompleteHandAcquisition(ready, [hint with { ObservedAt = now }], [], now);
+        // A caption locates the fingertips, not necessarily the palm. Assistance
+        // may follow independently measured connected context while selection
+        // and illuminated renewal stay anchored to the original control.
+        scene.CompleteHandAcquisition(scene.GetHandAcquisitionContext(now), [], [], now, illuminatedPresence: false);
+        now += TimeSpan.FromMilliseconds(1000);
+        ready = scene.GetHandAcquisitionContext(now)!;
+        var connectedGameRevision = scene.BlackjackState.Revision;
+        var candidate = hint with { ObservedAt = now,
+            CandidateBounds = new(center.X - 65, center.Y - 160, 130, 180) };
+        scene.CompleteHandAcquisition(ready, [candidate], [], now);
+        var connected = scene.GetHandAcquisitionContext(now)!;
+        var palmCenter = candidate.IlluminationCenter;
+        Require(connected.IlluminatedHint?.Center == candidate.Center &&
+                connected.IlluminatedHint.CandidateBounds == candidate.CandidateBounds &&
+                IsWhite(Draw(), palmCenter) && IsWhite(Draw(), center),
+            "Connected acquisition light failed to cover palm context and preserve its control anchor.");
+        var query = CreateHandAcquisitionQuery(new Camera.CameraFrame(size, size, size * 4,
+            new byte[size * size * 4], now), connected, new HandAcquisitionPresenceTracker(), now);
+        var crop = query.SearchRegions.Single();
+        Require(crop.Width == crop.Height && crop.X >= 0 && crop.Y >= 0 &&
+                crop.X + crop.Width <= size && crop.Y + crop.Height <= size &&
+                palmCenter.X >= crop.X && palmCenter.X < crop.X + crop.Width &&
+                palmCenter.Y >= crop.Y && palmCenter.Y < crop.Y + crop.Height &&
+                center.X >= crop.X && center.X < crop.X + crop.Width &&
+                center.Y >= crop.Y && center.Y < crop.Y + crop.Height,
+            "Connected context lost the palm, control core, or native square camera bounds.");
+        Require(scene.BlackjackState.Revision == connectedGameRevision && scene.HoveredBoardButtons.Count == 0,
+            "Connected geometry manufactured a button selection.");
         scene.SetBoardSetup(true);
         Require(scene.GetHandAcquisitionContext(now) is null, "Calibration did not cancel assistance.");
         return new { passed = true, bottomButtonLit = true, motionCannotSelect = true,
@@ -213,7 +241,8 @@ public sealed partial class MainWindow
             generatedUnlitReference = true, stationarySearchCenters = true, acceptedNativeHandSkipsFallbackLight = true,
             stationaryPresenceRetainsLight = true, emptyAndStalePresenceCannotRetainLight = true,
             sevenPercentBoundaryEnforced = true, nonfiniteAndUnmeasuredEvidenceRejected = true,
-            renewalRequiresFreshMeasuredEvidenceAtOriginalControl = true };
+            renewalRequiresFreshMeasuredEvidenceAtOriginalControl = true,
+            connectedContextLightsPalmAndControlWithoutSelecting = true };
 
         void AssertInvalidRenewal(HandAcquisitionHint[] evidence, bool refreshObservation)
         {

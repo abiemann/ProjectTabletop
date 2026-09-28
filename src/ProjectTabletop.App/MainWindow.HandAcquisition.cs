@@ -17,10 +17,11 @@ public sealed partial class MainWindow
 #endif
 
     private sealed record HandAcquisitionQuery(IReadOnlyList<HandAcquisitionHint> Hints,
-        IReadOnlyList<HandTrackingBounds> SearchRegions, HandAcquisitionPresenceResult? Presence)
+        IReadOnlyList<HandTrackingBounds> SearchRegions, HandAcquisitionPresenceResult? Presence, int Width = 0, int Height = 0)
     {
         // Only current measured button obstruction can start a search light.
-        public IReadOnlyList<HandAcquisitionHint> LightingHints => Presence?.Hints ?? [];
+        public IReadOnlyList<HandAcquisitionHint> LightingHints => Presence?.Hints
+            .Select(hint => hint.ConstrainToFrame(Width, Height)).ToArray() ?? [];
     }
 
     private HandAcquisitionQuery FindHandAcquisitionHints(CameraFrame frame,
@@ -46,12 +47,13 @@ public sealed partial class MainWindow
                 context.IlluminatedHint, context.IlluminationStartedAt) : null;
         IReadOnlyList<HandAcquisitionHint> hints = context.IlluminatedHint is { } illuminated ? [illuminated] :
             presence?.Hints ?? [];
+        hints = hints.Select(hint => hint.ConstrainToFrame(frame.Width, frame.Height)).ToArray();
         var regions = new List<HandTrackingBounds>(2);
         // Qualified presence already requires two fresh observations and at
         // least 7% of both the control and its label. Try the untouched camera
         // crop first: extra white light can hide an otherwise clear hand pose.
         // A rejected model fit can still request the existing search light.
-        regions.AddRange(hints.Take(2).Select(hint => hint.SearchBounds));
+        regions.AddRange(hints.Take(2).Select(hint => AcquisitionSearchBounds(hint, frame.Width, frame.Height)));
         // Photo Copy's object field is also a point of interest. Keep its
         // separate capture gesture without searching the whole webcam.
         if (context.ContinuousSearchPolygon is { Length: >= 3 } polygon)
@@ -73,7 +75,24 @@ public sealed partial class MainWindow
                 regions.Add(region);
             }
         }
-        return new(hints, regions, presence);
+        return new(hints, regions, presence, frame.Width, frame.Height);
+    }
+
+    private static HandTrackingBounds AcquisitionSearchBounds(HandAcquisitionHint hint, int width, int height)
+    {
+        if (hint.ConstrainToFrame(width, height).ValidatedCandidateBounds is not { } candidate)
+            return hint.SearchBounds;
+        // Keep connected palm context and the measured caption core together.
+        // These pixels guide fresh model inference; they do not define a pose.
+        double core = hint.RadiusPixels * .64;
+        double left = Math.Min(candidate.X, hint.Center.X - core);
+        double top = Math.Min(candidate.Y, hint.Center.Y - core);
+        double right = Math.Max(candidate.X + candidate.Width, hint.Center.X + core);
+        double bottom = Math.Max(candidate.Y + candidate.Height, hint.Center.Y + core);
+        int side = (int)Math.Ceiling(Math.Clamp(Math.Max(right - left, bottom - top) * 1.25,
+            Math.Min(hint.SearchBounds.Width, Math.Min(width, height) * .60), Math.Min(width, height) * .60));
+        return new(Math.Clamp(Math.Round((left + right - side) / 2), 0, width - side),
+            Math.Clamp(Math.Round((top + bottom - side) / 2), 0, height - side), side, side);
     }
 
     private void DescribeHandAcquisition(CameraFrame frame, SceneCompositor.HandAcquisitionContext? context,

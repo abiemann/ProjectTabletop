@@ -8,10 +8,14 @@ namespace ProjectTabletop.Vision;
 /// <param name="BoardTriggerRegions">Optional normalized board-UV rectangles paired one-to-one
 /// with BoardSearchRegions and contained inside them. Each control also requires fresh foreground
 /// over at least 7% of its trigger region, such as its generated label.</param>
+/// <param name="AllowsLocalForegroundContext">The generated image also describes the static
+/// surroundings of controls. After a control qualifies, connected local foreground may
+/// fit its temporary light; those extra pixels cannot qualify acquisition.</param>
 public sealed record HandAcquisitionSceneImage(int Width, int Height, byte[] Bgra,
     IReadOnlyList<double> CameraToBoard, IReadOnlyList<HandTrackingBounds>? BoardSearchRegions = null,
     IReadOnlyList<HandTrackingBounds>? BoardReferenceRegions = null,
-    IReadOnlyList<HandTrackingBounds>? BoardTriggerRegions = null);
+    IReadOnlyList<HandTrackingBounds>? BoardTriggerRegions = null,
+    bool AllowsLocalForegroundContext = false);
 
 /// <summary>Fresh generated-letter structure evidence, independent of panel palette fitting.
 /// Coverage counts measured changed glyph/halo pixels against the complete paired rectangles.</summary>
@@ -43,7 +47,7 @@ public sealed record HandAcquisitionPresenceResult(IReadOnlyList<HandAcquisition
 /// inside its opaque white core and is never learned as the unlit board. Reset on a real scene
 /// or calibration change, not when toggling the acquisition light.
 /// </summary>
-public sealed class HandAcquisitionPresenceTracker
+public sealed partial class HandAcquisitionPresenceTracker
 {
     private const int Features = 7;
     // A live four-finger capture covered 7.2–9.0% of its control with residual
@@ -107,6 +111,7 @@ public sealed class HandAcquisitionPresenceTracker
             if (!Configure(width, height, searchPolygon)) return Empty("invalid-search-polygon");
         _lastTime = frameTime;
         SampledCellCount = 0;
+        LocalContextSampledCellCount = 0;
         if (_validCount < 48) return Empty("insufficient-board-area");
         if (!ReferenceEquals(_scene, expectedScene)) ConfigureTemplate(expectedScene);
         // A supplied render is authoritative. Invalid geometry or an empty control
@@ -126,7 +131,7 @@ public sealed class HandAcquisitionPresenceTracker
             : compareControlEdges ? (bool[])allowed.Clone() : allowed;
         if (activeLight)
             for (int index = 0; index < allowed.Length; index++)
-                if (Distance(_locations[index], illuminatedHint!.Center) < illuminatedHint.RadiusPixels * 1.28)
+                if (Distance(_locations[index], illuminatedHint!.IlluminationCenter) < illuminatedHint.IlluminationRadiusPixels * 1.28)
                     allowed[index] = fitAllowed[index] = false;
 
         // The immutable rendered image supports acquisition even when a hand is present in
@@ -267,6 +272,10 @@ public sealed class HandAcquisitionPresenceTracker
             });
         }
         if (hints.Count > 2) hints.RemoveRange(2, hints.Count - 2);
+        if (!activeLight && modelReliable && fit is not null && colorOffsets is not null &&
+            _scene?.AllowsLocalForegroundContext == true)
+            for (int index = 0; index < hints.Count; index++)
+                hints[index] = AttachLocalForegroundCandidate(hints[index], bgra, stride, fit, colorOffsets);
 
         // Keep a fixed reference instead of gradually absorbing a stationary hand. A new
         // rendered scene explicitly resets it; exposure drift is fitted on every fresh frame.
@@ -356,7 +365,7 @@ public sealed class HandAcquisitionPresenceTracker
             // reference patches compensate camera exposure; they cannot acquire
             // a hand. Only an active light's white core needs additional pixels.
             if (_templateSampleMask is not null && !_templateSampleMask[index] &&
-                (illuminatedHint is null || Distance(point, illuminatedHint.Center) >= illuminatedHint.RadiusPixels * .64))
+                (illuminatedHint is null || Distance(point, illuminatedHint.IlluminationCenter) >= illuminatedHint.IlluminationRadiusPixels * .64))
                 continue;
             SampledCellCount++;
             for (int dy = -1; dy <= 1; dy += 2)

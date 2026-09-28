@@ -2,6 +2,13 @@ using System.Runtime.InteropServices;
 using OpenCvSharp;
 using ProjectTabletop.Vision;
 
+if (args is ["--hand-local-context"])
+{
+    HandAcquisitionLocalContextRegression.Run();
+    HandAcquisitionHintRegression.Run();
+    return;
+}
+
 if (args is ["--hand-acquisition-history"])
 {
     HandAcquisitionOpticalHistoryRegression.Run();

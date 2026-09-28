@@ -95,7 +95,7 @@ internal sealed class HandAcquisitionTextPatterns
             // measurement owns renewal and must never be compared with the unlit text.
             PixelPoint center = CameraPoint(template.Left + template.Width / 2.0,
                 template.Top + template.Height / 2.0);
-            if (light is not null && Distance(center, light.Center) < light.RadiusPixels * 1.4)
+            if (light is not null && Distance(center, light.IlluminationCenter) < light.IlluminationRadiusPixels * 1.4)
             {
                 observations.Add(new(template.Region, false, false, 0, [], 0, 0, 0));
                 continue;

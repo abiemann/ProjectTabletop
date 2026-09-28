@@ -191,21 +191,25 @@ public sealed partial class SceneCompositor
             var hint = hints.FirstOrDefault(hint => HasCurrentControlObstruction(hint, frameTime));
             if (hint is null) return;
             if (!double.IsFinite(hint.RadiusPixels) || hint.RadiusPixels <= 0) return;
-            var center = _boardCameraMap!.Transform(new(hint.Center.X, hint.Center.Y));
-            var board = _boardSurfaceMap!.InverseTransform(center);
+            var anchor = _boardCameraMap!.Transform(new(hint.Center.X, hint.Center.Y));
+            var board = _boardSurfaceMap!.InverseTransform(anchor);
             if (!_boardSession.Buttons.Any(button => button.Bounds.Contains(board.X, board.Y))) return;
+            var nativeCenter = hint.IlluminationCenter;
+            double nativeRadius = hint.IlluminationRadiusPixels;
+            if (!double.IsFinite(nativeRadius) || nativeRadius <= 0) return;
+            var center = _boardCameraMap.Transform(new(nativeCenter.X, nativeCenter.Y));
             double radius = 0;
             for (int i = 0; i < 8; i++)
             {
                 double angle = i * Math.PI / 4;
-                var point = _boardCameraMap.Transform(new(hint.Center.X + Math.Cos(angle) * hint.RadiusPixels,
-                    hint.Center.Y + Math.Sin(angle) * hint.RadiusPixels));
+                var point = _boardCameraMap.Transform(new(nativeCenter.X + Math.Cos(angle) * nativeRadius,
+                    nativeCenter.Y + Math.Sin(angle) * nativeRadius));
                 radius = Math.Max(radius, Math.Sqrt(Math.Pow((point.X - center.X) * _displayAspect, 2) +
                     Math.Pow(point.Y - center.Y, 2)));
             }
             if (!double.IsFinite(radius) || radius <= 0 || !double.IsFinite(center.X) || !double.IsFinite(center.Y)) return;
             _acquisitionHint = hint;
-            _acquisitionLight = new(new(center.X, center.Y), Math.Min(radius, .24));
+            _acquisitionLight = new(new(center.X, center.Y), Math.Min(radius, hint.ValidatedCandidateBounds is null ? .24 : .32));
             _acquisitionLightUntil = now + AcquisitionLightDuration;
             _acquisitionLightStarted = now;
             RetainPaintButtonLightExclusion();
@@ -341,7 +345,9 @@ public sealed partial class SceneCompositor
             return new((int)BoardSurfaceSize, (int)BoardSurfaceSize, pixels, cameraToBoard,
                 BoardSearchRegions: regions, BoardReferenceRegions: referenceRegions,
                 BoardTriggerRegions: _boardSession.Buttons
-                    .Select(button => BoardButtonTextRegion(_acquisitionReferenceTarget.Device, button)).ToArray());
+                    .Select(button => BoardButtonTextRegion(_acquisitionReferenceTarget.Device, button)).ToArray(),
+                AllowsLocalForegroundContext: _boardSession.Screen is BoardScreen.Menu or
+                    BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.Monopoly);
         }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or
             InvalidOperationException or ObjectDisposedException)

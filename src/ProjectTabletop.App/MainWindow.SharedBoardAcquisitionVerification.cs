@@ -88,7 +88,7 @@ public sealed partial class MainWindow
             generatedCaptionCorruptionNeedsTwoFreshFrames = true,
             noEmptyBoardCandidates = true, assistanceCannotSelect = true,
             sevenPercentCoverageRequiredAcrossBoards = true,
-            buttonRegionsOnlyBeforeIllumination = true, nativeFocusedModelSearchBeforeFallbackIllumination = true,
+            buttonRegionsOnlyBeforeQualification = true, nativeFocusedModelSearchBeforeFallbackIllumination = true,
             noBlindButtonSweepOrWholeBoardMotionFallback = true,
             resetClearsForegroundQueryHistory = true,
             boundedPhotoCopyFieldAndUnrestrictedGestureTesterPreserved = true,
@@ -237,7 +237,9 @@ public sealed partial class MainWindow
                 Require(pendingQuery.LightingHints.Any(hint => hint.Center == measured.Center),
                     label + "/" + button.Label + " did not pass measured control evidence to illumination.");
                 Require(pendingQuery.SearchRegions.Count is > 0 and <= 2 &&
-                        pendingQuery.SearchRegions.Contains(measured.SearchBounds) && context.IlluminatedHint is null,
+                        pendingQuery.SearchRegions.Contains(AcquisitionSearchBounds(measured, size, size)) &&
+                        pendingQuery.SearchRegions.All(crop => crop.Width == crop.Height && crop.X >= 0 && crop.Y >= 0 &&
+                            crop.X + crop.Width <= size && crop.Y + crop.Height <= size) && context.IlluminatedHint is null,
                     label + "/" + button.Label + " did not try its qualified native camera crop before fallback illumination.");
                 Require(measured.ControlTriggerCoverage is double textCoverage && textCoverage >= .07,
                     label + "/" + button.Label + " did not measure at least 7% of its actual control-label obstruction.");
@@ -301,7 +303,7 @@ public sealed partial class MainWindow
                     label + "/" + button.Label + " did not illuminate its control.");
                 var focusedQuery = Query(occupied, lit);
                 Require(focusedQuery.SearchRegions.Count is > 0 and <= 2 &&
-                        focusedQuery.SearchRegions.Contains(lit.IlluminatedHint!.SearchBounds),
+                        focusedQuery.SearchRegions.Contains(AcquisitionSearchBounds(lit.IlluminatedHint!, size, size)),
                     label + "/" + button.Label + " did not focus inference on its illuminated point of interest.");
                 Require(scene.CurrentBoardScreen == screen && scene.BlackjackState.Revision == gameRevision &&
                         scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(ids) &&
