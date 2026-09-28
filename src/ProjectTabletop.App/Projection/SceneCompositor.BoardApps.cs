@@ -395,7 +395,7 @@ public sealed partial class SceneCompositor
 
     private static CanvasTextFormat PaintButtonTextFormat() => new()
     {
-        FontFamily = "Segoe UI", FontSize = 26, FontWeight = FontWeights.SemiBold,
+        FontFamily = "Segoe UI", FontSize = 36, FontWeight = FontWeights.SemiBold,
         HorizontalAlignment = CanvasHorizontalAlignment.Center,
         VerticalAlignment = CanvasVerticalAlignment.Center,
         WordWrapping = CanvasWordWrapping.NoWrap

@@ -314,7 +314,7 @@ public sealed partial class SceneCompositor
     {
         if (game.Phase == MonopolyPhase.Landing)
         {
-            DrawMonopolyCrest(ds, new Vector2(500, 291), 1.1f, boardAspect);
+            DrawMonopolyCrest(ds, new Vector2(545, 291), 1.1f, boardAspect);
             MonopolyText(ds, "THE PROPERTY TRADING GAME", new Rect(236, 354, 528, 21), 14, MonopolyGold);
             MonopolyText(ds, "MONOPOLY", new Rect(212, 382, 576, 68), 53, MonopolyIvory, "Georgia", true);
             DrawMonopolyRule(ds, 458, 135);
@@ -322,8 +322,12 @@ public sealed partial class SceneCompositor
             MonopolyText(ds, "Human players and AI opponents share one beautiful board.", new Rect(242, 687, 516, 42), 16, MonopolyMuted, wrap: true);
             return;
         }
-        MonopolyText(ds, "MONOPOLY", new Rect(230, 207, 540, 49), 36, MonopolyIvory, "Georgia", true);
-        DrawMonopolyRule(ds, 266, 100);
+        bool headerExit = game.Phase is not MonopolyPhase.ExitConfirmation and not MonopolyPhase.Saving;
+        // Leave a full gesture-sized Exit plate on the felt, clear of the
+        // property perimeter and every phase's status/actions below the header.
+        MonopolyText(ds, "MONOPOLY", headerExit ? new Rect(465, 207, 340, 49) : new Rect(230, 207, 540, 49),
+            36, MonopolyIvory, "Georgia", true);
+        DrawMonopolyRule(ds, 266, 100, headerExit ? 635 : 500);
         if (game.Phase == MonopolyPhase.Setup)
         {
             MonopolyText(ds, "YOUR TABLE, YOUR COMPANY", new Rect(226, 287, 548, 28), 18, MonopolyGold);
@@ -397,8 +401,10 @@ public sealed partial class SceneCompositor
             MonopolyText(ds, caption, new Rect(rect.X + 48, rect.Y + 29, 210, height - 32), 11.5f, MonopolyMuted);
         }
         var current = game.Players.ElementAtOrDefault(game.ActivePlayerIndex);
+        bool headerExit = game.Phase is not MonopolyPhase.ExitConfirmation and not MonopolyPhase.Saving;
         MonopolyText(ds, current is null ? "" : $"TURN {game.TurnNumber}  ·  {current.Name.ToUpperInvariant()}{(current.IsAi ? " · AI IS PLAYING" : "")}",
-            new Rect(234, 278, 532, 24), 15, MonopolyGold, "Bahnschrift", true);
+            headerExit ? new Rect(465, 278, 340, 24) : new Rect(234, 278, 532, 24),
+            15, MonopolyGold, "Bahnschrift", true);
     }
 
     private static void DrawMonopolyManagement(CanvasDrawingSession ds, MonopolySnapshot game)
@@ -467,7 +473,7 @@ public sealed partial class SceneCompositor
     private static CanvasTextFormat MonopolyButtonTextFormat(BoardButton button) => new()
     {
         FontFamily = "Bahnschrift", FontWeight = FontWeights.SemiBold,
-        FontSize = button.Label is "+" or "−" or "-" ? 28 : button.Id == "mp-roll" ? 26 :
+        FontSize = button.Id == "mp-exit" ? 36 : button.Label is "+" or "−" or "-" ? 28 : button.Id == "mp-roll" ? 26 :
             button.Bounds.Height < .05 ? 17 : button.Id is "mp-start-game" or "mp-start" ? 26 :
             button.Bounds.Width < .1 ? 24 : button.Label.Length > 15 ? 18 : 22,
         HorizontalAlignment = CanvasHorizontalAlignment.Center,
@@ -706,11 +712,11 @@ public sealed partial class SceneCompositor
         ds.FillGeometry(star, color);
     }
 
-    private static void DrawMonopolyRule(CanvasDrawingSession ds, float y, float halfWidth)
+    private static void DrawMonopolyRule(CanvasDrawingSession ds, float y, float halfWidth, float centerX = 500)
     {
-        ds.DrawLine(500 - halfWidth, y, 481, y, ThemeColor(228, 197, 126, 125), 1);
-        ds.DrawLine(519, y, 500 + halfWidth, y, ThemeColor(228, 197, 126, 125), 1);
-        DrawMonopolyDiamond(ds, new Vector2(500, y), 4, MonopolyGold);
+        ds.DrawLine(centerX - halfWidth, y, centerX - 19, y, ThemeColor(228, 197, 126, 125), 1);
+        ds.DrawLine(centerX + 19, y, centerX + halfWidth, y, ThemeColor(228, 197, 126, 125), 1);
+        DrawMonopolyDiamond(ds, new Vector2(centerX, y), 4, MonopolyGold);
     }
 
     private static string MonopolyMoney(decimal amount) => "$" + amount.ToString("#,0.##", CultureInfo.InvariantCulture);

@@ -44,9 +44,15 @@ internal static class BlackjackBoardRegression
         foreach (var button in buttons)
         {
             var r = button.Bounds;
-            Require(r.X >= .05 && r.Y >= .05 && r.X + r.Width <= .95 && r.Y + r.Height <= .95,
+            // Reset's full visible plate sits below the betting row so the
+            // enlarged control cannot cover dealer cards or another action.
+            // It uses the footer's 1% bottom margin; other margins stay at 5%.
+            double bottomLimit = button.Id == "bj-reset" ? .99 : .95;
+            Require(r.X >= .05 && r.Y >= .05 && r.X + r.Width <= .95 && r.Y + r.Height <= bottomLimit,
                 "A Blackjack target reaches the edge of the board.");
-            Require(buttons.Count(other => other.Bounds.Contains(r.X + r.Width / 2, r.Y + r.Height / 2)) == 1,
+            Require(buttons.All(other => other.Id == button.Id ||
+                    r.X >= other.Bounds.X + other.Bounds.Width || other.Bounds.X >= r.X + r.Width ||
+                    r.Y >= other.Bounds.Y + other.Bounds.Height || other.Bounds.Y >= r.Y + r.Height),
                 "Blackjack hit targets overlap.");
         }
 

@@ -15,12 +15,20 @@ public sealed record HandAcquisitionSceneImage(int Width, int Height, byte[] Bgr
 
 /// <summary>Fresh generated-letter structure evidence, independent of panel palette fitting.
 /// Coverage counts measured changed glyph/halo pixels against the complete paired rectangles.</summary>
+/// <param name="CaptionReflectanceCoverage">Fresh chromatic residual on registered generated glyph/halo
+/// support, measured against the whole control, independent of structural letter corruption.</param>
+/// <param name="CaptionReflectanceTriggerCoverage">The same residual measured against the caption region.</param>
+/// <param name="CaptionReflectanceInkFraction">Fraction of sampled generated ink with fresh chromatic residual.</param>
+/// <param name="CaptionReflectanceChanged">Readable letters have independently verified localized reflectance
+/// evidence meeting both 7% area floors and the ink floor. This is not structural text corruption.</param>
 public sealed record HandAcquisitionTextPatternResult(int ControlRegion, bool LabelIntact,
     double Correlation, double ControlCoverage, double ControlTriggerCoverage,
     bool ShapeCorrupted = false, int ConfirmationFrames = 0, double OpticalBlur = 0,
     int RegistrationX = 0, int RegistrationY = 0, double OpticalScaleX = 1, double OpticalScaleY = 1,
     IReadOnlyList<double>? SectorCorrelations = null, double LocalDamageCoverage = 0,
-    double OpticalExposureGain = 1, double OpticalExposureBackground = 0);
+    double OpticalExposureGain = 1, double OpticalExposureBackground = 0,
+    double CaptionReflectanceCoverage = 0, double CaptionReflectanceTriggerCoverage = 0,
+    double CaptionReflectanceInkFraction = 0, bool CaptionReflectanceChanged = false);
 
 /// <summary>Foreground evidence for acquisition, never proof of a hand or a selection.</summary>
 /// <param name="ForegroundFraction">Foreground occupancy among eligible candidate samples.
@@ -183,11 +191,20 @@ public sealed class HandAcquisitionPresenceTracker
         }
         bool modelReliable = fit is not null && fit.MedianError <= 18 && referenceFraction < .40;
         if (!modelReliable) Array.Clear(foreground);
-        // If the generated letters are still intact, a palette/exposure mismatch
-        // on their panel is not a physical obstruction. Do not light that control.
+        var captionReflectance = MeasureCaptionReflectance(reference, current, foreground, fit, colorOffsets);
+        var reflectedControls = ValidateCaptionReflectance(reference, current, captionReflectance,
+            textObservations, fitAllowed);
+        // Readable letters usually disprove a panel palette/exposure mismatch.
+        // The projector can also print the same readable letters onto fingers:
+        // retain only independently verified new chroma on their generated ink
+        // and halo, never a broad panel tint or luminance-only optical mismatch.
         foreach (var observation in textObservations.Where(observation => !observation.StrongCorruption))
+        {
+            var evidence = reflectedControls.FirstOrDefault(candidate => candidate.Region == observation.Region);
             for (int index = 0; index < foreground.Length; index++)
-                if (_controlRegions?[index] == observation.Region) foreground[index] = false;
+                if (_controlRegions?[index] == observation.Region)
+                    foreground[index] = evidence?.Mask[index] ?? false;
+        }
         if (modelReliable)
         {
             foregroundCount = foreground.Count(value => value);
@@ -213,6 +230,8 @@ public sealed class HandAcquisitionPresenceTracker
 
         var hints = modelReliable ? Components(foreground, frameTime,
             searchMask: _templateMask, evidenceArea: _templateMask is null ? null : eligibleCount) : new List<HandAcquisitionHint>();
+        if (!activeLight && reflectedControls.Count > 0 && hints.Count > 0)
+            reason = "caption-reflectance-foreground";
         foreach (var observation in textObservations.Where(observation => observation.StrongCorruption))
             if (TextHint(observation, frameTime) is { } textHint &&
                 !hints.Any(hint => ControlRegionAt(hint.Center) == observation.Region))
@@ -223,7 +242,7 @@ public sealed class HandAcquisitionPresenceTracker
             }
         foreach (var observation in textObservations)
         {
-            bool qualifying = observation.StrongCorruption && hints.Any(hint =>
+            bool qualifying = (observation.StrongCorruption || reflectedControls.Any(evidence => evidence.Region == observation.Region)) && hints.Any(hint =>
                 ControlRegionAt(hint.Center) == observation.Region && hint.ControlCoverage >= MinimumControlCoverage &&
                 hint.ControlTriggerCoverage >= MinimumControlCoverage);
             bool consecutive = frameTime - _textCorruptionTimes![observation.Region] <= TimeSpan.FromMilliseconds(350);
@@ -233,7 +252,8 @@ public sealed class HandAcquisitionPresenceTracker
             if (confirmations < 2)
             {
                 hints.RemoveAll(hint => ControlRegionAt(hint.Center) == observation.Region);
-                if (qualifying && !activeLight) reason = "text-corruption-confirming";
+                if (qualifying && !activeLight) reason = observation.StrongCorruption
+                    ? "text-corruption-confirming" : "caption-reflectance-confirming";
             }
         }
         if (illuminatedPresence == true)
@@ -265,7 +285,11 @@ public sealed class HandAcquisitionPresenceTracker
             observation.StrongCorruption, _textCorruptionFrames![observation.Region], observation.OpticalBlur,
             observation.OffsetX, observation.OffsetY, observation.ScaleX, observation.ScaleY,
             observation.SectorCorrelations, observation.LocalDamageCoverage,
-            observation.ExposureGain, observation.ExposureBackground)).ToArray();
+            observation.ExposureGain, observation.ExposureBackground,
+            captionReflectance.FirstOrDefault(evidence => evidence.Region == observation.Region)?.Coverage ?? 0,
+            captionReflectance.FirstOrDefault(evidence => evidence.Region == observation.Region)?.TriggerCoverage ?? 0,
+            captionReflectance.FirstOrDefault(evidence => evidence.Region == observation.Region)?.InkFraction ?? 0,
+            reflectedControls.Any(evidence => evidence.Region == observation.Region))).ToArray();
         return new(hints, _baseline is not null || _expected is not null, illuminatedPresence, fraction, reason,
             textDiagnostics.Length == 0 ? null : textDiagnostics);
     }
@@ -513,6 +537,98 @@ public sealed class HandAcquisitionPresenceTracker
     }
 
     private sealed record PhotometricFit(double[][] Coefficients, double MedianError);
+
+    private sealed record CaptionReflectanceEvidence(int Region, bool[] Mask, double Coverage,
+        double TriggerCoverage, double InkFraction);
+
+    private IReadOnlyList<CaptionReflectanceEvidence> MeasureCaptionReflectance(double[] reference,
+        double[] current, bool[] foreground, PhotometricFit? fit, Dictionary<int, double[]>? offsets,
+        int? selectedRegion = null)
+    {
+        if (fit is null || offsets is null || _textPatterns is null || _scene is null ||
+            _controlRegions is null || _controlBoardAreas is null || _controlTriggerRegions is null ||
+            _controlTriggerBoardAreas is null) return [];
+        var result = new List<CaptionReflectanceEvidence>();
+        Span<double> residual = stackalloc double[3];
+        for (int region = 0; region < _controlBoardAreas.Length; region++)
+        {
+            if (selectedRegion is not null && selectedRegion != region) continue;
+            bool[] mask = new bool[foreground.Length];
+            double area = 0, triggerArea = 0, inkArea = 0, changedInkArea = 0;
+            for (int index = 0; index < foreground.Length; index++)
+            {
+                if (_controlRegions[index] != region ||
+                    !BoardPosition(_scene, _locations[index], out double u, out double v) ||
+                    !_textPatterns.IsGeneratedCaptionSupport(region, u, v, out bool ink)) continue;
+                double cellArea = _sampleBoardAreas![index];
+                if (ink) inkArea += cellArea;
+                if (!foreground[index]) continue;
+                offsets.TryGetValue(ColorKey(reference, index), out var offset);
+                for (int channel = 0; channel < 3; channel++)
+                    residual[channel] = current[index * 3 + channel] -
+                        Predict(fit.Coefficients[channel], reference[index * 3], reference[index * 3 + 1],
+                            reference[index * 3 + 2], index, channel) - (offset?[channel] ?? 0);
+                double luminance = residual[0] * .114 + residual[1] * .587 + residual[2] * .299;
+                double chroma = Math.Sqrt((Math.Pow(residual[0] - luminance, 2) +
+                    Math.Pow(residual[1] - luminance, 2) + Math.Pow(residual[2] - luminance, 2)) / 3);
+                if (chroma < 18) continue;
+                mask[index] = true;
+                area += cellArea;
+                if (_controlTriggerRegions[index] == region) triggerArea += cellArea;
+                if (ink) changedInkArea += cellArea;
+            }
+            result.Add(new(region, mask, area / _controlBoardAreas[region],
+                triggerArea / _controlTriggerBoardAreas[region], changedInkArea / Math.Max(1e-12, inkArea)));
+        }
+        return result;
+    }
+
+    private IReadOnlyList<CaptionReflectanceEvidence> ValidateCaptionReflectance(double[] reference,
+        double[] current, IReadOnlyList<CaptionReflectanceEvidence> measured,
+        IReadOnlyList<HandAcquisitionTextPatterns.Observation> observations, bool[] fitAllowed)
+    {
+        var result = new List<CaptionReflectanceEvidence>();
+        if (_controlRegions is null || _templateReferenceMask is null) return result;
+        foreach (var candidate in measured.Where(evidence =>
+            evidence.Coverage >= MinimumControlCoverage && evidence.TriggerCoverage >= MinimumControlCoverage &&
+            evidence.InkFraction >= .5 && observations.Any(observation => observation.Region == evidence.Region &&
+                observation.Clean && !observation.StrongCorruption)))
+        {
+            var independentLabels = observations.Where(observation => observation.Region != candidate.Region &&
+                observation.Clean && observation.Correlation >= .82 &&
+                measured.All(other => other.Region != observation.Region || other.Coverage < MinimumControlCoverage))
+                .Select(observation => observation.Region).ToHashSet();
+            if (independentLabels.Count == 0) continue;
+            bool[] independent = Enumerable.Range(0, fitAllowed.Length).Select(index =>
+                fitAllowed[index] && _templateReferenceMask[index] && _controlRegions[index] != candidate.Region &&
+                (_controlRegions[index] < 0 || independentLabels.Contains(_controlRegions[index]))).ToArray();
+            var fit = Fit(reference, current, independent);
+            if (fit is null || fit.MedianError > 18) continue;
+            var offsets = ColorResiduals(reference, current, independent, fit.Coefficients);
+            double threshold = Math.Clamp(fit.MedianError * 3.5 + 10, 24, 52);
+            int checkedReference = 0, uncertainReference = 0;
+            bool[] foreground = new bool[fitAllowed.Length];
+            for (int index = 0; index < foreground.Length; index++)
+            {
+                if (!independent[index] && _controlRegions[index] != candidate.Region) continue;
+                offsets.TryGetValue(ColorKey(reference, index), out var offset);
+                double error = Error(fit.Coefficients, reference, current, index, offset);
+                if (error > threshold && _edgeColors?[index] is { } alternatives)
+                    error = EdgeError(fit.Coefficients, alternatives, current, index, offsets, error, threshold);
+                if (independent[index])
+                {
+                    checkedReference++;
+                    if (error > threshold) uncertainReference++;
+                }
+                else foreground[index] = error > threshold;
+            }
+            if (checkedReference < 80 || uncertainReference / (double)checkedReference >= .40) continue;
+            var verified = MeasureCaptionReflectance(reference, current, foreground, fit, offsets, candidate.Region).Single();
+            if (verified.Coverage >= MinimumControlCoverage && verified.TriggerCoverage >= MinimumControlCoverage &&
+                verified.InkFraction >= .5) result.Add(verified);
+        }
+        return result;
+    }
 
     private void ExcludeObstructedTextControls(IReadOnlyList<HandAcquisitionTextPatterns.Observation> observations,
         bool[] fitAllowed)

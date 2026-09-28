@@ -105,6 +105,9 @@ internal static class HandAcquisitionOpticalHistoryRegression
             "cold intact text, moved verified optics, independent untouched Save, stationary four fingers, " +
             "two fresh corruption frames, both 7% area floors, and removal.");
 
+        CheckReadableCaptionReflectance(ProjectGeneratedCamera(expected, camera, 1, -.002, .001,
+            fullBoard: true), scene);
+
         HandAcquisitionPresenceResult Feed(HandAcquisitionPresenceTracker tracker, byte[] pixels, int milliseconds)
         {
             var now = Epoch.AddMilliseconds(milliseconds);
@@ -112,12 +115,105 @@ internal static class HandAcquisitionOpticalHistoryRegression
         }
     }
 
+    private static void CheckReadableCaptionReflectance(byte[] camera, HandAcquisitionSceneImage scene)
+    {
+        scene = scene with { BoardReferenceRegions = [new(.2, 0, .8, 1)] };
+        // Synthetic skin response preserves the projected letters. The fixture
+        // contains generated controls only; no private hand pixels are stored.
+        byte[] skin = Tint(camera, uv => Contains(Controls[0], uv));
+        var tracker = new HandAcquisitionPresenceTracker();
+        var first = Feed(tracker, skin, 0);
+        var firstExit = first.TextPatterns!.Single(pattern => pattern.ControlRegion == 0);
+        Require(firstExit.LabelIntact && !firstExit.ShapeCorrupted && firstExit.CaptionReflectanceChanged &&
+            firstExit.CaptionReflectanceCoverage >= .07 && firstExit.CaptionReflectanceTriggerCoverage >= .07 &&
+            first.Hints.Count == 0 && firstExit.ConfirmationFrames == 1,
+            "Readable letters projected onto synthetic skin did not retain independently measured caption evidence", first);
+        var confirmed = Feed(tracker, skin, 100);
+        Require(confirmed.Hints.Count == 1 && confirmed.Hints[0].ControlCoverage >= .07 &&
+            confirmed.Hints[0].ControlTriggerCoverage >= .07,
+            "Readable caption evidence did not survive component grouping and both area floors", confirmed);
+        for (int frame = 2; frame < 12; frame++)
+            Require(Feed(tracker, skin, frame * 100).Hints.Count == 1,
+                "Stationary readable-on-skin evidence was learned as empty background");
+        Clean(Feed(tracker, camera, 1200), "Readable skin removal");
+
+        byte[] global = Tint(camera, _ => true);
+        byte[] panel = Tint(camera, uv => Contains(Controls[0], uv) &&
+            (uv.X < Labels[0].X - .004 || uv.X > Labels[0].X + Labels[0].Width + .004 ||
+             uv.Y < Labels[0].Y - .004 || uv.Y > Labels[0].Y + Labels[0].Height + .004));
+        byte[] tiny = Tint(camera, uv => Contains(Controls[0], uv) && uv.X < Controls[0].X + .015);
+        foreach (var (negative, description) in new[] { (global, "Global color/exposure drift"),
+                     (panel, "Local panel-only tint with untouched letters"), (tiny, "Sub-floor local reflectance") })
+        {
+            var quiet = new HandAcquisitionPresenceTracker();
+            for (int frame = 0; frame < 4; frame++)
+                Clean(Feed(quiet, negative, frame * 100), description);
+        }
+        var oneLabelScene = scene with { BoardSearchRegions = [Controls[0]], BoardTriggerRegions = [Labels[0]] };
+        var noIndependentLabel = new HandAcquisitionPresenceTracker();
+        for (int frame = 0; frame < 3; frame++)
+        {
+            var time = Epoch.AddMilliseconds(frame * 100);
+            var result = noIndependentLabel.Update(CameraWidth, CameraHeight, CameraWidth * 4,
+                skin, Polygon, oneLabelScene, time, time);
+            Require(result.Hints.Count == 0 && result.TextPatterns!.Single() is
+                { LabelIntact: true, CaptionReflectanceChanged: false, CaptionReflectanceCoverage: >= .07 },
+                "Caption reflectance without another verified clean label was accepted", result);
+        }
+
+        var duplicate = new HandAcquisitionPresenceTracker();
+        Require(Feed(duplicate, skin, 0).Hints.Count == 0 && Feed(duplicate, skin, 0).Hints.Count == 0,
+            "Duplicate camera timestamps confirmed caption reflectance");
+        Require(Feed(duplicate, skin, 1000).Hints.Count == 0,
+            "A long camera gap reused earlier caption reflectance confirmation");
+        Require(Feed(duplicate, skin, 1100).Hints.Count == 1,
+            "Two fresh caption frames after a gap did not reconfirm");
+        var stale = new HandAcquisitionPresenceTracker();
+        Require(Feed(stale, skin, 0, 1000).Hints.Count == 0 && Feed(stale, skin, 100, 1100).Hints.Count == 0,
+            "Stale readable caption frames confirmed acquisition");
+        var reverse = new HandAcquisitionPresenceTracker();
+        Require(Feed(reverse, skin, 200).Hints.Count == 0 && Feed(reverse, skin, 100).Hints.Count == 0,
+            "A backwards timestamp reused reflectance confirmation");
+        Require(Feed(reverse, skin, 300).Hints.Count == 0 && Feed(reverse, skin, 400).Hints.Count == 1,
+            "Fresh frames after backwards time failed to reconfirm");
+        Console.WriteLine("Readable caption-reflectance regression passed: projected letters retain their shape, " +
+            "independent clean reference, both 7% floors, stationary/removal, panel-only/global/tiny negatives, " +
+            "and two fresh frames with duplicate/stale/gap/backwards barriers.");
+
+        HandAcquisitionPresenceResult Feed(HandAcquisitionPresenceTracker target, byte[] pixels,
+            int milliseconds, int? nowMilliseconds = null)
+        {
+            var time = Epoch.AddMilliseconds(milliseconds);
+            return target.Update(CameraWidth, CameraHeight, CameraWidth * 4, pixels, Polygon, scene,
+                time, Epoch.AddMilliseconds(nowMilliseconds ?? milliseconds));
+        }
+    }
+
+    private static bool Contains(HandTrackingBounds bounds, PixelPoint point) => point.X >= bounds.X &&
+        point.X <= bounds.X + bounds.Width && point.Y >= bounds.Y && point.Y <= bounds.Y + bounds.Height;
+
+    private static byte[] Tint(byte[] source, Func<PixelPoint, bool> selected)
+    {
+        byte[] result = (byte[])source.Clone();
+        for (int y = 0; y < CameraHeight; y++)
+        for (int x = 0; x < CameraWidth; x++)
+        {
+            if (!selected(Transform(Matrix, x, y))) continue;
+            int pixel = (y * CameraWidth + x) * 4;
+            result[pixel] = (byte)Math.Clamp(source[pixel] - 50, 0, 255);
+            result[pixel + 1] = (byte)Math.Clamp(source[pixel + 1] - 10, 0, 255);
+            result[pixel + 2] = (byte)Math.Clamp(source[pixel + 2] + 40, 0, 255);
+        }
+        return result;
+    }
+
     private static void Clean(HandAcquisitionPresenceResult result, string description) =>
         Require(result.Hints.Count == 0 && result.TextPatterns is { Count: 2 } &&
             result.TextPatterns.All(pattern => !pattern.ShapeCorrupted),
             description + " falsely acquired illumination from intact generated text", result);
 
-    private static byte[] ProjectGeneratedCamera(byte[] generated, byte[] original, double blur, double offsetU, double offsetV)
+    private static byte[] ProjectGeneratedCamera(byte[] generated, byte[] original, double blur, double offsetU,
+        double offsetV, bool fullBoard = false)
     {
         using var source = new Mat(1000, 1000, MatType.CV_8UC4);
         Marshal.Copy(generated, 0, source.Data, generated.Length);
@@ -130,9 +226,9 @@ internal static class HandAcquisitionOpticalHistoryRegression
         for (int x = 0; x < CameraWidth; x++)
         {
             PixelPoint uv = Transform(Matrix, x, y);
-            var exit = Controls[0];
-            if (uv.X < exit.X - .012 || uv.X > exit.X + exit.Width + .012 ||
-                uv.Y < exit.Y - .012 || uv.Y > exit.Y + exit.Height + .012) continue;
+            if (!(fullBoard ? new[] { new HandTrackingBounds(0, 0, 1, 1) } : Controls.Take(1)).Any(control =>
+                uv.X >= control.X - .012 && uv.X <= control.X + control.Width + .012 &&
+                uv.Y >= control.Y - .012 && uv.Y <= control.Y + control.Height + .012)) continue;
             double sx = (uv.X - offsetU) * 1000, sy = (uv.Y - offsetV) * 1000;
             int left = (int)Math.Floor(sx), top = (int)Math.Floor(sy);
             int pixel = (y * CameraWidth + x) * 4;

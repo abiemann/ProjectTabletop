@@ -124,9 +124,9 @@ public sealed partial class SceneCompositor
         }
 
         CasinoText(ds, "Dealer stands on soft 17  ·  One split  ·  No insurance or surrender",
-            new Rect(65, 911, 870, 24), 16, CasinoMuted);
+            new Rect(65, 911, 605, 24), 16, CasinoMuted);
         CasinoText(ds, "Four fingers together. Aim with middle; move index sideways.",
-            new Rect(75, 934, 850, 19), 14, CasinoMuted);
+            new Rect(75, 934, 595, 19), 14, CasinoMuted);
     }
 
     private static string CasinoAmount(decimal amount) => amount.ToString("0.##", CultureInfo.InvariantCulture);
@@ -513,6 +513,6 @@ public sealed partial class SceneCompositor
             "menu" => "‹  Back to menu", _ => button.Label
         };
         return (caption, new Rect(rect.X + 8, rect.Y + (button.Id == "bj-deal" ? -7 : 0),
-            rect.Width - 16, rect.Height), button.Id == "menu" ? 21 : button.Id == "bj-reset" ? 18 : 27);
+            rect.Width - 16, rect.Height), button.Id == "menu" ? 30 : button.Id == "bj-reset" ? 32 : 27);
     }
 }

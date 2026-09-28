@@ -16,9 +16,11 @@ internal static class HandTrackingSearchRegionsRegression
         CheckSmallHands(engine, photograph);
         CheckOtherHandAndCadence(engine, photograph);
         CheckRestrictedAcquisition(engine, photograph);
+        CheckEdgePalmContext(engine, photograph);
+        CheckRecoveryCropBounds(engine);
         Console.WriteLine("Focused hand search: native square crops, tiny-hand acquisition, full-frame landmark coordinates, " +
             "invalid/duplicate/two-region limits, unchanged search cadence, fresh tracked priority, fallback second hand, " +
-            "and restricted control acquisition with idle/lost-track waiting passed.");
+            "restricted control acquisition with idle/lost-track waiting, and conditional camera-edge palm recovery passed.");
     }
 
     private static void CheckValidationAndLimits(HandTrackingEngine engine)
@@ -45,7 +47,7 @@ internal static class HandTrackingSearchRegionsRegression
             focused[1].ViewBounds == new HandTrackingBounds(380, 250, 150, 150),
             "Valid crops were not bounded, deduplicated and rounded to two native square views.");
         Require(trace.Searches.Take(2).All(search => search.Source == "motion-roi") &&
-            trace.Searches.Skip(2).SequenceEqual(ordinarySearches),
+            trace.Searches.Where(search => search.Source is "full-frame" or "tile").SequenceEqual(ordinarySearches),
             "Focused hints changed or suppressed ordinary full-frame/tile fallback searches.");
 
         engine.ResetTracking();
@@ -54,8 +56,13 @@ internal static class HandTrackingSearchRegionsRegression
         focused = trace.Searches.Where(search => search.Source == "motion-roi").ToArray();
         Require(absent.Count == 0 && focused.Length == 2 && focused[0].ViewBounds == first &&
             focused[1].ViewBounds == new HandTrackingBounds(380, 250, 150, 150) &&
-            trace.Searches.All(search => search.Source is "motion-roi" or "motion-roi-normalized"),
-            "Restricted acquisition bypassed region validation/limits or searched outside its two valid crops.");
+            trace.Searches.All(search => IsFocusedSource(search.Source)),
+            "Restricted acquisition bypassed region validation/limits or searched beyond focused control context.");
+        Require(trace.Searches.All(search => search.ViewBounds.Width == search.ViewBounds.Height &&
+            search.ViewBounds.X >= 0 && search.ViewBounds.Y >= 0 &&
+            search.ViewBounds.X + search.ViewBounds.Width <= blank.Width &&
+            search.ViewBounds.Y + search.ViewBounds.Height <= blank.Height),
+            "Focused recovery used a non-square or out-of-frame model input.");
     }
 
     private static void CheckSmallHands(HandTrackingEngine engine, Mat photograph)
@@ -227,6 +234,105 @@ internal static class HandTrackingSearchRegionsRegression
     }
 
     private static Mat BlankFrame() => new(1080, 1920, MatType.CV_8UC4, new Scalar(128, 128, 128, 255));
+
+    private static bool IsFocusedSource(string source) => source is "motion-roi" or "motion-roi-normalized" or
+        "motion-roi-context" or "motion-roi-context-normalized";
+
+    private static void CheckEdgePalmContext(HandTrackingEngine engine, Mat photograph)
+    {
+        // The same licensed hand reaches down from the camera's top edge.
+        // A caption can locate its fingertip accurately while its narrow crop
+        // excludes the palm above it. No private camera photograph is needed.
+        foreach (var (photoWidth, hintSide, needsContext) in new[]
+            { (350, 220, true), (420, 281, true), (280, 220, false) })
+        {
+            using var frame = BlankFrame();
+            int height = (int)Math.Round(photoWidth * photograph.Height / (double)photograph.Width);
+            using var scaled = new Mat();
+            using var rotated = new Mat();
+            Cv2.Resize(photograph, scaled, new Size(photoWidth, height), interpolation: InterpolationFlags.Area);
+            Cv2.Rotate(scaled, rotated, RotateFlags.Rotate180);
+            const int left = 1200, top = 0;
+            using (var destination = new Mat(frame, new Rect(left, top, photoWidth, height))) rotated.CopyTo(destination);
+            PixelPoint expected = new(left + photoWidth - .5 -
+                (0.47388697 * photograph.Width + .5) * photoWidth / photograph.Width,
+                top + height - .5 - (0.19592366 * photograph.Height + .5) * height / photograph.Height);
+            var hint = new HandTrackingBounds(Math.Clamp((int)Math.Round(expected.X - hintSide / 2.0), 0, frame.Width - hintSide),
+                Math.Clamp((int)Math.Round(expected.Y - hintSide / 2.0), 0, frame.Height - hintSide), hintSide, hintSide);
+            engine.ResetTracking();
+            var hands = Detect(engine, frame, [hint], restricted: true);
+            var trace = engine.LastDiagnostics!;
+            Require(hands.Count == 1 && hands[0].Confidence >= .8 && Distance(hands[0].IndexTip, expected) < 10,
+                $"A {photoWidth}px hand at the camera edge was not acquired with valid confidence and native coordinates.");
+            Require(trace.Searches.All(search => IsFocusedSource(search.Source)) &&
+                trace.Searches[0].Source == "motion-roi" && trace.Searches[0].ViewBounds == hint,
+                "An edge-hand recovery skipped its actual control crop or scanned the entire webcam.");
+            var selected = trace.Candidates.Single(candidate => trace.SelectedCandidateIndices.Contains(candidate.Index));
+            Require(ReferenceEquals(selected.Hand, hands[0]),
+                "An edge-hand recovery synthesized a pose instead of selecting the current model inference.");
+            if (needsContext)
+            {
+                Require(trace.Candidates.Where(candidate => candidate.Source == "motion-roi").All(candidate => candidate.Hand is null) &&
+                    selected.Source == "motion-roi-context" && selected.PalmBounds.Y + selected.PalmBounds.Height / 2 < hint.Y,
+                    "The edge-hand fixture did not recover the palm excluded by its tip-centered control crop.");
+                Require(trace.Searches.Count == 2 && trace.Searches[1].Source == "motion-roi-context" &&
+                    trace.Searches[1].ViewBounds.Width > hint.Width,
+                    "A successful raw context recovery ran unnecessary color or global retries.");
+            }
+            else
+                Require(trace.Searches.Count == 1 && selected.Source == "motion-roi",
+                    "A successful original focused fit unnecessarily ran an expanded context search.");
+
+            // Once acquired, this edge hand must remain a normal fresh track;
+            // a continuing disturbed caption is unnecessary for landmark input.
+            for (int index = 0; index < 8; index++)
+            {
+                var tracked = Detect(engine, frame, restricted: true);
+                var trackedTrace = engine.LastDiagnostics!;
+                Require(tracked.Count == 1 && tracked[0].Confidence >= .8 &&
+                    Distance(tracked[0].IndexTip, expected) < 10 && trackedTrace.Searches.Count == 0 &&
+                    trackedTrace.TrackedRoiAttempts == 1 &&
+                    trackedTrace.Candidates.All(candidate => candidate.Source == "tracked-roi"),
+                    "An acquired edge hand lost fresh ROI continuity or ran unrequested recovery searches.");
+            }
+            engine.ResetTracking();
+            Require(Detect(engine, frame, restricted: true).Count == 0 && engine.LastDiagnostics!.Searches.Count == 0,
+                "An idle restricted frame acquired the visible edge hand without a disturbed control hint.");
+            Console.WriteLine($"Camera-edge {photoWidth}px hand: context needed={needsContext}, " +
+                $"confidence={hands[0].Confidence:F3}, fingertip error={Distance(hands[0].IndexTip, expected):F2}px.");
+        }
+    }
+
+    private static void CheckRecoveryCropBounds(HandTrackingEngine engine)
+    {
+        using var blank = BlankFrame();
+        // Both extremes of the native camera require a square recovery view
+        // to shift inward rather than stretch or read beyond the image.
+        HandTrackingBounds[] hints = [new(0, 0, 281, 281), new(1639, 799, 281, 281)];
+        engine.ResetTracking();
+        Require(Detect(engine, blank, hints, restricted: true).Count == 0,
+            "Recovery context invented a hand on a blank camera frame.");
+        var trace = engine.LastDiagnostics!;
+        var contexts = trace.Searches.Where(search => search.Source == "motion-roi-context").ToArray();
+        Require(contexts.Length == 4 && contexts[0].ViewBounds == new HandTrackingBounds(0, 0, 506, 506) &&
+            contexts[1].ViewBounds == new HandTrackingBounds(1414, 574, 506, 506) &&
+            contexts[2].ViewBounds == new HandTrackingBounds(0, 0, 562, 562) &&
+            contexts[3].ViewBounds == new HandTrackingBounds(1358, 518, 562, 562) &&
+            trace.Searches.All(search => IsFocusedSource(search.Source)),
+            "Camera-edge recovery views lost their square size, frame clamp, or focused-only restriction.");
+
+        engine.ResetTracking();
+        Require(Detect(engine, blank, [new(1320, 480, 600, 600)], restricted: true).Count == 0,
+            "Capped recovery invented a hand on a blank camera frame.");
+        Require(engine.LastDiagnostics!.Searches.Single(search => search.Source == "motion-roi-context").ViewBounds ==
+            new HandTrackingBounds(1272, 432, 648, 648),
+            "Recovery exceeded the 60% camera-short-side limit or lost its camera-edge clamp.");
+
+        engine.ResetTracking();
+        Require(Detect(engine, blank, [new(0, 0, 648, 648)], restricted: true).Count == 0 &&
+            engine.LastDiagnostics!.Searches.All(search => !search.Source.Contains("context", StringComparison.Ordinal)),
+            "An already capped focused crop ran a duplicate or smaller context retry.");
+    }
 
     private static PixelPoint PlaceHand(Mat frame, Mat source, int width, int centerX, int centerY)
     {

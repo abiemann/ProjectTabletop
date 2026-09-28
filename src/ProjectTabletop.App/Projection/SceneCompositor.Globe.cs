@@ -65,10 +65,10 @@ public sealed partial class SceneCompositor
 
         DrawGlobeControls(ds, buttons, hovered, selectionFeedback);
 
-        GlobeText(ds, "NASA EARTH OBSERVATIONS", new Rect(130, 806, 740, 22), 13,
+        GlobeText(ds, "NASA EARTH OBSERVATIONS", new Rect(130, 680, 740, 22), 13,
             ThemeColor(116, 148, 169), true);
         var zoomLabel = state.TargetZoom.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "×";
-        GlobeText(ds, zoomLabel + "  ·  SLOW EASTWARD ROTATION", new Rect(130, 829, 740, 25), 15,
+        GlobeText(ds, zoomLabel + "  ·  SLOW EASTWARD ROTATION", new Rect(130, 705, 740, 25), 15,
             ThemeColor(150, 190, 216), true);
     }
 
@@ -87,10 +87,10 @@ public sealed partial class SceneCompositor
         foreach (var button in buttons)
         {
             DrawGlobeButton(ds, button, button.Enabled && hovered.Contains(button.Id));
-            DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, ThemeColor(104, 222, 254));
+            DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, ThemeColor(24, 104, 124));
         }
         GlobeText(ds, FingerSelectionCaption(selectionFeedback, "Four fingers together. Aim, then separate index."),
-            new Rect(100, 963, 800, 23), 13, ThemeColor(134, 169, 191), true);
+            new Rect(100, 968, 800, 23), 13, ThemeColor(134, 169, 191), true);
     }
 
     private static Rect GlobeButtonTextRectangle(BoardButton button)
@@ -102,7 +102,7 @@ public sealed partial class SceneCompositor
 
     private static CanvasTextFormat GlobeButtonTextFormat(BoardButton button) => new()
     {
-        FontFamily = "Segoe UI", FontWeight = FontWeights.SemiBold, FontSize = 22,
+        FontFamily = "Segoe UI", FontWeight = FontWeights.SemiBold, FontSize = 36,
         HorizontalAlignment = CanvasHorizontalAlignment.Center,
         VerticalAlignment = CanvasVerticalAlignment.Center,
         WordWrapping = CanvasWordWrapping.NoWrap
@@ -113,22 +113,22 @@ public sealed partial class SceneCompositor
         var bounds = button.Bounds;
         var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
             bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
-        // All gradient stops are opaque. Live surface details must never appear
-        // inside the caption/body masks used for hand acquisition.
+        // Pale opaque glass gives the camera a bright, quiet caption background
+        // without pure-white glare. Earth details cannot enter the label masks.
         using var glass = new CanvasLinearGradientBrush(ds.Device,
         [
-            new() { Position = 0, Color = ThemeColor(46, 72, 93) },
-            new() { Position = .49f, Color = ThemeColor(18, 37, 55) },
-            new() { Position = 1, Color = ThemeColor(8, 22, 36) }
+            new() { Position = 0, Color = ThemeColor(234, 239, 242) },
+            new() { Position = .49f, Color = ThemeColor(226, 232, 236) },
+            new() { Position = 1, Color = ThemeColor(218, 225, 230) }
         ]) { StartPoint = new((float)rect.X, (float)rect.Y), EndPoint = new((float)rect.X, (float)rect.Bottom) };
         ds.FillRoundedRectangle(rect, 15, 15, glass);
         ds.DrawRoundedRectangle(rect, 15, 15,
-            hovered ? ThemeColor(103, 224, 255) : ThemeColor(100, 149, 180), hovered ? 2.5f : 1.2f);
+            hovered ? ThemeColor(103, 224, 255) : ThemeColor(117, 151, 173), hovered ? 2.5f : 1.2f);
         ds.DrawLine((float)rect.X + 17, (float)rect.Y + 2, (float)rect.Right - 17, (float)rect.Y + 2,
-            ThemeColor(185, 224, 244, 70), 1);
+            ThemeColor(255, 255, 255, 160), 1);
         using var format = GlobeButtonTextFormat(button);
         ds.DrawText(button.Label, GlobeButtonTextRectangle(button), button.Enabled
-            ? ThemeColor(232, 247, 255) : ThemeColor(109, 135, 153), format);
+            ? ThemeColor(50, 55, 59) : ThemeColor(111, 119, 125), format);
     }
 
     private static void GlobeText(CanvasDrawingSession ds, string text, Rect rect, float size,

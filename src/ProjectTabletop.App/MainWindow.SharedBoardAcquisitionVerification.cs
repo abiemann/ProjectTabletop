@@ -62,7 +62,7 @@ public sealed partial class MainWindow
         scene.ShowBlackjack(); VerifyButtons("Blackjack betting");
         Require(scene.CurrentBoardButtons.Any(button => button.Id == "bj-reset") &&
                 scene.CurrentBoardButtons.Any(button => button.Id == "menu"),
-            "Blackjack coverage omitted its top Reset or Back controls.");
+            "Blackjack coverage omitted its Reset or Back controls.");
         Require(scene.ActivateBlackjackButton("bj-deal"), "The player-turn acquisition fixture could not deal.");
         now += TimeSpan.FromSeconds(3);
         Draw();
@@ -88,7 +88,7 @@ public sealed partial class MainWindow
             generatedCaptionCorruptionNeedsTwoFreshFrames = true,
             noEmptyBoardCandidates = true, assistanceCannotSelect = true,
             sevenPercentCoverageRequiredAcrossBoards = true,
-            buttonRegionsOnlyBeforeIllumination = true, illuminationBeforeFocusedModelSearch = true,
+            buttonRegionsOnlyBeforeIllumination = true, nativeFocusedModelSearchBeforeFallbackIllumination = true,
             noBlindButtonSweepOrWholeBoardMotionFallback = true,
             resetClearsForegroundQueryHistory = true,
             boundedPhotoCopyFieldAndUnrestrictedGestureTesterPreserved = true,
@@ -97,7 +97,7 @@ public sealed partial class MainWindow
             renderedLabelMasksContainLightAndDarkInkAcrossBoards = true,
             foregroundFixturesCoverActualLabels = true,
             untouchedLabelRejectsControlEdgeDisturbanceAcrossBoards = true,
-            topBlackjackBackAndResetIncluded = true, mediaAndCalibrationInactive = true,
+            blackjackBackAndResetIncluded = true, mediaAndCalibrationInactive = true,
             globeAllFiveControlsCovered = tested.Count(label => label.StartsWith("Globe/", StringComparison.Ordinal)) == 5,
             liveHardwareUnchanged = true };
 
@@ -115,7 +115,7 @@ public sealed partial class MainWindow
                 label + " omitted a button from its camera centers or foreground masks.");
             var screen = scene.CurrentBoardScreen;
             Require(context.RestrictAcquisitionToSearchRegions == (screen != BoardScreen.HandTracking) &&
-                    context.RequiresSearchIllumination &&
+                    context.AllowsSearchIllumination &&
                     (context.ContinuousSearchPolygon is not null) == (screen == BoardScreen.PhotoCopy),
                 label + " did not preserve its intended acquisition policy.");
             Require(context.ExpectedScene!.BoardTriggerRegions?.Count == scene.CurrentBoardButtons.Count,
@@ -236,8 +236,9 @@ public sealed partial class MainWindow
                     double.IsFinite(coverage) && coverage >= .07);
                 Require(pendingQuery.LightingHints.Any(hint => hint.Center == measured.Center),
                     label + "/" + button.Label + " did not pass measured control evidence to illumination.");
-                Require(pendingQuery.SearchRegions.Count == 0,
-                    label + "/" + button.Label + " searched before its spotlight was projected.");
+                Require(pendingQuery.SearchRegions.Count is > 0 and <= 2 &&
+                        pendingQuery.SearchRegions.Contains(measured.SearchBounds) && context.IlluminatedHint is null,
+                    label + "/" + button.Label + " did not try its qualified native camera crop before fallback illumination.");
                 Require(measured.ControlTriggerCoverage is double textCoverage && textCoverage >= .07,
                     label + "/" + button.Label + " did not measure at least 7% of its actual control-label obstruction.");
                 var edge = LargestUnlabelledPart(control, trigger);

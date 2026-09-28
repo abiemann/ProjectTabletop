@@ -46,10 +46,15 @@ internal static class GlobeBoardRegression
         Require(board.Buttons.Select(button => button.Id).SequenceEqual(ids) &&
             board.Buttons.Select(button => button.Label).SequenceEqual(labels), "Globe controls do not match the requested captions.");
         foreach (BoardButton button in board.Buttons)
-            Require(button.Bounds.Y > .85 && button.Bounds.X > 0 && button.Bounds.X + button.Bounds.Width < 1 &&
+            Require(button.Bounds.Y > .7 && button.Bounds.Width >= .26 && button.Bounds.Height >= .105 &&
+                button.Bounds.X > 0 && button.Bounds.X + button.Bounds.Width < 1 &&
                 button.Bounds.Y + button.Bounds.Height < 1 &&
-                board.Buttons.Count(other => other.Bounds.Contains(Center(button).U, Center(button).V)) == 1,
-                "A Globe control is outside the board or overlaps a neighboring hit target.");
+                !board.Buttons.Any(other => other.Id != button.Id &&
+                    other.Bounds.X < button.Bounds.X + button.Bounds.Width &&
+                    other.Bounds.X + other.Bounds.Width > button.Bounds.X &&
+                    other.Bounds.Y < button.Bounds.Y + button.Bounds.Height &&
+                    other.Bounds.Y + other.Bounds.Height > button.Bounds.Y),
+                "A Globe control lacks four-finger room, is outside the board or overlaps a neighboring hit target.");
 
         GlobeSnapshot before = board.GetGlobeSnapshot(Time(4000));
         Require(board.ActivateButton("globe-zoom-in", Time(4000)), "Zoom + did not accept a laptop selection.");

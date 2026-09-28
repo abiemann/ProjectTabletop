@@ -65,7 +65,7 @@ public sealed partial class BoardSession
         var game = MonopolyState;
         var result = new List<BoardButton>();
         if (game.Phase is not MonopolyPhase.ExitConfirmation and not MonopolyPhase.Saving)
-            Add("mp-exit", "Exit", new(.825, .012, .15, .038));
+            Add("mp-exit", "Exit", new(.19, .175, .26, .105));
         switch (game.Phase)
         {
             case MonopolyPhase.Landing:

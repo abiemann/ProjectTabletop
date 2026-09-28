@@ -76,6 +76,17 @@ public sealed partial class MainWindow
         scene.CompleteHandAcquisition(ready, [hint with { ObservedAt = now.AddMilliseconds(-1) }], [], now);
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
             "Foreground evidence from another camera frame started acquisition illumination.");
+        // An accepted current model result uses normal hand lighting. It must
+        // not turn on the preliminary light first or perform a board action.
+        var nativeAccepted = new HandDetection(Enumerable.Repeat(center, 21).ToArray(), .99, .5);
+        scene.CompleteHandAcquisition(ready, [hint], [nativeAccepted], now);
+        Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && !IsWhite(Draw(), center) &&
+                scene.BlackjackState.Revision == gameRevision && scene.ActiveHandSpotlightCount == 0 &&
+                scene.HoveredBoardButtons.Count == 0,
+            "An accepted native hand started fallback illumination or executed a board action.");
+        now += TimeSpan.FromMilliseconds(600);
+        ready = scene.GetHandAcquisitionContext(now)!;
+        hint = hint with { ObservedAt = now };
         scene.CompleteHandAcquisition(ready, [hint with { ControlCoverage = .07, ControlTriggerCoverage = .07 }], [], now);
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is not null,
             "Fresh foreground covering exactly 7% of a control did not get acquisition illumination.");
@@ -199,7 +210,7 @@ public sealed partial class MainWindow
         return new { passed = true, bottomButtonLit = true, motionCannotSelect = true,
             expiresWithoutFeedback = true, handHandover = true, staleAndSceneRejection = true,
             animationQuiet = true, executeSuppressionPreserved = true, boardClip = true,
-            generatedUnlitReference = true, stationarySearchCenters = true,
+            generatedUnlitReference = true, stationarySearchCenters = true, acceptedNativeHandSkipsFallbackLight = true,
             stationaryPresenceRetainsLight = true, emptyAndStalePresenceCannotRetainLight = true,
             sevenPercentBoundaryEnforced = true, nonfiniteAndUnmeasuredEvidenceRejected = true,
             renewalRequiresFreshMeasuredEvidenceAtOriginalControl = true };

@@ -47,32 +47,30 @@ public sealed partial class MainWindow
         IReadOnlyList<HandAcquisitionHint> hints = context.IlluminatedHint is { } illuminated ? [illuminated] :
             presence?.Hints ?? [];
         var regions = new List<HandTrackingBounds>(2);
-        // A newly obstructed button first lights up. Acquisition uses its crop
-        // on subsequent frames, when the camera can see the illumination.
-        bool waitingForLight = context.RequiresSearchIllumination && context.IlluminatedHint is null && hints.Count > 0;
-        if (!waitingForLight)
+        // Qualified presence already requires two fresh observations and at
+        // least 7% of both the control and its label. Try the untouched camera
+        // crop first: extra white light can hide an otherwise clear hand pose.
+        // A rejected model fit can still request the existing search light.
+        regions.AddRange(hints.Take(2).Select(hint => hint.SearchBounds));
+        // Photo Copy's object field is also a point of interest. Keep its
+        // separate capture gesture without searching the whole webcam.
+        if (context.ContinuousSearchPolygon is { Length: >= 3 } polygon)
         {
-            regions.AddRange(hints.Take(2).Select(hint => hint.SearchBounds));
-            // Photo Copy's object field is also a point of interest. Keep its
-            // separate capture gesture without searching the whole webcam.
-            if (context.ContinuousSearchPolygon is { Length: >= 3 } polygon)
+            double left = polygon.Min(point => point.X), top = polygon.Min(point => point.Y);
+            double width = polygon.Max(point => point.X) - left, height = polygon.Max(point => point.Y) - top;
+            int side = (int)Math.Clamp(Math.Ceiling(Math.Max(Math.Min(width, height), Math.Max(width, height) / 2)),
+                32, Math.Min(frame.Width, frame.Height));
+            // Two overlapping squares cover the rectangular field without
+            // stretching it into the palm model's square input.
+            foreach (double position in new[] { 0.0, 1.0 })
             {
-                double left = polygon.Min(point => point.X), top = polygon.Min(point => point.Y);
-                double width = polygon.Max(point => point.X) - left, height = polygon.Max(point => point.Y) - top;
-                int side = (int)Math.Clamp(Math.Ceiling(Math.Max(Math.Min(width, height), Math.Max(width, height) / 2)),
-                    32, Math.Min(frame.Width, frame.Height));
-                // Two overlapping squares cover the rectangular field without
-                // stretching it into the palm model's square input.
-                foreach (double position in new[] { 0.0, 1.0 })
-                {
-                    double x = width >= height ? left + position * Math.Max(0, width - side) : left + (width - side) / 2;
-                    double y = height > width ? top + position * Math.Max(0, height - side) : top + (height - side) / 2;
-                    var region = new HandTrackingBounds(Math.Clamp(Math.Round(x), 0, frame.Width - side),
-                        Math.Clamp(Math.Round(y), 0, frame.Height - side), side, side);
-                    if (regions.Contains(region)) continue;
-                    if (regions.Count == 2) break;
-                    regions.Add(region);
-                }
+                double x = width >= height ? left + position * Math.Max(0, width - side) : left + (width - side) / 2;
+                double y = height > width ? top + position * Math.Max(0, height - side) : top + (height - side) / 2;
+                var region = new HandTrackingBounds(Math.Clamp(Math.Round(x), 0, frame.Width - side),
+                    Math.Clamp(Math.Round(y), 0, frame.Height - side), side, side);
+                if (regions.Contains(region)) continue;
+                if (regions.Count == 2) break;
+                regions.Add(region);
             }
         }
         return new(hints, regions, presence);
@@ -90,7 +88,7 @@ public sealed partial class MainWindow
         _lastHandAcquisitionDetection = context is null ? null : new
         {
             frameTime = frame.Timestamp, context.Revision, context.ObserveMotion,
-            context.RestrictAcquisitionToSearchRegions, context.RequiresSearchIllumination,
+            context.RestrictAcquisitionToSearchRegions, context.AllowsSearchIllumination,
             hints = query.Hints, lightingHints = query.LightingHints,
             searchRegions = query.SearchRegions, presence = query.Presence,
             handCount, searches = trace?.Searches,

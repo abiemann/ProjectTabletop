@@ -494,7 +494,7 @@ public sealed partial class MainWindow
             }
             var empty = Draw(lightingScene);
             var context = lightingScene.GetHandAcquisitionContext(now)!;
-            Require(context is { ObserveMotion: true, RequiresSearchIllumination: true,
+            Require(context is { ObserveMotion: true, AllowsSearchIllumination: true,
                     ExpectedScene.BoardTriggerRegions.Count: 2 },
                 "Paint did not expose settled label-gated Exit/Save acquisition.");
             var emptyQuery = Query(empty, context);
@@ -541,8 +541,9 @@ public sealed partial class MainWindow
                 " Diagnostic: " + directory);
             var hint = query.LightingHints[0];
             Require(hint.ControlCoverage is >= .07 && hint.ControlTriggerCoverage is >= .07 &&
-                    query.SearchRegions.Count == 0,
-                "Stationary fingers over Exit did not request label-gated illumination before model acquisition.");
+                    query.SearchRegions.Count == 1 && query.SearchRegions.Contains(hint.SearchBounds) &&
+                    context.IlluminatedHint is null,
+                "Stationary fingers over Exit did not request their qualified native crop before fallback illumination.");
             foreach (double? textCoverage in new double?[] { null, .069999, double.NaN,
                          double.PositiveInfinity, double.NegativeInfinity })
             {

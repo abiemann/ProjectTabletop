@@ -24,15 +24,28 @@ Palm proposals are translated to camera coordinates and hand landmarks are
 inferred from the original frame. These hints do not bypass either model threshold
 or turn movement into a hand detection. Diagnostics label these attempts `motion-roi`
 (the hints can come from foreground, motion, or scheduled control-area searches).
-If all ordinary fits fail, at most two focused palm thumbnails get a bounded
+If acquisition fails, the engine retries each supplied hint with more palm context:
+same-center squares 1.8 and 2.0 times its side, capped at 60% of the camera's short
+side and shifted inside the frame at an edge. This recovers text-centered searches that
+see fingertips but omit the palm. Diagnostics label the retry `motion-roi-context`.
+It runs only after ordinary fits fail; successful acquisition and tracked-only
+frames incur no extra context searches. Restricted boards still wait for a valid
+control hint and never use whole-camera or tiled fallback.
+If the raw fits still fail, the focused palm thumbnails get a bounded
 colour-cast correction estimated from bright, modest-chroma pixels. Correction
 needs sufficient reference pixels and a material colour imbalance; its channel
 gains stay within .75-1.35. Diagnostics label these attempts
-`motion-roi-normalized` and report the gains and reference-pixel count. Only the
+`motion-roi-normalized` or `motion-roi-context-normalized` and report the gains
+and reference-pixel count. Only the
 palm-search thumbnail changes: landmark inference, previews, captures and copied
 images use the original camera pixels. Existing model confidence cutoffs remain.
 Run `-- --hand-color-correction` for recovery, raw-tracking continuity, neutral
 input and empty-frame checks.
+
+On button boards, a fresh confirmed disturbance schedules its native crop before
+optional search lighting. If the current image already gives valid landmarks,
+the normal fitted hand spotlight takes over; if recognition fails, the search
+light assists later frames. Illumination never supplies a hand or gesture by itself.
 
 `HandAcquisitionMotionTracker` finds local luminance changes inside a supplied
 camera polygon. It uses equal sampling scale on both axes, compensates for global
@@ -58,6 +71,14 @@ antialiased mixtures, while excluding edges from photometric fitting. A connecte
 candidate must cover at least 7% of one control's eligible interior, independently
 of how many other controls are visible. Occupied cell extents include the full
 last sample cell. Unmasked and illuminated-core checks keep their existing rules.
+Readable projected letters can also land on fingers. A reliable compensated RGB
+fit therefore measures localized chroma changes on the registered generated ink
+and halo. This alternative requires an independent clean caption/reference,
+changes on at least half the sampled ink, the same independent 7% control and
+caption area floors, and two fresh observations. Panel-only tint, global colour
+or exposure drift, and illumination itself cannot qualify. Diagnostics retain
+the structural text result separately from `CaptionReflectanceChanged` and its
+measured coverage, so readable letters are not reported as missing glyphs.
 It returns up to two stationary foreground regions. It can start with a hand
 already present and does not absorb that hand into its background. A fixed camera
 reference is available only as a fallback without a usable rendered scene and

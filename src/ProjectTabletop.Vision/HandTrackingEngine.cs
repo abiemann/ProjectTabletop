@@ -61,11 +61,15 @@ public sealed class HandTrackingEngine : IDisposable
     /// <param name="searchRegions">Optional square crop hints in native camera pixels.
     /// On normal acquisition/periodic-search frames, at most two distinct valid
     /// in-frame regions of at least 32 pixels are searched before normal fallback.
-    /// If all raw fits fail, those regions may receive a bounded palm-only color
-    /// correction retry. Landmark inference always uses the original RGB frame.
+    /// If all ordinary fits fail, each hint may receive square context retries
+    /// at 1.8 and 2 times its side, capped at 60% of the camera's short side.
+    /// Failed raw fits may then
+    /// receive bounded palm-only color correction on the same original/context
+    /// views. Landmark inference always uses the original RGB frame.
     /// Invalid hints are ignored; hints never produce or retain a detection.</param>
     /// <param name="restrictAcquisitionToSearchRegions">When true, new palm searches
-    /// use only the supplied valid regions. Existing hands still receive fresh
+    /// use only the supplied valid regions and their bounded context retries.
+    /// Existing hands still receive fresh
     /// landmark inference from their own tracked ROIs. Without a region or a
     /// tracked hand, detection waits for a control disturbance.</param>
     public IReadOnlyList<HandDetection> Detect(int width, int height, int stride, byte[] bgra,
@@ -217,15 +221,56 @@ public sealed class HandTrackingEngine : IDisposable
         // Do not let a focused crop's success disable the ordinary tile-search
         // condition: another hand may have arrived outside all supplied hints.
         hands.AddRange(focusedHands);
+        // A control's changed letters can localize fingertips rather than its
+        // palm. Include surrounding native pixels when the initial crop fails,
+        // especially the camera-edge context of hands reaching onto the board.
+        // This remains conditional on the caller's valid hints; an idle control
+        // cannot start inference, and a successful fit needs no larger search.
+        var contextRegions = hands.Count == 0
+            ? ContextSearchRegions(focusedRegions, rgb.Width, rgb.Height) : [];
+        foreach (var region in contextRegions)
+        {
+            FindHandsInView(rgb, region, "motion-roi-context", hands, diagnostics);
+            if (hands.Count > 0) break;
+        }
         // Projected white light can have a strong camera color cast that hides
         // a palm from acquisition. Retry only after every ordinary fit failed,
-        // on the same bounded hints. Pose inference still sees the original RGB.
+        // on the same bounded original/context views. Pose inference still sees
+        // the original RGB; the camera image is never modified or stretched.
         if (hands.Count == 0)
             foreach (var region in focusedRegions)
             {
                 FindHandsInView(rgb, region, "motion-roi-normalized", hands, diagnostics, normalizeProjection: true);
                 if (hands.Count > 0) break;
             }
+        if (hands.Count == 0)
+            foreach (var region in contextRegions)
+            {
+                FindHandsInView(rgb, region, "motion-roi-context-normalized", hands, diagnostics, normalizeProjection: true);
+                if (hands.Count > 0) break;
+            }
+    }
+
+    private static IReadOnlyList<Rect> ContextSearchRegions(IReadOnlyList<Rect> focusedRegions,
+        int width, int height)
+    {
+        int maximumSide = (int)Math.Floor(Math.Min(width, height) * .60);
+        var selected = new List<Rect>(focusedRegions.Count * 2);
+        // Preserve the closer context at every hint before considering the
+        // wider scale. Native square views avoid aspect distortion; a fit at
+        // either scale immediately skips all remaining recovery work.
+        foreach (double factor in new[] { 1.8, 2.0 })
+        foreach (var region in focusedRegions)
+        {
+            int side = Math.Min(maximumSide, (int)Math.Ceiling(region.Width * factor));
+            if (side <= region.Width) continue;
+            int x = Math.Clamp((int)Math.Round(region.X + region.Width / 2.0 - side / 2.0), 0, width - side);
+            int y = Math.Clamp((int)Math.Round(region.Y + region.Height / 2.0 - side / 2.0), 0, height - side);
+            var expanded = new Rect(x, y, side, side);
+            if (focusedRegions.Contains(expanded) || selected.Contains(expanded)) continue;
+            selected.Add(expanded);
+        }
+        return selected;
     }
 
     private void FindHandsInView(Mat rgb, Rect view, string source, List<HandDetection> hands,

@@ -12,11 +12,13 @@ internal static class PaintBoardRegression
             "The Paint menu target did not launch Paint.");
         var exit = board.Buttons.Single(button => button.Id == "menu");
         Require(exit is { Id: "menu", Label: "Exit", Destination: BoardScreen.Menu } &&
-            exit.Bounds == new BoardRect(.06, .88, .14, .075), "Paint must have a compact Exit target in the bottom-left.");
+            exit.Bounds.X < .1 && exit.Bounds.Y > .8 && exit.Bounds.Width >= .26 && exit.Bounds.Height >= .105,
+            "Paint must have a roomy four-finger Exit target in the bottom-left.");
         var save = board.Buttons.Single(button => button.Id == "paint-save");
         Require(board.Buttons.Count == 2 && save is { Label: "Save", Destination: BoardScreen.Paint, Enabled: false } &&
-            save.Bounds == new BoardRect(.80, .88, .14, .075) && !board.PaintSaveEnabled,
-            "Paint must start with a compact disabled Save target in the bottom-right.");
+            save.Bounds.X > .6 && save.Bounds.Y > .8 && save.Bounds.Width >= .26 && save.Bounds.Height >= .105 &&
+            save.Bounds.X + save.Bounds.Width < 1 && save.Bounds.Y + save.Bounds.Height < 1 && !board.PaintSaveEnabled,
+            "Paint must start with a roomy disabled Save target in the bottom-right.");
 
         // The canvas is driven by observed disturbance, not by a hidden execution
         // target. A pinch over paint must neither navigate nor replay on Exit.

@@ -5,11 +5,11 @@ public sealed partial class BoardSession
     private readonly GlobeState _globe;
     private static readonly IReadOnlyList<BoardButton> GlobeButtons = Array.AsReadOnly(new[]
     {
-        new BoardButton("globe-exit", "Exit", new(.025, .885, .12, .072), BoardScreen.Menu),
-        new BoardButton("globe-zoom-out", "Zoom -", new(.16, .885, .18, .072), BoardScreen.Globe),
-        new BoardButton("globe-zoom-in", "Zoom +", new(.355, .885, .18, .072), BoardScreen.Globe),
-        new BoardButton("globe-rotate-left", "< Rotate", new(.55, .885, .205, .072), BoardScreen.Globe),
-        new BoardButton("globe-rotate-right", "Rotate >", new(.77, .885, .205, .072), BoardScreen.Globe)
+        new BoardButton("globe-exit", "Exit", new(.04, .86, .26, .105), BoardScreen.Menu),
+        new BoardButton("globe-zoom-out", "Zoom -", new(.205, .735, .26, .105), BoardScreen.Globe),
+        new BoardButton("globe-zoom-in", "Zoom +", new(.535, .735, .26, .105), BoardScreen.Globe),
+        new BoardButton("globe-rotate-left", "< Rotate", new(.37, .86, .26, .105), BoardScreen.Globe),
+        new BoardButton("globe-rotate-right", "Rotate >", new(.70, .86, .26, .105), BoardScreen.Globe)
     });
 
     public void ShowGlobe(DateTimeOffset? now = null) => Show(BoardScreen.Globe, now ?? DateTimeOffset.UtcNow);

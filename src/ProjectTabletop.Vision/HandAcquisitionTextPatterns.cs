@@ -9,8 +9,9 @@ internal sealed class HandAcquisitionTextPatterns
         double ScaleX = 1, double ScaleY = 1, IReadOnlyList<double>? SectorCorrelations = null,
         double LocalDamageCoverage = 0, double ExposureGain = 1, double ExposureBackground = 0);
     private sealed record Template(int Region, int Left, int Top, int Width, int Height,
-        double[][] HighPass, double[][] Blurred, double Background, int[] Evidence)
+        double[][] HighPass, double[][] Blurred, double Background, int[] Evidence, double InkBackground)
     {
+        public HashSet<int> EvidenceSupport { get; } = Evidence.ToHashSet();
         public double CleanCorrelation { get; set; }
         public int? RegisteredVariant { get; set; }
         public int RegisteredDx { get; set; }
@@ -79,7 +80,7 @@ internal sealed class HandAcquisitionTextPatterns
             var blurred = Blurs.Select(blur => blur == 0 ? expected : Blur(expected, width, height, blur)).ToArray();
             var variants = blurred.Select(image => HighPass(image, width, height)).ToArray();
             _templates.Add(new(region, left, top, width, height, variants, blurred,
-                expected.Order().ElementAt(expected.Length / 10), evidence));
+                expected.Order().ElementAt(expected.Length / 10), evidence, background));
         }
     }
 
@@ -394,6 +395,24 @@ internal sealed class HandAcquisitionTextPatterns
         double divisor = _inverse[6] * u + _inverse[7] * v + _inverse[8];
         return new((_inverse[0] * u + _inverse[1] * v + _inverse[2]) / divisor,
             (_inverse[3] * u + _inverse[4] * v + _inverse[5]) / divisor);
+    }
+
+    internal bool IsGeneratedCaptionSupport(int region, double u, double v, out bool ink)
+    {
+        ink = false;
+        var template = _templates.FirstOrDefault(template => template.Region == region);
+        if (template?.RegisteredVariant is null) return false;
+        double x = (u * LogicalSize - template.Left - template.Width / 2.0 - template.RegisteredDx) /
+            template.RegisteredScaleX + template.Width / 2.0;
+        double y = (v * LogicalSize - template.Top - template.Height / 2.0 - template.RegisteredDy) /
+            template.RegisteredScaleY + template.Height / 2.0;
+        int ix = (int)Math.Round(x), iy = (int)Math.Round(y);
+        if (ix < 0 || iy < 0 || ix >= template.Width || iy >= template.Height) return false;
+        int index = iy * template.Width + ix;
+        if (!template.EvidenceSupport.Contains(index)) return false;
+        ink = Math.Abs(template.Blurred[0][index] - template.InkBackground) > 24 &&
+            Math.Abs(template.HighPass[0][index]) > 6;
+        return true;
     }
     private static double[] HighPass(double[] image, int width, int height)
     {

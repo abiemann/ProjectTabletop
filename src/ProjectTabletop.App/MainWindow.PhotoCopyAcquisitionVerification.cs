@@ -1,5 +1,6 @@
 #if DEBUG
 using Microsoft.Graphics.Canvas;
+using ProjectTabletop.App.Camera;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
@@ -37,7 +38,7 @@ public sealed partial class MainWindow
         Require(before.ExpectedScene is { Width: size, Height: size } &&
                 before.ExpectedScene.Bgra.Length == size * size * 4 &&
                 before.ExpectedScene.BoardSearchRegions is { Count: 3 } &&
-                before.RestrictAcquisitionToSearchRegions && before.RequiresSearchIllumination &&
+                before.RestrictAcquisitionToSearchRegions && before.AllowsSearchIllumination &&
                 before.ContinuousSearchPolygon is { Length: 4 },
             "Photo Copy needs its own bounded button reference, three search masks and a focused object field.");
         AssertSearchCenters(before);
@@ -115,12 +116,21 @@ public sealed partial class MainWindow
                 Fill(occupied, (int)center.X - 44 + finger * 23, (int)center.Y - 30,
                     21, 85, 95, 145, 195);
             var detector = new HandAcquisitionPresenceTracker();
-            var presence = detector.Update(size, size, size * 4, occupied, ready.SearchPolygon,
-                ready.ExpectedScene, now, now);
+            var firstArrival = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
+                ready, detector, now);
+            Require(firstArrival.LightingHints.Count == 0 && firstArrival.SearchRegions.Count == 0,
+                $"A single unconfirmed {button.Label} obstruction triggered model inference or illumination.");
+            now += TimeSpan.FromMilliseconds(125);
+            var nativeQuery = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
+                ready, detector, now);
+            var presence = nativeQuery.Presence!;
             Require(presence.Hints.Count > 0 && presence.Hints.Any(hint =>
                     Math.Abs(hint.Center.X - center.X) < 65 && Math.Abs(hint.Center.Y - center.Y) < 65 &&
                     hint.ControlCoverage is double coverage && double.IsFinite(coverage) && coverage >= .07),
-                $"Stationary fingers over {button.Label} produced no useful crop on the first frame: {presence.Reason}.");
+                $"Stationary fingers over {button.Label} produced no useful crop after two fresh frames: {presence.Reason}.");
+            Require(nativeQuery.SearchRegions.Count is > 0 and <= 2 &&
+                    nativeQuery.SearchRegions.Contains(presence.Hints[0].SearchBounds) && ready.IlluminatedHint is null,
+                $"Qualified {button.Label} fingers did not receive native inference before fallback illumination.");
             scene.CompleteHandAcquisition(ready, presence.Hints, [], now);
             var illuminated = scene.GetHandAcquisitionContext(now)!;
             Require(illuminated.IlluminatedHint is not null &&
@@ -186,7 +196,7 @@ public sealed partial class MainWindow
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
                 Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "The isolated verification changed the live camera, projector or board.");
-        return new { passed = true, stationaryFirstFrameOverExitClearSave = true,
+        return new { passed = true, stationaryTwoFreshFramesOverExitClearSave = true,
             realRenderedButtonReference = true, boundedButtonMasks = true, motionFallbackDisabled = true,
             focusedObjectFieldStopsAfterSwirl = true,
             textChangesRefreshReference = true, swirlStatusObjectAndSearchLightsDoNotRetrigger = true,

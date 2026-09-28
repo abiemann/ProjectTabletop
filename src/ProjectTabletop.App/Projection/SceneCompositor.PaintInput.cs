@@ -13,7 +13,7 @@ public sealed partial class SceneCompositor
 {
     private static readonly HandTrackingBounds PaintInputBounds = new(.01, .01, .98, .98);
     private static readonly BoardRect PaintTitleBounds = new(.06, .018, .10, .028);
-    private static readonly BoardRect PaintStatusBounds = new(.28, .895, .44, .045);
+    private static readonly BoardRect PaintStatusBounds = new(.35, .88, .30, .065);
     private HandTrackingBounds? _paintButtonLightIgnoreRegion;
     private DateTimeOffset _paintButtonLightIgnoreUntil;
 

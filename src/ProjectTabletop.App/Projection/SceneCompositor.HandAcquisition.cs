@@ -42,7 +42,7 @@ public sealed partial class SceneCompositor
         PixelPoint[] SearchPolygon, HandAcquisitionHint? IlluminatedHint,
         HandAcquisitionSceneImage? ExpectedScene = null, DateTimeOffset IlluminationStartedAt = default,
         PixelPoint[]? StationarySearchCenters = null, bool RestrictAcquisitionToSearchRegions = true,
-        bool RequiresSearchIllumination = true, PixelPoint[]? ContinuousSearchPolygon = null);
+        bool AllowsSearchIllumination = true, PixelPoint[]? ContinuousSearchPolygon = null);
 
     private AcquisitionSceneState CurrentAcquisitionState() => new(_boardSession.Revision,
         _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision :
@@ -111,7 +111,7 @@ public sealed partial class SceneCompositor
                 return new(_acquisitionRevision, observe, polygon, illuminated,
                     _acquisitionExpectedScene, _acquisitionLightStarted, centers,
                     RestrictAcquisitionToSearchRegions: _boardSession.Screen != BoardScreen.HandTracking,
-                    RequiresSearchIllumination: true,
+                    AllowsSearchIllumination: true,
                     ContinuousSearchPolygon: capturePolygon);
             }
             if (animating || AcquisitionMustYieldToHandOrExecute(now))
@@ -229,7 +229,7 @@ public sealed partial class SceneCompositor
             return new { revision = _acquisitionRevision, reason = _acquisitionReason,
                 minimumControlCoverage = HandAcquisitionPresenceTracker.MinimumControlCoverage,
                 restrictAcquisitionToSearchRegions = context?.RestrictAcquisitionToSearchRegions,
-                requiresSearchIllumination = context?.RequiresSearchIllumination,
+                allowsSearchIllumination = context?.AllowsSearchIllumination,
                 continuousSearchPolygon = context?.ContinuousSearchPolygon,
                 observingMotion = context?.ObserveMotion ?? false, searchPolygon = context?.SearchPolygon,
                 searchLightActive = context?.IlluminatedHint is not null, light = _acquisitionLight,
