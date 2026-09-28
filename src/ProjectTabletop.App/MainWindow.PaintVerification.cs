@@ -36,8 +36,14 @@ public sealed partial class MainWindow
                 scene.CurrentBoardButtons.Any(button => button.Id == "paint-save" && !button.Enabled),
             "Paint must open blank with bottom-side Exit and an unavailable Save until paint exists.");
         await Save(target, "paint-blank");
-        var canvas = new BoardRect(.025, .19, .95, .79);
-        Require(ChangedPixels(blank, Draw(scene), canvas) == 0,
+        var canvas = new BoardRect(.025, .08, .95, .79);
+        var blankFluid = scene.GetPaintDiagnostics().Fluid ??
+            throw new InvalidOperationException("Paint has no GPU clear-liquid field.");
+        Require(blankFluid.FieldWidth > 0 && blankFluid.FieldHeight > 0 &&
+                Math.Max(blankFluid.FieldWidth, blankFluid.FieldHeight) == 1024,
+            "Paint has no bounded GPU clear-liquid field.");
+        Require(ChangedPixels(blank, Draw(scene), canvas) == 0 &&
+                scene.GetPaintDiagnostics().Fluid!.SimulationSteps == blankFluid.SimulationSteps,
             "An idle painting changed without an observed disturbance.");
 
         // Both ordinary hand lighting and preliminary acquisition lighting must
@@ -69,30 +75,43 @@ public sealed partial class MainWindow
                 secondReference.AddPaintDrop(new(.20, .78), .075, now),
             "A fresh canvas disturbance did not create its first paint drop.");
         var initial = Draw(scene);
+        var injectedField = scene.CapturePaintFieldStatisticsForVerification();
         int initialArea = ChangedPixels(blank, initial, canvas);
-        Require(initialArea > 100, "The new paint drop has no visible initial pigment.");
+        await Save(target, "paint-single-liquid-injected");
+        Require(initialArea > 100 && injectedField.HeightMass > 0 && injectedField.PigmentMass > 0 &&
+                injectedField.NonFiniteValues == 0 && injectedField.NegativeDensityValues == 0,
+            "The new drop has no visible pigment/positive fluid volume or contains invalid floating-point fields.");
         Require(!scene.AddPaintDrop(firstCenter, .075, now), "One camera observation deposited paint twice.");
-        now += TimeSpan.FromSeconds(2);
+        Advance(2, scene, firstOnly, secondReference);
         var afterTwo = Draw(scene);
+        var evolvedField = scene.CapturePaintFieldStatisticsForVerification();
+        await Save(target, "paint-single-liquid-2s");
+        double heightMassRatio = evolvedField.HeightMass / injectedField.HeightMass;
+        double pigmentMassRatio = evolvedField.PigmentMass / injectedField.PigmentMass;
+        Require(evolvedField.NonFiniteValues == 0 && evolvedField.NegativeDensityValues == 0 &&
+                evolvedField.MaximumHeight <= 5.001 && evolvedField.MaximumSpeed < 500 &&
+                heightMassRatio is > .95 and < 1.05 && pigmentMassRatio is > .95 and < 1.05,
+            $"The wet field became invalid or gained/lost excessive mass: height {heightMassRatio:F3}, pigment {pigmentMassRatio:F3}. " +
+            $"Height {injectedField.HeightMass:F3} -> {evolvedField.HeightMass:F3}, pigment {injectedField.PigmentMass:F3} -> {evolvedField.PigmentMass:F3}. Images: {directory}");
         int twoSecondArea = ChangedPixels(blank, afterTwo, canvas);
-        now += TimeSpan.FromSeconds(6);
-        var afterEight = Draw(scene);
-        int eightSecondArea = ChangedPixels(blank, afterEight, canvas);
-        Require(twoSecondArea > initialArea * 1.2 && eightSecondArea > twoSecondArea * 1.03,
-            $"Paint did not spread gradually: areas {initialArea}, {twoSecondArea}, {eightSecondArea} at 0, 2, 8 seconds.");
-        await Save(target, "paint-single-spread-8s");
-        Require(ChangedPixels(blank, afterEight, exit.Bounds) == 0,
+        Advance(2, scene, firstOnly, secondReference);
+        var afterFour = Draw(scene);
+        int fourSecondArea = ChangedPixels(blank, afterFour, canvas);
+        Require(twoSecondArea > initialArea && ChangedPixels(initial, afterFour, canvas) > 100,
+            $"Liquid did not spread and evolve: areas {initialArea}, {twoSecondArea}, {fourSecondArea} at 0, 2, 4 seconds.");
+        await Save(target, "paint-single-liquid-4s");
+        Require(ChangedPixels(blank, afterFour, exit.Bounds) == 0,
             "Spreading paint changed the Exit control.");
 
         // The comparison scene has the same drop sequence and second-drop age,
         // but its first pigment is far away. This distinguishes mixed overlap
         // from painting a completely opaque second blob over the old color.
-        now += TimeSpan.FromSeconds(1);
+        Advance(1, scene, firstOnly, secondReference);
         var secondCenter = new Point2(.54, .55);
         Require(scene.AddPaintDrop(secondCenter, .075, now) &&
                 secondReference.AddPaintDrop(secondCenter, .075, now),
             "An overlapping second disturbance did not add new paint.");
-        now += TimeSpan.FromSeconds(8);
+        Advance(2, scene, firstOnly, secondReference);
         var combined = Draw(scene);
         var oldPigmentOnly = Draw(firstOnly);
         var newPigmentOnly = Draw(secondReference);
@@ -101,7 +120,15 @@ public sealed partial class MainWindow
         Require(mixedPixels > 30,
             $"Overlapping pigment does not visibly combine the old and new colors ({mixedPixels} mixed pixels).");
         Draw(scene);
-        await Save(target, "paint-overlapping-pigments");
+        await Save(target, "paint-liquid-pigments-merging");
+        long dropsBeforeFlow = scene.GetPaintDiagnostics().DropCount;
+        var beforeFlow = scene.GetPaintDiagnostics().Fluid!;
+        Advance(1, scene);
+        var continuingFlow = Draw(scene);
+        Require(scene.GetPaintDiagnostics().DropCount == dropsBeforeFlow &&
+                scene.GetPaintDiagnostics().Fluid!.SimulationSteps > beforeFlow.SimulationSteps &&
+                ChangedPixels(combined, continuingFlow, new(.35, .40, .32, .30)) > 30,
+            "Merged liquid stopped evolving unless another camera event deposited paint.");
 
         long countBeforeRejectedInput = scene.GetPaintDiagnostics().DropCount;
         foreach (var point in new[] { new Point2(.2, -.01), new Point2(-.1, .5), new Point2(.5, 1.1),
@@ -116,7 +143,7 @@ public sealed partial class MainWindow
         Require(scene.AddPaintDrop(new(.985, .98), .11, now), "A valid near-edge drop was rejected.");
         Require(!scene.AddPaintDrop(new(.75, .85), .075, now.AddMilliseconds(-1)),
             "An out-of-order camera observation deposited paint.");
-        now += TimeSpan.FromSeconds(8);
+        Advance(1, scene);
         var edgePixels = Draw(scene);
         Require(OutsideBorderIsBlack(edgePixels, size, size, inset) &&
                 ChangedPixels(blank, edgePixels, exit.Bounds) == 0,
@@ -130,31 +157,35 @@ public sealed partial class MainWindow
         Require(scene.GetPaintDiagnostics().DropCount == 0 && ChangedPixels(blank, reopened, canvas) == 0,
             "A fresh Paint session retained the previous painting.");
 
-        // Output dimensions are physical pixels. Inspect the dedicated paint
-        // layer as well as the shared UI raster so a low-resolution paint image
-        // enlarged underneath a sharp Exit button cannot pass this check.
+        // Fluid transport uses a bounded field; wet-surface shading and the UI
+        // still render at the physical board's native projected pixel density.
         scene.SetDisplayAspect(16d / 9);
+        scene.ResetPaint();
         foreach (var position in new Point2[] { new(.29, .38), new(.47, .38), new(.65, .38), new(.38, .55),
             new(.56, .55), new(.74, .55), new(.29, .73), new(.47, .73), new(.65, .73) })
         {
             now += TimeSpan.FromMilliseconds(250);
             Require(scene.AddPaintDrop(position, .105, now), "The dense paint fixture rejected an independent drop.");
         }
-        now += TimeSpan.FromSeconds(8);
+        Advance(2, scene);
         DrawNative(scene, native, 3840, 2160);
         var paintRaster = scene.GetPaintDiagnostics();
         var boardRaster = scene.GetBoardResolutionDiagnostics();
         Require(paintRaster.NativeWidth > 3000 && paintRaster.NativeHeight > 1800 &&
                 boardRaster.BoardPixelWidth > 3000 && boardRaster.BoardPixelHeight > 1800 &&
-                boardRaster.ProjectorPixelWidth == 3840 && boardRaster.ProjectorPixelHeight == 2160,
-            "The 4K board enlarged a low-resolution paint or interface layer.");
+                boardRaster.ProjectorPixelWidth == 3840 && boardRaster.ProjectorPixelHeight == 2160 &&
+                Math.Abs(paintRaster.Fluid!.FieldWidth / (double)paintRaster.Fluid.FieldHeight - 16d / 9) < .005,
+            "The wet surface/UI is not native 4K or the bounded fluid field stretches the physical board's proportions.");
         Require(OutsideBorderIsBlack(native.GetPixelBytes(), 3840, 2160, inset),
             "The native 4K painting escaped its calibrated board boundary.");
         await Save(native, "paint-metallic-blends-native-4k");
         DrawNative(scene, preview, 400, 300, true);
         var afterPreview = scene.GetPaintDiagnostics();
-        Require(afterPreview.NativeWidth == paintRaster.NativeWidth && afterPreview.NativeHeight == paintRaster.NativeHeight,
-            "A small laptop preview shrank the native paint cache.");
+        Require(afterPreview.NativeWidth == paintRaster.NativeWidth && afterPreview.NativeHeight == paintRaster.NativeHeight &&
+                afterPreview.Fluid!.SimulationSteps == paintRaster.Fluid!.SimulationSteps &&
+                afterPreview.Fluid.FieldWidth == paintRaster.Fluid.FieldWidth &&
+                afterPreview.Fluid.FieldHeight == paintRaster.Fluid.FieldHeight,
+            "A small laptop preview changed the native surface density or advanced/resized its liquid field.");
         scene.SetBoardSetup(true);
         Require(!scene.AddPaintDrop(new(.5, .5), .075, now), "Calibration accepted a paint disturbance.");
         scene.ClearBoardMediaClip();
@@ -175,7 +206,7 @@ public sealed partial class MainWindow
             now += TimeSpan.FromMilliseconds(250);
             Require(fullCanvas.AddPaintDrop(position, .10, now), "Paint cannot flow beneath the bottom-side controls.");
         }
-        now += TimeSpan.FromSeconds(8);
+        Advance(2, fullCanvas);
         var paintedFullCanvas = Draw(fullCanvas);
         Require(ChangedPixels(cleanControls, paintedFullCanvas, new(.18, .012, .72, .035)) > 1000 &&
                 ChangedPixels(cleanControls, paintedFullCanvas, new(.075, .965, .11, .025)) > 100 &&
@@ -185,50 +216,69 @@ public sealed partial class MainWindow
             "Paint must reach the top and flow below both bottom controls while their interiors remain opaque above it.");
         await Save(target, "paint-beneath-floating-controls");
 
-        using var gallery = NewScene(out double galleryInset);
-        gallery.SetDisplayAspect(16d / 9);
-        DrawNative(gallery, native, 3840, 2160);
-        var emptyGallery = native.GetPixelBytes();
-        Point2[] galleryPositions = (from y in new[] { .34, .58, .82 }
-                                    from x in new[] { .18, .40, .62, .84 }
-                                    select new Point2(x, y)).ToArray();
-        foreach (var position in galleryPositions)
+        // A liquid field should transport pigment and merge neighbouring drops,
+        // rather than choose a different decorative silhouette for each seed.
+        // Save an isolated three-colour field at native output size for visual QA.
+        using var liquidGallery = NewScene(out _);
+        liquidGallery.SetDisplayAspect(16d / 9);
+        DrawNative(liquidGallery, native, 3840, 2160);
+        foreach (var position in new Point2[] { new(.42, .49), new(.52, .49), new(.47, .59) })
         {
-            // Each observation is distinct, but all drops have effectively the
-            // same age so the snapshots show comparable spreading stages.
-            now += TimeSpan.FromMilliseconds(1);
-            Require(gallery.AddPaintDrop(position, .035, now), "The varied paint gallery rejected an independent drop.");
+            now += TimeSpan.FromSeconds(1);
+            Require(liquidGallery.AddPaintDrop(position, .09, now), "The merging-liquid gallery rejected a distinct drop.");
+            Advance(1, liquidGallery);
         }
-        var galleryStarted = now;
-        foreach (double age in new[] { .6, 2d, 8d })
+        Advance(2, liquidGallery);
+        DrawNative(liquidGallery, native, 3840, 2160);
+        await Save(native, "paint-liquid-three-pigments-native-4k");
+
+        // The fluid solver uses fixed steps rather than scaling displacement by
+        // rendering frequency. Drive three equal drop sequences at 30/60/120 Hz.
+        using var thirtyHz = NewScene(out _);
+        using var sixtyHz = NewScene(out _);
+        using var oneTwentyHz = NewScene(out _);
+        foreach (var timingScene in new[] { thirtyHz, sixtyHz, oneTwentyHz })
         {
-            now = galleryStarted.AddSeconds(age);
-            DrawNative(gallery, native, 3840, 2160);
-            await Save(native, age == 8 ? "paint-variety-native-4k" :
-                age == 2 ? "paint-variety-2s-native-4k" : "paint-variety-0_6s-native-4k");
+            Draw(timingScene);
+            Require(timingScene.AddPaintDrop(new(.5, .5), .085, now), "The timestep fixture rejected its first drop.");
+            Draw(timingScene);
         }
-        var galleryPixels = native.GetPixelBytes();
-        var silhouettes = galleryPositions.Select((position, index) =>
-            MeasurePaintSilhouette(galleryPixels, emptyGallery, position, galleryInset, index + 1)).ToArray();
-        Require(silhouettes.All(shape => shape.Area > 300 && double.IsFinite(shape.Elongation) &&
-                double.IsFinite(shape.Compactness)), "One of the twelve paint seeds has no measurable silhouette.");
-        Require(silhouettes.All(shape => shape.BoundaryPixels == 0),
-            "The paint gallery does not isolate complete silhouettes: " + string.Join("; ",
-                silhouettes.Where(shape => shape.BoundaryPixels > 0).Select(shape =>
-                    $"seed{shape.Seed}:boundary pixels={shape.BoundaryPixels}")));
-        double areaRatio = (double)silhouettes.Max(shape => shape.Area) / silhouettes.Min(shape => shape.Area);
-        double elongationRange = silhouettes.Max(shape => shape.Elongation) - silhouettes.Min(shape => shape.Elongation);
-        double compactnessRange = silhouettes.Max(shape => shape.Compactness) - silhouettes.Min(shape => shape.Compactness);
-        var distinctProfiles = new List<PaintSilhouetteMetrics>();
-        foreach (var shape in silhouettes)
-            if (distinctProfiles.All(other => Math.Abs(Math.Log((double)shape.Area / other.Area)) > .22 ||
-                Math.Abs(shape.Elongation - other.Elongation) > .25 ||
-                Math.Abs(shape.Compactness - other.Compactness) > .08)) distinctProfiles.Add(shape);
-        Require(areaRatio > 1.25 && (elongationRange > .3 || compactnessRange > .08) && distinctProfiles.Count >= 3,
-            $"Paint repeats substantially the same rendered silhouette across colors: area ratio {areaRatio:F3}, " +
-            $"elongation range {elongationRange:F3}, compactness range {compactnessRange:F3}, " +
-            $"distinct profiles {distinctProfiles.Count}. " + string.Join("; ", silhouettes.Select(shape =>
-                $"seed{shape.Seed}:area={shape.Area},elongation={shape.Elongation:F3},compactness={shape.Compactness:F3}")));
+        for (int frame = 1; frame <= 120; frame++)
+        {
+            now += TimeSpan.FromSeconds(1d / 120);
+            DrawNative(oneTwentyHz, target, size, size);
+            if (frame % 2 == 0) DrawNative(sixtyHz, target, size, size);
+            if (frame % 4 == 0) DrawNative(thirtyHz, target, size, size);
+        }
+        var thirtyFluid = thirtyHz.GetPaintDiagnostics().Fluid!;
+        var sixtyFluid = sixtyHz.GetPaintDiagnostics().Fluid!;
+        var oneTwentyFluid = oneTwentyHz.GetPaintDiagnostics().Fluid!;
+        Require(Math.Abs(thirtyFluid.SimulatedSeconds - sixtyFluid.SimulatedSeconds) < .035 &&
+                Math.Abs(sixtyFluid.SimulatedSeconds - oneTwentyFluid.SimulatedSeconds) < .035 &&
+                oneTwentyFluid.SimulatedSeconds > .9 && thirtyFluid.DroppedSeconds < .035 &&
+                sixtyFluid.DroppedSeconds < .035 && oneTwentyFluid.DroppedSeconds < .035,
+            "Liquid simulation speed depends on whether the same scene is rendered at 30, 60 or 120 Hz.");
+        var thirtyPixels = Draw(thirtyHz);
+        var sixtyPixels = Draw(sixtyHz);
+        var oneTwentyPixels = Draw(oneTwentyHz);
+        int changedAtThirtyHz = ChangedPixels(thirtyPixels, sixtyPixels, new(.3, .3, .4, .4));
+        int changedAtOneTwentyHz = ChangedPixels(sixtyPixels, oneTwentyPixels, new(.3, .3, .4, .4));
+        Require(changedAtThirtyHz < 500 && changedAtOneTwentyHz < 500,
+            $"Equal-duration liquid differs across rendering frequency: {changedAtThirtyHz}, {changedAtOneTwentyHz} pixels.");
+        long beforeLongGap = sixtyFluid.SimulationSteps;
+        now += TimeSpan.FromMinutes(1);
+        Draw(sixtyHz);
+        var afterLongGap = sixtyHz.GetPaintDiagnostics().Fluid!;
+        Require(afterLongGap.SimulationSteps - beforeLongGap is > 0 and <= 4 && afterLongGap.DroppedSeconds > 59,
+            "A long frame stall caused an unbounded fluid catch-up instead of capped fixed substeps.");
+        Draw(sixtyHz);
+        Require(sixtyHz.GetPaintDiagnostics().Fluid!.SimulationSteps == afterLongGap.SimulationSteps,
+            "Re-rendering at the same timestamp advanced the liquid a second time.");
+        now -= TimeSpan.FromSeconds(1);
+        Draw(sixtyHz);
+        Require(sixtyHz.GetPaintDiagnostics().Fluid!.SimulationSteps == afterLongGap.SimulationSteps,
+            "A backwards timestamp advanced the liquid.");
+        now += TimeSpan.FromSeconds(1);
 
         using var inputScene = NewScene(out double inputInset, nativeCamera: true);
         var detector = new PaintDisturbanceTracker();
@@ -241,7 +291,18 @@ public sealed partial class MainWindow
             now += TimeSpan.FromMilliseconds(125);
         }
         Draw(inputScene);
-        Require(inputScene.GetPaintDisturbanceContext() is not null, "Paint did not become ready after camera settling.");
+        var firstReadyContext = inputScene.GetPaintDisturbanceContext();
+        Require(firstReadyContext is not null, "Paint did not become ready after camera settling.");
+        // The worker can complete after warmup while its camera frame still
+        // belongs to the previous projected board. This frame is otherwise
+        // fresh enough to pass the ordinary 350 ms observation lifetime.
+        var previousProjectionTime = now.AddMilliseconds(-150);
+        var previousProjection = new PaintDisturbanceResult(
+            [new(new(.5, .5), .075, .01, previousProjectionTime)], 1, .01, true,
+            "delayed-previous-projection", 150);
+        Require(inputScene.CompletePaintDisturbance(firstReadyContext!, previousProjection, previousProjectionTime) == 0 &&
+                inputScene.GetPaintDiagnostics().DropCount == 0,
+            "A delayed camera frame from before projection warmup seeded a new painting.");
         Require(inputScene.AddPaintDrop(new(.45, .03), .11, now), "The Paint animation fixture could not begin above the old header.");
         int animationFramesCompared = 0;
         // A webcam observes an older submitted projector frame. Feed actual GPU
@@ -345,7 +406,8 @@ public sealed partial class MainWindow
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
                 Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "The isolated Paint verification changed the live camera, projector or board.");
-        return new { passed = true, initialArea, twoSecondArea, eightSecondArea, mixedPixels,
+        return new { passed = true, initialArea, twoSecondArea, fourSecondArea, mixedPixels,
+            heightMassRatio, pigmentMassRatio, finiteNonnegativeFlowAndPigmentFields = true,
             progressiveSpreading = true, overlappingPigmentsBlend = true, exitProtected = true,
             boundedBoardClip = true, invalidAndRepeatedObservationsRejected = true, freshSessionClearsPainting = true,
             nativePaintRaster = paintRaster, nativeBoardRaster = boardRaster, previewCannotShrinkPaint = true,
@@ -353,9 +415,10 @@ public sealed partial class MainWindow
             renderedAnimationDoesNotRetrigger = true, twoStationaryObstructionsApplyIndependently = true,
             fullCanvasBeneathFloatingControls = true,
             completedInputReplayAndNavigationCalibrationBarriers = true,
-            variedRenderedSilhouettes = true, silhouettes, silhouetteAreaRatio = areaRatio,
-            silhouetteElongationRange = elongationRange, silhouetteCompactnessRange = compactnessRange,
-            distinctSilhouetteProfiles = distinctProfiles.Count,
+            sharedLiquidContinuesWithoutNewCameraEvents = true,
+            fixedTimeStepIndependentOfRenderFrequency = true, changedAtThirtyHz, changedAtOneTwentyHz,
+            boundedLongGapCatchUp = true, zeroAndBackwardsTimeCannotAdvance = true,
+            framesObservedBeforeProjectionWarmupRejected = true,
             liveHardwareUnchanged = true, directory, images };
 
         SceneCompositor NewScene(out double safetyInset, bool nativeCamera = false)
@@ -375,6 +438,16 @@ public sealed partial class MainWindow
         {
             DrawNative(drawingScene, target, size, size);
             return target.GetPixelBytes();
+        }
+        void Advance(double seconds, params SceneCompositor[] drawingScenes)
+        {
+            int frames = (int)Math.Ceiling(seconds * 60);
+            for (int frame = 0; frame < frames; frame++)
+            {
+                now += TimeSpan.FromSeconds(seconds / frames);
+                foreach (var drawingScene in drawingScenes)
+                    DrawNative(drawingScene, target, size, size);
+            }
         }
         static void DrawNative(SceneCompositor drawingScene, CanvasRenderTarget output, float width, float height,
             bool isPreview = false)
@@ -457,76 +530,5 @@ public sealed partial class MainWindow
         }
     }
 
-    private sealed record PaintSilhouetteMetrics(int Seed, int Area, double Elongation, double Compactness,
-        int Width, int Height, int BoundaryPixels);
-
-    private static PaintSilhouetteMetrics MeasurePaintSilhouette(byte[] pixels, byte[] empty, Point2 center,
-        double inset, int seed)
-    {
-        const int width = 3840, height = 2160, step = 3;
-        int left = (int)(width * (inset / 2 + (center.X - .11) * (1 - inset)));
-        int top = (int)(height * (inset / 2 + (center.Y - .12) * (1 - inset)));
-        int columns = (int)(width * .22 * (1 - inset)) / step;
-        int rows = (int)(height * .24 * (1 - inset)) / step;
-        var ink = new bool[columns * rows];
-        for (int y = 0; y < rows; y++)
-        for (int x = 0; x < columns; x++)
-        {
-            int offset = ((top + y * step + step / 2) * width + left + x * step + step / 2) * 4;
-            int pixelDifference = Math.Max(Math.Abs(pixels[offset] - empty[offset]),
-                Math.Max(Math.Abs(pixels[offset + 1] - empty[offset + 1]),
-                    Math.Abs(pixels[offset + 2] - empty[offset + 2])));
-            ink[y * columns + x] = pixelDifference > 12;
-        }
-
-        // Discard color and fill enclosed texture holes. The remaining binary
-        // shape measures footprint and edge structure, rather than glitter,
-        // pigment hue, or a particular implementation's family identifier.
-        var outside = new bool[ink.Length];
-        var pending = new Queue<int>();
-        void Visit(int x, int y)
-        {
-            if (x < 0 || x >= columns || y < 0 || y >= rows) return;
-            int index = y * columns + x;
-            if (ink[index] || outside[index]) return;
-            outside[index] = true;
-            pending.Enqueue(index);
-        }
-        for (int x = 0; x < columns; x++) { Visit(x, 0); Visit(x, rows - 1); }
-        for (int y = 0; y < rows; y++) { Visit(0, y); Visit(columns - 1, y); }
-        while (pending.TryDequeue(out int index))
-        {
-            int x = index % columns, y = index / columns;
-            Visit(x - 1, y); Visit(x + 1, y); Visit(x, y - 1); Visit(x, y + 1);
-        }
-        int area = 0, perimeter = 0, boundary = 0;
-        int minX = columns, maxX = -1, minY = rows, maxY = -1;
-        double sumX = 0, sumY = 0, sumXX = 0, sumYY = 0, sumXY = 0;
-        bool Filled(int x, int y) => x >= 0 && x < columns && y >= 0 && y < rows && !outside[y * columns + x];
-        for (int y = 0; y < rows; y++)
-        for (int x = 0; x < columns; x++)
-        {
-            if (!Filled(x, y)) continue;
-            area++;
-            sumX += x; sumY += y; sumXX += x * x; sumYY += y * y; sumXY += x * y;
-            minX = Math.Min(minX, x); maxX = Math.Max(maxX, x);
-            minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
-            if (!Filled(x - 1, y)) perimeter++;
-            if (!Filled(x + 1, y)) perimeter++;
-            if (!Filled(x, y - 1)) perimeter++;
-            if (!Filled(x, y + 1)) perimeter++;
-            if (x is 0 || x == columns - 1 || y is 0 || y == rows - 1) boundary++;
-        }
-        if (area == 0) return new(seed, 0, double.NaN, double.NaN, 0, 0, 0);
-        double varianceX = sumXX / area - Math.Pow(sumX / area, 2);
-        double varianceY = sumYY / area - Math.Pow(sumY / area, 2);
-        double covariance = sumXY / area - sumX * sumY / (area * (double)area);
-        double trace = varianceX + varianceY;
-        double eigenvalueGap = Math.Sqrt(Math.Pow(varianceX - varianceY, 2) + 4 * covariance * covariance);
-        double elongation = Math.Sqrt((trace + eigenvalueGap) / Math.Max(.000001, trace - eigenvalueGap));
-        double compactness = 4 * Math.PI * area / (perimeter * (double)perimeter);
-        return new(seed, area * step * step, elongation, compactness,
-            (maxX - minX + 1) * step, (maxY - minY + 1) * step, boundary * step);
-    }
 }
 #endif

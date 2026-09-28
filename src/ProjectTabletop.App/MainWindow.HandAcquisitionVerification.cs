@@ -52,7 +52,7 @@ public sealed partial class MainWindow
         Require(ready.ObserveMotion, "The settled Blackjack button area did not start watching.");
         var center = BoardPoint(.55, .83);
         var hint = new HandAcquisitionHint(new(center.X - 140, center.Y - 140, 280, 280),
-            center, 82, now, .05);
+            center, 82, now, .05, ControlCoverage: .10);
         var baseline = Draw();
         ready = scene.GetHandAcquisitionContext(now)!;
         Require(ready.ExpectedScene is { Width: 1000, Height: 1000 } expected &&
@@ -61,9 +61,19 @@ public sealed partial class MainWindow
         Require(ready.StationarySearchCenters?.Length == scene.CurrentBoardButtons.Count,
             "Stationary button searches must include every Blackjack control.");
         long gameRevision = scene.BlackjackState.Revision;
-        scene.CompleteHandAcquisition(ready, [hint], [], now);
+        foreach (double? coverage in new double?[] { null, .069999, double.NaN,
+                     double.PositiveInfinity, double.NegativeInfinity })
+        {
+            scene.CompleteHandAcquisition(ready, [hint with { ControlCoverage = coverage }], [], now);
+            Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && !IsWhite(Draw(), center),
+                "Unmeasured, sub-7%, or non-finite foreground evidence started acquisition illumination.");
+        }
+        scene.CompleteHandAcquisition(ready, [hint with { ObservedAt = now.AddMilliseconds(-1) }], [], now);
+        Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
+            "Foreground evidence from another camera frame started acquisition illumination.");
+        scene.CompleteHandAcquisition(ready, [hint with { ControlCoverage = .07 }], [], now);
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is not null,
-            "Unrecognized local activity did not get acquisition illumination.");
+            "Fresh foreground covering exactly 7% of a control did not get acquisition illumination.");
         var lit = Draw();
         Require(IsWhite(lit, center) && !IsWhite(baseline, center), "The acquisition light did not cover the bottom button.");
         Require(lit.Take(4).SequenceEqual(new byte[] { 0, 0, 0, 255 }), "Search light escaped the board clip.");
@@ -77,6 +87,7 @@ public sealed partial class MainWindow
         for (int index = 0; index < 5; index++)
         {
             now += TimeSpan.FromMilliseconds(500);
+            hint = hint with { ObservedAt = now, ControlCoverage = index == 0 ? .07 : .10 };
             scene.CompleteHandAcquisition(illuminated, [hint], [], now, illuminatedPresence: true);
             illuminated = scene.GetHandAcquisitionContext(now)!;
             Require(illuminated.IlluminatedHint is not null && IsWhite(Draw(), center),
@@ -85,6 +96,17 @@ public sealed partial class MainWindow
         scene.CompleteHandAcquisition(illuminated, [hint], [], now, illuminatedPresence: false);
         Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null } &&
             !IsWhite(Draw(), center), "An empty illuminated area retained its search light.");
+
+        // A foreground flag alone must not bypass the measured threshold after
+        // the spotlight is already lit. Each result belongs to this exact frame
+        // and the original illuminated control, even when the hand holds still.
+        foreach (double? coverage in new double?[] { null, .069999, double.NaN,
+                     double.PositiveInfinity, double.NegativeInfinity })
+            AssertInvalidRenewal([hint with { ControlCoverage = coverage }], refreshObservation: true);
+        AssertInvalidRenewal([], refreshObservation: true);
+        AssertInvalidRenewal([hint], refreshObservation: false);
+        AssertInvalidRenewal([hint with { Center = BoardPoint(.3, .83) }], refreshObservation: true);
+
         now += TimeSpan.FromMilliseconds(500);
         Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false },
             "The camera's delayed view of a switched-off light was allowed to retrigger acquisition.");
@@ -170,7 +192,26 @@ public sealed partial class MainWindow
             expiresWithoutFeedback = true, handHandover = true, staleAndSceneRejection = true,
             animationQuiet = true, executeSuppressionPreserved = true, boardClip = true,
             generatedUnlitReference = true, stationarySearchCenters = true,
-            stationaryPresenceRetainsLight = true, emptyAndStalePresenceCannotRetainLight = true };
+            stationaryPresenceRetainsLight = true, emptyAndStalePresenceCannotRetainLight = true,
+            sevenPercentBoundaryEnforced = true, nonfiniteAndUnmeasuredEvidenceRejected = true,
+            renewalRequiresFreshMeasuredEvidenceAtOriginalControl = true };
+
+        void AssertInvalidRenewal(HandAcquisitionHint[] evidence, bool refreshObservation)
+        {
+            now += TimeSpan.FromMilliseconds(1000);
+            var watching = scene.GetHandAcquisitionContext(now)!;
+            Require(watching.ObserveMotion, "Renewal rejection fixture did not finish its quiet interval.");
+            hint = hint with { ObservedAt = now, ControlCoverage = .10 };
+            scene.CompleteHandAcquisition(watching, [hint], [], now);
+            now += TimeSpan.FromMilliseconds(500);
+            var searching = scene.GetHandAcquisitionContext(now)!;
+            Require(searching.IlluminatedHint is not null, "Renewal rejection fixture did not start illumination.");
+            if (refreshObservation) evidence = evidence.Select(item => item with { ObservedAt = now }).ToArray();
+            scene.CompleteHandAcquisition(searching, evidence, [], now, illuminatedPresence: true);
+            Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null } &&
+                    !IsWhite(Draw(), center),
+                "Absent, stale, misplaced, sub-7%, or non-finite evidence retained an active spotlight.");
+        }
 
         PixelPoint BoardPoint(double u, double v) => new(1000 * (.1 + .8 * (inset + (1 - 2 * inset) * u)),
             1000 * (.1 + .8 * (inset + (1 - 2 * inset) * v)));

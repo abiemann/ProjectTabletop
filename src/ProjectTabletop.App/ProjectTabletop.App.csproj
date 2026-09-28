@@ -12,12 +12,17 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
+    <PackageReference Include="ComputeSharp.D2D1.WinUI" Version="3.2.0" />
     <ProjectReference Include="..\ProjectTabletop.Calibration\ProjectTabletop.Calibration.csproj" />
     <ProjectReference Include="..\ProjectTabletop.Vision\ProjectTabletop.Vision.csproj" />
     <ProjectReference Include="..\ProjectTabletop.Interaction\ProjectTabletop.Interaction.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\THIRD_PARTY_NOTICES.md" Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

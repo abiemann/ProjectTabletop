@@ -185,12 +185,63 @@ public sealed partial class MainWindow
         var board = BoardSizeEstimate.FromImageDimensions(corners, image.Width, image.Height);
         Require(Math.Abs(board.ShortSideCentimeters - 36) < 1e-8 && Math.Abs(board.LongSideCentimeters - 64) < 1e-8,
             "Board edges were confused with the full output image.");
+
+        string files = Path.Combine(Path.GetTempPath(), "ProjectTabletop", "ProjectionSizingVerification", Guid.NewGuid().ToString("N"));
+        string settingsPath = Path.Combine(files, "projection-setup.json");
+        var fileSettings = new ProjectionSetupSettings();
+        fileSettings.Profiles[key] = combined with { BoardFacingDegrees = .4565473707345973 };
+        fileSettings.Profiles[secondKey] = otherReference with { BoardFacingDegrees = 90 };
+        Require(TrySaveProjectionSettings(fileSettings, settingsPath, out var saveError) && saveError is null,
+            "A fresh settings file could not be saved, or a successful write reported an error.");
+        var firstSaved = ParseProjectionSettings(File.ReadAllText(settingsPath), "unused", fourThree);
+        Require(firstSaved.Profiles[key] == fileSettings.Profiles[key],
+            "A fresh settings file changed the saved facing.");
+        var correctedFacing = combined with { BoardFacingDegrees = 180.4565473707345973 };
+        fileSettings.Profiles[key] = correctedFacing;
+        Require(TrySaveProjectionSettings(fileSettings, settingsPath, out saveError) && saveError is null,
+            "An existing settings file could not be replaced with the corrected facing.");
+        string savedJson = File.ReadAllText(settingsPath);
+        var savedFacing = ParseProjectionSettings(savedJson, "unused", fourThree);
+        Require(savedFacing.Profiles[key] == correctedFacing &&
+                savedFacing.Profiles[secondKey] == fileSettings.Profiles[secondKey],
+            "Replacing the saved facing restored the old angle or changed another output's profile.");
+
+        fileSettings.Profiles[key] = firstSaved.Profiles[key];
+        using (var lockedSettings = new FileStream(settingsPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            Require(!TrySaveProjectionSettings(fileSettings, settingsPath, out saveError) &&
+                    !string.IsNullOrWhiteSpace(saveError),
+                "A locked settings target reported success or hid its write error.");
+            Require(File.ReadAllText(settingsPath) == savedJson,
+                "A failed settings replacement changed the last saved facing.");
+        }
+        string directoryTarget = Path.Combine(files, "directory-target.json");
+        Directory.CreateDirectory(directoryTarget);
+        string retainedFile = Path.Combine(directoryTarget, "retained.txt");
+        File.WriteAllText(retainedFile, "keep");
+        Require(!TrySaveProjectionSettings(fileSettings, directoryTarget, out saveError) &&
+                !string.IsNullOrWhiteSpace(saveError) && File.ReadAllText(retainedFile) == "keep" &&
+                File.ReadAllText(settingsPath) == savedJson,
+            "A directory destination reported success, hid its error, or damaged existing files.");
+
+        File.Delete(settingsPath + ".tmp");
+        Directory.CreateDirectory(settingsPath + ".tmp");
+        Require(!TrySaveProjectionSettings(fileSettings, settingsPath, out saveError) &&
+                !string.IsNullOrWhiteSpace(saveError) && File.ReadAllText(settingsPath) == savedJson,
+            "A blocked temporary write reported success, hid its error, or changed the saved facing.");
+        Directory.Delete(settingsPath + ".tmp");
+        fileSettings.Profiles[key] = correctedFacing;
+        Require(TrySaveProjectionSettings(fileSettings, settingsPath, out saveError) && saveError is null &&
+                ParseProjectionSettings(File.ReadAllText(settingsPath), "unused", fourThree).Profiles[key] == correctedFacing,
+            "Retrying a settings save after the obstruction was removed did not recover or retained the old error.");
         return new { passed = true, optionalFields = true, genericAspectRatios = true, portrait = true,
             outputProfilesIsolated = true, persistenceAndLegacyMigration = true, invalidInputsRejected = true,
             boardUsesDetectedEdges = true, measuredReferenceIndependentOfOptics = true,
             measuredPartialAndClear = true, measuredPersistenceAndVersionTwoCompatibility = true,
             displayAudioDefaultsAndPersistence = true, displayAudioProfilesIsolated = true,
             displayAudioWithoutSizeSettings = true,
+            settingsFileWriteAndOverwrite = true, settingsFileFailuresPreserveSavedFacing = true,
+            settingsFileSaveRetryRecovery = true,
             opticalFormulaUnchanged = true, liveSettingsUnchanged = true };
 
         static DisplayModeInfo Mode(string id, int width, int height) => new("DISPLAY1", width, height, 60)

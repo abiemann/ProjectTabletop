@@ -350,11 +350,13 @@ public sealed partial class SceneCompositor : IDisposable
         {
             if (!_boardSetup) throw new InvalidOperationException("Board setup is not active.");
             var points = projectorCorners.Select(point => new Point2(point.X, point.Y)).ToArray();
-            var heading = _boardFacingDegrees ?? BoardOrientation.Heading(points, _displayAspect);
+            // The ordered calibration dots establish projector coordinates.
+            // Camera corner order must not choose the interface's first facing.
+            var heading = _boardFacingDegrees ?? 0;
             var ordered = BoardOrientation.Orient(points, heading, _displayAspect);
             var grid = BoardGrid.Create(ordered.Select(point => new Vector2((float)point.X, (float)point.Y)).ToArray());
             ApplyDetectedBoardGrid(grid, cameraMap);
-            // Learn the facing only after the geometry passed all validation.
+            // Save the initial projector-facing default only after validation.
             _boardFacingDegrees ??= heading;
             return grid.InsetFraction;
         }

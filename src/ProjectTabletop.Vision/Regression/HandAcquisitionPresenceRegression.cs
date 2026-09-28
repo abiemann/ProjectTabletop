@@ -13,11 +13,14 @@ internal static class HandAcquisitionPresenceRegression
         ExposureGeometryAndNoise();
         UniqueControlCoveredAtStartup();
         OwnLightPresenceAndRemoval();
+        IlluminatedControlAreaFloor();
+        PointOfInterestSampling();
         BaselineFallbackAndBarriers();
         PhotoCopyControlRegionsRegression.Run();
         Console.WriteLine("Hand acquisition presence regression: stationary foreground present at startup, persistent " +
             "known-render comparison, native projective geometry, photometric/exposure compensation, raster-edge/noise " +
-            "rejection, bounded crops, own-white-light exclusion, lit foreground versus empty light, removal, and reset/time barriers passed.");
+            "rejection, point-of-interest-only camera sampling, bounded crops, own-white-light exclusion, " +
+            "lit foreground versus empty light, removal, and reset/time barriers passed.");
     }
 
     private static void StationaryAtStartupAndRemoval()
@@ -89,6 +92,8 @@ internal static class HandAcquisitionPresenceRegression
         var present = Feed(tracker, occupied, scene, 350, hint, 100);
         Require(present.IlluminatedPresence == true && present.Hints.Count > 0,
             "An illuminated stationary hand failed to keep fresh foreground evidence.");
+        Require(present.Hints[0].ControlCoverage is null,
+            "A generic white-core observation invented rendered-control coverage.");
         for (int frame = 4; frame <= 14; frame++)
             Require(Feed(tracker, occupied, scene, frame * 100, hint, 100).IlluminatedPresence == true,
                 "Own lighting absorbed stationary foreground after the initial illumination.");
@@ -103,6 +108,105 @@ internal static class HandAcquisitionPresenceRegression
         var uncertain = Feed(tracker, occluded, scene, 1700, hint, 100);
         Require(uncertain.IlluminatedPresence is not false,
             "A fully dark, uniformly occluded light was confidently called empty.");
+    }
+
+    private static void IlluminatedControlAreaFloor()
+    {
+        var scene = Scene() with
+        {
+            BoardSearchRegions = [new(.32, .48, .27, .31)],
+            BoardReferenceRegions = [new(.13, .32, .72, .14)]
+        };
+        var hint = new HandAcquisitionHint(new(200, 150, 200, 200), new(300, 250), 65,
+            Epoch, .04, ControlCoverage: .91);
+        var tracker = new HandAcquisitionPresenceTracker();
+        Feed(tracker, Camera(scene), scene, 0);
+        byte[] occupied = Camera(scene);
+        Circle(occupied, hint.Center, hint.RadiusPixels, 215, 225, 220);
+        Rectangle(occupied, 283, 220, 34, 60, 85, 115, 165);
+        var retained = Feed(tracker, occupied, scene, 350, hint, 100);
+        Require(retained.IlluminatedPresence == true && retained.Hints.Count > 0 &&
+                retained.Hints[0].ControlCoverage is >= HandAcquisitionPresenceTracker.MinimumControlCoverage and < .91 &&
+                retained.Hints[0].ObservedAt == Epoch.AddMilliseconds(350),
+            "An illuminated hand did not provide fresh measured control coverage: " + retained.Reason + ".");
+
+        // This dark patch is large enough for the former white-core-only test,
+        // but covers less than 7% of the control. Old .91 coverage must not help.
+        byte[] fragment = Camera(scene);
+        Circle(fragment, hint.Center, hint.RadiusPixels, 215, 225, 220);
+        Rectangle(fragment, 290, 234, 20, 30, 85, 115, 165);
+        var rejected = Feed(tracker, fragment, scene, 500, hint, 100);
+        Require(rejected.IlluminatedPresence == false && rejected.Hints.Count == 0,
+            "A sub-7% illuminated fragment reused old coverage to keep a search light on: " + rejected.Reason + ".");
+
+        var generic = new HandAcquisitionPresenceTracker();
+        var unrestricted = Scene();
+        Feed(generic, Camera(unrestricted), unrestricted, 0);
+        var genericPresence = Feed(generic, occupied, unrestricted, 350, hint, 100);
+        Require(genericPresence.IlluminatedPresence == true && genericPresence.Hints[0].ControlCoverage is null,
+            "An unrestricted white-core observation retained an old control coverage value.");
+    }
+
+    private static void PointOfInterestSampling()
+    {
+        HandTrackingBounds[] controls = [new(.32, .48, .27, .31)];
+        HandTrackingBounds[] referenceRegions = [new(.10, .60, .18, .19), new(.62, .60, .22, .19)];
+        var scene = Scene() with { BoardSearchRegions = controls, BoardReferenceRegions = referenceRegions };
+        var tracker = new HandAcquisitionPresenceTracker();
+        Require(Feed(tracker, Camera(scene), scene, 0).Hints.Count == 0,
+            "Unoccluded points of interest did not match their generated reference.");
+        int restrictedCells = tracker.SampledCellCount;
+        var unrestricted = new HandAcquisitionPresenceTracker();
+        Feed(unrestricted, Camera(scene), Scene(), 0);
+        Require(restrictedCells > 80 && restrictedCells < unrestricted.SampledCellCount * .45,
+            "Known control geometry still sampled the whole board instead of controls and exposure reference patches.");
+
+        // Change every unrelated board pixel, rather than requiring motion near
+        // a button. Neither rendering elsewhere nor a still off-button object
+        // can supply candidate evidence or expand the camera sampling footprint.
+        byte[] elsewhere = Camera(scene);
+        for (int y = 0; y < Height; y++)
+        for (int x = 0; x < Width; x++)
+        {
+            double divisor = Matrix[6] * x + Matrix[7] * y + Matrix[8];
+            double u = (Matrix[0] * x + Matrix[1] * y + Matrix[2]) / divisor;
+            double v = (Matrix[3] * x + Matrix[4] * y + Matrix[5]) / divisor;
+            // Keep one sampling-cell margin so samples at a region boundary
+            // do not mix the deliberately changed neighboring pixels.
+            if (controls.Concat(referenceRegions).Any(region => u >= region.X - .012 &&
+                u <= region.X + region.Width + .012 && v >= region.Y - .012 && v <= region.Y + region.Height + .012)) continue;
+            Set(elsewhere, x, y, 255, 0, 255);
+        }
+        Require(Feed(tracker, elsewhere, scene, 100).Hints.Count == 0 && tracker.SampledCellCount == restrictedCells,
+            "Off-button board disturbance acquired a light or caused whole-board camera sampling.");
+
+        byte[] hand = Camera(scene, brightness: 18, gain: .90, noise: 2);
+        Rectangle(hand, 265, 205, 65, 95, 60, 85, 150);
+        for (int frame = 2; frame <= 7; frame++)
+        {
+            var presence = Feed(tracker, hand, scene, frame * 100);
+            Require(presence.Hints.Count == 1 && presence.Hints[0].ControlCoverage >= HandAcquisitionPresenceTracker.MinimumControlCoverage &&
+                tracker.SampledCellCount == restrictedCells,
+                "Point-of-interest sampling lost a stationary hand or its independent exposure compensation.");
+        }
+
+        // The renewal core can cross the button edge. Read its visible white
+        // pixels as well, while retaining the measured control-area floor.
+        var light = new HandAcquisitionHint(new(200, 150, 200, 200), new(300, 285), 75, Epoch, .04);
+        byte[] litHand = Camera(scene);
+        Circle(litHand, light.Center, light.RadiusPixels, 215, 225, 220);
+        Rectangle(litHand, 283, 253, 34, 47, 85, 115, 165);
+        var retained = Feed(tracker, litHand, scene, 1000, light, 700);
+        Require(retained.IlluminatedPresence == true && retained.Hints[0].ControlCoverage >= HandAcquisitionPresenceTracker.MinimumControlCoverage,
+            "Restricted camera sampling missed foreground under a search light crossing the control edge: " + retained.Reason + ".");
+        Require(tracker.SampledCellCount > restrictedCells && tracker.SampledCellCount < unrestricted.SampledCellCount * .50,
+            "Search-light renewal did not add just the visible white core to point-of-interest sampling.");
+        byte[] litEmpty = Camera(scene);
+        Circle(litEmpty, light.Center, light.RadiusPixels, 215, 225, 220);
+        Require(Feed(tracker, litEmpty, scene, 1100, light, 700).IlluminatedPresence == false,
+            "An empty white core was mistaken for foreground after restricting camera sampling.");
+        Require(Feed(tracker, Camera(scene), scene, 1200).Hints.Count == 0 && tracker.SampledCellCount == restrictedCells,
+            "Removing the search light retained expanded sampling or a stale foreground hint.");
     }
 
     private static void UniqueControlCoveredAtStartup()

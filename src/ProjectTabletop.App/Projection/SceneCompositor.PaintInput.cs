@@ -120,7 +120,8 @@ public sealed partial class SceneCompositor
             SyncPaintReference();
             var now = _paintClock();
             if (!PaintInputReady || now < _paintInputReadyAfter || requested.Revision != _paintReferenceRevision ||
-                frameTime > now || now - frameTime > TimeSpan.FromMilliseconds(350)) return 0;
+                frameTime < _paintInputReadyAfter || frameTime > now ||
+                now - frameTime > TimeSpan.FromMilliseconds(350)) return 0;
             int accepted = 0;
             foreach (var drop in result.Drops.Take(2))
             {

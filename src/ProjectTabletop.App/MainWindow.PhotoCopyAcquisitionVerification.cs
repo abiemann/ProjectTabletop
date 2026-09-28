@@ -37,8 +37,9 @@ public sealed partial class MainWindow
         Require(before.ExpectedScene is { Width: size, Height: size } &&
                 before.ExpectedScene.Bgra.Length == size * size * 4 &&
                 before.ExpectedScene.BoardSearchRegions is { Count: 3 } &&
-                !before.MotionFallbackEnabled,
-            "Photo Copy needs its own bounded button reference, three search masks and no motion fallback.");
+                before.RestrictAcquisitionToSearchRegions && before.RequiresSearchIllumination &&
+                before.ContinuousSearchPolygon is { Length: 4 },
+            "Photo Copy needs its own bounded button reference, three search masks and a focused object field.");
         AssertSearchCenters(before);
         AssertEmpty(before, Draw(), "The empty Photo Copy controls produced foreground candidates.");
 
@@ -84,6 +85,8 @@ public sealed partial class MainWindow
         var ready = Ready();
         Require(scene.CurrentBoardButtons.Select(button => button.Label).SequenceEqual(["Exit", "Clear", "Save"]),
             "The retained photograph did not expose the requested result controls.");
+        Require(ready.ContinuousSearchPolygon is null && ready.RestrictAcquisitionToSearchRegions,
+            "Photo Copy continued scanning the object field after Swirl changed the controls to Clear/Save.");
         Require(!ReferenceEquals(before.ExpectedScene, ready.ExpectedScene) &&
                 !before.ExpectedScene!.Bgra.SequenceEqual(ready.ExpectedScene!.Bgra),
             "Clear/Save reused the old Swirl/Copy text template.");
@@ -115,7 +118,8 @@ public sealed partial class MainWindow
             var presence = detector.Update(size, size, size * 4, occupied, ready.SearchPolygon,
                 ready.ExpectedScene, now, now);
             Require(presence.Hints.Count > 0 && presence.Hints.Any(hint =>
-                    Math.Abs(hint.Center.X - center.X) < 65 && Math.Abs(hint.Center.Y - center.Y) < 65),
+                    Math.Abs(hint.Center.X - center.X) < 65 && Math.Abs(hint.Center.Y - center.Y) < 65 &&
+                    hint.ControlCoverage is double coverage && double.IsFinite(coverage) && coverage >= .07),
                 $"Stationary fingers over {button.Label} produced no useful crop on the first frame: {presence.Reason}.");
             scene.CompleteHandAcquisition(ready, presence.Hints, [], now);
             var illuminated = scene.GetHandAcquisitionContext(now)!;
@@ -137,7 +141,7 @@ public sealed partial class MainWindow
         ready = Ready();
         var handCenter = CameraPoint(.5, .8875);
         var hint = new HandAcquisitionHint(new(handCenter.X - 100, handCenter.Y - 100, 200, 200),
-            handCenter, 75, now, .08);
+            handCenter, 75, now, .08, ControlCoverage: .10);
         scene.CompleteHandAcquisition(ready, [hint], [], now.AddSeconds(-1));
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null, "A stale camera frame relit the controls.");
         scene.CompleteHandAcquisition(ready, [hint], [], now.AddSeconds(1));
@@ -184,6 +188,7 @@ public sealed partial class MainWindow
             "The isolated verification changed the live camera, projector or board.");
         return new { passed = true, stationaryFirstFrameOverExitClearSave = true,
             realRenderedButtonReference = true, boundedButtonMasks = true, motionFallbackDisabled = true,
+            focusedObjectFieldStopsAfterSwirl = true,
             textChangesRefreshReference = true, swirlStatusObjectAndSearchLightsDoNotRetrigger = true,
             acquisitionCannotSelect = true, confirmedHandHandover = true,
             staleResetNavigationAndExecuteSuppression = true, liveHardwareUnchanged = true };

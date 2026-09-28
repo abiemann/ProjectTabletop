@@ -34,22 +34,22 @@ public sealed partial class MainWindow
         scene.SetBoardSetup(false);
         scene.ShowPaint();
         Draw();
+        var clearFilm = scene.CapturePaintArtworkForVerification();
         Require(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(["menu", "paint-save"]) &&
                 scene.CurrentBoardButtons[0].Label == "Exit" && scene.CurrentBoardButtons[1].Label == "Save" &&
                 !scene.CanSavePaint && !scene.TryBeginPaintSave(out _),
             "A blank Paint board did not expose Exit and an unavailable Save.");
 
-        // One drop lies in the old reserved header. Another remains wet in the
-        // body, so an export that only copies settled paint cannot pass.
+        // One drop lies in the old reserved header. Another evolves in the
+        // body, so an export of a static cache cannot substitute for the field.
         Require(scene.AddPaintDrop(new(.50, .085), .10, now),
             "The former Paint header cannot retain paint beneath its floating overlays.");
         now += TimeSpan.FromMilliseconds(250);
         Require(scene.AddPaintDrop(new(.50, .55), .09, now), "The active artwork fixture rejected its body drop.");
-        now += TimeSpan.FromSeconds(2);
-        Draw();
+        Advance(2);
         var beforeSnapshot = scene.GetPaintDiagnostics();
-        Require(beforeSnapshot.ActiveDrops == 2 && beforeSnapshot.SettledDrops == 0 && scene.CanSavePaint &&
-                scene.CurrentBoardButtons[1].Enabled, "Wet paint did not enable Save before settling.");
+        Require(beforeSnapshot.ActiveDrops > 0 && scene.CanSavePaint && scene.CurrentBoardButtons[1].Enabled,
+            "The evolving wet field did not enable Save.");
 
         long eventId = 120000;
         var firstFrame = await Pinch();
@@ -59,20 +59,21 @@ public sealed partial class MainWindow
         Require(!scene.TryTakePaintSaveRequest(firstFrame, out _) && !scene.TryBeginPaintSave(out _) &&
                 !scene.CanSavePaint && scene.GetPaintSaveStatus(now) == "Saving image…",
             "A consumed or busy Save request could be started again.");
-        AssertArtwork(firstImage);
+        AssertArtwork(firstImage, clearFilm);
         Require(Math.Abs(firstImage.Width - outputWidth * .93 * (1 - inset)) <= 3 &&
                 Math.Abs(firstImage.Height - outputHeight * .93 * (1 - inset)) <= 3 &&
                 Math.Abs(firstImage.Width / (double)firstImage.Height - 16d / 9) < .003 &&
                 firstImage.Width > 3000 && firstImage.Height > 1800,
             "Paint Save resized or stretched the physical board instead of using its native projected pixels.");
         var afterSnapshot = scene.GetPaintDiagnostics();
-        Require(afterSnapshot.ActiveDrops == beforeSnapshot.ActiveDrops && afterSnapshot.SettledDrops == 0 &&
-                afterSnapshot.DropCount == beforeSnapshot.DropCount,
-            "Taking a Paint snapshot forced the live animation to finish or changed its drops.");
+        Require(afterSnapshot.ActiveDrops == beforeSnapshot.ActiveDrops &&
+                afterSnapshot.DropCount == beforeSnapshot.DropCount &&
+                afterSnapshot.Fluid!.SimulationSteps == beforeSnapshot.Fluid!.SimulationSteps,
+            "Taking a Paint snapshot forced the live field to finish or changed its deposited drops.");
 
         var busyFrame = await Pinch();
         Require(!scene.TryTakePaintSaveRequest(busyFrame, out _), "A second selection queued a Save while one was busy.");
-        now += TimeSpan.FromSeconds(2);
+        Advance(2);
         Require(scene.AddPaintDrop(new(.73, .62), .06, now), "Saving blocked new paint from reaching the canvas.");
         Draw();
         Require(frozenPixels.SequenceEqual(firstImage.BgraPixels) && scene.IsPaintMemoryImageCurrent(firstImage),
@@ -199,6 +200,15 @@ public sealed partial class MainWindow
             using var drawing = target.CreateDrawingSession();
             scene.Draw(drawing, outputWidth, outputHeight, preview: false, runningSlowly: false);
         }
+        void Advance(double seconds)
+        {
+            int frames = (int)Math.Ceiling(seconds * 60);
+            for (int frame = 0; frame < frames; frame++)
+            {
+                now += TimeSpan.FromSeconds(seconds / frames);
+                Draw();
+            }
+        }
         async Task<DateTimeOffset> Pinch(bool repeat = false)
         {
             Draw();
@@ -223,9 +233,11 @@ public sealed partial class MainWindow
             Require(data.DetachPixelData().SequenceEqual(expected.BgraPixels),
                 "The saved PNG differs from the frozen artwork pixels.");
         }
-        static void AssertArtwork(SceneCompositor.PaintMemoryImage image)
+        static void AssertArtwork(SceneCompositor.PaintMemoryImage image, SceneCompositor.PaintMemoryImage blankFilm)
         {
             Require(image.BgraPixels.Length == checked(image.Width * image.Height * 4), "The Paint snapshot has invalid pixel storage.");
+            Require(image.Width == blankFilm.Width && image.Height == blankFilm.Height,
+                "The blank clear-film reference has different export geometry.");
             int upperPaint = 0, bodyPaint = 0;
             for (int y = 0; y < image.Height; y++)
             for (int x = 0; x < image.Width; x++)
@@ -233,19 +245,20 @@ public sealed partial class MainWindow
                 int offset = (y * image.Width + x) * 4;
                 var pixels = image.BgraPixels;
                 Require(pixels[offset + 3] == 255, "Paint export lost its opaque canvas background.");
-                bool painted = Math.Abs(pixels[offset] - 12) > 12 || Math.Abs(pixels[offset + 1] - 5) > 12 ||
-                    Math.Abs(pixels[offset + 2] - 3) > 12;
+                int difference = Math.Max(Math.Abs(pixels[offset] - blankFilm.BgraPixels[offset]),
+                    Math.Max(Math.Abs(pixels[offset + 1] - blankFilm.BgraPixels[offset + 1]),
+                        Math.Abs(pixels[offset + 2] - blankFilm.BgraPixels[offset + 2])));
+                bool painted = difference > 12;
                 double u = x / (double)image.Width, v = y / (double)image.Height;
                 if (painted && u > .38 && u < .62 && v < .17) upperPaint++;
                 if (painted && u > .35 && u < .65 && v > .35 && v < .75) bodyPaint++;
                 // Quiet regions under the bottom controls, top-left title and
-                // transient status must be plain canvas in this export fixture.
+                // transient status must retain clear film in this export fixture.
                 // Their live labels, backgrounds and hover are separate layers.
                 if (((u > .09 && u < .17 || u > .83 && u < .91) && v > .90 && v < .935) ||
                     (u > .065 && u < .155 && v > .019 && v < .043) ||
                     (u > .35 && u < .65 && v > .90 && v < .935))
-                    Require(Math.Abs(pixels[offset] - 12) <= 1 && Math.Abs(pixels[offset + 1] - 5) <= 1 &&
-                            Math.Abs(pixels[offset + 2] - 3) <= 1,
+                    Require(difference <= 3,
                         "The saved painting includes a floating control, label or status overlay.");
             }
             Require(upperPaint > 1000 && bodyPaint > 1000,

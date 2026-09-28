@@ -1,5 +1,6 @@
 #if DEBUG
 using Microsoft.Graphics.Canvas;
+using ProjectTabletop.App.Camera;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
@@ -73,6 +74,13 @@ public sealed partial class MainWindow
             "The shared-board verification changed live hardware or navigation.");
         return new { passed = true, stationaryFirstFrameForEveryControl = true, controls = tested,
             noEmptyBoardCandidates = true, assistanceCannotSelect = true,
+            sevenPercentCoverageRequiredAcrossBoards = true,
+            buttonRegionsOnlyBeforeIllumination = true, illuminationBeforeFocusedModelSearch = true,
+            noBlindButtonSweepOrWholeBoardMotionFallback = true,
+            resetClearsForegroundQueryHistory = true,
+            boundedPhotoCopyFieldAndUnrestrictedGestureTesterPreserved = true,
+            rectangularPhotoCopyFieldCoveredWithoutStretching = true,
+            paintControlSearchWithoutSpotlight = true,
             topBlackjackBackAndResetIncluded = true, mediaAndCalibrationInactive = true,
             liveHardwareUnchanged = true };
 
@@ -88,6 +96,10 @@ public sealed partial class MainWindow
                     context.ExpectedScene!.BoardSearchRegions?.Count == scene.CurrentBoardButtons.Count,
                 label + " omitted a button from its camera centers or foreground masks.");
             var screen = scene.CurrentBoardScreen;
+            Require(context.RestrictAcquisitionToSearchRegions == (screen != BoardScreen.HandTracking) &&
+                    context.RequiresSearchIllumination == (screen != BoardScreen.Paint) &&
+                    (context.ContinuousSearchPolygon is not null) == (screen == BoardScreen.PhotoCopy),
+                label + " did not preserve its intended acquisition policy.");
             long gameRevision = scene.BlackjackState.Revision;
             var ids = scene.CurrentBoardButtons.Select(button => button.Id).ToArray();
             for (int index = 0; index < ids.Length; index++)
@@ -104,6 +116,49 @@ public sealed partial class MainWindow
                     context.SearchPolygon, context.ExpectedScene, now, now);
                 Require(emptyResult.BaselineReady && emptyResult.Hints.Count == 0,
                     label + " found an empty-table hand candidate: " + emptyResult.Reason);
+                var emptyQuery = Query(empty, context);
+                Require(emptyQuery.Hints.Count == 0 && emptyQuery.LightingHints.Count == 0,
+                    label + "/" + button.Label + " generated a candidate on its empty rendered board.");
+                if (context.ContinuousSearchPolygon is null)
+                    Require(emptyQuery.SearchRegions.Count == 0,
+                        label + "/" + button.Label + " blindly searched an undisturbed button.");
+                else
+                {
+                    Require(emptyQuery.SearchRegions.Count is > 0 and <= 2 &&
+                            emptyQuery.SearchRegions.All(region => region.Width == region.Height &&
+                                region.X >= 0 && region.Y >= 0 &&
+                                region.X + region.Width <= size && region.Y + region.Height <= size),
+                        "Photo Copy lost its bounded native square object-field search.");
+                    foreach (var field in new PixelPoint[][]
+                    {
+                        [new(100, 300), new(900, 300), new(900, 500), new(100, 500)],
+                        [new(300, 100), new(500, 100), new(500, 900), new(300, 900)],
+                        [new(288, 146), new(854, 712), new(712, 854), new(146, 288)]
+                    })
+                    {
+                        var fieldQuery = Query(empty, context with { ContinuousSearchPolygon = field });
+                        Require(fieldQuery.SearchRegions.Count is > 0 and <= 2 &&
+                                fieldQuery.SearchRegions.All(region => region.Width == region.Height) &&
+                                field.All(point => fieldQuery.SearchRegions.Any(region =>
+                                    point.X >= region.X && point.X <= region.X + region.Width &&
+                                    point.Y >= region.Y && point.Y <= region.Y + region.Height)) &&
+                                fieldQuery.SearchRegions.Any(region =>
+                                    field.Average(point => point.X) >= region.X &&
+                                    field.Average(point => point.X) <= region.X + region.Width &&
+                                    field.Average(point => point.Y) >= region.Y &&
+                                    field.Average(point => point.Y) <= region.Y + region.Height),
+                            "A wide or tall Photo Copy field left its middle unsearched or stretched a model crop.");
+                    }
+                }
+                // A large, stationary off-button occlusion must not become a
+                // control candidate or a whole-board motion fallback search.
+                var outside = (byte[])empty.Clone();
+                var outsideCenter = CameraPoint(.5, .2);
+                Fill(outside, (int)outsideCenter.X - 30, (int)outsideCenter.Y - 30, 60, 60, 15, 20, 225);
+                var outsideQuery = Query(outside, context);
+                Require(outsideQuery.LightingHints.Count == 0 &&
+                        outsideQuery.SearchRegions.SequenceEqual(emptyQuery.SearchRegions),
+                    label + "/" + button.Label + " searched an unrelated board disturbance.");
                 var occupied = (byte[])empty.Clone();
                 // A lone Back button has to work when the arriving hand covers
                 // most of its interior. The separate static header/panel supplies
@@ -120,7 +175,8 @@ public sealed partial class MainWindow
                 var presence = new HandAcquisitionPresenceTracker().Update(size, size, size * 4, occupied,
                     context.SearchPolygon, context.ExpectedScene, now, now);
                 if (!presence.Hints.Any(hint => Math.Abs(hint.Center.X - center.X) < 65 &&
-                        Math.Abs(hint.Center.Y - center.Y) < 65))
+                        Math.Abs(hint.Center.Y - center.Y) < 65 &&
+                        hint.ControlCoverage is double coverage && double.IsFinite(coverage) && coverage >= .07))
                 {
                     string directory = Path.Combine(_appDataDirectory, "SharedAcquisitionFailures", Guid.NewGuid().ToString("N"));
                     Directory.CreateDirectory(directory);
@@ -139,14 +195,46 @@ public sealed partial class MainWindow
                     throw new InvalidOperationException(label + "/" + button.Label +
                         " missed stationary fingers on its first frame: " + presence.Reason + ". Diagnostic: " + directory);
                 }
+                var measured = presence.Hints.First(hint => Math.Abs(hint.Center.X - center.X) < 65 &&
+                    Math.Abs(hint.Center.Y - center.Y) < 65 && hint.ControlCoverage is double coverage &&
+                    double.IsFinite(coverage) && coverage >= .07);
+                var pendingQuery = Query(occupied, context);
+                Require(pendingQuery.LightingHints.Any(hint => hint.Center == measured.Center),
+                    label + "/" + button.Label + " did not pass measured control evidence to illumination.");
+                Require(screen == BoardScreen.Paint
+                        ? pendingQuery.SearchRegions.Count > 0 &&
+                            pendingQuery.SearchRegions.Any(region => region == measured.SearchBounds)
+                        : pendingQuery.SearchRegions.Count == 0,
+                    label + "/" + button.Label + " searched before its spotlight, or lost Paint's unlit control crop.");
+                var resetTracker = new HandAcquisitionPresenceTracker();
+                CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
+                    context, resetTracker, now);
+                resetTracker.Reset();
+                var afterReset = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, empty, now),
+                    context with { Revision = context.Revision + 1 }, resetTracker, now);
+                Require(afterReset.Hints.Count == 0 && afterReset.LightingHints.Count == 0 &&
+                        afterReset.SearchRegions.SequenceEqual(emptyQuery.SearchRegions),
+                    label + "/" + button.Label + " retained foreground query evidence after a context/camera reset.");
+                foreach (double? coverage in new double?[] { null, .069999 })
+                {
+                    scene.CompleteHandAcquisition(context, [measured with { ControlCoverage = coverage }], [], now);
+                    Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
+                        label + "/" + button.Label + " accepted motion-only or sub-7% foreground evidence.");
+                }
                 scene.CompleteHandAcquisition(context, presence.Hints, [], now);
                 var lit = scene.GetHandAcquisitionContext(now)!;
                 if (screen == BoardScreen.Paint)
                     Require(lit.IlluminatedHint is null && CountWhite(Draw(), center) == CountWhite(empty, center),
                         "Paint must retain its Exit search crop without projecting a spotlight.");
                 else
+                {
                     Require(lit.IlluminatedHint is not null && CountWhite(Draw(), center) > CountWhite(empty, center) + 800,
                         label + "/" + button.Label + " did not illuminate its control.");
+                    var focusedQuery = Query(occupied, lit);
+                    Require(focusedQuery.SearchRegions.Count is > 0 and <= 2 &&
+                            focusedQuery.SearchRegions.Contains(lit.IlluminatedHint!.SearchBounds),
+                        label + "/" + button.Label + " did not focus inference on its illuminated point of interest.");
+                }
                 Require(scene.CurrentBoardScreen == screen && scene.BlackjackState.Revision == gameRevision &&
                         scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(ids) &&
                         scene.ActiveHandSpotlightCount == 0 && scene.HoveredBoardButtons.Count == 0 &&
@@ -159,6 +247,9 @@ public sealed partial class MainWindow
         }
         PixelPoint CameraPoint(double u, double v) => new(size * (.035 + .93 * (inset / 2 + u * (1 - inset))),
             size * (.035 + .93 * (inset / 2 + v * (1 - inset))));
+        HandAcquisitionQuery Query(byte[] pixels, SceneCompositor.HandAcquisitionContext context) =>
+            CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, pixels, now), context,
+                new HandAcquisitionPresenceTracker(), now);
         byte[] Draw()
         {
             using (var drawing = target.CreateDrawingSession()) scene.Draw(drawing, size, size, false, false);

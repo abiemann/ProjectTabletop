@@ -64,8 +64,13 @@ public sealed class HandTrackingEngine : IDisposable
     /// If all raw fits fail, those regions may receive a bounded palm-only color
     /// correction retry. Landmark inference always uses the original RGB frame.
     /// Invalid hints are ignored; hints never produce or retain a detection.</param>
+    /// <param name="restrictAcquisitionToSearchRegions">When true, new palm searches
+    /// use only the supplied valid regions. Existing hands still receive fresh
+    /// landmark inference from their own tracked ROIs. Without a region or a
+    /// tracked hand, detection waits for a control disturbance.</param>
     public IReadOnlyList<HandDetection> Detect(int width, int height, int stride, byte[] bgra,
-        IReadOnlyList<HandTrackingBounds>? searchRegions = null)
+        IReadOnlyList<HandTrackingBounds>? searchRegions = null,
+        bool restrictAcquisitionToSearchRegions = false)
     {
         lock (_gate)
         {
@@ -76,13 +81,28 @@ public sealed class HandTrackingEngine : IDisposable
                 stride < (long)width * 4 || bgra.Length < (long)(height - 1) * stride + width * 4L)
                 throw new ArgumentException("Invalid BGRA dimensions, stride, or buffer length.");
 
+            var focusedRegions = ValidSearchRegions(searchRegions, width, height);
+            var diagnostics = _captureDiagnostics ? new DetectionTrace(_previousHands.Count) : null;
+            bool canTrack = _previousHands.Count > 0 && width == _previousWidth && height == _previousHeight;
+            if (restrictAcquisitionToSearchRegions && focusedRegions.Count == 0 && !canTrack)
+            {
+                // An idle button board needs no RGB copy or model inference.
+                // Regions only schedule inference; they never stand in for it.
+                if (diagnostics is not null) diagnostics.FullSearchReason = "waiting-for-control-disturbance";
+                _lastDiagnostics = diagnostics?.Finish([]);
+                _previousHands = [];
+                _previousWidth = width;
+                _previousHeight = height;
+                _framesSincePalmSearch = 0;
+                return [];
+            }
+
             using Mat frame = Mat.FromPixelData(height, width, MatType.CV_8UC4, bgra, stride);
             using var rgb = new Mat();
             Cv2.CvtColor(frame, rgb, ColorConversionCodes.BGRA2RGB);
             var hands = new List<HandDetection>(2);
             var trackedPreviousBoundsIou = new Dictionary<HandDetection, double>(ReferenceEqualityComparer.Instance);
-            var diagnostics = _captureDiagnostics ? new DetectionTrace(_previousHands.Count) : null;
-            if (width == _previousWidth && height == _previousHeight)
+            if (canTrack)
             {
                 // Once acquired, a hand's own palm landmarks provide a much
                 // larger, steadier crop than locating its tiny palm afresh in
@@ -109,19 +129,22 @@ public sealed class HandTrackingEngine : IDisposable
             }
 
             // Periodically search for an arriving second hand. A lost track
-            // triggers acquisition immediately, including on this very frame.
-            bool search = hands.Count == 0 || hands.Count < _previousHands.Count ||
+            // requests acquisition immediately; restricted boards must still
+            // supply a disturbed control crop before a palm search can run.
+            bool searchRequested = hands.Count == 0 || hands.Count < _previousHands.Count ||
                 ++_framesSincePalmSearch >= 6;
+            bool search = searchRequested && (!restrictAcquisitionToSearchRegions || focusedRegions.Count > 0);
             if (diagnostics is not null)
             {
                 diagnostics.FullSearch = search;
-                diagnostics.FullSearchReason = !search ? "tracking-only" : hands.Count == 0
-                    ? "no-tracked-hand" : hands.Count < _previousHands.Count ? "lost-tracked-hand" : "periodic";
+                diagnostics.FullSearchReason = search
+                    ? hands.Count == 0 ? "no-tracked-hand" : hands.Count < _previousHands.Count ? "lost-tracked-hand" : "periodic"
+                    : hands.Count == 0 && restrictAcquisitionToSearchRegions ? "waiting-for-control-disturbance" : "tracking-only";
             }
+            if (searchRequested) _framesSincePalmSearch = 0;
             if (search)
             {
-                _framesSincePalmSearch = 0;
-                FindHands(rgb, hands, diagnostics, searchRegions);
+                FindHands(rgb, hands, diagnostics, focusedRegions, restrictAcquisitionToSearchRegions);
             }
             diagnostics?.RecordPreNms(hands);
 
@@ -159,34 +182,36 @@ public sealed class HandTrackingEngine : IDisposable
     }
 
     private void FindHands(Mat rgb, List<HandDetection> hands, DetectionTrace? diagnostics,
-        IReadOnlyList<HandTrackingBounds>? searchRegions)
+        IReadOnlyList<Rect> focusedRegions, bool restrictAcquisitionToSearchRegions)
     {
         var focusedHands = new List<HandDetection>(2);
-        var focusedRegions = ValidSearchRegions(searchRegions, rgb.Width, rgb.Height);
         foreach (var region in focusedRegions)
             FindHandsInView(rgb, region, "motion-roi", focusedHands, diagnostics);
 
-        var fullProposals = DetectPalms(rgb);
-        diagnostics?.Searches.Add(new("full-frame", new(0, 0, rgb.Width, rgb.Height), fullProposals.Count));
-        foreach (Palm palm in fullProposals)
+        if (!restrictAcquisitionToSearchRegions)
         {
-            HandDetection? hand = DetectHand(rgb, palm, diagnostics?.Begin("full-frame", palm,
-                searchView: new(0, 0, rgb.Width, rgb.Height)));
-            if (hand is not null) hands.Add(hand);
-        }
-
-        // Letterboxing a wide webcam image into 192 pixels makes a tabletop
-        // hand very small. Recheck overlapping square views when acquisition
-        // fails or the observed hand is small relative to the whole image.
-        // Refine on the original image so a tile boundary cannot cut off fingers.
-        int side = Math.Min(rgb.Width, rgb.Height), longest = Math.Max(rgb.Width, rgb.Height);
-        if (longest > side * 1.25 && (hands.Count == 0 ||
-            hands.Any(hand => HandExtent(hand) < longest * 0.35)))
-        {
-            foreach (int offset in new[] { 0, (longest - side) / 2, longest - side }.Distinct())
+            var fullProposals = DetectPalms(rgb);
+            diagnostics?.Searches.Add(new("full-frame", new(0, 0, rgb.Width, rgb.Height), fullProposals.Count));
+            foreach (Palm palm in fullProposals)
             {
-                int x = rgb.Width > rgb.Height ? offset : 0, y = rgb.Height > rgb.Width ? offset : 0;
-                FindHandsInView(rgb, new(x, y, side, side), "tile", hands, diagnostics);
+                HandDetection? hand = DetectHand(rgb, palm, diagnostics?.Begin("full-frame", palm,
+                    searchView: new(0, 0, rgb.Width, rgb.Height)));
+                if (hand is not null) hands.Add(hand);
+            }
+
+            // Letterboxing a wide webcam image into 192 pixels makes a tabletop
+            // hand very small. Recheck overlapping square views when acquisition
+            // fails or the observed hand is small relative to the whole image.
+            // Refine on the original image so a tile boundary cannot cut off fingers.
+            int side = Math.Min(rgb.Width, rgb.Height), longest = Math.Max(rgb.Width, rgb.Height);
+            if (longest > side * 1.25 && (hands.Count == 0 ||
+                hands.Any(hand => HandExtent(hand) < longest * 0.35)))
+            {
+                foreach (int offset in new[] { 0, (longest - side) / 2, longest - side }.Distinct())
+                {
+                    int x = rgb.Width > rgb.Height ? offset : 0, y = rgb.Height > rgb.Width ? offset : 0;
+                    FindHandsInView(rgb, new(x, y, side, side), "tile", hands, diagnostics);
+                }
             }
         }
         // Do not let a focused crop's success disable the ordinary tile-search

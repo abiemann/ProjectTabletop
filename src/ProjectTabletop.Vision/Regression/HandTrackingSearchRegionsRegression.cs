@@ -15,8 +15,10 @@ internal static class HandTrackingSearchRegionsRegression
         Cv2.CvtColor(original, photograph, ColorConversionCodes.BGR2BGRA);
         CheckSmallHands(engine, photograph);
         CheckOtherHandAndCadence(engine, photograph);
+        CheckRestrictedAcquisition(engine, photograph);
         Console.WriteLine("Focused hand search: native square crops, tiny-hand acquisition, full-frame landmark coordinates, " +
-            "invalid/duplicate/two-region limits, unchanged search cadence, fresh tracked priority, fallback second hand and disappearance passed.");
+            "invalid/duplicate/two-region limits, unchanged search cadence, fresh tracked priority, fallback second hand, " +
+            "and restricted control acquisition with idle/lost-track waiting passed.");
     }
 
     private static void CheckValidationAndLimits(HandTrackingEngine engine)
@@ -45,6 +47,15 @@ internal static class HandTrackingSearchRegionsRegression
         Require(trace.Searches.Take(2).All(search => search.Source == "motion-roi") &&
             trace.Searches.Skip(2).SequenceEqual(ordinarySearches),
             "Focused hints changed or suppressed ordinary full-frame/tile fallback searches.");
+
+        engine.ResetTracking();
+        absent = Detect(engine, blank, [.. invalid, first, first, duplicate, second, third], restricted: true);
+        trace = engine.LastDiagnostics!;
+        focused = trace.Searches.Where(search => search.Source == "motion-roi").ToArray();
+        Require(absent.Count == 0 && focused.Length == 2 && focused[0].ViewBounds == first &&
+            focused[1].ViewBounds == new HandTrackingBounds(380, 250, 150, 150) &&
+            trace.Searches.All(search => search.Source is "motion-roi" or "motion-roi-normalized"),
+            "Restricted acquisition bypassed region validation/limits or searched outside its two valid crops.");
     }
 
     private static void CheckSmallHands(HandTrackingEngine engine, Mat photograph)
@@ -135,12 +146,84 @@ internal static class HandTrackingSearchRegionsRegression
             "Old focused hints retained vanished hands or skipped normal reacquisition.");
     }
 
+    private static void CheckRestrictedAcquisition(HandTrackingEngine engine, Mat photograph)
+    {
+        using var frame = BlankFrame();
+        PixelPoint near = PlaceHand(frame, photograph, 112, 1400, 540);
+        PlaceHand(frame, photograph, 233, 350, 540);
+        HandTrackingBounds hint = new(1240, 380, 320, 320);
+        engine.ResetTracking();
+        foreach (IReadOnlyList<HandTrackingBounds>? hints in new IReadOnlyList<HandTrackingBounds>?[]
+            { null, [], [new(-1, 0, 100, 100), new(0, 0, 100, 99), new(double.NaN, 0, 320, 320)] })
+        {
+            var idle = Detect(engine, frame, hints, restricted: true);
+            var trace = engine.LastDiagnostics!;
+            Require(idle.Count == 0 && !trace.FullSearch && trace.Searches.Count == 0 &&
+                trace.Candidates.Count == 0 && trace.TrackedRoiAttempts == 0 &&
+                trace.FullSearchReason == "waiting-for-control-disturbance",
+                "A restricted idle frame inferred a hand without a valid control crop.");
+        }
+
+        var hands = Detect(engine, frame, [hint], restricted: true);
+        Require(hands.Count == 1 && Distance(hands[0].IndexTip, near) < 12 &&
+            engine.LastDiagnostics!.Searches.All(search => search.Source is "motion-roi" or "motion-roi-normalized") &&
+            engine.LastDiagnostics.Candidates.Any(candidate => candidate.Source == "motion-roi" &&
+                candidate.Hand is not null && candidate.SearchViewBounds == hint &&
+                Distance(candidate.Hand.IndexTip, near) < 12),
+            "Restricted acquisition missed its native crop or acquired the other hand outside it.");
+
+        // Once the control's hand has been acquired, fresh ROI landmarks do not
+        // require a continuing disturbance hint or periodic whole-frame scans.
+        for (int frameIndex = 1; frameIndex <= 12; frameIndex++)
+        {
+            hands = Detect(engine, frame, restricted: true);
+            var trace = engine.LastDiagnostics!;
+            Require(hands.Count == 1 && Distance(hands[0].IndexTip, near) < 12 &&
+                trace.TrackedRoiAttempts == 1 && !trace.FullSearch && trace.Searches.Count == 0 &&
+                trace.Candidates.All(candidate => candidate.Source == "tracked-roi"),
+                "Restricted tracking lost fresh ROI continuity or periodically scanned outside its controls.");
+        }
+        for (int frameIndex = 1; frameIndex <= 6; frameIndex++)
+        {
+            hands = Detect(engine, frame, [hint], restricted: true);
+            var trace = engine.LastDiagnostics!;
+            Require(hands.Count == 1 && Distance(hands[0].IndexTip, near) < 12 &&
+                trace.Searches.All(search => search.Source is "motion-roi" or "motion-roi-normalized"),
+                "Restricted periodic acquisition searched outside the control crop.");
+            if (frameIndex == 6)
+                Require(trace.FullSearchReason == "periodic" &&
+                    trace.Searches.Count(search => search.Source == "motion-roi") == 1,
+                    "Restricted control search changed the six-frame periodic search cadence.");
+        }
+
+        using var blank = BlankFrame();
+        hands = Detect(engine, blank, restricted: true);
+        var lost = engine.LastDiagnostics!;
+        Require(hands.Count == 0 && lost.TrackedRoiAttempts == 1 && !lost.FullSearch &&
+            lost.Searches.Count == 0 && lost.FullSearchReason == "waiting-for-control-disturbance",
+            "A lost restricted hand triggered a global search or retained stale landmarks.");
+        hands = Detect(engine, frame, restricted: true);
+        Require(hands.Count == 0 && engine.LastDiagnostics!.TrackedRoiAttempts == 0 &&
+            engine.LastDiagnostics.Searches.Count == 0,
+            "A returning hand was acquired without a new control crop after its old track vanished.");
+        hands = Detect(engine, frame, [hint], restricted: true);
+        Require(hands.Count == 1 && Distance(hands[0].IndexTip, near) < 12,
+            "A fresh control crop failed to reacquire the vanished restricted hand.");
+
+        using var resized = new Mat(480, 640, MatType.CV_8UC4, new Scalar(128, 128, 128, 255));
+        hands = Detect(engine, resized, [hint], restricted: true);
+        Require(hands.Count == 0 && engine.LastDiagnostics!.PreviousHandCount == 1 &&
+            engine.LastDiagnostics.TrackedRoiAttempts == 0 && engine.LastDiagnostics.Searches.Count == 0 &&
+            engine.LastDiagnostics.FullSearchReason == "waiting-for-control-disturbance",
+            "A changed camera size reused an out-of-frame control crop or old hand ROI.");
+    }
+
     private static IReadOnlyList<HandDetection> Detect(HandTrackingEngine engine, Mat frame,
-        IReadOnlyList<HandTrackingBounds>? hints = null)
+        IReadOnlyList<HandTrackingBounds>? hints = null, bool restricted = false)
     {
         var pixels = new byte[frame.Width * frame.Height * 4];
         Marshal.Copy(frame.Data, pixels, 0, pixels.Length);
-        return engine.Detect(frame.Width, frame.Height, frame.Width * 4, pixels, hints);
+        return engine.Detect(frame.Width, frame.Height, frame.Width * 4, pixels, hints, restricted);
     }
 
     private static Mat BlankFrame() => new(1080, 1920, MatType.CV_8UC4, new Scalar(128, 128, 128, 255));

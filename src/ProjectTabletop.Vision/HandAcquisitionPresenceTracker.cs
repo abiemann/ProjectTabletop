@@ -36,6 +36,7 @@ public sealed class HandAcquisitionPresenceTracker
     private bool[]? _templateEdges;
     private bool[]? _templateMask;
     private bool[]? _templateReferenceMask;
+    private bool[]? _templateSampleMask;
     private double[]?[]? _edgeColors;
     private int[]? _controlRegions;
     private double[]? _sampleBoardAreas;
@@ -44,6 +45,7 @@ public sealed class HandAcquisitionPresenceTracker
     private int _width, _height, _columns, _rows, _validCount;
     private double _left, _top, _scale;
     private DateTimeOffset _lastTime;
+    internal int SampledCellCount { get; private set; }
 
     public HandAcquisitionPresenceResult Update(int width, int height, int stride, byte[] bgra,
         IReadOnlyList<PixelPoint> searchPolygon, HandAcquisitionSceneImage? expectedScene,
@@ -68,14 +70,15 @@ public sealed class HandAcquisitionPresenceTracker
         if (width != _width || height != _height || !_polygon.SequenceEqual(searchPolygon))
             if (!Configure(width, height, searchPolygon)) return Empty("invalid-search-polygon");
         _lastTime = frameTime;
+        SampledCellCount = 0;
         if (_validCount < 48) return Empty("insufficient-board-area");
-        double[] current = Sample(stride, bgra);
         if (!ReferenceEquals(_scene, expectedScene)) ConfigureTemplate(expectedScene);
         // A supplied render is authoritative. Invalid geometry or an empty control
         // mask must not silently learn a hand already present as empty camera background.
         if (expectedScene is not null && _expected is null) return Empty("invalid-rendered-scene");
 
         bool activeLight = IsValidLight(illuminatedHint);
+        double[] current = Sample(stride, bgra, activeLight ? illuminatedHint : null);
         bool[] allowed = (bool[])(_templateMask ?? _mask).Clone();
         // Compact labeled controls can consist almost entirely of raster edges.
         // Keep those pixels as candidates, comparing nearby expected colors, but
@@ -146,6 +149,7 @@ public sealed class HandAcquisitionPresenceTracker
         if (!modelReliable) Array.Clear(foreground);
 
         bool? illuminatedPresence = null;
+        double? illuminatedControlCoverage = null;
         string reason = modelReliable ? usingTemplate ? "rendered-scene-foreground" : "camera-reference-foreground"
             : "photometric-reference-uncertain";
         if (activeLight)
@@ -154,7 +158,8 @@ public sealed class HandAcquisitionPresenceTracker
                 reason = "search-light-settling";
             else
             {
-                illuminatedPresence = CheckIlluminatedCore(current, illuminatedHint!, fit, out string lightReason);
+                illuminatedPresence = CheckIlluminatedCore(current, illuminatedHint!, fit, out string lightReason,
+                    out illuminatedControlCoverage);
                 reason = lightReason;
             }
         }
@@ -164,7 +169,11 @@ public sealed class HandAcquisitionPresenceTracker
         if (illuminatedPresence == true)
         {
             hints.RemoveAll(hint => Distance(hint.Center, illuminatedHint!.Center) < illuminatedHint.RadiusPixels);
-            hints.Insert(0, illuminatedHint! with { ObservedAt = frameTime });
+            hints.Insert(0, illuminatedHint! with
+            {
+                ObservedAt = frameTime,
+                ControlCoverage = illuminatedControlCoverage
+            });
         }
         if (hints.Count > 2) hints.RemoveRange(2, hints.Count - 2);
 
@@ -178,10 +187,11 @@ public sealed class HandAcquisitionPresenceTracker
     public void Reset()
     {
         _polygon = []; _locations = []; _mask = [];
-        _baseline = _expected = null; _templateEdges = _templateMask = _templateReferenceMask = null;
+        _baseline = _expected = null; _templateEdges = _templateMask = _templateReferenceMask = _templateSampleMask = null;
         _edgeColors = null; _controlRegions = null; _sampleBoardAreas = _controlBoardAreas = null; _scene = null;
         _width = _height = _columns = _rows = _validCount = 0;
         _lastTime = default;
+        SampledCellCount = 0;
     }
 
     private HandAcquisitionPresenceResult Empty(string reason) =>
@@ -213,13 +223,21 @@ public sealed class HandAcquisitionPresenceTracker
         return true;
     }
 
-    private double[] Sample(int stride, byte[] bgra)
+    private double[] Sample(int stride, byte[] bgra, HandAcquisitionHint? illuminatedHint)
     {
         double[] result = new double[_mask.Length * 3];
+        SampledCellCount = 0;
         for (int index = 0; index < _mask.Length; index++)
         {
             if (!_mask[index]) continue;
             PixelPoint point = _locations[index];
+            // Generated controls are the points of interest. Independent static
+            // reference patches compensate camera exposure; they cannot acquire
+            // a hand. Only an active light's white core needs additional pixels.
+            if (_templateSampleMask is not null && !_templateSampleMask[index] &&
+                (illuminatedHint is null || Distance(point, illuminatedHint.Center) >= illuminatedHint.RadiusPixels * .64))
+                continue;
+            SampledCellCount++;
             for (int dy = -1; dy <= 1; dy += 2)
             for (int dx = -1; dx <= 1; dx += 2)
             {
@@ -234,7 +252,8 @@ public sealed class HandAcquisitionPresenceTracker
 
     private void ConfigureTemplate(HandAcquisitionSceneImage? scene)
     {
-        _scene = scene; _baseline = _expected = null; _templateEdges = _templateMask = _templateReferenceMask = null;
+        _scene = scene; _baseline = _expected = null;
+        _templateEdges = _templateMask = _templateReferenceMask = _templateSampleMask = null;
         _edgeColors = null;
         _controlRegions = null; _sampleBoardAreas = _controlBoardAreas = null;
         if (scene is null || scene.Width is <= 1 or > 16384 || scene.Height is <= 1 or > 16384 ||
@@ -275,6 +294,8 @@ public sealed class HandAcquisitionPresenceTracker
         _templateReferenceMask = referenceRegions is null ? null : referenceMask;
         if (regions is not null)
         {
+            _templateSampleMask = Enumerable.Range(0, _mask.Length)
+                .Select(index => templateMask[index] || referenceMask[index]).ToArray();
             _edgeColors = new double[]?[_mask.Length];
             _controlRegions = Enumerable.Repeat(-1, _mask.Length).ToArray();
             _sampleBoardAreas = new double[_mask.Length];
@@ -544,8 +565,10 @@ public sealed class HandAcquisitionPresenceTracker
         return values;
     }
 
-    private bool? CheckIlluminatedCore(double[] current, HandAcquisitionHint hint, PhotometricFit? fit, out string reason)
+    private bool? CheckIlluminatedCore(double[] current, HandAcquisitionHint hint, PhotometricFit? fit,
+        out string reason, out double? controlCoverage)
     {
+        controlCoverage = null;
         int[] core = Enumerable.Range(0, _mask.Length).Where(index => _mask[index] &&
             Distance(_locations[index], hint.Center) < hint.RadiusPixels * .64).ToArray();
         if (core.Length < 24) { reason = "insufficient-white-core"; return null; }
@@ -562,9 +585,23 @@ public sealed class HandAcquisitionPresenceTracker
             if (brightnessDrop <= 20 && colorError <= 22) continue;
             foreground[index] = true; changed++;
         }
-        if (changed >= Math.Max(8, core.Length * .035) &&
-            Components(foreground, _lastTime, Math.Max(6, (int)(core.Length * .025))).Count > 0)
-        { reason = "foreground-under-search-light"; return true; }
+        bool controlled = _templateMask is not null && _controlBoardAreas is not null;
+        // Renewal needs the same measured obstruction as unlit acquisition.
+        // The disk's own shading or a few dark pixels cannot retain a light by
+        // inheriting the coverage that started it. Components counts only fresh
+        // residual cells, and uses their mapped board area before dilation.
+        if (changed >= Math.Max(8, core.Length * .035))
+        {
+            var components = Components(foreground, _lastTime, Math.Max(6, (int)(core.Length * .025)),
+                searchMask: controlled ? _templateMask : null,
+                evidenceArea: controlled ? _templateMask!.Count(value => value) : null);
+            if (components.Count > 0)
+            {
+                controlCoverage = controlled ? components.Max(component => component.ControlCoverage) : null;
+                reason = "foreground-under-search-light";
+                return true;
+            }
+        }
 
         // A uniformly dark core might be entirely occluded. Do not call it empty unless
         // the visible color is a plausible lit board, or agrees with the fitted white response.

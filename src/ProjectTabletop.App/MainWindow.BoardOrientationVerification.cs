@@ -27,7 +27,9 @@ public sealed partial class MainWindow
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
         var referencePixels = new Dictionary<BoardScreen, byte[]>();
         var comparisons = new List<object>();
+        var firstScanComparisons = new List<object>();
         int hoverChecks = 0;
+        int firstScanHoverChecks = 0;
         string directory = Path.Combine(_appDataDirectory, "BoardOrientationVerification", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var images = new List<object>();
@@ -70,6 +72,53 @@ public sealed partial class MainWindow
                 }
                 scene.ClearHandTips();
             }
+        }
+
+        // A new output has no saved facing. Its first scan must use the
+        // projector's orientation after the ordered dots resolve camera roll,
+        // regardless of which camera-space corner the board detector lists first.
+        for (int quarterTurn = 0; quarterTurn < 4; quarterTurn++)
+        {
+            var measuredMap = CameraMap(quarterTurn);
+            var observedSpots = Enumerable.Range(0, BoardRegistration.SpotCount)
+                .Select(index => measuredMap.InverseTransform(BoardRegistration.SpotPosition(index))).ToArray();
+            var fittedMap = BoardRegistration.FitAndValidate(observedSpots, out var centerError);
+            Require(centerError < 1e-10, "The first-scan fixture's ordered dots failed their center check.");
+            foreach (bool reverse in new[] { false, true })
+                for (int first = 0; first < 4; first++)
+                {
+                    using var scene = new SceneCompositor(new BlackjackGame(seed: 173),
+                        blackjackClock: () => now, paintClock: () => now);
+                    scene.SetDisplayAspect((double)width / height);
+                    Require(scene.GetBoardFacingDegrees() is null,
+                        "The first-scan fixture unexpectedly had a saved facing direction.");
+                    var corners = CameraOrderedCorners(quarterTurn);
+                    if (reverse) Array.Reverse(corners);
+                    var ordered = Enumerable.Range(0, 4).Select(index => corners[(first + index) % 4]).ToArray();
+                    scene.SetBoardSetup(true);
+                    double inset = scene.SetDetectedBoardGrid(ordered, fittedMap);
+                    scene.SetBoardSetup(false);
+                    scene.ShowBoardMenu();
+                    Require(scene.GetBoardFacingDegrees() == 0,
+                        $"A first scan with camera rotation {quarterTurn * 90} learned camera-dependent facing.");
+                    AssertCameraMap(scene, fittedMap);
+                    var difference = Difference(referencePixels[BoardScreen.Menu], Draw(scene));
+                    Require(difference.MeanChannelError < .1 && difference.PixelsOver16 < width * height * .001,
+                        $"A first scan with camera rotation {quarterTurn * 90}, first corner {first}, " +
+                        $"reversed winding {reverse} changed the menu's physical orientation.");
+                    firstScanComparisons.Add(new { cameraDegrees = quarterTurn * 90, firstCorner = first,
+                        reversedWinding = reverse, difference.MeanChannelError, difference.PixelsOver16 });
+                    var surface = SurfaceMap(inset, halfTurn: false);
+                    foreach (var button in scene.CurrentBoardButtons.Where(button => button.Enabled).ToArray())
+                    {
+                        await Hover(scene, fittedMap, surface, button);
+                        firstScanHoverChecks++;
+                    }
+                    scene.ClearHandTips();
+                    scene.ClearBoardMediaClip();
+                    Require(scene.GetBoardFacingDegrees() == 0,
+                        "Clearing a first calibration forgot its camera-independent facing.");
+                }
         }
 
         using var turned = NewScene(0, out var originalCameraMap, out double originalInset);
@@ -149,6 +198,7 @@ public sealed partial class MainWindow
             "Orientation verification changed the live camera, projector, alignment or board-facing preference.");
         return new { passed = true, cameraRotations = new[] { 0, 90, 180, 270 },
             boards = boards.Select(board => board.ToString()).ToArray(), comparisons, hoverChecks,
+            firstScanComparisons, firstScanHoverChecks, firstScanUsesProjectorOrientation = true,
             physicalRenderingIndependentOfCameraRotation = true, cameraCalibrationPreserved = true,
             explicitHalfTurnPreservesCoverageAndProportions = true,
             rotationDifference = new { rotationDifference.MeanChannelError, rotationDifference.PixelsOver16 },

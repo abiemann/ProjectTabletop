@@ -11,6 +11,8 @@ public sealed partial class MainWindow
     private ProjectionSetupSettings _projectionSetup = new();
     private bool _projectionSetupInitialized, _loadingProjectionProfile;
     private string? _projectionProfileKey;
+    private string? _projectionSettingsError;
+    private const string SessionOnlyFacingError = "This output has no stable identity; its facing is stored only for this session.";
     private double? _boardFacingDegrees;
     private readonly Dictionary<string, ProjectionSizeProfile> _sessionProjectionProfiles = new();
     private long _lastProjectionModeCheck;
@@ -126,27 +128,45 @@ public sealed partial class MainWindow
         UpdateBoardSizeEstimate();
     }
 
-    private void SaveProjectionSettings()
+    private bool SaveProjectionSettings()
+    {
+        bool saved = TrySaveProjectionSettings(_projectionSetup, ProjectionSetupPath, out _projectionSettingsError);
+        ProjectionSettingsStatusText.Text = _projectionSettingsError ?? "";
+        ProjectionSettingsStatusText.Visibility = saved ? Visibility.Collapsed : Visibility.Visible;
+        UpdateBoardFacingStatus();
+        return saved;
+    }
+
+    private static bool TrySaveProjectionSettings(ProjectionSetupSettings settings, string path, out string? error)
     {
         try
         {
-            Directory.CreateDirectory(_appDataDirectory);
-            string temporary = ProjectionSetupPath + ".tmp";
-            File.WriteAllText(temporary, JsonSerializer.Serialize(_projectionSetup,
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            string temporary = path + ".tmp";
+            File.WriteAllText(temporary, JsonSerializer.Serialize(settings,
                 new JsonSerializerOptions { WriteIndented = true }));
-            File.Move(temporary, ProjectionSetupPath, overwrite: true);
-            ProjectionSettingsStatusText.Visibility = Visibility.Collapsed;
+            File.Move(temporary, path, overwrite: true);
+            error = null;
+            return true;
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            ProjectionSettingsStatusText.Text = "Could not save output settings: " + error.Message;
-            ProjectionSettingsStatusText.Visibility = Visibility.Visible;
+            error = "Could not save output settings: " + exception.Message;
+            return false;
         }
     }
 
     private void ProjectionSettingsDisplayChanged()
     {
         if (!_projectionSetupInitialized) return;
+        // This message belongs to the previous output, unlike a failure to
+        // write the shared settings file, which still needs to remain visible.
+        if (_projectionSettingsError == SessionOnlyFacingError)
+        {
+            _projectionSettingsError = null;
+            ProjectionSettingsStatusText.Text = "";
+            ProjectionSettingsStatusText.Visibility = Visibility.Collapsed;
+        }
         InvalidateDisplayAudio();
         string? persistentKey = ProjectionSizeProfile.PersistentKey(SelectedDisplay?.PhysicalMode);
         _projectionProfileKey = persistentKey ?? (SelectedDisplay is { } selected

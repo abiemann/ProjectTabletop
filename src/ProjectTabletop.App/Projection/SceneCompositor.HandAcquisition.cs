@@ -41,7 +41,8 @@ public sealed partial class SceneCompositor
     public sealed record HandAcquisitionContext(long Revision, bool ObserveMotion,
         PixelPoint[] SearchPolygon, HandAcquisitionHint? IlluminatedHint,
         HandAcquisitionSceneImage? ExpectedScene = null, DateTimeOffset IlluminationStartedAt = default,
-        PixelPoint[]? StationarySearchCenters = null, bool MotionFallbackEnabled = true);
+        PixelPoint[]? StationarySearchCenters = null, bool RestrictAcquisitionToSearchRegions = true,
+        bool RequiresSearchIllumination = true, PixelPoint[]? ContinuousSearchPolygon = null);
 
     private AcquisitionSceneState CurrentAcquisitionState() => new(_boardSession.Revision,
         _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision : 0,
@@ -95,9 +96,21 @@ public sealed partial class SceneCompositor
                 var centers = boardCenters.Select(point =>
                     _boardCameraMap!.InverseTransform(_boardSurfaceMap!.Transform(point)))
                     .Select(point => new PixelPoint(point.X, point.Y)).ToArray();
+                // Photo Copy must see hands beside the subject for its field
+                // shutter and to keep a hand from being acquired as an object.
+                // This known capture area is separate from button lighting.
+                var field = BoardSession.PhotoCopyShutterBounds;
+                var capturePolygon = _boardSession.Screen == BoardScreen.PhotoCopy && !_boardSession.PhotoCopyHasSwirl
+                    ? new[] { new Point2(field.X, field.Y), new Point2(field.X + field.Width, field.Y),
+                        new Point2(field.X + field.Width, field.Y + field.Height), new Point2(field.X, field.Y + field.Height) }
+                        .Select(point => _boardCameraMap!.InverseTransform(_boardSurfaceMap!.Transform(point)))
+                        .Select(point => new PixelPoint(point.X, point.Y)).ToArray()
+                    : null;
                 return new(_acquisitionRevision, observe, polygon, illuminated,
                     _acquisitionExpectedScene, _acquisitionLightStarted, centers,
-                    MotionFallbackEnabled: _boardSession.Screen != BoardScreen.PhotoCopy);
+                    RestrictAcquisitionToSearchRegions: _boardSession.Screen != BoardScreen.HandTracking,
+                    RequiresSearchIllumination: _boardSession.Screen != BoardScreen.Paint,
+                    ContinuousSearchPolygon: capturePolygon);
             }
             if (animating || HasAcquiredHandOrSuppression(now))
             {
@@ -159,20 +172,21 @@ public sealed partial class SceneCompositor
             {
                 // Keep searching a stationary foreground object using current
                 // camera evidence. The projected white disk alone cannot renew it.
-                if (illuminatedPresence == true)
+                if (illuminatedPresence == true && hints.Any(hint =>
+                    HasCurrentControlObstruction(hint, frameTime) && hint.Center == current.IlluminatedHint.Center))
                     _acquisitionLightUntil = frameTime + TimeSpan.FromMilliseconds(800);
-                else if (illuminatedPresence == false)
+                else if (illuminatedPresence is not null)
                 {
                     ClearAcquisitionLight();
                     _acquisitionQuietUntil = now + AcquisitionLightOffSettle;
-                    _acquisitionReason = "foreground-left";
+                    _acquisitionReason = illuminatedPresence == false ? "foreground-left" : "insufficient-control-obstruction";
                 }
                 return;
             }
             if (!current.ObserveMotion || _acquisitionHint is not null || hints.Count == 0) return;
-            var hint = hints[0];
-            if (hint.ObservedAt > frameTime || frameTime - hint.ObservedAt > TimeSpan.FromMilliseconds(450) ||
-                !double.IsFinite(hint.RadiusPixels) || hint.RadiusPixels <= 0) return;
+            var hint = hints.FirstOrDefault(hint => HasCurrentControlObstruction(hint, frameTime));
+            if (hint is null) return;
+            if (!double.IsFinite(hint.RadiusPixels) || hint.RadiusPixels <= 0) return;
             var center = _boardCameraMap!.Transform(new(hint.Center.X, hint.Center.Y));
             var board = _boardSurfaceMap!.InverseTransform(center);
             if (!_boardSession.Buttons.Any(button => button.Bounds.Contains(board.X, board.Y))) return;
@@ -195,6 +209,10 @@ public sealed partial class SceneCompositor
         }
     }
 
+    private static bool HasCurrentControlObstruction(HandAcquisitionHint hint, DateTimeOffset frameTime) =>
+        hint.ObservedAt == frameTime && hint.ControlCoverage is double coverage &&
+        double.IsFinite(coverage) && coverage >= HandAcquisitionPresenceTracker.MinimumControlCoverage;
+
     public object GetHandAcquisitionDiagnostics()
     {
         lock (_gate)
@@ -203,6 +221,9 @@ public sealed partial class SceneCompositor
             var context = GetHandAcquisitionContext(now);
             return new { revision = _acquisitionRevision, reason = _acquisitionReason,
                 minimumControlCoverage = HandAcquisitionPresenceTracker.MinimumControlCoverage,
+                restrictAcquisitionToSearchRegions = context?.RestrictAcquisitionToSearchRegions,
+                requiresSearchIllumination = context?.RequiresSearchIllumination,
+                continuousSearchPolygon = context?.ContinuousSearchPolygon,
                 observingMotion = context?.ObserveMotion ?? false, searchPolygon = context?.SearchPolygon,
                 searchLightActive = context?.IlluminatedHint is not null, light = _acquisitionLight,
                 lightUntil = _acquisitionLightUntil, lightCount = _acquisitionLightCount,
@@ -301,8 +322,8 @@ public sealed partial class SceneCompositor
             InvalidOperationException or ObjectDisposedException)
         {
             // Device recreation must not escape the camera callback or latch
-            // hand inference busy. Native square searches can continue without
-            // a rendered reference while the graphics device recovers.
+            // hand inference busy. Existing tracked hands and Photo Copy's
+            // capture-field searches can continue while the device recovers.
             _acquisitionReferenceError = error.Message;
             _acquisitionReferenceRetryAt = _blackjackClock() + TimeSpan.FromSeconds(1);
             return null;

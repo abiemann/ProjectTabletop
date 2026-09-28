@@ -200,7 +200,8 @@ public sealed partial class MainWindow
                     var detectionStarted = Stopwatch.GetTimestamp();
                     var acquisitionHints = FindHandAcquisitionHints(frame, acquisitionContext, engineReset);
                     var hands = _handEngine.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-                        acquisitionHints.SearchRegions);
+                        acquisitionHints.SearchRegions,
+                        restrictAcquisitionToSearchRegions: acquisitionContext?.RestrictAcquisitionToSearchRegions == true);
                     var detectorTrace = _handEngine.LastDiagnostics;
                     var inferenceMilliseconds = Stopwatch.GetElapsedTime(detectionStarted).TotalMilliseconds;
                     var visibleHands = hands.Where(hand =>
