@@ -184,7 +184,7 @@ public sealed partial class SceneCompositor
                 DrawPhotoCopyObjectSpotlight(surface);
             }
             else if (_boardSession.Screen is not (BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.Monopoly or BoardScreen.Globe))
-                DrawMetalBackdrop(surface);
+                DrawMetalBackdrop(surface, drawFooterDivider: _boardSession.Screen != BoardScreen.Menu);
             using var heading = new CanvasTextFormat
             {
                 FontFamily = "Segoe UI",
@@ -228,20 +228,15 @@ public sealed partial class SceneCompositor
             }
             else if (_boardSession.Screen == BoardScreen.Menu)
             {
-                surface.DrawLine(80, 65, 109, 65, AppPalette.IndicatorOn, 3);
-                surface.DrawText("PROJECT TABLETOP", 125, 51, AppPalette.MutedText, small);
+                surface.DrawText("PROJECT TABLETOP", 80, 51, AppPalette.MutedText, small);
                 surface.DrawText("06  /  BOARDS", 771, 54, AppPalette.AccentSecondary, small);
                 surface.DrawText("Choose a board", 76, 99, AppPalette.Text, heading);
-                surface.DrawText("Four fingers together. Aim, then move index sideways.", 80, 182, muted, body);
-                for (int index = 0; index < _boardSession.Buttons.Count; index++)
+                foreach (var button in _boardSession.Buttons)
                 {
-                    var button = _boardSession.Buttons[index];
                     var hovered = handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id);
-                    DrawMenuButton(surface, button, hovered, label, small, index + 1, selectionFeedback);
+                    DrawMenuButton(surface, button, hovered, label, small, selectionFeedback);
                 }
-                surface.FillCircle(new Vector2(88, 894), 4, AppPalette.IndicatorOn);
-                surface.DrawText(FingerSelectionCaption(selectionFeedback, "Bring fingers together"), 105, 877, AppPalette.Text, body);
-                surface.DrawText("Aim with your middle fingertip. Bring fingers together to select again.", 80, 923, muted, small);
+                surface.DrawText("Four fingers together. Aim, then move index sideways.", 80, 923, muted, body);
             }
             else
             {
@@ -366,15 +361,13 @@ public sealed partial class SceneCompositor
     }
 
     private static void DrawMenuButton(CanvasDrawingSession ds, BoardButton button,
-        bool hovered, CanvasTextFormat label, CanvasTextFormat small, int number,
+        bool hovered, CanvasTextFormat label, CanvasTextFormat small,
         IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback)
     {
         var bounds = button.Bounds;
         var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
             bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
         DrawButtonSurface(ds, rect, hovered);
-        ds.DrawText(number.ToString("00"), (float)rect.X + 32, (float)rect.Y + 16,
-            hovered ? AppPalette.IndicatorOn : AppPalette.MutedText, small);
         ds.DrawText(button.Label, (float)rect.X + 32, (float)rect.Y + 52,
             AppPalette.ButtonText, label);
         var description = button.Destination switch
@@ -388,15 +381,6 @@ public sealed partial class SceneCompositor
             _ => "Coming soon"
         };
         ds.DrawText(description, (float)rect.X + 32, (float)rect.Y + 111, AppPalette.MutedText, small);
-        var iconCenter = new Vector2((float)rect.Right - 55, (float)rect.Y + 48);
-        ds.FillCircle(iconCenter, 30, ThemeColor(9, 21, 35, 110));
-        ds.DrawCircle(iconCenter, 30, hovered ? AppPalette.IndicatorOn : ThemeColor(123, 158, 187, 65), 1);
-        DrawBoardSymbol(ds, button.Destination, iconCenter, .79f,
-            hovered ? AppPalette.IndicatorOn : AppPalette.AccentSecondary);
-        float arrowX = (float)rect.Right - 41, arrowY = (float)rect.Bottom - 30;
-        ds.DrawLine(arrowX - 12, arrowY, arrowX, arrowY, hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 2);
-        ds.DrawLine(arrowX - 6, arrowY - 6, arrowX, arrowY, hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 2);
-        ds.DrawLine(arrowX - 6, arrowY + 6, arrowX, arrowY, hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 2);
         DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, AppPalette.IndicatorOn);
     }
 

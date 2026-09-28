@@ -34,11 +34,6 @@ public sealed partial class SceneCompositor
         DrawCasinoSuit(ds, BlackjackSuit.Spades, new Vector2(500, 141), 10, CasinoGold);
         DrawCasinoDiamond(ds, new Vector2(674, 142), 4, CasinoGold);
 
-        DrawCasinoPlaque(ds, new Rect(742, 55, 198, 90));
-        CasinoText(ds, "YOUR CHIPS", new Rect(752, 65, 178, 23), 15, CasinoGold);
-        CasinoText(ds, CasinoAmount(game.Bankroll), new Rect(752, 88, 178, 43), 31, CasinoIvory,
-            "Bahnschrift", true);
-
         bool dealt = game.DealerCards.Count != 0;
         var dealerLabel = !dealt || deal is not null ? "DEALER" : game.DealerHoleCardHidden
             ? $"DEALER  ·  {game.DealerTotal} SHOWING"
@@ -119,14 +114,12 @@ public sealed partial class SceneCompositor
         foreach (var button in buttons)
         {
             DrawCasinoButton(ds, button, button.Enabled,
-                hovered.Contains(button.Id), game.SelectedBet);
+                hovered.Contains(button.Id), game.SelectedBet, game.Bankroll);
             DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, CasinoGold);
         }
 
         CasinoText(ds, "Dealer stands on soft 17  ·  One split  ·  No insurance or surrender",
             new Rect(65, 911, 605, 24), 16, CasinoMuted);
-        CasinoText(ds, "Four fingers together. Aim with middle; move index sideways.",
-            new Rect(75, 934, 595, 19), 14, CasinoMuted);
     }
 
     private static string CasinoAmount(decimal amount) => amount.ToString("0.##", CultureInfo.InvariantCulture);
@@ -191,10 +184,25 @@ public sealed partial class SceneCompositor
     }
 
     private static void DrawCasinoButton(CanvasDrawingSession ds, BoardButton button, bool enabled,
-        bool hovered, decimal selectedBet)
+        bool hovered, decimal selectedBet, decimal bankroll)
     {
         var bounds = button.Bounds;
         var rect = new Rect(bounds.X * 1000, bounds.Y * 1000, bounds.Width * 1000, bounds.Height * 1000);
+        if (button.Id == "bj-reset")
+        {
+            DrawCasinoPlaque(ds, rect);
+            if (hovered && enabled)
+            {
+                ds.DrawRoundedRectangle(rect, 12, 12, CasinoGold, 2.5f);
+                ds.DrawRoundedRectangle(new Rect(rect.X - 3, rect.Y - 3, rect.Width + 6, rect.Height + 6),
+                    15, 15, ThemeColor(225, 196, 133, 55), 3);
+            }
+            var heading = CasinoButtonTextSpec(button);
+            CasinoText(ds, heading.Caption, heading.Bounds, heading.Size, CasinoGold, "Bahnschrift", true);
+            CasinoText(ds, CasinoAmount(bankroll), new Rect(rect.X + 10, rect.Y + 33, rect.Width - 20, 43),
+                31, CasinoIvory, "Bahnschrift", true);
+            return;
+        }
         bool bet = button.Id.StartsWith("bj-bet-", StringComparison.Ordinal);
         bool selected = bet && decimal.TryParse(button.Id[7..], NumberStyles.Integer,
             CultureInfo.InvariantCulture, out var amount) && amount == selectedBet;
@@ -506,13 +514,15 @@ public sealed partial class SceneCompositor
             return (value, new Rect(rect.X + rect.Width / 2 - 24,
                 rect.Y + rect.Height / 2 - 18, 48, 36), value.Length >= 3 ? 19 : 23);
         }
+        if (button.Id == "bj-reset")
+            return ("YOUR CHIPS", new Rect(rect.X + 10, rect.Y + 10, rect.Width - 20, 23), 15);
         string caption = button.Id switch
         {
             "bj-deal" => "DEAL", "bj-hit" => "HIT", "bj-stand" => "STAND",
-            "bj-double" => "DOUBLE", "bj-split" => "SPLIT", "bj-reset" => "Reset chips",
-            "menu" => "‹  Back to menu", _ => button.Label
+            "bj-double" => "DOUBLE", "bj-split" => "SPLIT",
+            "menu" => "Exit", _ => button.Label
         };
         return (caption, new Rect(rect.X + 8, rect.Y + (button.Id == "bj-deal" ? -7 : 0),
-            rect.Width - 16, rect.Height), button.Id == "menu" ? 30 : button.Id == "bj-reset" ? 32 : 27);
+            rect.Width - 16, rect.Height), button.Id == "menu" ? 30 : 27);
     }
 }

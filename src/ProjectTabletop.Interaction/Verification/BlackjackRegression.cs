@@ -210,7 +210,8 @@ internal static class BlackjackRegression
             Finish(game, start + 10);
             Require(game.Snapshot.Bankroll == 900 - round * 100, "Loss incorrectly changed bankroll.");
         }
-        Require(game.Snapshot.Bankroll == 0 && game.Snapshot.AvailableActions.SequenceEqual(["bj-reset"]),
+        Require(game.Snapshot.Bankroll == 0 && game.Snapshot.AvailableActions.SequenceEqual(["bj-reset"]) &&
+            game.Snapshot.Status.Contains("Select Your Chips", StringComparison.Ordinal),
             "Broke player could deal or change bet.");
         Require(!game.HandleAction("bj-deal", At(21000)), "Broke player placed a bet.");
         Do(game, "bj-reset", 21000);

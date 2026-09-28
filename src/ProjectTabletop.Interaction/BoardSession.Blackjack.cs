@@ -152,15 +152,15 @@ public sealed partial class BoardSession
         var game = _blackjack.Snapshot;
         var result = new List<BoardButton>
         {
-            new("menu", "Back to menu", new(.06, .055, .26, .105), BoardScreen.Menu)
+            new("menu", "Exit", new(.06, .055, .18, .09), BoardScreen.Menu)
         };
+        Add("bj-reset", "Your Chips", new(.742, .055, .198, .09));
         if (game.Phase is BlackjackPhase.Betting or BlackjackPhase.RoundOver)
         {
             int[] bets = [10, 25, 50, 100];
             for (int i = 0; i < bets.Length; i++)
                 Add($"bj-bet-{bets[i]}", bets[i].ToString(), new(.08 + i * .14, .775, .12, .095));
             Add("bj-deal", game.Phase == BlackjackPhase.Betting ? "Deal" : "Deal again", new(.68, .775, .24, .095));
-            Add("bj-reset", "Reset chips", new(.68, .88, .26, .105));
         }
         else
         {

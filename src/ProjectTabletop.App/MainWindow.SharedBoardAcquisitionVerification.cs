@@ -60,9 +60,11 @@ public sealed partial class MainWindow
             VerifyButtons(title);
         }
         scene.ShowBlackjack(); VerifyButtons("Blackjack betting");
-        Require(scene.CurrentBoardButtons.Any(button => button.Id == "bj-reset") &&
-                scene.CurrentBoardButtons.Any(button => button.Id == "menu"),
-            "Blackjack coverage omitted its Reset or Back controls.");
+        Require(scene.CurrentBoardButtons.Any(button => button.Id == "bj-reset" && button.Label == "Your Chips" &&
+                    button.Bounds == new BoardRect(.742, .055, .198, .09)) &&
+                scene.CurrentBoardButtons.Any(button => button.Id == "menu" && button.Label == "Exit" &&
+                    button.Bounds == new BoardRect(.06, .055, .18, .09)),
+            "Blackjack coverage omitted its top Your Chips plaque or Exit control.");
         Require(scene.ActivateBlackjackButton("bj-deal"), "The player-turn acquisition fixture could not deal.");
         now += TimeSpan.FromSeconds(3);
         Draw();
@@ -97,7 +99,8 @@ public sealed partial class MainWindow
             renderedLabelMasksContainLightAndDarkInkAcrossBoards = true,
             foregroundFixturesCoverActualLabels = true,
             untouchedLabelRejectsControlEdgeDisturbanceAcrossBoards = true,
-            blackjackBackAndResetIncluded = true, mediaAndCalibrationInactive = true,
+            blackjackExitAndYourChipsIncluded = true, yourChipsAcquiresHeadingInsteadOfBalance = true,
+            mediaAndCalibrationInactive = true,
             globeAllFiveControlsCovered = tested.Count(label => label.StartsWith("Globe/", StringComparison.Ordinal)) == 5,
             liveHardwareUnchanged = true };
 
@@ -144,6 +147,15 @@ public sealed partial class MainWindow
                     context.SearchPolygon, context.ExpectedScene, now, now);
                 Require(emptyResult.BaselineReady && emptyResult.Hints.Count == 0,
                     label + " found an empty-table hand candidate: " + emptyResult.Reason);
+                if (screen == BoardScreen.Blackjack && button.Id is "bj-reset" or "menu")
+                {
+                    Require(emptyResult.TextPatterns?.SingleOrDefault(pattern => pattern.ControlRegion == index) is
+                        { LabelIntact: true, Correlation: > .8 }, label + "/" + button.Label + " has no actual generated glyph template.");
+                    if (button.Id == "bj-reset")
+                        Require(trigger.X >= .752 && trigger.X + trigger.Width <= .930 &&
+                                trigger.Y >= .065 && trigger.Y + trigger.Height <= .095 && trigger.Height < .04,
+                            "Your Chips acquisition watched the balance/body instead of its small heading.");
+                }
                 var emptyQuery = Query(empty, context);
                 Require(emptyQuery.Hints.Count == 0 && emptyQuery.LightingHints.Count == 0,
                     label + "/" + button.Label + " generated a candidate on its empty rendered board.");
@@ -243,6 +255,10 @@ public sealed partial class MainWindow
                     label + "/" + button.Label + " did not try its qualified native camera crop before fallback illumination.");
                 Require(measured.ControlTriggerCoverage is double textCoverage && textCoverage >= .07,
                     label + "/" + button.Label + " did not measure at least 7% of its actual control-label obstruction.");
+                if (screen == BoardScreen.Blackjack && button.Id is "bj-reset" or "menu")
+                    Require(presence.TextPatterns?.SingleOrDefault(pattern => pattern.ControlRegion == index) is
+                        { ShapeCorrupted: true, ConfirmationFrames: >= 2 },
+                        label + "/" + button.Label + " qualified without confirming stationary interference with the rendered heading.");
                 var edge = LargestUnlabelledPart(control, trigger);
                 if (edge.Width * edge.Height >= control.Width * control.Height * .07)
                 {

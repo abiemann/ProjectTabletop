@@ -15,12 +15,14 @@ internal static class HandAcquisitionPresenceRegression
         ExposureGeometryAndNoise();
         UniqueControlCoveredAtStartup();
         OwnLightPresenceAndRemoval();
+        HandAcquisitionIlluminatedRenewalRegression.Run();
         IlluminatedControlAreaFloor();
         PointOfInterestSampling();
         CompactReferenceControlOcclusion();
         ControlTriggerRegions();
         RenderedCompactControls();
         HandAcquisitionOpticalHistoryRegression.Run();
+        HandAcquisitionGoldDealRegression.Run();
         HandAcquisitionShortLabelRegression.Run();
         HandAcquisitionLocalContextRegression.Run();
         HandAcquisitionHintRegression.Run();

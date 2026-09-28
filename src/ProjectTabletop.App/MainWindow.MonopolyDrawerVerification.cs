@@ -86,6 +86,7 @@ public sealed partial class MainWindow
             "The isolated drawer check changed the user's hardware or live game.");
         return new { passed = true, nativeWidth = width, nativeHeight = height, durationMilliseconds = 300,
             slideReferenceSuppression = true, modalTargets = true, bothConditionalActionsAndCaretsAcquired = true,
+            vectorChevronTemplates = true, intactChevronRejectsLargePillObstruction = true,
             twoFreshFramesAndSevenPercent = true, busySaveAndFailureRecovery = true, successfulRetryAndResume = true,
             liveHardwareUnchanged = true, tested, directory, images };
 
@@ -126,6 +127,40 @@ public sealed partial class MainWindow
                 Require(trigger.Width > 0 && trigger.Height > 0 && trigger.X >= control.X && trigger.Y >= control.Y &&
                     trigger.X + trigger.Width <= control.X + control.Width + 1e-8 &&
                     trigger.Y + trigger.Height <= control.Y + control.Height + 1e-8, "A drawer caption has no bounded glyph trigger.");
+                bool chevron = button.Id is "mp-exit" or "mp-exit-cancel";
+                if (chevron)
+                {
+                    // A matching diagnostic exists only if Vision extracted real
+                    // rendered ink/halo; a generic rectangular trigger has none.
+                    Require(empty.TextPatterns?.SingleOrDefault(pattern => pattern.ControlRegion == index) is
+                        { LabelIntact: true, Correlation: > .8 }, "The gold chevron used a rectangular fallback instead of an ink template.");
+                    var away = (byte[])clean.Clone();
+                    var corner = CameraPoint(control.X + .018, control.Y + .008);
+                    var opposite = CameraPoint(Math.Min(control.X + control.Width * .35, trigger.X - .020),
+                        control.Y + control.Height - .008);
+                    var controlStart = CameraPoint(control.X, control.Y);
+                    var controlEnd = CameraPoint(control.X + control.Width, control.Y + control.Height);
+                    int changedPixels = 0;
+                    for (int y = (int)corner.Y; y < opposite.Y; y++)
+                    for (int x = (int)corner.X; x < opposite.X; x++)
+                    { int offset = (y * width + x) * 4; away[offset] = 20; away[offset + 1] = 35; away[offset + 2] = 225; changedPixels++; }
+                    Require(changedPixels / ((controlEnd.X - controlStart.X) * (controlEnd.Y - controlStart.Y)) > .07,
+                        "The intact-chevron negative fixture did not obstruct more than 7% of its pill.");
+                    var inkStart = CameraPoint(trigger.X, trigger.Y);
+                    var inkEnd = CameraPoint(trigger.X + trigger.Width, trigger.Y + trigger.Height);
+                    for (int y = (int)inkStart.Y; y <= inkEnd.Y; y++)
+                    for (int x = (int)inkStart.X; x <= inkEnd.X; x++)
+                    { int offset = (y * width + x) * 4; Require(away.AsSpan(offset, 4).SequenceEqual(clean.AsSpan(offset, 4)), "The negative pill patch damaged chevron pixels."); }
+                    var awayDetector = new HandAcquisitionPresenceTracker();
+                    for (int frame = 0; frame < 2; frame++)
+                    {
+                        var intact = awayDetector.Update(width, height, width * 4, away, context.SearchPolygon, context.ExpectedScene, now, now);
+                        Require(intact.Hints.Count == 0 && intact.TextPatterns?.SingleOrDefault(pattern => pattern.ControlRegion == index) is
+                            { LabelIntact: true, ShapeCorrupted: false, Correlation: > .8 },
+                            "A large obstruction beside an intact gold chevron triggered acquisition: " + JsonSerializer.Serialize(intact));
+                        now += TimeSpan.FromMilliseconds(33);
+                    }
+                }
                 var occupied = (byte[])clean.Clone();
                 double span = Math.Min(control.Width - .024, Math.Max(trigger.Width + .025, control.Width * .4));
                 double center = trigger.X + trigger.Width / 2;
@@ -140,6 +175,12 @@ public sealed partial class MainWindow
                 var second = detector.Update(width, height, width * 4, occupied, context.SearchPolygon, context.ExpectedScene, now, now);
                 Require(first.Hints.Count == 0 && second.Hints.Any(hint => hint.ControlCoverage >= .07 && hint.ControlTriggerCoverage >= .07),
                     $"The actual {button.Label} caption failed two-frame 7% acquisition: " + JsonSerializer.Serialize(new { first, second }));
+                if (chevron)
+                    Require(first.TextPatterns?.SingleOrDefault(pattern => pattern.ControlRegion == index) is
+                            { ShapeCorrupted: true, ConfirmationFrames: 1 } &&
+                        second.TextPatterns?.SingleOrDefault(pattern => pattern.ControlRegion == index) is
+                            { ShapeCorrupted: true, ConfirmationFrames: 2 },
+                        "Gold chevron obstruction qualified without two fresh rendered-shape confirmations.");
                 tested.Add(button.Label); now += TimeSpan.FromMilliseconds(33);
             }
         }

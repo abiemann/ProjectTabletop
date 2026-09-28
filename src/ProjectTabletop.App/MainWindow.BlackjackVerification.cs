@@ -34,8 +34,20 @@ public sealed partial class MainWindow
             "The menu's held pinch also dealt a hand.");
         scene.ClearHandTips(resetInput: false);
         var betting = DrawPreview(scene);
+        CheckTopControls(scene, resetEnabled: true);
         Require(NonBlackPixels(betting) > size * size / 2, "The laptop casino preview is blank or mostly missing.");
         await Save("betting");
+
+        await Task.Delay(2);
+        var chips = scene.CurrentBoardButtons.Single(button => button.Id == "bj-reset");
+        scene.SetHandCursors([new(PointAt(chips), DateTimeOffset.MinValue)], DateTimeOffset.UtcNow);
+        var chipsHovered = DrawPreview(scene);
+        Require(scene.HoveredBoardButtons.SequenceEqual(["bj-reset"]) &&
+                DifferentPixels(betting, chipsHovered, chips.Bounds) > 100 &&
+                DifferentPixels(betting, chipsHovered, new(.752, .088, .178, .043)) == 0,
+            "Your Chips lacks plaque hover feedback or hovering altered its balance display.");
+        await Save("your-chips-hover");
+        scene.ClearHandTips(resetInput: false);
 
         await Task.Delay(2);
         var dealButton = scene.CurrentBoardButtons.Single(button => button.Id == "bj-deal");
@@ -57,6 +69,7 @@ public sealed partial class MainWindow
         // before testing another real-time gesture. The animation verifier uses a fake clock.
         await Task.Delay(1850);
         var player = DrawPreview(scene);
+        CheckTopControls(scene, resetEnabled: false);
         Require(DifferentPixels(betting, player) > 1000, "Dealing did not redraw the cached table.");
         Require(BrightPixels(player, new(.08, .23, .84, .50)) > 5000,
             "The opening cards are not visibly rendered on the table.");
@@ -83,6 +96,7 @@ public sealed partial class MainWindow
             "The dealer turn retained an enabled player action.");
         scene.ClearHandTips(resetInput: false);
         DrawPreview(scene);
+        CheckTopControls(scene, resetEnabled: false);
         await Save("dealer-turn");
         var future = DateTimeOffset.UtcNow.AddSeconds(2);
         Require(scene.TickBlackjack(future) && !scene.BlackjackState.DealerHoleCardHidden,
@@ -94,6 +108,7 @@ public sealed partial class MainWindow
         Require(scene.BlackjackState.Bankroll == 975 && scene.BlackjackState.Hands.Single().Result == "DEALER WINS",
             "The displayed completed game has the wrong result or bankroll.");
         var settled = DrawPreview(scene);
+        CheckTopControls(scene, resetEnabled: true);
         Require(DifferentPixels(hit, settled) > 1000, "Round settlement did not redraw cards and result controls.");
         await Save("dealer-wins");
 
@@ -152,7 +167,8 @@ public sealed partial class MainWindow
         using (var brokeScene = new SceneCompositor(broke))
         {
             brokeScene.ShowBlackjack();
-            DrawPreview(brokeScene);
+            var exhausted = DrawPreview(brokeScene);
+            CheckTopControls(brokeScene, resetEnabled: true);
             await Save("out-of-credits");
             Require(!brokeScene.ActivateBlackjackButton("bj-deal"), "A disabled Deal button can be invoked.");
             var reset = brokeScene.CurrentBoardButtons.Single(button => button.Id == "bj-reset");
@@ -160,6 +176,9 @@ public sealed partial class MainWindow
                 reset.Bounds.Y + reset.Bounds.Height / 2) && brokeScene.BlackjackState.Bankroll == 1000 &&
                 brokeScene.BlackjackState.Phase == BlackjackPhase.Betting,
                 "The laptop coordinate hit target could not restore virtual credits.");
+            Require(DifferentPixels(exhausted, DrawPreview(brokeScene), new(.752, .088, .178, .043)) > 50,
+                "Restoring 1000 chips left the old exhausted balance in the top counter.");
+            await Save("your-chips-restored");
             Require(!brokeScene.HasBoardMediaClip, "The laptop action unexpectedly created a projector clip.");
         }
 
@@ -169,6 +188,7 @@ public sealed partial class MainWindow
             "The isolated Blackjack check changed the live camera, projector, board or game.");
         return new { passed = true, liveHardwareUnchanged = true, menuAndPinchActions = true,
             heldPinchSuppressed = true, hoverRendered = true, cachedTableUpdated = true,
+            exitCaptionAndTopCounterTargets = true, yourChipsPlaqueHoverAndRestoredBalance = true, noFooterReset = true,
             hiddenCardDoesNotLeak = true, dealerRevealAndSettlement = true,
             splitRendered = true, perspectiveClip = true, zeroCreditsAndLaptopReset = true, directory, images };
 
@@ -241,6 +261,17 @@ public sealed partial class MainWindow
 
         static void Act(BlackjackGame game, string id, DateTimeOffset time) =>
             Require(game.HandleAction(id, time), "The deterministic fixture rejected " + id + ".");
+
+        static void CheckTopControls(SceneCompositor fixture, bool resetEnabled)
+        {
+            var buttons = fixture.CurrentBoardButtons;
+            var exit = buttons.Single(button => button.Id == "menu");
+            var reset = buttons.Single(button => button.Id == "bj-reset");
+            Require(exit.Label == "Exit" && exit.Bounds == new BoardRect(.06, .055, .18, .09) && exit.Enabled &&
+                    reset.Label == "Your Chips" && reset.Bounds == new BoardRect(.742, .055, .198, .09) &&
+                    reset.Enabled == resetEnabled && buttons.All(button => !button.Label.Contains("Reset chips", StringComparison.OrdinalIgnoreCase)),
+                "The casino retained its old navigation/footer reset or changed the top-counter interaction rules.");
+        }
 
         static int NonBlackPixels(byte[] pixels)
         {

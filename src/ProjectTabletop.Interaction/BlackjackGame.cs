@@ -236,7 +236,7 @@ public sealed class BlackjackGame
         _phase = BlackjackPhase.RoundOver;
         _status = _hands.Count == 1 ? _hands[0].Result + ". Place your next bet."
             : $"Hand 1: {_hands[0].Result} · Hand 2: {_hands[1].Result}";
-        if (_bankroll < Bets[0]) _status = "Out of credits. Reset chips to play again.";
+        if (_bankroll < Bets[0]) _status = "Out of credits. Select Your Chips to play again.";
         if (_bankroll < _selectedBet)
             _selectedBet = Bets.Where(bet => bet <= _bankroll).DefaultIfEmpty(Bets[0]).Max();
     }

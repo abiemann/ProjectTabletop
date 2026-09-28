@@ -118,9 +118,12 @@ internal static class HandAcquisitionOpticalHistoryRegression
     private static void CheckReadableCaptionReflectance(byte[] camera, HandAcquisitionSceneImage scene)
     {
         scene = scene with { BoardReferenceRegions = [new(.2, 0, .8, 1)] };
-        // Synthetic skin response preserves the projected letters. The fixture
-        // contains generated controls only; no private hand pixels are stored.
-        byte[] skin = Tint(camera, uv => Contains(Controls[0], uv));
+        // Partial fingers preserve the projected letters but leave independent
+        // panel margins visible. A whole-panel color transfer is ambiguous with
+        // a unique projected palette and cannot prove a localized new surface.
+        // The fixture contains generated controls only; no hand pixels are stored.
+        byte[] skin = Tint(camera, uv => Contains(Controls[0], uv) &&
+            new[] { .102, .118, .134, .150 }.Any(left => uv.X >= left && uv.X <= left + .014));
         var tracker = new HandAcquisitionPresenceTracker();
         var first = Feed(tracker, skin, 0);
         var firstExit = first.TextPatterns!.Single(pattern => pattern.ControlRegion == 0);
@@ -138,16 +141,27 @@ internal static class HandAcquisitionOpticalHistoryRegression
         Clean(Feed(tracker, camera, 1200), "Readable skin removal");
 
         byte[] global = Tint(camera, _ => true);
+        byte[] wholePanel = Tint(camera, uv => Contains(Controls[0], uv));
         byte[] panel = Tint(camera, uv => Contains(Controls[0], uv) &&
             (uv.X < Labels[0].X - .004 || uv.X > Labels[0].X + Labels[0].Width + .004 ||
              uv.Y < Labels[0].Y - .004 || uv.Y > Labels[0].Y + Labels[0].Height + .004));
         byte[] tiny = Tint(camera, uv => Contains(Controls[0], uv) && uv.X < Controls[0].X + .015);
         foreach (var (negative, description) in new[] { (global, "Global color/exposure drift"),
+                     (wholePanel, "Unique whole-panel color response with readable letters"),
                      (panel, "Local panel-only tint with untouched letters"), (tiny, "Sub-floor local reflectance") })
         {
             var quiet = new HandAcquisitionPresenceTracker();
             for (int frame = 0; frame < 4; frame++)
-                Clean(Feed(quiet, negative, frame * 100), description);
+            {
+                var result = Feed(quiet, negative, frame * 100);
+                Clean(result, description);
+                if (ReferenceEquals(negative, wholePanel))
+                    Require(result.TextPatterns!.Single(pattern => pattern.ControlRegion == 0) is
+                        { LabelIntact: true, CaptionReflectanceCoverage: >= .07,
+                          CaptionReflectanceTriggerCoverage: >= .07, CaptionReflectanceInkFraction: >= .5,
+                          CaptionReflectanceChanged: false },
+                        "Whole-panel palette fixture must meet reflectance floors but fail localization", result);
+            }
         }
         var oneLabelScene = scene with { BoardSearchRegions = [Controls[0]], BoardTriggerRegions = [Labels[0]] };
         var noIndependentLabel = new HandAcquisitionPresenceTracker();
@@ -177,7 +191,8 @@ internal static class HandAcquisitionOpticalHistoryRegression
         Require(Feed(reverse, skin, 300).Hints.Count == 0 && Feed(reverse, skin, 400).Hints.Count == 1,
             "Fresh frames after backwards time failed to reconfirm");
         Console.WriteLine("Readable caption-reflectance regression passed: projected letters retain their shape, " +
-            "independent clean reference, both 7% floors, stationary/removal, panel-only/global/tiny negatives, " +
+            "independent clean reference and panel margins, both 7% floors, stationary/removal, " +
+            "whole-panel/panel-only/global/tiny negatives, " +
             "and two fresh frames with duplicate/stale/gap/backwards barriers.");
 
         HandAcquisitionPresenceResult Feed(HandAcquisitionPresenceTracker target, byte[] pixels,

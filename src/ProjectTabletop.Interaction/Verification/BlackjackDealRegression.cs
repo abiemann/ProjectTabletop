@@ -120,7 +120,7 @@ internal static class BlackjackDealRegression
             bool navigated = gesture
                 ? board.Update([Pinch(Button(board, "menu"), 1, 300)], Time(300), Time(300))?.ButtonId == "menu"
                 : board.ActivateButton("menu", Time(300));
-            Require(navigated && board.Screen == BoardScreen.Menu, "Presentation blocked Back to menu.");
+            Require(navigated && board.Screen == BoardScreen.Menu, "Presentation blocked Exit.");
             board.ShowBlackjack(Time(400));
             Require(Button(board, "bj-hit").Enabled, "Menu navigation left a presentation lock behind.");
             board.HoldBlackjackPresentationUntil(Time(2000));

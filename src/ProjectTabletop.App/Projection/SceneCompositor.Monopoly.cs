@@ -287,8 +287,12 @@ public sealed partial class SceneCompositor
             case MonopolySpaceKind.Jail:
                 MonopolyText(ds, "IN JAIL", new Rect(7, 6, width - 14, 22), 14, MonopolyInk, "Georgia", true);
                 ds.FillRoundedRectangle(new Rect(32, 34, 54, 42), 6, 6, ThemeColor(191, 128, 72));
-                ds.FillCircle(new Vector2(59, 53), 9, MonopolyInk);
-                for (float x = 39; x < 83; x += 11) ds.DrawLine(x, 34, x, 76, ThemeColor(248, 229, 190), 3);
+                DrawMonopolyJailedFace(ds, new Vector2(59, 55));
+                for (float x = 39; x < 83; x += 11)
+                {
+                    ds.DrawLine(x, 34, x, 76, ThemeColor(59, 54, 43, 160), 4.5f);
+                    ds.DrawLine(x, 34, x, 76, ThemeColor(248, 229, 190), 3);
+                }
                 MonopolyText(ds, "JUST VISITING", new Rect(3, 79, width - 6, 19), 10.8f, MonopolyInk, "Bahnschrift", true);
                 break;
             case MonopolySpaceKind.FreeParking:
@@ -307,6 +311,26 @@ public sealed partial class SceneCompositor
                 MonopolyText(ds, "JAIL", new Rect(4, 77, width - 8, 23), 16, MonopolyInk, "Georgia", true);
                 break;
         }
+    }
+
+    private static void DrawMonopolyJailedFace(CanvasDrawingSession ds, Vector2 center)
+    {
+        using var face = new CanvasLinearGradientBrush(ds.Device,
+            ThemeColor(247, 223, 163), ThemeColor(222, 178, 101))
+        { StartPoint = center + new Vector2(0, -15), EndPoint = center + new Vector2(0, 15) };
+        ds.FillCircle(center, 15, face);
+        ds.DrawCircle(center, 15, MonopolyInk, 1.2f);
+        ds.FillCircle(center + new Vector2(-5, -4), 1.5f, MonopolyInk);
+        ds.FillCircle(center + new Vector2(5, -4), 1.5f, MonopolyInk);
+        ds.DrawLine(center + new Vector2(-7, -8), center + new Vector2(-2, -10), MonopolyInk, 1.3f);
+        ds.DrawLine(center + new Vector2(2, -10), center + new Vector2(7, -8), MonopolyInk, 1.3f);
+        using var mouthPath = new CanvasPathBuilder(ds.Device);
+        mouthPath.BeginFigure(center + new Vector2(-7, 7));
+        mouthPath.AddCubicBezier(center + new Vector2(-4, 0), center + new Vector2(4, 0),
+            center + new Vector2(7, 7));
+        mouthPath.EndFigure(CanvasFigureLoop.Open);
+        using var mouth = CanvasGeometry.CreatePath(mouthPath);
+        ds.DrawGeometry(mouth, MonopolyInk, 1.7f);
     }
 
     private static string MonopolySpaceCaption(MonopolySpace space)
@@ -335,7 +359,7 @@ public sealed partial class SceneCompositor
     {
         if (game.Phase == MonopolyPhase.Landing)
         {
-            DrawMonopolyCrest(ds, new Vector2(545, 291), 1.1f, boardAspect);
+            DrawMonopolyCrest(ds, new Vector2(500, 291), 1.1f, boardAspect);
             MonopolyText(ds, "THE PROPERTY TRADING GAME", new Rect(236, 354, 528, 21), 14, MonopolyGold);
             MonopolyText(ds, "MONOPOLY", new Rect(212, 382, 576, 68), 53, MonopolyIvory, "Georgia", true);
             DrawMonopolyRule(ds, 458, 135);
@@ -484,7 +508,7 @@ public sealed partial class SceneCompositor
     private static CanvasTextFormat MonopolyButtonTextFormat(BoardButton button) => new()
     {
         FontFamily = "Bahnschrift", FontWeight = FontWeights.SemiBold,
-        FontSize = button.Label is "^" or "v" ? 34 : button.Label is "+" or "−" or "-" ? 28 : button.Id == "mp-roll" ? 26 :
+        FontSize = button.Label is "+" or "−" or "-" ? 28 : button.Id == "mp-roll" ? 26 :
             button.Bounds.Height < .05 ? 17 : button.Id is "mp-start-game" or "mp-start" ? 26 :
             button.Bounds.Width < .1 ? 24 : button.Label.Length > 15 ? 18 : 22,
         HorizontalAlignment = CanvasHorizontalAlignment.Center,
@@ -496,7 +520,7 @@ public sealed partial class SceneCompositor
     {
         var b = button.Bounds;
         var rect = new Rect(b.X * BoardSurfaceSize, b.Y * BoardSurfaceSize, b.Width * BoardSurfaceSize, b.Height * BoardSurfaceSize);
-        bool caret = button.Label is "^" or "v";
+        bool caret = IsMonopolyDrawerHandle(button);
         bool primary = button.Id is "mp-roll" or "mp-start-game" or "mp-start" or "mp-buy" or "mp-end-turn" or "mp-save-exit" or "mp-exit-game" or "mp-new-game";
         bool danger = button.Id is "mp-bankrupt" or "mp-exit-without-saving";
         bool enabled = button.Enabled;
@@ -519,6 +543,11 @@ public sealed partial class SceneCompositor
             DrawMonopolyDie(ds, new Rect(rect.X + 25, centerY - 14, 28, 28), 5, ink, primary ? ThemeColor(226, 197, 129) : MonopolyInk, boardAspect);
             DrawMonopolyDie(ds, new Rect(rect.X + 57, centerY - 14, 28, 28), 3, ink, primary ? ThemeColor(226, 197, 129) : MonopolyInk, boardAspect);
             ds.DrawLine((float)rect.X + 92, centerY - 17, (float)rect.X + 92, centerY + 17, ThemeColor(57, 56, 31, 60), .8f);
+        }
+        if (caret)
+        {
+            DrawMonopolyDrawerArrow(ds, button, boardAspect, hovered);
+            return;
         }
         using var format = MonopolyButtonTextFormat(button);
         ds.DrawText(button.Label, MonopolyButtonTextRectangle(button), ink, format);

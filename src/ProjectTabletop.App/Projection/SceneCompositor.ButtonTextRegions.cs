@@ -21,6 +21,8 @@ public sealed partial class SceneCompositor
         }
         if (_boardSession.Screen == BoardScreen.Monopoly)
         {
+            if (IsMonopolyDrawerHandle(button))
+                return ButtonInkRegion(button, MonopolyDrawerArrowInk(button, PaintBoardAspect()), 0, 0);
             var rectangle = MonopolyButtonTextRectangle(button);
             using var format = MonopolyButtonTextFormat(button);
             using var layout = new CanvasTextLayout(device, button.Label, format,

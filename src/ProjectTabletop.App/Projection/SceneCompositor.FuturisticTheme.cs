@@ -12,7 +12,7 @@ public sealed partial class SceneCompositor
 {
     // All material detail is static and cached in the board texture. The capture
     // field never receives this texture, preserving a uniform camera background.
-    private static void DrawMetalBackdrop(CanvasDrawingSession ds)
+    private static void DrawMetalBackdrop(CanvasDrawingSession ds, bool drawFooterDivider = true)
     {
         using var baseMetal = new CanvasLinearGradientBrush(ds.Device,
         [
@@ -30,7 +30,8 @@ public sealed partial class SceneCompositor
         ds.DrawRoundedRectangle(new Rect(28, 28, 944, 944), 30, 30, ThemeColor(132, 167, 190, 85), 1.5f);
         ds.DrawRoundedRectangle(new Rect(32, 32, 936, 936), 27, 27, ThemeColor(0, 0, 0, 150), 1);
         ds.DrawLine(80, 226, 920, 226, ThemeColor(118, 151, 178, 55), 1);
-        ds.DrawLine(80, 857, 920, 857, ThemeColor(118, 151, 178, 55), 1);
+        if (drawFooterDivider)
+            ds.DrawLine(80, 857, 920, 857, ThemeColor(118, 151, 178, 55), 1);
         foreach (float x in new[] { 48f, 952f })
         foreach (float y in new[] { 48f, 952f })
         {

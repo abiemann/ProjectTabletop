@@ -634,7 +634,9 @@ public sealed partial class HandAcquisitionPresenceTracker
             if (checkedReference < 80 || uncertainReference / (double)checkedReference >= .40) continue;
             var verified = MeasureCaptionReflectance(reference, current, foreground, fit, offsets, candidate.Region).Single();
             if (verified.Coverage >= MinimumControlCoverage && verified.TriggerCoverage >= MinimumControlCoverage &&
-                verified.InkFraction >= .5) result.Add(verified);
+                verified.InkFraction >= .5 && LocalizedCaptionReflectance(reference, current, candidate.Region,
+                    foreground, fit, offsets, threshold) is { } localized)
+                result.Add(localized);
         }
         return result;
     }
@@ -906,15 +908,21 @@ public sealed partial class HandAcquisitionPresenceTracker
         int[] bright = core.OrderBy(index => Luminance(current, index)).Skip((int)(core.Length * .72)).ToArray();
         double[] reference = Enumerable.Range(0, 3).Select(channel => Median(bright.Select(index => current[index * 3 + channel]))).ToArray();
         double referenceLuminance = reference[0] * .114 + reference[1] * .587 + reference[2] * .299;
+        var whiteField = FitPeripheralIlluminatedWhite(current, core, bright, hint);
         bool[] foreground = new bool[_mask.Length];
         int changed = 0;
         foreach (int index in core)
         {
-            double brightnessDrop = referenceLuminance - Luminance(current, index);
+            double expectedBlue = WhiteAt(0), expectedGreen = WhiteAt(1), expectedRed = WhiteAt(2);
+            double expectedLuminance = expectedBlue * .114 + expectedGreen * .587 + expectedRed * .299;
+            double brightnessDrop = expectedLuminance - Luminance(current, index);
             double colorError = Math.Sqrt(Enumerable.Range(0, 3).Sum(channel =>
-                Math.Pow(current[index * 3 + channel] - reference[channel] + brightnessDrop, 2)) / 3);
+                Math.Pow(current[index * 3 + channel] - WhiteAt(channel) + brightnessDrop, 2)) / 3);
             if (brightnessDrop <= 20 && colorError <= 22) continue;
             foreground[index] = true; changed++;
+
+            double WhiteAt(int channel) => whiteField is null ? reference[channel] :
+                IlluminatedWhiteAt(whiteField[channel], _locations[index], hint);
         }
         bool controlled = _templateMask is not null && _controlBoardAreas is not null;
         // Renewal needs the same measured obstruction as unlit acquisition.

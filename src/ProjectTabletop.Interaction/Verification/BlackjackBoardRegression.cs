@@ -11,12 +11,22 @@ internal static class BlackjackBoardRegression
         Select("blackjack", 1, 100);
         Require(board.Screen == BoardScreen.Blackjack && board.BlackjackState.Phase == BlackjackPhase.Betting,
             "The Blackjack menu item did not open the betting table.");
+        var chips = Button("bj-reset");
+        Require(chips.Label == "Your Chips" && chips.Enabled && chips.Bounds == new BoardRect(.742, .055, .198, .09) &&
+            board.Buttons.Count(button => button.Id == "bj-reset") == 1 &&
+            Button("menu") is { Label: "Exit", Enabled: true } &&
+            Button("menu").Bounds == new BoardRect(.06, .055, .18, .09),
+            "The chips plaque and Exit do not use their rendered control labels and bounds.");
         long navigationRevision = board.Revision;
         Select("bj-deal", 1, 140, 100);
         Require(board.BlackjackState.Phase == BlackjackPhase.Betting, "A held menu pinch dealt a round.");
         Select("bj-deal", 2, 200);
         Require(board.BlackjackState.Phase == BlackjackPhase.PlayerTurn && board.BlackjackState.Bankroll == 975 &&
             board.BlackjackState.DealerCards[1] is null, "Deal did not debit once and hide the dealer hole card.");
+        Require(Button("bj-reset") is { Enabled: false, Label: "Your Chips" } &&
+            Button("bj-reset").Bounds == chips.Bounds && !board.ActivateButton("bj-reset", Time(210)) &&
+            board.BlackjackState.Bankroll == 975,
+            "The chips plaque disappeared or allowed an active-hand bankroll reset.");
         Require(board.Revision == navigationRevision, "A game action changed navigation revision.");
         Select("bj-hit", 2, 240, 200);
         Require(board.BlackjackState.Hands[0].Cards.Count == 2, "A held deal pinch also hit.");
@@ -44,11 +54,7 @@ internal static class BlackjackBoardRegression
         foreach (var button in buttons)
         {
             var r = button.Bounds;
-            // Reset's full visible plate sits below the betting row so the
-            // enlarged control cannot cover dealer cards or another action.
-            // It uses the footer's 1% bottom margin; other margins stay at 5%.
-            double bottomLimit = button.Id == "bj-reset" ? .99 : .95;
-            Require(r.X >= .05 && r.Y >= .05 && r.X + r.Width <= .95 && r.Y + r.Height <= bottomLimit,
+            Require(r.X >= .05 && r.Y >= .05 && r.X + r.Width <= .95 && r.Y + r.Height <= .95,
                 "A Blackjack target reaches the edge of the board.");
             Require(buttons.All(other => other.Id == button.Id ||
                     r.X >= other.Bounds.X + other.Bounds.Width || other.Bounds.X >= r.X + r.Width ||
@@ -69,20 +75,35 @@ internal static class BlackjackBoardRegression
         settling.ShowBlackjack(Time(0));
         settling.ActivateButton("bj-deal", Time(100));
         settling.ActivateButton("bj-stand", Time(200));
+        var dealerChips = settling.Buttons.Single(button => button.Id == "bj-reset");
+        Require(!dealerChips.Enabled && dealerChips.Bounds == chips.Bounds,
+            "The chips plaque disappeared or enabled reset during the dealer turn.");
         settling.TickBlackjack(Time(850)); // Reveal.
+        Require(settling.Update([Sample(dealerChips, 19, 900)], Time(900), Time(900)) is null &&
+            settling.HoveredButtonIds.Count == 0,
+            "The disabled dealer-turn chips plaque highlighted or consumed a bankroll reset.");
         settling.TickBlackjack(Time(1500)); // Settlement enables a new Deal target.
         Require(settling.BlackjackState.Phase == BlackjackPhase.RoundOver, "Settlement fixture did not finish.");
+        var settledChips = settling.Buttons.Single(button => button.Id == "bj-reset");
+        Require(settledChips.Enabled && settledChips.Bounds == chips.Bounds &&
+            settling.Update([Sample(settledChips, 19, 900)], Time(1520), Time(1520)) is null &&
+            settling.BlackjackState.Bankroll == 1025,
+            "Settlement moved the chips plaque or replayed its disabled-period gesture.");
         var nextDeal = settling.Buttons.Single(b => b.Id == "bj-deal");
         Require(settling.Update([Sample(nextDeal, 20, 1450)], Time(1450), Time(1550)) is null &&
             settling.BlackjackState.RoundNumber == 1, "A queued dealer-turn pinch dealt after settlement.");
         Require(settling.Update([Sample(nextDeal, 21, 1600) with { SelectionFrameTime = Time(1490) }],
             Time(1600), Time(1600)) is null, "A pre-settlement pointing anchor crossed into betting.");
-        Require(settling.Update([Sample(nextDeal, 22, 1700)], Time(1700), Time(1700)) is not null &&
+        Require(settling.Update([Sample(settledChips, 22, 1650)], Time(1650), Time(1650))?.ButtonId == "bj-reset" &&
+            settling.BlackjackState is { Bankroll: 1000, SelectedBet: 25, Phase: BlackjackPhase.Betting } &&
+            settling.BlackjackState.Hands.Count == 0 && settling.BlackjackState.DealerCards.Count == 0,
+            "A fresh Your Chips selection did not restore a clean 1,000-credit betting table.");
+        Require(settling.Update([Sample(nextDeal, 23, 1700)], Time(1700), Time(1700)) is not null &&
             settling.BlackjackState.RoundNumber == 2, "Settlement barriers blocked a fresh Deal.");
         CheckHitEvents();
         BlackjackDealRegression.Run();
         Console.WriteLine("Blackjack board verification passed: launch, shared targets, held/disabled pinch consumption, " +
-            "game/navigation revisions, split, menu continuity, reset and laptop/gesture input barriers; " +
+            "game/navigation revisions, split, menu continuity, phase-gated Your Chips plaque and reset input barriers; " +
             "HIT event payloads, advancing split hands, unique sequences and non-HIT suppression.");
 
         BoardButton Button(string id) => board.Buttons.Single(b => b.Id == id);

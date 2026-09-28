@@ -9,6 +9,16 @@ if (args is ["--hand-local-context"])
     return;
 }
 
+if (args is ["--hand-acquisition-gold"])
+{
+    HandAcquisitionGoldDealRegression.Run();
+    return;
+}
+if (args is ["--hand-acquisition-light"] or ["--hand-acquisition-illumination"])
+{
+    HandAcquisitionIlluminatedRenewalRegression.Run();
+    return;
+}
 if (args is ["--hand-acquisition-history"])
 {
     HandAcquisitionOpticalHistoryRegression.Run();
