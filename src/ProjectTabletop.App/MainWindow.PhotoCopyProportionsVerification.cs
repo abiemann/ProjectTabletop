@@ -20,8 +20,6 @@ public sealed partial class MainWindow
     {
         const int frameWidth = 1600, frameHeight = 1000, spriteWidth = 120, spriteHeight = 80;
         var device = CanvasDevice.GetSharedDevice();
-        using var cameraLayer = new CanvasRenderTarget(device, frameWidth, frameHeight, 96);
-        using var boardLayer = new CanvasRenderTarget(device, 1000, 1000, 96);
         using var reconstructed = new CanvasRenderTarget(device, frameWidth, frameHeight, 96);
         var source = new byte[spriteWidth * spriteHeight * 4];
         for (int y = 2; y < spriteHeight - 2; y++)
@@ -56,6 +54,8 @@ public sealed partial class MainWindow
         };
         double worstRatioError = 0, worstAxisDot = 0, worstAnchorError = 0;
         int checkedCopies = 0;
+        double largestCameraRasterScale = 1;
+        foreach (var (boardWidth, boardHeight) in new[] { (1000, 1000), (3840, 2160) })
         foreach (var quad in cameraQuads)
         {
             var mapping = Homography.FromFourPoints(quad, boardCorners);
@@ -64,14 +64,26 @@ public sealed partial class MainWindow
             {
                 CameraGeometry = new(frameWidth, frameHeight, mapping.ToMatrix())
             };
+            float rasterScale = SceneCompositor.GetPhotoCopyCameraRasterScale(sprite.CameraGeometry,
+                boardWidth, boardHeight, device.MaximumBitmapSizeInPixels);
+            int cameraWidth = (int)Math.Ceiling(frameWidth * (double)rasterScale);
+            int cameraHeight = (int)Math.Ceiling(frameHeight * (double)rasterScale);
+            Require(cameraWidth <= device.MaximumBitmapSizeInPixels && cameraHeight <= device.MaximumBitmapSizeInPixels,
+                "The native photograph layer exceeded the GPU texture limit.");
+            if (boardWidth == 3840)
+                Require(rasterScale > 1, "The 4K board retained a webcam-resolution photograph layer.");
+            largestCameraRasterScale = Math.Max(largestCameraRasterScale, rasterScale);
+            using var cameraLayer = new CanvasRenderTarget(device, cameraWidth, cameraHeight, 96);
+            using var boardLayer = new CanvasRenderTarget(device, boardWidth, boardHeight, 96);
             foreach (var placement in placements)
             {
                 using (var drawing = boardLayer.CreateDrawingSession())
                 {
                     drawing.Clear(Colors.Transparent);
-                    SceneCompositor.DrawPhotoCopyNativeLayer(drawing, cameraLayer, bitmap, sprite, [placement], 1);
+                    drawing.Transform = Matrix3x2.CreateScale(boardWidth / 1000f, boardHeight / 1000f);
+                    SceneCompositor.DrawPhotoCopyNativeLayer(drawing, cameraLayer, bitmap, sprite, [placement], 1, rasterScale);
                 }
-                ReconstructCamera(inverse);
+                ReconstructCamera(boardLayer, inverse);
                 var pixels = reconstructed.GetPixelBytes();
                 Vector2 red = MarkerCenter(pixels, 2), green = MarkerCenter(pixels, 1), blue = MarkerCenter(pixels, 0);
                 var horizontal = green - red;
@@ -99,9 +111,10 @@ public sealed partial class MainWindow
             using (var drawing = boardLayer.CreateDrawingSession())
             {
                 drawing.Clear(Colors.Transparent);
-                SceneCompositor.DrawPhotoCopyNativeLayer(drawing, cameraLayer, bitmap, sprite, placements, 0);
+                drawing.Transform = Matrix3x2.CreateScale(boardWidth / 1000f, boardHeight / 1000f);
+                SceneCompositor.DrawPhotoCopyNativeLayer(drawing, cameraLayer, bitmap, sprite, placements, 0, rasterScale);
             }
-            ReconstructCamera(inverse);
+            ReconstructCamera(boardLayer, inverse);
             var cleared = reconstructed.GetPixelBytes();
             Require(Enumerable.Range(0, cleared.Length / 4).All(i => cleared[i * 4 + 3] == 0),
                 "The native camera layer retained pixels from a previous stamp draw.");
@@ -112,27 +125,84 @@ public sealed partial class MainWindow
         {
             CameraGeometry = new(frameWidth, frameHeight, lastMap.ToMatrix())
         };
-        using (var drawing = boardLayer.CreateDrawingSession())
+        float finalScale = SceneCompositor.GetPhotoCopyCameraRasterScale(finalSprite.CameraGeometry,
+            3840, 2160, device.MaximumBitmapSizeInPixels);
+        using var finalCameraLayer = new CanvasRenderTarget(device,
+            (int)Math.Ceiling(frameWidth * (double)finalScale), (int)Math.Ceiling(frameHeight * (double)finalScale), 96);
+        using var finalBoardLayer = new CanvasRenderTarget(device, 3840, 2160, 96);
+        using (var drawing = finalBoardLayer.CreateDrawingSession())
         {
             drawing.Clear(Colors.Transparent);
-            SceneCompositor.DrawPhotoCopyNativeLayer(drawing, cameraLayer, bitmap, finalSprite, placements, placements.Length);
+            drawing.Transform = Matrix3x2.CreateScale(3.84f, 2.16f);
+            SceneCompositor.DrawPhotoCopyNativeLayer(drawing, finalCameraLayer, bitmap, finalSprite,
+                placements, placements.Length, finalScale);
         }
-        ReconstructCamera(lastMap.Inverse().ToMatrix());
+        ReconstructCamera(finalBoardLayer, lastMap.Inverse().ToMatrix());
         string directory = Path.Combine(_appDataDirectory, "ProjectionSnapshots");
         Directory.CreateDirectory(directory);
         string path = Path.Combine(directory, $"photo-copy-proportions-{Guid.NewGuid():N}.png");
         await reconstructed.SaveAsync(path, CanvasBitmapFileFormat.Png);
+        // Fine image detail must survive a small swirl stamp. Compare the old
+        // webcam-sized intermediate with the production dense layer at the exact
+        // same 4K destination; geometry-only assertions would miss this bottleneck.
+        var stripes = new byte[source.Length];
+        for (int y = 2; y < spriteHeight - 2; y++)
+        for (int x = 2; x < spriteWidth - 2; x++)
+        {
+            int index = (y * spriteWidth + x) * 4;
+            stripes[index] = stripes[index + 1] = stripes[index + 2] = (byte)((x / 4) % 2 == 0 ? 0 : 255);
+            stripes[index + 3] = 255;
+        }
+        using var stripeBitmap = CanvasBitmap.CreateFromBytes(device, stripes, spriteWidth, spriteHeight,
+            DirectXPixelFormat.B8G8R8A8UIntNormalized, 96, CanvasAlphaMode.Premultiplied);
+        var detailSprite = new PhotoHandCutout(spriteWidth, spriteHeight, stripes, new(60, 40), new(0, -1))
+        {
+            CameraGeometry = new(frameWidth, frameHeight, Homography.FromFourPoints(cameraQuads[0], boardCorners).ToMatrix())
+        };
+        float detailScale = SceneCompositor.GetPhotoCopyCameraRasterScale(detailSprite.CameraGeometry,
+            3840, 2160, device.MaximumBitmapSizeInPixels);
+        using var legacyCameraLayer = new CanvasRenderTarget(device, frameWidth, frameHeight, 96);
+        double legacyDetailContrast = DetailContrast(legacyCameraLayer, 1);
+        double nativeDetailContrast = DetailContrast(finalCameraLayer, detailScale);
+        Require(nativeDetailContrast > legacyDetailContrast * 1.10 + 5,
+            $"The projector-resolution photo layer did not retain more small-stamp detail ({nativeDetailContrast:F1} versus {legacyDetailContrast:F1}).");
+
         return new { passed = true, checkedCopies, anisotropicBoard = true, perspectiveBoard = true,
             nativeCameraProportions = true, inwardDirection = true, transparentLayerClears = true,
+            fullResolutionBoard = true, largestCameraRasterScale,
+            legacyDetailContrast, nativeDetailContrast,
             worstRatioError, worstAxisDot, worstAnchorError, path };
 
-        void ReconstructCamera(double[] h)
+        double DetailContrast(CanvasRenderTarget layer, float scale)
+        {
+            using (var drawing = finalBoardLayer.CreateDrawingSession())
+            {
+                drawing.Clear(Colors.Transparent);
+                drawing.Transform = Matrix3x2.CreateScale(3.84f, 2.16f);
+                SceneCompositor.DrawPhotoCopyNativeLayer(drawing, layer, stripeBitmap, detailSprite,
+                    [new(.3, .3, .0525, .035, 0)], 1, scale);
+            }
+            var pixels = finalBoardLayer.GetPixelBytes();
+            double contrast = 0;
+            int count = 0;
+            for (int i = 0; i < pixels.Length; i += 4)
+            {
+                if (pixels[i + 3] < 245) continue;
+                contrast += Math.Abs(pixels[i] - 127.5);
+                count++;
+            }
+            Require(count > 1000, "The small-stamp detail check did not render its photograph.");
+            return contrast / count;
+        }
+
+        void ReconstructCamera(CanvasRenderTarget boardLayer, double[] h)
         {
             // Board pixels -> native camera pixels. This is the camera-view
             // equivalent of the calibrated outer board-to-projector mapping.
+            double width = boardLayer.SizeInPixels.Width, height = boardLayer.SizeInPixels.Height;
             var matrix = new Matrix4x4(
-                (float)(h[0] / 1000), (float)(h[3] / 1000), 0, (float)(h[6] / 1000),
-                (float)(h[1] / 1000), (float)(h[4] / 1000), 0, (float)(h[7] / 1000),
+                (float)(h[0] / width), (float)(h[3] / width), 0, (float)(h[6] / width),
+                (float)(h[1] / height), (float)(h[4] / height), 0, (float)(h[7] / height),
                 0, 0, 1, 0, (float)h[2], (float)h[5], 0, (float)h[8]);
             using var effect = new Transform3DEffect
             {

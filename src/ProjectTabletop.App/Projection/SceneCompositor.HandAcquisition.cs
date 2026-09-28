@@ -28,6 +28,7 @@ public sealed partial class SceneCompositor
     private DateTimeOffset _acquisitionLightUntil;
     private DateTimeOffset _acquisitionLightStarted;
     private HandAcquisitionSceneImage? _acquisitionExpectedScene;
+    private CanvasRenderTarget? _acquisitionReferenceTarget;
     private DateTimeOffset _acquisitionReferenceRetryAt;
     private string? _acquisitionReferenceError;
     private string _acquisitionReason = "inactive";
@@ -213,7 +214,26 @@ public sealed partial class SceneCompositor
         // separate hand/search-light overlay. This is not a webcam background.
         try
         {
-            var pixels = _boardApplicationTarget.GetPixelBytes();
+            // Detection needs a bounded board-UV reference, not a readback of
+            // every projector pixel. Keep this analysis image independent of
+            // the display cache's resolution and Windows display scaling.
+            if (_acquisitionReferenceTarget is null ||
+                _acquisitionReferenceTarget.Device != _boardApplicationTarget.Device)
+            {
+                _acquisitionReferenceTarget?.Dispose();
+                _acquisitionReferenceTarget = new CanvasRenderTarget(_boardApplicationTarget.Device,
+                    BoardSurfaceSize, BoardSurfaceSize, 96);
+            }
+            var sourceSize = _boardApplicationTarget.SizeInPixels;
+            using (var drawing = _acquisitionReferenceTarget.CreateDrawingSession())
+            {
+                drawing.Clear(Colors.Transparent);
+                drawing.DrawImage(_boardApplicationTarget,
+                    new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize),
+                    new Rect(0, 0, sourceSize.Width, sourceSize.Height),
+                    1, CanvasImageInterpolation.HighQualityCubic);
+            }
+            var pixels = _acquisitionReferenceTarget.GetPixelBytes();
             _acquisitionReferenceError = null;
             return new((int)BoardSurfaceSize, (int)BoardSurfaceSize, pixels, cameraToBoard);
         }

@@ -9,6 +9,8 @@ public sealed partial class SceneCompositor
         PhotoCopyCaptureContext Context, PhotoCopyAction Action = PhotoCopyAction.Swirl,
         BoardSelectionGesture Gesture = BoardSelectionGesture.IndexSeparation);
     private PhotoCopyGestureShutter? _photoCopyGestureShutter;
+    private sealed record PhotoCopyMemorySaveRequest(DateTimeOffset FrameTime, PhotoCopyMemoryImage Image);
+    private PhotoCopyMemorySaveRequest? _photoCopyMemorySaveRequest;
 
     // Feed the same board gesture recognizer only while a fresh capture can be
     // made. Settling, busy work and unavailable subjects never queue a shutter.
@@ -16,6 +18,7 @@ public sealed partial class SceneCompositor
         DateTimeOffset frameTime, bool acceptFrame, bool busy)
     {
         _photoCopyGestureShutter = null;
+        _photoCopyMemorySaveRequest = null;
         PhotoCopyCaptureContext? ready = null;
         if (acceptFrame && !busy && TryGetPhotoCopyCaptureContext(out var context) &&
             frameTime >= context.ReadyAfter && (context.Target is not null || cursors.Count == 2))
@@ -47,6 +50,20 @@ public sealed partial class SceneCompositor
                 !ReferenceEquals(current.Target, shutter.Context.Target)) return false;
             request = shutter;
             return request.TrackingId > 0;
+        }
+    }
+
+    internal bool TryTakePhotoCopyMemorySaveRequest(DateTimeOffset frameTime, out PhotoCopyMemoryImage image)
+    {
+        lock (_gate)
+        {
+            var request = _photoCopyMemorySaveRequest;
+            _photoCopyMemorySaveRequest = null;
+            image = null!;
+            if (request is null || request.FrameTime != frameTime ||
+                !IsPhotoCopyMemoryImageCurrent(request.Image)) return false;
+            image = request.Image;
+            return true;
         }
     }
 

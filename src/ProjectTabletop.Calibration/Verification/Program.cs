@@ -59,49 +59,67 @@ Reject(() => ProjectionClipRegion.FromCorners([new(0, 0), new(0, 1), new(1, 1), 
 Reject(() => ProjectionClipRegion.FromCorners([new(0, 0), new(1, 0), new(0.3, 0.3), new(0, 1)]));
 Reject(() => ProjectionClipRegion.FromCorners([new(0, 0), new(1, 0), new(1, 0), new(0, 1)]));
 
-// The camera sees this board upside down and the lens bends points away from a
-// single homography. Spots near the board edges should reduce extrapolation error.
-static Point2 DistortedCamera(Point2 projector)
+// Registration projects four ordered alignment spots, then independently checks
+// the center. Observed spot order, rather than webcam corner order, determines
+// orientation, including a camera that sees the board upside down.
+Point2[] registrationTargets = [new(0.32, 0.32), new(0.68, 0.32),
+    new(0.68, 0.68), new(0.32, 0.68), new(0.5, 0.5)];
+if (BoardRegistration.SpotCount != registrationTargets.Length ||
+    BoardRegistration.MaximumCenterError != 0.015)
+    throw new Exception("Board setup must use five spots and retain its center-check tolerance.");
+for (var index = 0; index < registrationTargets.Length; index++)
+    Close(BoardRegistration.SpotPosition(index), registrationTargets[index]);
+Reject(() => BoardRegistration.SpotPosition(-1));
+Reject(() => BoardRegistration.SpotPosition(BoardRegistration.SpotCount));
+
+Point2[] unitCorners = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
+Point2[][] cameraViews = [
+    unitCorners,
+    [new(1600, 900), new(200, 900), new(200, 100), new(1600, 100)],
+    [new(220, 120), new(1500, 230), new(1390, 1000), new(400, 870)]
+];
+foreach (var cameraCorners in cameraViews)
 {
-    var dx = projector.X - 0.5;
-    var dy = projector.Y - 0.5;
-    return new Point2(1700 - 1450 * projector.X + 160 * dx * dx * dx,
-                      950 - 850 * projector.Y + 95 * dy * dy * dy);
+    var projectorToCamera = Homography.FromFourPoints(unitCorners, cameraCorners);
+    var observedSpots = registrationTargets.Select(projectorToCamera.Transform).ToArray();
+    var registration = BoardRegistration.FitAndValidate(observedSpots, out var centerError);
+    if (centerError > 1e-10)
+        throw new Exception($"An exact five-spot calibration has center error {centerError}.");
+    foreach (var target in registrationTargets.Concat(
+                 [new Point2(0.1, 0.15), new Point2(0.9, 0.85)]))
+        Close(registration.Transform(projectorToCamera.Transform(target)), target);
 }
-Point2[] centralProjector = [new(0.32, 0.32), new(0.68, 0.32),
-                             new(0.68, 0.68), new(0.32, 0.68)];
-Point2[] physicalProjector = [new(0.9, 0.9), new(0.1, 0.9),
-                              new(0.1, 0.1), new(0.9, 0.1)];
-Point2[] physicalCamera = physicalProjector.Select(DistortedCamera).ToArray();
-var provisionalRegistration = Homography.FromFourPoints(
-    centralProjector.Select(DistortedCamera).ToArray(), centralProjector);
-var nearTargets = NearEdgeRegistrationPlan.Create(physicalCamera, provisionalRegistration);
-if (nearTargets.Length != 4 || nearTargets.Any(target =>
-        target.ProjectorPosition.X is < 0.05 or > 0.95 ||
-        target.ProjectorPosition.Y is < 0.05 or > 0.95))
-    throw new Exception("Near-edge targets left the safe projector field.");
-Point2[] boardUv = [new(0.15, 0.15), new(0.85, 0.15),
-                    new(0.85, 0.85), new(0.15, 0.85)];
-var cameraToBoard = Homography.FromFourPoints(physicalCamera,
-    [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]);
-for (var index = 0; index < 4; index++)
-    Close(cameraToBoard.Transform(nearTargets[index].CameraEstimate), boardUv[index]);
-var nearRegistration = Homography.FromFourPoints(
-    nearTargets.Select(target => DistortedCamera(target.ProjectorPosition)).ToArray(),
-    nearTargets.Select(target => target.ProjectorPosition).ToArray());
-static double MaxCornerError(Homography mapping, Point2[] camera, Point2[] projector) =>
-    Enumerable.Range(0, 4).Max(index =>
-    {
-        var actual = mapping.Transform(camera[index]);
-        var expected = projector[index];
-        return Math.Sqrt(Math.Pow(actual.X - expected.X, 2) +
-                         Math.Pow(actual.Y - expected.Y, 2));
-    });
-var provisionalError = MaxCornerError(provisionalRegistration, physicalCamera, physicalProjector);
-var nearError = MaxCornerError(nearRegistration, physicalCamera, physicalProjector);
-if (provisionalError < 0.006 || nearError >= provisionalError * 0.75)
-    throw new Exception($"Near-edge registration failed to reduce synthetic corner error " +
-                        $"({provisionalError:F4} -> {nearError:F4}).");
+
+// A slightly noisy center may pass validation, but must not move the mapping
+// already determined by the first four measurements.
+var noisyCenterSpots = registrationTargets.ToArray();
+noisyCenterSpots[4] = new(0.51, 0.508);
+var validatedRegistration = BoardRegistration.FitAndValidate(noisyCenterSpots,
+    out var acceptedCenterError);
+if (Math.Abs(acceptedCenterError - Math.Sqrt(0.01 * 0.01 + 0.008 * 0.008)) > 1e-10)
+    throw new Exception("Center validation did not report the independent measurement error.");
+Close(validatedRegistration.Transform(new Point2(0.1, 0.9)), new Point2(0.1, 0.9));
+
+var wrongCenterSpots = registrationTargets.ToArray();
+wrongCenterSpots[4] = new(0.516, 0.5);
+var rejectedCenter = false;
+try { BoardRegistration.FitAndValidate(wrongCenterSpots, out _); }
+catch (InvalidOperationException) { rejectedCenter = true; }
+if (!rejectedCenter)
+    throw new Exception("A fifth spot outside the center tolerance was accepted.");
+
+Reject(() => BoardRegistration.FitAndValidate(registrationTargets[..4], out _));
+Reject(() => BoardRegistration.FitAndValidate(
+    [.. registrationTargets, new Point2(0.5, 0.5)], out _));
+Reject(() => BoardRegistration.FitAndValidate(null!, out _));
+Reject(() => BoardRegistration.FitAndValidate(
+    [registrationTargets[0], registrationTargets[1], registrationTargets[1],
+     registrationTargets[3], registrationTargets[4]], out _));
+Reject(() => BoardRegistration.FitAndValidate(
+    [registrationTargets[0], registrationTargets[2], registrationTargets[1],
+     registrationTargets[3], registrationTargets[4]], out _));
+Reject(() => BoardRegistration.FitAndValidate(
+    [.. registrationTargets[..4], new Point2(double.NaN, 0.5)], out _));
 
 var board = new PlaneCalibration(source, destination);
 var pieceTop = new PlaneCalibration(source, trapezoid);

@@ -7,7 +7,7 @@ public static partial class PhotoObjectLocator
 {
     // A pale printed box can contribute one open outer rim and several separate
     // ink components. Only recover its enclosed face when the actual camera
-    // image supports all four sides; component containment alone would fill an
+    // image supports its complete outline; containment alone would fill an
     // open U around an unrelated object or a real hole in a picture frame.
     private static bool TryRecoverPrintedSurface(byte[] photo, byte[] pixels, int[] ids,
         int[] candidates, int[] area, bool[] touchesEdge, out byte[] recoveredMask,
@@ -15,7 +15,7 @@ public static partial class PhotoObjectLocator
     {
         recoveredMask = [];
         contrastEvidence = [];
-        if (candidates.Length is < 2 or > 12 || candidates.Any(id => touchesEdge[id])) return false;
+        if (candidates.Length is < 1 or > 12 || candidates.Any(id => touchesEdge[id])) return false;
         int outerId = candidates.MaxBy(id => area[id]);
         if (area[outerId] < candidates.Where(id => id != outerId).Sum(id => area[id])) return false;
         byte[] outerPixels = new byte[BoardSize * BoardSize];
@@ -43,11 +43,11 @@ public static partial class PhotoObjectLocator
         bool parallel = Math.Abs(Cv2.ContourArea(quad)) >= hullArea * .88 &&
             PhotoObjectSpotlight.TryParallelEdges(quad, hull, hullArea, out _, out _);
         bool rectangular = hullArea / rectangleArea >= .88;
-        if (!parallel && !rectangular) return false;
         // A frame-sized opening is evidence against an opaque face. Very narrow
         // rim slivers can close during rectification, however, so let those tiny
         // near-boundary gaps survive as transparent holes in the recovered mask.
-        // Ordinary one-component subjects keep their old path.
+        // This also protects genuine openings when the rim and printing happen
+        // to form one connected component.
         for (int i = 0; i < contours.Length; i++)
         {
             if (hierarchy[i].Parent < 0) continue;
@@ -60,20 +60,40 @@ public static partial class PhotoObjectLocator
                     Math.Max(6, Math.Min(rectangle.Size.Width, rectangle.Size.Height) * .1)) return false;
         }
 
-        using Mat filled = new(BoardSize, BoardSize, MatType.CV_8UC1, Scalar.Black);
-        Cv2.FillConvexPoly(filled, hull, Scalar.White);
-        byte[] filledPixels = new byte[BoardSize * BoardSize];
-        Marshal.Copy(filled.Data, filledPixels, 0, filledPixels.Length);
-        var candidateIds = candidates.ToHashSet();
-        for (int i = 0; i < ids.Length; i++)
-            if (candidateIds.Contains(ids[i]) && filledPixels[i] == 0) return false;
-
         using Mat camera = Mat.FromPixelData(BoardSize, BoardSize, MatType.CV_8UC4, photo);
         using Mat smoothed = new();
         Cv2.GaussianBlur(camera, smoothed, new Size(3, 3), .8);
-        if (!(parallel && PrintedSurfaceEdges(smoothed,
-                quad.Select(point => new Point2f(point.X, point.Y)).ToArray())) &&
-            !(rectangular && PrintedSurfaceEdges(smoothed, rectangle.Points()))) return false;
+        var outlines = new List<(Point[] Mask, Point2f[] Edges)>();
+        if (parallel) outlines.Add((hull, quad.Select(point => new Point2f(point.X, point.Y)).ToArray()));
+        if (rectangular) outlines.Add((hull, rectangle.Points()));
+        // Two strong adjacent sides can leave only an L-shaped contrast mask.
+        // Its convex hull cuts through the pale face. Complete a bounded outline
+        // only when the actual image supports every proposed side, including
+        // both faint ones, and all separate printing lies inside that outline.
+        foreach (var corners in PrintedSurfaceCompletions(hull).OrderBy(points => Math.Abs(Cv2.ContourArea(points))))
+            outlines.Add((corners.Select(point => new Point((int)Math.Round(point.X),
+                (int)Math.Round(point.Y))).ToArray(), corners));
+        using Mat filled = new(BoardSize, BoardSize, MatType.CV_8UC1, Scalar.Black);
+        byte[] filledPixels = new byte[BoardSize * BoardSize];
+        var candidateIds = candidates.ToHashSet();
+        bool accepted = false;
+        foreach (var outline in outlines)
+        {
+            double proposedArea = Math.Abs(Cv2.ContourArea(outline.Mask));
+            if (proposedArea < hullArea * .98 || proposedArea > hullArea * 2.05 ||
+                proposedArea > Capture.Width * Capture.Height * .45 ||
+                outline.Mask.Any(point => point.X <= Capture.Left + 2 || point.X >= Capture.Right - 3 ||
+                    point.Y <= Capture.Top + 2 || point.Y >= Capture.Bottom - 3) ||
+                !PrintedSurfaceEdges(smoothed, outline.Edges)) continue;
+            filled.SetTo(Scalar.Black);
+            Cv2.FillConvexPoly(filled, outline.Mask, Scalar.White);
+            Marshal.Copy(filled.Data, filledPixels, 0, filledPixels.Length);
+            bool containsAll = true;
+            for (int i = 0; i < ids.Length && containsAll; i++)
+                if (candidateIds.Contains(ids[i]) && filledPixels[i] == 0) containsAll = false;
+            if (containsAll) { accepted = true; break; }
+        }
+        if (!accepted) return false;
 
         // Retain even tiny enclosed holes instead of manufacturing opaque
         // pixels there. The larger-hole veto above prevents merging a frame
@@ -91,13 +111,44 @@ public static partial class PhotoObjectLocator
     private static bool PrintedSurfaceEdges(Mat photo, Point2f[] corners)
     {
         int strongSides = 0;
-        for (int side = 0; side < 4; side++)
+        for (int side = 0; side < corners.Length; side++)
         {
-            if (!PrintedSurfaceEdge(photo, corners[side], corners[(side + 1) % 4], out bool strong))
+            if (!PrintedSurfaceEdge(photo, corners[side], corners[(side + 1) % corners.Length], out bool strong))
                 return false;
             if (strong) strongSides++;
         }
         return strongSides >= 2;
+    }
+
+    private static IEnumerable<Point2f[]> PrintedSurfaceCompletions(Point[] hull)
+    {
+        var rectangle = Cv2.MinAreaRect(hull);
+        double minimumSide = Math.Max(40, Math.Min(rectangle.Size.Width, rectangle.Size.Height) * .4);
+        Point[] outline = Cv2.ApproxPolyDP(hull, Cv2.ArcLength(hull, true) * .01, true);
+        static double Length(Point edge) => Math.Sqrt((double)edge.X * edge.X + (double)edge.Y * edge.Y);
+        var sides = Enumerable.Range(0, outline.Length)
+            .Select(i => outline[(i + 1) % outline.Length] - outline[i])
+            .Where(edge => Length(edge) >= minimumSide).OrderByDescending(Length).Take(8).ToArray();
+        // Use the measured side directions rather than forcing right angles in
+        // square board coordinates. A rotated physical rectangle becomes skewed
+        // there when the physical board has unequal width and height.
+        for (int first = 0; first < sides.Length; first++)
+            for (int second = first + 1; second < sides.Length; second++)
+            {
+                Point a = sides[first], b = sides[second];
+                double ux = a.X / Length(a), uy = a.Y / Length(a);
+                double vx = b.X / Length(b), vy = b.Y / Length(b);
+                double determinant = ux * vy - uy * vx;
+                if (Math.Abs(ux * vx + uy * vy) > .65) continue;
+                var projected = hull.Select(point => (U: (point.X * vy - point.Y * vx) / determinant,
+                    V: (ux * point.Y - uy * point.X) / determinant)).ToArray();
+                double minU = projected.Min(point => point.U), maxU = projected.Max(point => point.U);
+                double minV = projected.Min(point => point.V), maxV = projected.Max(point => point.V);
+                if (Math.Min(maxU - minU, maxV - minV) < 40) continue;
+                Point2f P(double u, double v) => new((float)(u * ux + v * vx), (float)(u * uy + v * vy));
+                yield return [P(minU, minV), P(maxU, minV), P(maxU, maxV), P(minU, maxV)];
+            }
+        yield return rectangle.Points();
     }
 
     private static bool PrintedSurfaceEdge(Mat photo, Point2f first, Point2f second, out bool strong)

@@ -13,11 +13,13 @@ public sealed partial class SceneCompositor
 {
     public sealed record PhotoCopyCaptureContext(long Revision, double[] CameraToBoard,
         DateTimeOffset ReadyAfter, PhotoObjectTarget? Target);
+    internal sealed record PhotoCopyMemoryImage(long Revision, PhotoHandCutout Cutout);
+    internal sealed record PhotoCopySwirlImage(int Width, int Height, byte[] BgraPixels);
 
     private static readonly TimeSpan PhotoCopySurfaceSettle = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan PhotoCopyRemoveHandDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan PhotoCopyStampInterval = TimeSpan.FromMilliseconds(25);
-    private const string PhotoCopyReadyMessage = "Place an object on grey and lift your hand. Select Swirl, Copy, or Copy with the clock.";
+    private const string PhotoCopyReadyMessage = "Place an object above the controls and lift your hand. Select Swirl or Copy.";
     private long _photoCopySessionRevision = -1;
     private long _photoCopyRevision;
     private DateTimeOffset _photoCopySurfaceShownAt;
@@ -29,6 +31,7 @@ public sealed partial class SceneCompositor
     private bool _photoCopyRenderFailed;
     private IReadOnlyList<PhotoCopyPlacement> _photoCopyPlacements = Array.Empty<PhotoCopyPlacement>();
     private string _photoCopyStatus = PhotoCopyReadyMessage;
+    private string? _photoCopyMemorySaveStatus;
     private DateTimeOffset _photoCopySavedUntil, _photoCopyCountdownUntil;
 
     public string PhotoCopyStatus
@@ -71,7 +74,10 @@ public sealed partial class SceneCompositor
         {
             _photoCopySessionRevision = _boardSession.Revision;
             _photoCopyGestureShutter = null;
+            _photoCopyMemorySaveRequest = null;
+            _photoCopyMemorySaveStatus = null;
             _boardSession.PhotoCopyShutterEnabled = false;
+            _boardSession.PhotoCopyHasSwirl = false;
             _photoCopyRevision++;
             _photoCopyCutout = null;
             _photoCopyPremultipliedPixels = null;
@@ -97,9 +103,64 @@ public sealed partial class SceneCompositor
             InvalidatePhotoCopyCapture();
     }
 
-    private bool PhotoCopyCaptureAllowed => !_disposed && !_blackOutput && !_boardSetup && !IsBoardRevealActive && !_photoCopyRenderFailed &&
+    private bool PhotoCopyBoardReady => !_disposed && !_blackOutput && !_boardSetup && !IsBoardRevealActive &&
         _calibrationTarget < 0 && _boardSession.Screen == BoardScreen.PhotoCopy &&
         _boardMediaClip is not null && _boardCameraMap is not null && _boardSurfaceMap is not null;
+
+    private bool PhotoCopyCaptureAllowed => PhotoCopyBoardReady && !_photoCopyRenderFailed;
+
+    internal bool TryGetPhotoCopyMemoryImage(out PhotoCopyMemoryImage image)
+    {
+        lock (_gate)
+        {
+            SyncPhotoCopySession();
+            image = null!;
+            if (!PhotoCopyBoardReady || _photoCopyCutout is null) return false;
+            image = new(_photoCopyRevision, _photoCopyCutout);
+            return true;
+        }
+    }
+
+    internal bool IsPhotoCopyMemoryImageCurrent(PhotoCopyMemoryImage image)
+    {
+        lock (_gate)
+            return TryGetPhotoCopyMemoryImage(out var current) && current.Revision == image.Revision &&
+                ReferenceEquals(current.Cutout, image.Cutout);
+    }
+
+    internal bool BeginPhotoCopyMemorySave(PhotoCopyMemoryImage image)
+    {
+        lock (_gate)
+        {
+            if (!IsPhotoCopyMemoryImageCurrent(image)) return false;
+            _photoCopySavedUntil = DateTimeOffset.MinValue;
+            _photoCopyMemorySaveStatus = "Saving image…";
+            _renderedBoardState = null;
+            return true;
+        }
+    }
+
+    internal bool CompletePhotoCopyMemorySave(PhotoCopyMemoryImage image, DateTimeOffset? savedAt = null)
+    {
+        lock (_gate)
+        {
+            if (!IsPhotoCopyMemoryImageCurrent(image)) return false;
+            _photoCopyMemorySaveStatus = null;
+            _photoCopySavedUntil = (savedAt ?? DateTimeOffset.UtcNow).AddSeconds(3);
+            _renderedBoardState = null;
+            return true;
+        }
+    }
+
+    internal void FailPhotoCopyMemorySave(PhotoCopyMemoryImage image)
+    {
+        lock (_gate)
+        {
+            if (!IsPhotoCopyMemoryImageCurrent(image)) return;
+            _photoCopyMemorySaveStatus = "Image could not be saved. Check the Pictures folder and select Save again.";
+            _renderedBoardState = null;
+        }
+    }
 
     public bool TryGetPhotoCopyCaptureContext(out PhotoCopyCaptureContext context)
     {
@@ -149,6 +210,7 @@ public sealed partial class SceneCompositor
                 return false;
             var placements = PhotoCopyLayout.Create(cutout.Width / (double)cutout.Height);
             _photoCopyCutout = cutout;
+            _boardSession.PhotoCopyHasSwirl = true;
             _photoCopySavedUntil = _photoCopyCountdownUntil = DateTimeOffset.MinValue;
             _photoCopyObjectTarget = null;
             _photoCopyObjectShownAt = DateTimeOffset.MinValue;
@@ -229,6 +291,7 @@ public sealed partial class SceneCompositor
     private string PhotoCopyDisplayStatus(DateTimeOffset now)
     {
         if (now < _photoCopySavedUntil) return "Image Saved";
+        if (_photoCopyMemorySaveStatus is { } memoryStatus) return memoryStatus;
         if (_photoCopyCountdownUntil != DateTimeOffset.MinValue)
         {
             int seconds = Math.Max(0, (int)Math.Ceiling((_photoCopyCountdownUntil - now).TotalSeconds));
@@ -250,7 +313,7 @@ public sealed partial class SceneCompositor
         if (count == 0) return "Photo captured. Remove the object and your hands.";
         return count < _photoCopyPlacements.Count
             ? $"Copying your photo: {count} of {_photoCopyPlacements.Count}"
-            : "Copies complete. Select Capture again to make another photo.";
+            : "Copies complete. Select Save to save the swirl, or Clear to start again.";
     }
 
     private void DrawPhotoCopyStamps(CanvasDrawingSession surface, int count)
@@ -269,16 +332,26 @@ public sealed partial class SceneCompositor
             }
             if (cutout.CameraGeometry is { } camera)
             {
+                // This layer uses camera coordinates for geometry, but its pixels
+                // must be dense enough for the current projector-resolution board.
+                // Keep a single raster scale so photographed objects cannot stretch.
+                float rasterScale = GetPhotoCopyCameraRasterScale(camera, _boardRasterPixels.Width,
+                    _boardRasterPixels.Height, surface.Device.MaximumBitmapSizeInPixels);
+                int rasterWidth = (int)Math.Ceiling(camera.FrameWidth * (double)rasterScale);
+                int rasterHeight = (int)Math.Ceiling(camera.FrameHeight * (double)rasterScale);
                 if (_photoCopyCameraTarget is null || !Equals(_photoCopyCameraTarget.Device, surface.Device) ||
-                    _photoCopyCameraTarget.SizeInPixels.Width != camera.FrameWidth ||
-                    _photoCopyCameraTarget.SizeInPixels.Height != camera.FrameHeight)
+                    _photoCopyCameraTarget.SizeInPixels.Width != rasterWidth ||
+                    _photoCopyCameraTarget.SizeInPixels.Height != rasterHeight)
                 {
-                    _photoCopyCameraTarget?.Dispose();
-                    _photoCopyCameraTarget = new CanvasRenderTarget(surface.Device,
-                        camera.FrameWidth, camera.FrameHeight, 96);
+                    // Keep the existing resource intact if allocating a larger
+                    // display-resolution layer fails.
+                    var replacement = new CanvasRenderTarget(surface.Device, rasterWidth, rasterHeight, 96);
+                    var previous = _photoCopyCameraTarget;
+                    _photoCopyCameraTarget = replacement;
+                    previous?.Dispose();
                 }
                 DrawPhotoCopyNativeLayer(surface, _photoCopyCameraTarget, _photoCopyBitmap,
-                    cutout, _photoCopyPlacements, count);
+                    cutout, _photoCopyPlacements, count, rasterScale);
                 return;
             }
             for (var index = 0; index < count; index++)
@@ -306,8 +379,11 @@ public sealed partial class SceneCompositor
     // The one camera-to-board projection combines with the outer board-to-projector
     // mapping to retain alignment and the photograph's camera-view proportions.
     internal static void DrawPhotoCopyNativeLayer(CanvasDrawingSession surface, CanvasRenderTarget cameraLayer,
-        CanvasBitmap bitmap, PhotoHandCutout cutout, IReadOnlyList<PhotoCopyPlacement> placements, int count)
+        CanvasBitmap bitmap, PhotoHandCutout cutout, IReadOnlyList<PhotoCopyPlacement> placements, int count,
+        float rasterScale = 1)
     {
+        if (!float.IsFinite(rasterScale) || rasterScale <= 0)
+            throw new ArgumentOutOfRangeException(nameof(rasterScale));
         var camera = cutout.CameraGeometry ?? throw new ArgumentException("A native photograph needs camera geometry.");
         var h = camera.CameraToBoard;
         var inverse = InvertPhotoCopyMap(h);
@@ -345,13 +421,14 @@ public sealed partial class SceneCompositor
                 if (!float.IsFinite(scale) || scale <= 0 || !float.IsFinite(destination.X) || !float.IsFinite(destination.Y))
                     throw new InvalidOperationException("The native photograph has an invalid placement.");
                 drawing.Transform = Matrix3x2.CreateTranslation(-anchor) * Matrix3x2.CreateScale(scale) *
-                    Matrix3x2.CreateRotation(rotation) * Matrix3x2.CreateTranslation(destination);
+                    Matrix3x2.CreateRotation(rotation) * Matrix3x2.CreateTranslation(destination) *
+                    Matrix3x2.CreateScale(rasterScale);
                 drawing.DrawImage(bitmap);
             }
         }
         var matrix = new Matrix4x4(
-            (float)(BoardSurfaceSize * h[0]), (float)(BoardSurfaceSize * h[3]), 0, (float)h[6],
-            (float)(BoardSurfaceSize * h[1]), (float)(BoardSurfaceSize * h[4]), 0, (float)h[7],
+            (float)(BoardSurfaceSize * h[0] / rasterScale), (float)(BoardSurfaceSize * h[3] / rasterScale), 0, (float)(h[6] / rasterScale),
+            (float)(BoardSurfaceSize * h[1] / rasterScale), (float)(BoardSurfaceSize * h[4] / rasterScale), 0, (float)(h[7] / rasterScale),
             0, 0, 1, 0,
             (float)(BoardSurfaceSize * h[2]), (float)(BoardSurfaceSize * h[5]), 0, (float)h[8]);
         using var projected = new Transform3DEffect
@@ -360,6 +437,53 @@ public sealed partial class SceneCompositor
             InterpolationMode = CanvasImageInterpolation.Linear, BorderMode = EffectBorderMode.Soft
         };
         surface.DrawImage(projected);
+    }
+
+    internal static float GetPhotoCopyCameraRasterScale(PhotoCopyCameraGeometry camera,
+        int boardRasterWidth, int boardRasterHeight, int maximumBitmapSize)
+    {
+        if (boardRasterWidth <= 0 || boardRasterHeight <= 0 || maximumBitmapSize <= 1)
+            throw new ArgumentOutOfRangeException(nameof(boardRasterWidth));
+        var h = camera.CameraToBoard;
+        var inverse = InvertPhotoCopyMap(h);
+        double requiredScale = 1;
+        // Perspective magnification varies across the board. Sample its complete
+        // footprint, measuring the largest physical-pixel derivative in any
+        // direction, rather than comparing the whole webcam and output widths.
+        for (int row = 0; row <= 8; row++)
+        for (int column = 0; column <= 8; column++)
+        {
+            double u = column / 8d, v = row / 8d;
+            double inverseDenominator = inverse[6] * u + inverse[7] * v + inverse[8];
+            if (!double.IsFinite(inverseDenominator) || Math.Abs(inverseDenominator) < 1e-10)
+                throw new InvalidOperationException("The camera-to-board mapping reached its projective horizon.");
+            double x = (inverse[0] * u + inverse[1] * v + inverse[2]) / inverseDenominator;
+            double y = (inverse[3] * u + inverse[4] * v + inverse[5]) / inverseDenominator;
+            double denominator = h[6] * x + h[7] * y + h[8];
+            double a = boardRasterWidth * (h[0] - u * h[6]) / denominator;
+            double b = boardRasterWidth * (h[1] - u * h[7]) / denominator;
+            double c = boardRasterHeight * (h[3] - v * h[6]) / denominator;
+            double d = boardRasterHeight * (h[4] - v * h[7]) / denominator;
+            double trace = a * a + b * b + c * c + d * d;
+            double determinant = a * d - b * c;
+            double largestScale = Math.Sqrt((trace + Math.Sqrt(Math.Max(0,
+                trace * trace - 4 * determinant * determinant))) / 2);
+            if (!double.IsFinite(largestScale))
+                throw new InvalidOperationException("The native photograph has an invalid raster scale.");
+            requiredScale = Math.Max(requiredScale, largestScale);
+        }
+        // Round upward to avoid reallocations for insignificant mapping noise.
+        // Reserve one pixel at the GPU limit for float/ceil rounding.
+        double quantizedScale = Math.Ceiling(requiredScale * 16) / 16;
+        double maximumScale = (maximumBitmapSize - 1d) / Math.Max(camera.FrameWidth, camera.FrameHeight);
+        // Bound memory as well as either edge: a skewed mapping must not allocate
+        // a maximum-width, maximum-height staging texture. The same scalar still
+        // applies to both axes. Reserve one pixel on each axis before ceil rounds
+        // the eventual texture dimensions, keeping its area within 64 MiPixels.
+        const long maximumPixels = 64L * 1024 * 1024;
+        double areaScale = Math.Sqrt(maximumPixels / ((double)camera.FrameWidth * camera.FrameHeight)) -
+            1d / Math.Min(camera.FrameWidth, camera.FrameHeight);
+        return (float)Math.Min(quantizedScale, Math.Min(maximumScale, areaScale));
     }
 
     private static double[] InvertPhotoCopyMap(IReadOnlyList<double> h)
@@ -381,7 +505,7 @@ public sealed partial class SceneCompositor
     {
         if (!_photoCopyRenderFailed) AppLog.Write("Photo Copy rendering", error);
         _photoCopyRenderFailed = true;
-        _photoCopyStatus = "Photo could not be drawn. Select Capture again to retry.";
+        _photoCopyStatus = "Photo could not be drawn. Select Clear to retry.";
         _renderedBoardState = null;
     }
 }

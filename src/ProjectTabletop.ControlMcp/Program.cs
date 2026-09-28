@@ -69,7 +69,7 @@ static async Task RunMcpAsync()
             Tool("show_test_grid", "Show the board-clipped test grid on the projector."),
             Tool("show_board_menu", "Show the board app menu and enable hand tracking for pinch selection."),
             Tool("show_hand_tracking_test", "Open the built-in Hand-Tracking gesture test and enable hand tracking."),
-            Tool("show_photo_copy", "Open Photo Copy on grey output: Swirl repeats an object photo; Copy saves a PNG; Copy with the clock waits three seconds before capture."),
+            Tool("show_photo_copy", "Open Photo Copy on grey output: bottom controls offer Exit, Swirl and Copy. Swirl repeats an object photo and becomes Clear; Copy immediately saves a PNG with a photocopier sound."),
             Tool("show_blackjack", "Open the virtual-chip Blackjack table and laptop preview without opening projector output or starting the camera."),
             BlackjackActionTool(),
             Tool("capture_blackjack_preview", "Save the current Blackjack table as an unmapped laptop-preview PNG."),

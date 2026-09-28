@@ -102,7 +102,8 @@ public sealed partial class MainWindow
         LensHeightCentimeters = OptionalNumber(ProjectorLensHeightNumberBox.Value),
         ThrowRatio = OptionalNumber(ProjectorThrowRatioNumberBox.Value),
         MeasuredBoardShortSideCentimeters = OptionalNumber(MeasuredBoardShortSideNumberBox.Value),
-        MeasuredBoardLongSideCentimeters = OptionalNumber(MeasuredBoardLongSideNumberBox.Value)
+        MeasuredBoardLongSideCentimeters = OptionalNumber(MeasuredBoardLongSideNumberBox.Value),
+        EnableDisplayAudio = _displayAudioRequested
     };
 
     private static double? OptionalNumber(double value) => double.IsNaN(value) ? null : value;
@@ -144,6 +145,7 @@ public sealed partial class MainWindow
     private void ProjectionSettingsDisplayChanged()
     {
         if (!_projectionSetupInitialized) return;
+        InvalidateDisplayAudio();
         string? persistentKey = ProjectionSizeProfile.PersistentKey(SelectedDisplay?.PhysicalMode);
         _projectionProfileKey = persistentKey ?? (SelectedDisplay is { } selected
             ? ProjectionSizeProfile.SessionKey(selected.Id, selected.PhysicalMode) : null);
@@ -159,7 +161,9 @@ public sealed partial class MainWindow
         MeasuredBoardSizeExpander.IsExpanded = profile.MeasuredBoardShortSideCentimeters is not null ||
             profile.MeasuredBoardLongSideCentimeters is not null;
         _loadingProjectionProfile = false;
+        _displayAudioRequested = profile.EnableDisplayAudio;
         UpdateBoardSizeEstimate();
+        _ = RefreshDisplayAudioAsync();
     }
 
     private string BoardSizeSource => EnteredProjectionProfile().MeasuredBoardSize is not null

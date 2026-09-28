@@ -42,7 +42,6 @@ public sealed partial class SceneCompositor : IDisposable
     private DateTimeOffset _handFrameTime;
     private DateTimeOffset _handVisualResetThrough, _lastHandVisualFrameTime;
     private int _boardCalibrationSpot = -1;
-    private Vector2? _customBoardCalibrationSpot;
     private DateTimeOffset _boardSetupStarted;
     private long _projectorFrames;
     private long _previewFrames;
@@ -119,6 +118,7 @@ public sealed partial class SceneCompositor : IDisposable
             _detectedBoardCorners = null;
             _boardCameraMap = null;
             _boardSurfaceMap = null;
+            ResetBoardRaster();
             _handTips = [];
             _handVisualResetThrough = DateTimeOffset.UtcNow;
             ClearHandSpotlights();
@@ -246,7 +246,10 @@ public sealed partial class SceneCompositor : IDisposable
             if (acceptVisual) _lastHandVisualFrameTime = frameTime;
             var shutterContext = PreparePhotoCopyGesture(cursors, frameTime, acceptVisual, photoCopyCaptureBusy);
             var selectionResult = _boardSession.Update(boardSamples, frameTime, now);
-            if (selectionResult is { ButtonId: "photo-shutter" } && shutterContext is not null)
+            if (selectionResult is { ButtonId: "photo-save" } && acceptVisual && !photoCopyCaptureBusy &&
+                TryGetPhotoCopyMemoryImage(out var memoryImage))
+                _photoCopyMemorySaveRequest = new(frameTime, memoryImage);
+            else if (selectionResult is { ButtonId: "photo-shutter" } && shutterContext is not null)
                 _photoCopyGestureShutter = new(selectionResult.TrackingId, frameTime, shutterContext);
             else if (selectionResult is not null && shutterContext is not null &&
                 BoardSession.TryGetPhotoCopyAction(selectionResult.ButtonId, out var photoAction))
@@ -298,7 +301,6 @@ public sealed partial class SceneCompositor : IDisposable
             _blackOutput = false;
             _boardGrid = null;
             _boardCalibrationSpot = -1;
-            _customBoardCalibrationSpot = null;
         }
     }
 
@@ -313,17 +315,13 @@ public sealed partial class SceneCompositor : IDisposable
         }
     }
 
-    public const int BoardCalibrationSpotCount = 5;
+    public const int BoardCalibrationSpotCount = BoardRegistration.SpotCount;
 
-    public static Vector2 BoardCalibrationSpotPosition(int index) => index switch
+    public static Vector2 BoardCalibrationSpotPosition(int index)
     {
-        0 => new(0.32f, 0.32f),
-        1 => new(0.68f, 0.32f),
-        2 => new(0.68f, 0.68f),
-        3 => new(0.32f, 0.68f),
-        4 => new(0.50f, 0.50f),
-        _ => throw new ArgumentOutOfRangeException(nameof(index))
-    };
+        var point = BoardRegistration.SpotPosition(index);
+        return new((float)point.X, (float)point.Y);
+    }
 
     /// <summary>Dark disk on the white field for camera/projector registration.</summary>
     public void ShowBoardCalibrationSpot(int index)
@@ -334,22 +332,6 @@ public sealed partial class SceneCompositor : IDisposable
         {
             if (!_boardSetup) return;
             _boardCalibrationSpot = index;
-            _customBoardCalibrationSpot = null;
-        }
-    }
-
-    /// <summary>Dark registration disk at a normalized projector-canvas position.</summary>
-    public void ShowBoardCalibrationSpotAt(Vector2 position)
-    {
-        if (!float.IsFinite(position.X) || !float.IsFinite(position.Y) ||
-            position.X < 0.05f || position.X > 0.95f ||
-            position.Y < 0.05f || position.Y > 0.95f)
-            throw new ArgumentOutOfRangeException(nameof(position));
-        lock (_gate)
-        {
-            if (!_boardSetup) return;
-            _boardCalibrationSpot = -1;
-            _customBoardCalibrationSpot = position;
         }
     }
 
@@ -499,10 +481,9 @@ public sealed partial class SceneCompositor : IDisposable
                 else
                 {
                     ds.FillRectangle(output, Colors.White);
-                    if (_boardCalibrationSpot >= 0 || _customBoardCalibrationSpot is not null)
+                    if (_boardCalibrationSpot >= 0)
                     {
-                        var point = _customBoardCalibrationSpot ??
-                            BoardCalibrationSpotPosition(_boardCalibrationSpot);
+                        var point = BoardCalibrationSpotPosition(_boardCalibrationSpot);
                         var center = new Vector2((float)(output.X + point.X * output.Width),
                                                  (float)(output.Y + point.Y * output.Height));
                         ds.FillCircle(center, (float)Math.Min(output.Width, output.Height) * 0.035f,
@@ -834,6 +815,8 @@ public sealed partial class SceneCompositor : IDisposable
             _overlays.Clear();
             _boardApplicationTarget?.Dispose();
             _boardApplicationTarget = null;
+            _acquisitionReferenceTarget?.Dispose();
+            _acquisitionReferenceTarget = null;
             _blackjackPreviewTarget?.Dispose();
             _blackjackPreviewTarget = null;
             _blackjackFlightTarget?.Dispose();

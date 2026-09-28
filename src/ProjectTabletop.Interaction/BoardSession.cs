@@ -70,11 +70,9 @@ public sealed partial class BoardSession
     });
     private static readonly IReadOnlyList<BoardButton> PhotoCopyButtons = Array.AsReadOnly(new[]
     {
-        new BoardButton("menu", "Back to menu", new(.06, .055, .24, .105), BoardScreen.Menu),
-        new BoardButton("photo-swirl", "Swirl", new(.31, .055, .13, .105), BoardScreen.PhotoCopy),
-        new BoardButton("photo-copy-once", "Copy", new(.45, .055, .13, .105), BoardScreen.PhotoCopy),
-        new BoardButton("photo-copy-timer", "Copy", new(.59, .055, .15, .105), BoardScreen.PhotoCopy),
-        new BoardButton("capture-again", "Capture again", new(.75, .055, .19, .105), BoardScreen.PhotoCopy)
+        new BoardButton("menu", "Exit", new(.08, .835, .26, .105), BoardScreen.Menu),
+        new BoardButton("photo-swirl", "Swirl", new(.37, .835, .26, .105), BoardScreen.PhotoCopy),
+        new BoardButton("photo-copy-once", "Copy", new(.66, .835, .26, .105), BoardScreen.PhotoCopy)
     });
     private DateTimeOffset? _lastFrameTime;
     private DateTimeOffset? _lastNow;

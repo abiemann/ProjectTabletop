@@ -116,7 +116,7 @@ public sealed partial class MainWindow
         for (int x = 0; x < fixtureSize; x++)
         {
             int offset = (y * fixtureSize + x) * 4;
-            byte value = x is >= 220 and < 320 && y is >= 530 and < 670 ? (byte)30 : (byte)100;
+            byte value = x is >= 220 and < 320 && y is >= 300 and < 440 ? (byte)30 : (byte)100;
             pixels[offset] = pixels[offset + 1] = pixels[offset + 2] = value; pixels[offset + 3] = 255;
         }
         var photoObject = PhotoObjectLocator.Locate(fixtureSize, fixtureSize, fixtureSize * 4, pixels,

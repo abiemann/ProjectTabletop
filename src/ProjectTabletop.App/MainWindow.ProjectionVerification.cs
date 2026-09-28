@@ -20,10 +20,12 @@ public sealed partial class MainWindow
         try
         {
             await output.ShowOnAsync(target, AppWindow.Id);
+            await VerifyPhysicalPixels();
             VerifyState(fullScreen: true);
             await output.SetFullScreenAsync(false);
             VerifyState(fullScreen: false);
             await output.SetFullScreenAsync(true);
+            await VerifyPhysicalPixels();
             VerifyState(fullScreen: true);
         }
         finally { output.Close(); }
@@ -41,7 +43,21 @@ public sealed partial class MainWindow
         finally { rejectedOutput.Close(); }
 
         return new { passed = true, fullScreenAlwaysOnTop = true, windowedNotAlwaysOnTop = true,
-            fullScreenReentry = true, controlDisplayUnchanged = true, laptopTargetRejected = true };
+            fullScreenReentry = true, controlDisplayUnchanged = true, laptopTargetRejected = true,
+            nativeOutputPixels = true };
+
+        async Task VerifyPhysicalPixels()
+        {
+            var physical = DisplayModeInfo.ForArea(target)
+                ?? throw new InvalidOperationException("The output pixel mode could not be verified.");
+            for (int attempt = 0; attempt < 40; attempt++)
+            {
+                if (output.RenderResolution is { } rendered && rendered.PixelWidth == physical.Width &&
+                    rendered.PixelHeight == physical.Height) return;
+                await Task.Delay(25);
+            }
+            throw new InvalidOperationException($"The fullscreen canvas is not native {physical.Width} × {physical.Height}: {output.RenderResolution}.");
+        }
 
         void VerifyState(bool fullScreen)
         {

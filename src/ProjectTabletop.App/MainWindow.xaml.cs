@@ -73,6 +73,7 @@ public sealed partial class MainWindow : Window
         StartHandTrackingStatus();
         RefreshDisplays();
         InitializeProjectionSettings();
+        InitializeDisplayAudio();
         _ = RefreshCamerasAsync();
         UpdateTrainingStatus();
         SyncVisionSettingsControls();
@@ -94,14 +95,14 @@ public sealed partial class MainWindow : Window
         public RectInt32 Bounds { get; } = Area.OuterBounds;
         public bool IsPrimary { get; } = Area.IsPrimary;
         public DisplayModeInfo? PhysicalMode { get; } = DisplayModeInfo.ForArea(Area);
-        // Layout dimensions are used by AppWindow and fullscreen Win2D canvas mapping.
+        // Desktop bounds place AppWindow. XAML canvas sizes use separate DIPs.
         public int Width => Bounds.Width;
         public int Height => Bounds.Height;
         public override string ToString() =>
             $"{PhysicalMode?.FriendlyName ?? $"Display {Number}"}: " + (PhysicalMode is { } mode
                 ? $"{mode.Width} × {mode.Height} @ {mode.RefreshHertz} Hz physical"
                 : "physical mode unavailable") +
-            $" ({Width} × {Height} layout)" +
+            $" ({Width} × {Height} desktop)" +
             (IsPrimary ? " (primary)" : " (secondary)");
     }
 
@@ -220,6 +221,8 @@ public sealed partial class MainWindow : Window
     {
         if (_closing) return;
         _closing = true;
+        DisposeDisplayAudio();
+        _photocopierSound.Dispose();
         _statusTimer.Stop();
         await DisposeHandTrackingAsync();
         if (_controlHost is not null) await _controlHost.DisposeAsync();

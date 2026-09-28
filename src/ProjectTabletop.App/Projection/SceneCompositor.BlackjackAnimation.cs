@@ -117,12 +117,9 @@ public sealed partial class SceneCompositor
         BlackjackDealFrame? deal)
     {
         if (flights.Count == 0 && deal is null) return null;
-        if (_blackjackFlightTarget is null || _blackjackFlightTarget.Device != device)
-        {
-            _blackjackFlightTarget?.Dispose();
-            _blackjackFlightTarget = new CanvasRenderTarget(device, BoardSurfaceSize, BoardSurfaceSize, 96);
-        }
-        using var drawing = _blackjackFlightTarget.CreateDrawingSession();
+        EnsureBoardRenderTarget(ref _blackjackFlightTarget, device);
+        using var drawing = _blackjackFlightTarget!.CreateDrawingSession();
+        drawing.Transform = BoardRasterTransform(_blackjackFlightTarget);
         drawing.Clear(Colors.Transparent);
         var cards = flights.Select(frame => new BlackjackMovingCard(frame.Hit.Card, false,
             frame.Hit.HandIndex, frame.Hit.CardIndex, frame.Destination, frame.Center, frame.Rotation,

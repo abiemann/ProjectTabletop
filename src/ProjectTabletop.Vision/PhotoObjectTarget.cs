@@ -10,12 +10,12 @@ namespace ProjectTabletop.Vision;
 /// </summary>
 public sealed class PhotoObjectTarget
 {
-    // Leave a one-percent guard at the physical sides/bottom; reserve the upper
-    // controls. Rendering and segmentation must use this same capture rectangle.
+    // Leave a one-percent guard at the physical sides; reserve the title above
+    // and controls below. Rendering and segmentation use this capture rectangle.
     public const int CaptureLeft = 10;
-    public const int CaptureTop = 230;
+    public const int CaptureTop = 60;
     public const int CaptureRight = 990;
-    public const int CaptureBottom = 990;
+    public const int CaptureBottom = 720;
     private readonly ReadOnlyCollection<byte> _alpha;
     public int Left { get; }
     public int Top { get; }

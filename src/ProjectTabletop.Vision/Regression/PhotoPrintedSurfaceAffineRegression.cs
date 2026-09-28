@@ -5,7 +5,8 @@ using ProjectTabletop.Vision;
 internal static class PhotoPrintedSurfaceAffineRegression
 {
     private const int Size = PhotoHandCutout.BoardPixels;
-    private static readonly double[] BoardMap = [1.0 / Size, 0, 0, 0, 1.0 / Size, 0, 0, 0, 1];
+    // Keep fixture camera pixels unchanged while placing the carton above the controls.
+    private static readonly double[] BoardMap = [1.0 / Size, 0, 0, 0, 1.0 / Size, -.25, 0, 0, 1];
     private static readonly Scalar Grey = new(115, 115, 115, 255);
     private static readonly Scalar Ink = new(35, 35, 35, 255);
     private static readonly Point2d Center = new(479, 620);
@@ -136,7 +137,7 @@ internal static class PhotoPrintedSurfaceAffineRegression
         ? (byte)0 : Sample(target, target.ContrastEvidence, point);
     private static byte Sample(PhotoObjectTarget target, IReadOnlyList<byte> values, Point2f point)
     {
-        int x = (int)Math.Round(point.X) - target.Left, y = (int)Math.Round(point.Y) - target.Top;
+        int x = (int)Math.Round(point.X) - target.Left, y = (int)Math.Round(point.Y) - 250 - target.Top;
         return x < 0 || y < 0 || x >= target.Width || y >= target.Height ? (byte)0 : values[y * target.Width + x];
     }
     private static void Require(bool condition, string message)

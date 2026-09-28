@@ -31,6 +31,19 @@ public sealed partial class MainWindow
             case "set_projection_size":
                 return SetProjectionSize(parameters);
 #if DEBUG
+            case "verify_photo_copy_memory_save":
+                return await VerifyPhotoCopyMemorySaveAsync();
+            case "verify_board_resolution":
+                return await VerifyBoardResolutionAsync();
+            case "play_photo_copy_sound":
+                _photocopierSound.Play();
+                return _photocopierSound.Status;
+            case "refresh_display_audio":
+                await RefreshDisplayAudioAsync();
+                return DisplayAudioDiagnostics;
+            case "set_display_audio":
+                SetDisplayAudioEnabled(parameters.GetProperty("enabled").GetBoolean());
+                return DisplayAudioDiagnostics;
             case "capture_photo_copy_diagnostics":
                 return await SavePhotoCopyDiagnosticsAsync();
             case "capture_photo_copy_now":
@@ -112,6 +125,8 @@ public sealed partial class MainWindow
                         status = BoardSizeEstimateText.Text
                     },
                     outputOpen = _output is not null,
+                    photoCopyAudio = _photocopierSound.Status,
+                    displayAudio = DisplayAudioDiagnostics,
                     outputVisible = _output?.AppWindow.IsVisible ?? false,
                     outputFullScreen = _output?.IsFullScreen ?? false,
                     outputAlwaysOnTop = _output?.IsAlwaysOnTop ?? false,
@@ -123,6 +138,8 @@ public sealed partial class MainWindow
                     boardClipReady = _scene.HasBoardMediaClip,
                     boardSetupStatus = BoardSetupControlStatus,
                     boardReveal = _scene.GetBoardRevealDiagnostics(),
+            boardResolution = _scene.GetBoardResolutionDiagnostics(),
+            outputRendering = _output?.RenderResolution,
                     handTrackingEnabled = HandTrackingEnabled,
                     handSpotlightCount = _scene.ActiveHandSpotlightCount,
                     handTrackingStatus = HandTrackingControlStatus,

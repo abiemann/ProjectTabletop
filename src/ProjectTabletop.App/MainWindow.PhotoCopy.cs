@@ -2,6 +2,7 @@ using ProjectTabletop.App.Camera;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Vision;
 using ProjectTabletop.Interaction;
+using ProjectTabletop.App.Media;
 
 namespace ProjectTabletop.App;
 
@@ -12,6 +13,7 @@ public sealed partial class MainWindow
     private PhotoCopyCaptureDiagnostics? _lastPhotoCopyCapture;
     private PhotoCopyObservation? _latestPhotoCopyFrame;
     private string? _lastSavedPhotoPath;
+    private readonly PhotocopierSound _photocopierSound = new();
     private sealed record PhotoCopyObservation(CameraFrame Frame, HandDetection[] Hands, long Generation);
 
     private sealed record PhotoCopyCaptureDiagnostics(DateTimeOffset FrameTime, int Width, int Height,
@@ -26,6 +28,15 @@ public sealed partial class MainWindow
         var previousEvent = _photoCopyConsumedEventId;
         foreach (var cursor in cursors)
             _photoCopyConsumedEventId = Math.Max(_photoCopyConsumedEventId, cursor.ExecuteEventId);
+        // The gesture uses the webcam, but saving an existing swirl uses only
+        // the captured photograph to render its complete pattern from memory.
+        // It requires no subject or new extraction.
+        if (_scene.TryTakePhotoCopyMemorySaveRequest(frame.Timestamp, out var memoryImage))
+        {
+            if (_photoCopyTask is not { IsCompleted: false })
+                _photoCopyTask = SaveStoredPhotoCopyAsync(memoryImage);
+            return;
+        }
         var now = DateTimeOffset.UtcNow;
         bool explicitRequest = _scene.TryTakePhotoCopyCaptureRequest(frame.Timestamp, out var request);
         // An accepted button request wins over the same raw pinch, so Copy cannot also Swirl.
@@ -66,6 +77,38 @@ public sealed partial class MainWindow
         }
     }
 
+    private async Task SaveStoredPhotoCopyAsync(SceneCompositor.PhotoCopyMemoryImage image)
+    {
+        if (!_scene.IsPhotoCopyMemoryImageCurrent(image)) return;
+        _photocopierSound.Play();
+        try
+        {
+            var path = await SavePhotoCopyMemoryImageAsync(_scene, image);
+            if (path is not null) _lastSavedPhotoPath = path;
+        }
+        catch (Exception error) { AppLog.Write("Photo Copy memory save", error); }
+        finally { if (!_closing) UpdateBoardAppStatus(); }
+    }
+
+    private static async Task<string?> SavePhotoCopyMemoryImageAsync(SceneCompositor scene,
+        SceneCompositor.PhotoCopyMemoryImage image, string? directory = null)
+    {
+        if (!scene.BeginPhotoCopyMemorySave(image)) return null;
+        try
+        {
+            var artwork = scene.RenderPhotoCopySwirlImage(image);
+            var path = await PhotoCopyImageStore.SaveBgraAsync(artwork.Width, artwork.Height,
+                artwork.Width * 4, artwork.BgraPixels, directory);
+            scene.CompletePhotoCopyMemorySave(image);
+            return path;
+        }
+        catch
+        {
+            scene.FailPhotoCopyMemorySave(image);
+            throw;
+        }
+    }
+
     private async Task CaptureDelayedPhotoCopyAsync(SceneCompositor.PhotoCopyCaptureContext context, long generation)
     {
         DateTimeOffset due = DateTimeOffset.UtcNow.AddSeconds(3);
@@ -103,6 +146,8 @@ public sealed partial class MainWindow
         IReadOnlyList<HandDetection> otherHands,
         SceneCompositor.PhotoCopyCaptureContext context, PhotoCopyAction action = PhotoCopyAction.Swirl)
     {
+        if (action == PhotoCopyAction.Copy)
+            _photocopierSound.Play();
         try
         {
             var result = await Task.Run(() =>

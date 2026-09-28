@@ -34,8 +34,8 @@ public sealed partial class MainWindow
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96);
         var tracker = new HandGestureTracker();
         bool reorder = false;
-        var grouped = HandAt(.76, .66, separated: false);
-        var opened = HandAt(.76, .66, separated: true);
+        var grouped = HandAt(.76, .52, separated: false);
+        var opened = HandAt(.76, .52, separated: true);
         var companion = HandAt(.66, .32, separated: false);
         Draw();
 
@@ -51,7 +51,7 @@ public sealed partial class MainWindow
 
         // Build a camera-space object separated from both hands and their forearms.
         var fixture = new byte[size * size * 4];
-        PixelPoint objectTopLeft = CameraPoint(.18, .48), objectBottomRight = CameraPoint(.35, .69);
+        PixelPoint objectTopLeft = CameraPoint(.18, .28), objectBottomRight = CameraPoint(.35, .49);
         for (int y = 0; y < size; y++)
         for (int x = 0; x < size; x++)
         {
@@ -123,6 +123,11 @@ public sealed partial class MainWindow
         cutout = PhotoCopyCameraImage.Capture(size, size, size * 4, fixture, selectedContext.CameraToBoard, cutout!);
         Require(cutout?.CameraGeometry is not null, "The photograph lost its original camera proportions before rendering.");
         Require(scene.SetPhotoCopyCapture(cutout!, selectedContext.Revision, lockedObject), "The gesture capture did not enter the renderer.");
+        Require(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
+                ["menu", "capture-again", "photo-save"]) &&
+            scene.CurrentBoardButtons.Single(button => button.Id == "capture-again") is { Label: "Clear", Enabled: true } &&
+            scene.CurrentBoardButtons.Single(button => button.Id == "photo-save") is { Label: "Save", Enabled: true },
+            "Swirl did not expose Clear and Save for the retained photograph.");
         await Task.Delay(1200);
         Draw();
         Require(scene.PhotoCopyCount > 0, "The captured object did not begin stamping.");
@@ -138,13 +143,16 @@ public sealed partial class MainWindow
         await target.SaveAsync(path, CanvasBitmapFileFormat.Png);
         int initialCopies = scene.PhotoCopyCount;
 
-        // Top controls retain navigation/reset semantics, never field shutters.
+        // Bottom controls retain navigation/reset semantics, never field shutters.
         var restart = scene.CurrentBoardButtons.Single(button => button.Id == "capture-again").Bounds;
         var restarted = await Gesture(AtControl(restart, false), AtControl(restart, true));
         Require(!scene.TryTakePhotoCopyGestureShutter(restarted.FrameTime, out _) && scene.PhotoCopyCount == 0 &&
             scene.CurrentBoardScreen == BoardScreen.PhotoCopy && !scene.TryGetPhotoCopyCaptureContext(out _),
-            "Capture again became a shutter or failed to reset the capture field.");
-        Require(!scene.SetPhotoCopyCapture(cutout!, selectedContext.Revision, lockedObject), "Capture again accepted an obsolete capture.");
+            "Clear became a shutter or failed to reset the capture field.");
+        Require(!scene.SetPhotoCopyCapture(cutout!, selectedContext.Revision, lockedObject), "Clear accepted an obsolete capture.");
+        Require(scene.CurrentBoardButtons.Any(button => button.Id == "photo-swirl") &&
+            scene.CurrentBoardButtons.All(button => button.Id != "capture-again"),
+            "Clearing the Swirl did not restore the Swirl control.");
         var back = scene.CurrentBoardButtons.Single(button => button.Id == "menu").Bounds;
         var left = await Gesture(AtControl(back, false), AtControl(back, true));
         Require(!scene.TryTakePhotoCopyGestureShutter(left.FrameTime, out _) && scene.CurrentBoardScreen == BoardScreen.Menu,
@@ -156,7 +164,7 @@ public sealed partial class MainWindow
             actualIndexPose = true, correctShutterIdentity = true, noPinchEvents = true, exactFrameConsumedOnce = true,
             heldGestureDoesNotRepeat = true, sameHandRearms = true, objectLockPreserved = true,
             objectExtractedAndRendered = true, nativeCameraPhoto = true, initialCopies,
-            topControlsNavigate = true, liveHardwareUnchanged = true, path };
+            bottomControlsNavigate = true, liveHardwareUnchanged = true, path };
 
         HandDetection AtControl(BoardRect bounds, bool separated) =>
             HandAt(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2, separated);

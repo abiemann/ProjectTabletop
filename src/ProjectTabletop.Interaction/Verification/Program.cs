@@ -161,6 +161,7 @@ static void CheckPhotoCopyNavigation()
     Require(Update(session, 100, Over(session.Buttons[1], 1, 100)) is { Current: BoardScreen.PhotoCopy, ButtonId: "photo-copy" },
         "The renamed Photo Copy target did not launch Photo Copy.");
     Require(session.Revision == 1, "Launching Photo Copy did not advance the navigation revision.");
+    session.PhotoCopyHasSwirl = true;
     BoardButton captureAgain = session.Buttons.Single(button => button.Id == "capture-again");
     Require(!captureAgain.Bounds.Contains(session.Buttons[0].Bounds.X, session.Buttons[0].Bounds.Y),
         "Capture again overlaps Back to menu.");
@@ -276,6 +277,7 @@ static void CheckAnchorNavigationAndReset()
 
     session = new BoardSession();
     session.ShowPhotoCopy(Time(100));
+    session.PhotoCopyHasSwirl = true;
     BoardButton captureAgain = session.Buttons.Single(button => button.Id == "capture-again");
     Require(Update(session, 200, Over(captureAgain, 1, 200) with { SelectionFrameTime = Time(150) }) is
         { Previous: BoardScreen.PhotoCopy, Current: BoardScreen.PhotoCopy }, "An anchored Capture again failed.");

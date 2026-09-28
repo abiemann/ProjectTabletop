@@ -57,9 +57,10 @@ internal static class BoardFingerSelectionRegression
     {
         var board = PhotoCopy();
         var button = Button(board, "capture-again");
-        var edge = Together(button) with { FingerAim = new(.935, .1) };
+        double right = button.Bounds.X + button.Bounds.Width, middle = button.Bounds.Y + button.Bounds.Height / 2;
+        var edge = Together(button) with { FingerAim = new(right - .005, middle) };
         At(board, 100, edge); At(board, 200, edge);
-        var opened = Apart(edge) with { FingerAim = new(.945, .1) };
+        var opened = Apart(edge) with { FingerAim = new(right + .005, middle) };
         At(board, 300, opened);
         Require(board.HoveredButtonIds.SequenceEqual([button.Id]),
             "A small opening motion lost the highlight at the grouped target.");
@@ -217,7 +218,7 @@ internal static class BoardFingerSelectionRegression
 
     private static BoardSession PhotoCopy()
     {
-        var board = new BoardSession(); board.ShowPhotoCopy(Time(0)); return board;
+        var board = new BoardSession(); board.ShowPhotoCopy(Time(0)); board.PhotoCopyHasSwirl = true; return board;
     }
     private static BoardNavigation? Select(BoardSession board, BoardHandSample hand, int start)
     {

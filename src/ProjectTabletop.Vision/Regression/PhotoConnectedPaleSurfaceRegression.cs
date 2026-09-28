@@ -3,7 +3,7 @@ using ProjectTabletop.Vision;
 internal static class PhotoConnectedPaleSurfaceRegression
 {
     private const int Size = PhotoHandCutout.BoardPixels;
-    private const int Left = 330, Top = 450, Width = 250, Height = 240;
+    private const int Left = 330, Top = 250, Width = 250, Height = 240;
     private static readonly double[] BoardMap = [1.0 / Size, 0, 0, 0, 1.0 / Size, 0, 0, 0, 1];
 
     public static void Run()

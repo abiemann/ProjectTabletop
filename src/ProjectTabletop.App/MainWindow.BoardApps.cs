@@ -60,7 +60,7 @@ public sealed partial class MainWindow
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
         SetStatus(_scene.HasBoardMediaClip
-            ? "Photo Copy: place an object on grey and lift your hand. Select Swirl, Copy, or Copy with the clock for a 3-second delay."
+            ? "Photo Copy: place an object above the controls and lift your hand. Select Swirl or Copy; Exit returns to the menu."
             : "Photo Copy selected. Scan the board before taking a photo.");
     }
 
@@ -78,10 +78,9 @@ public sealed partial class MainWindow
         var directory = Path.Combine(_appDataDirectory, "ProjectionSnapshots");
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, $"projection-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fff}-{Guid.NewGuid():N}.png");
-        var aspect = SelectedDisplay is { Width: > 0, Height: > 0 } display
-            ? display.Width / (double)display.Height : 16.0 / 9;
-        const float width = 1280;
-        var height = (float)(width / aspect);
+        var display = SelectedDisplay;
+        float width = display?.PhysicalMode is { Width: > 0 } mode ? mode.Width : display?.Width ?? 1280;
+        float height = display?.PhysicalMode is { Height: > 0 } heightMode ? heightMode.Height : display?.Height ?? 720;
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
         using (var drawing = target.CreateDrawingSession())
             _scene.Draw(drawing, width, height, preview: false, runningSlowly: false);

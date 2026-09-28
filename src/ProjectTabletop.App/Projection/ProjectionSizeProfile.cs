@@ -10,6 +10,7 @@ internal sealed record ProjectionSizeProfile
     public double? ThrowRatio { get; init; }
     public double? MeasuredBoardShortSideCentimeters { get; init; }
     public double? MeasuredBoardLongSideCentimeters { get; init; }
+    public bool EnableDisplayAudio { get; init; } = true;
 
     public bool IsValid => ValidOptics && ValidMeasuredInputs;
 

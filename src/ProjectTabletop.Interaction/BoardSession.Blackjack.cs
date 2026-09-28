@@ -70,10 +70,11 @@ public sealed partial class BoardSession
         AdvanceBlackjackPresentation(now);
         BlackjackHit? hit = null;
         BlackjackDeal? deal = null;
-        if (TryGetPhotoCopyAction(button.Id, out _))
+        if (TryGetPhotoCopyAction(button.Id, out var photoAction))
         {
-            if (Screen != BoardScreen.PhotoCopy || !PhotoCopyShutterEnabled) return false;
-            // Taking a photo must not navigate or restart the capture session.
+            if (Screen != BoardScreen.PhotoCopy || (photoAction == PhotoCopyAction.Save
+                ? !PhotoCopyHasSwirl : !PhotoCopyShutterEnabled || PhotoCopyHasSwirl)) return false;
+            // Capturing or saving a photo must not navigate or restart the capture session.
         }
         else if (Screen == BoardScreen.Blackjack && button.Id != "menu")
         {

@@ -20,6 +20,11 @@ public sealed partial class ProjectionWindow : Window
     private readonly SemaphoreSlim _placementOperation = new(1, 1);
     private readonly DisplayAreaWatcher _displayWatcher;
     private bool _closed;
+    private OutputRenderResolution? _renderResolution;
+
+    internal sealed record OutputRenderResolution(double WidthDips, double HeightDips,
+        float Dpi, int PixelWidth, int PixelHeight);
+    internal OutputRenderResolution? RenderResolution => Volatile.Read(ref _renderResolution);
 
     public ProjectionWindow(SceneCompositor scene)
     {
@@ -207,6 +212,12 @@ public sealed partial class ProjectionWindow : Window
 
     private void OutputCanvas_Draw(ICanvasAnimatedControl sender, CanvasAnimatedDrawEventArgs args)
     {
+        var size = sender.Size;
+        var dpi = args.DrawingSession.Dpi;
+        var previous = RenderResolution;
+        if (previous is null || previous.WidthDips != size.Width || previous.HeightDips != size.Height || previous.Dpi != dpi)
+            Volatile.Write(ref _renderResolution, new(size.Width, size.Height, dpi,
+                (int)Math.Round(size.Width * dpi / 96), (int)Math.Round(size.Height * dpi / 96)));
         _scene.Draw(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height,
             preview: false, runningSlowly: args.Timing.IsRunningSlowly);
     }

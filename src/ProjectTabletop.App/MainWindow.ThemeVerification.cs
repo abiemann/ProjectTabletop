@@ -43,7 +43,7 @@ public sealed partial class MainWindow
         scene.ShowPhotoCopy();
         await Save("photo-copy");
         byte[] grey = target.GetPixelBytes();
-        foreach (var point in new[] { BoardPoint(.2, .4), BoardPoint(.5, .55), BoardPoint(.8, .8) })
+        foreach (var point in new[] { BoardPoint(.2, .4), BoardPoint(.5, .55), BoardPoint(.8, .4) })
         {
             int index = ((int)(point.Y * size) * size + (int)(point.X * size)) * 4;
             if (grey[index] != AppPalette.PhotoCopyBackground.B || grey[index + 1] != AppPalette.PhotoCopyBackground.G ||

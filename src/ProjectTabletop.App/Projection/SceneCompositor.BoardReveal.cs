@@ -40,9 +40,9 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
-            if (!_boardSetup || _boardCalibrationSpot != 4 || _customBoardCalibrationSpot is not null)
+            if (!_boardSetup || _boardCalibrationSpot != BoardCalibrationSpotCount - 1)
                 throw new InvalidOperationException("Complete the center registration spot before revealing the board.");
-            var center = BoardCalibrationSpotPosition(4);
+            var center = BoardCalibrationSpotPosition(BoardCalibrationSpotCount - 1);
             var inset = SetDetectedBoardGrid(projectorCorners, cameraMap);
             SetBoardSetup(false);
             _boardRevealCenter = center;

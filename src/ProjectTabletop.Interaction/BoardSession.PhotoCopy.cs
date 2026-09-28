@@ -1,16 +1,32 @@
 namespace ProjectTabletop.Interaction;
 
-/// <summary>The requested output action; the application owns capture and countdown timing.</summary>
-public enum PhotoCopyAction { Swirl, Copy, TimedCopy }
+/// <summary>The requested output action; the application owns capture, saving and countdown timing.</summary>
+public enum PhotoCopyAction { Swirl, Copy, TimedCopy, Save }
 
 public sealed partial class BoardSession
 {
-    /// <summary>The normalized object area below the Photo Copy controls.</summary>
-    public static BoardRect PhotoCopyShutterBounds => new(.01, .23, .98, .76);
+    /// <summary>The normalized object area between the Photo Copy title and controls.</summary>
+    public static BoardRect PhotoCopyShutterBounds => new(.01, .06, .98, .66);
 
     private static readonly BoardButton PhotoCopyShutter =
         new("photo-shutter", "Capture object", PhotoCopyShutterBounds, BoardScreen.PhotoCopy);
     private bool _photoCopyShutterEnabled;
+    private bool _photoCopyHasSwirl;
+
+    /// <summary>
+    /// Whether a captured swirl is on the board. Its Swirl control becomes Clear;
+    /// Copy becomes Save to save the existing swirl pattern from memory.
+    /// </summary>
+    public bool PhotoCopyHasSwirl
+    {
+        get => _photoCopyHasSwirl;
+        set
+        {
+            if (_photoCopyHasSwirl == value) return;
+            _photoCopyHasSwirl = value;
+            ClearPhotoCopyGestureEvidence(includeResultControls: true);
+        }
+    }
 
     /// <summary>Maps explicit capture controls and the legacy field shutter to their output action.</summary>
     public static bool TryGetPhotoCopyAction(string buttonId, out PhotoCopyAction action)
@@ -18,17 +34,17 @@ public sealed partial class BoardSession
         action = buttonId switch
         {
             "photo-copy-once" => PhotoCopyAction.Copy,
-            "photo-copy-timer" => PhotoCopyAction.TimedCopy,
+            "photo-save" => PhotoCopyAction.Save,
             _ => PhotoCopyAction.Swirl
         };
-        return buttonId is "photo-swirl" or "photo-copy-once" or "photo-copy-timer" or "photo-shutter";
+        return buttonId is "photo-swirl" or "photo-copy-once" or "photo-shutter" or "photo-save";
     }
 
     /// <summary>
     /// Enables the explicit capture buttons and index-separation shutter in the
     /// object area only when capture is ready. The field shutter is not a rendered
     /// button or a pinch target. Changing readiness requires fresh gesture evidence
-    /// for capture actions, without interrupting Back to menu or Capture again.
+    /// for capture actions, without interrupting Exit, Clear or Save.
     /// </summary>
     public bool PhotoCopyShutterEnabled
     {
@@ -37,19 +53,30 @@ public sealed partial class BoardSession
         {
             if (_photoCopyShutterEnabled == value) return;
             _photoCopyShutterEnabled = value;
-            HoveredButtonIds = HoveredButtonIds.Where(id => !TryGetPhotoCopyAction(id, out _)).ToArray();
-            FingerSelectionFeedback = FingerSelectionFeedback.Where(item => !TryGetPhotoCopyAction(item.ButtonId, out _)).ToArray();
-            foreach (var track in _fingerTracks.Values)
-                if (track.TargetId is { } id && TryGetPhotoCopyAction(id, out _)) track.Clear();
+            ClearPhotoCopyGestureEvidence(includeResultControls: false);
         }
     }
 
-    private IReadOnlyList<BoardButton> CurrentPhotoCopyButtons() => PhotoCopyShutterEnabled
-        ? PhotoCopyButtons
-        : Array.AsReadOnly(PhotoCopyButtons.Select(button => TryGetPhotoCopyAction(button.Id, out _)
-            ? button with { Enabled = false } : button).ToArray());
+    private void ClearPhotoCopyGestureEvidence(bool includeResultControls)
+    {
+        bool Affected(string id) => TryGetPhotoCopyAction(id, out var action) &&
+            (includeResultControls || action != PhotoCopyAction.Save) || includeResultControls && id == "capture-again";
+        HoveredButtonIds = HoveredButtonIds.Where(id => !Affected(id)).ToArray();
+        FingerSelectionFeedback = FingerSelectionFeedback.Where(item => !Affected(item.ButtonId)).ToArray();
+        foreach (var track in _fingerTracks.Values)
+            if (track.TargetId is { } id && Affected(id)) track.Clear();
+    }
+
+    private IReadOnlyList<BoardButton> CurrentPhotoCopyButtons() =>
+        Array.AsReadOnly(PhotoCopyButtons.Select(button =>
+            PhotoCopyHasSwirl && button.Id == "photo-swirl"
+                ? button with { Id = "capture-again", Label = "Clear" }
+                : PhotoCopyHasSwirl && button.Id == "photo-copy-once"
+                    ? button with { Id = "photo-save", Label = "Save", Enabled = true }
+                : TryGetPhotoCopyAction(button.Id, out _)
+                    ? button with { Enabled = PhotoCopyShutterEnabled && !PhotoCopyHasSwirl } : button).ToArray());
 
     private IReadOnlyList<BoardButton> FingerTargets(IReadOnlyList<BoardButton> buttons) =>
-        Screen == BoardScreen.PhotoCopy && PhotoCopyShutterEnabled
+        Screen == BoardScreen.PhotoCopy && PhotoCopyShutterEnabled && !PhotoCopyHasSwirl
             ? Array.AsReadOnly(buttons.Concat([PhotoCopyShutter]).ToArray()) : buttons;
 }

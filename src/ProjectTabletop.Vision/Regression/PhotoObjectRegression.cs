@@ -5,7 +5,8 @@ using ProjectTabletop.Vision;
 internal static class PhotoObjectRegression
 {
     private const int Size = 500;
-    private static readonly double[] BoardMap = [1.0 / Size, 0, 0, 0, 1.0 / Size, 0, 0, 0, 1];
+    // Translate the unchanged camera fixtures into the upper capture field.
+    private static readonly double[] BoardMap = [1.0 / Size, 0, 0, 0, 1.0 / Size, -.2, 0, 0, 1];
     private static readonly PixelPoint[] OpenPoints =
     [
         new(250, 305), new(215, 284), new(190, 263), new(166, 240), new(151, 225),
@@ -99,7 +100,7 @@ internal static class PhotoObjectRegression
         Point2f[] corners = [new(0, 0), new(Size, 0), new(Size, Size), new(0, Size)];
         Point2f[] observed = [new(50, 20), new(470, 50), new(440, 480), new(30, 450)];
         using Mat forward = Cv2.GetPerspectiveTransform(corners, observed);
-        using Mat inverse = Cv2.GetPerspectiveTransform(observed, [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]);
+        using Mat inverse = Cv2.GetPerspectiveTransform(observed, [new(0, -.2f), new(1, -.2f), new(1, .8f), new(0, .8f)]);
         using Mat camera = new();
         Cv2.WarpPerspective(scene, camera, forward, new Size(Size, Size), InterpolationFlags.Linear,
             BorderTypes.Constant, new Scalar(242, 242, 242, 255));
@@ -140,6 +141,14 @@ internal static class PhotoObjectRegression
         ExpectReject(empty, Shutter, BoardMap, "The shutter hand alone was copied.");
         using Mat bare = Scene();
         ExpectReject(bare, Shutter, BoardMap, "An empty white board produced an object.");
+        using Mat bottom = Scene(); DrawShutter(bottom);
+        Cv2.Rectangle(bottom, new Rect(90, 475, 100, 20), new Scalar(60, 60, 60, 255), -1);
+        ExpectReject(bottom, Shutter, BoardMap, "An object in the bottom control strip was copied.");
+        using Mat upper = Scene(); DrawShutter(upper);
+        Cv2.Rectangle(upper, new Rect(90, 145, 100, 65), new Scalar(60, 60, 60, 255), -1);
+        var upperCopy = Extract(upper);
+        Require(upperCopy.BoardOrigin is { Y: > 80 and < 100 },
+            "The upper capture area below the title could not be photographed.");
         using Mat ambiguous = empty.Clone();
         Cv2.Rectangle(ambiguous, new Rect(90, 185, 100, 100), new Scalar(60, 60, 60, 255), -1);
         Cv2.Rectangle(ambiguous, new Rect(240, 200, 70, 90), new Scalar(30, 140, 210, 255), -1);
@@ -211,7 +220,7 @@ internal static class PhotoObjectRegression
         for (int y = 0; y < Size; y++)
             for (int x = 0; x < Size; x++) result.Set(y, x, Background(x, y, gradient));
         // Controls must never influence the background estimate or segmentation.
-        Cv2.Rectangle(result, new Rect(0, 0, Size, 105), new Scalar(30, 65, 40, 255), -1);
+        Cv2.Rectangle(result, new Rect(0, 470, Size, 30), new Scalar(30, 65, 40, 255), -1);
         return result;
     }
 

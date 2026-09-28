@@ -4,7 +4,7 @@ using ProjectTabletop.Vision;
 
 internal static class PhotoObjectPerforatedShapeRegression
 {
-    private const int Size = 400, BoardSize = PhotoHandCutout.BoardPixels, Left = 280, Top = 350;
+    private const int Size = 400, BoardSize = PhotoHandCutout.BoardPixels, Left = 280, Top = 150;
     private static readonly double[] BoardMap = [1.0 / BoardSize, 0, 0, 0, 1.0 / BoardSize, 0, 0, 0, 1];
 
     public static void Run()

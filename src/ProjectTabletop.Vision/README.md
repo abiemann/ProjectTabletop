@@ -242,12 +242,12 @@ For projector mapping, retain a fresh camera frame of the white scan. Project
 one dark calibration disk at a time and call
 `BoardDetector.DetectDarkCalibrationSpot(width, height, stride,
 whiteBgra, spotBgra)` for each fresh camera frame. It returns a camera-pixel
-center and relative confidence. The app first measures four central disks to
-form a provisional camera-to-projector homography. `NearEdgeRegistrationPlan`
-then places four more disks safely inside the detected physical corners; those
-measurements form the final homography. A ninth disk at the projector center
-validates the result before the app shows the selected board app or media within
-the safe board corners. The detector compensates for a global camera exposure shift, but
+center and relative confidence. The app measures four ordered disks to form
+the camera-to-projector homography. A fifth disk at the projector center
+independently validates the result, using the unchanged 0.015 normalized error
+limit, before the app reveals the selected board app or media within the safe
+board corners. The five-disk sequence omits the former four-disk edge refinement;
+edge accuracy with camera lens distortion may be lower. The detector compensates for a global camera exposure shift, but
 movement between baseline and spot frames can still invalidate a measurement.
 
 The older `BoardDetector.Detect(...)` is kept for the projected-grid regression
@@ -297,16 +297,17 @@ Photo Copy uses `PhotoCopyHandSelector.TrySelectGestureShutter` or
 making the command. One or two hands may be visible; one hand issues the shutter
 command. The current app acquires an object **before** illuminating it:
 `PhotoObjectLocator.Locate` rectifies the camera frame to the board plane,
-estimates the plain grey background below the controls, and selects one distinct
+estimates the plain grey background above the bottom controls, and selects one distinct
 foreground component. A smooth local illumination correction is fitted from
 background-like pixels, accounting for gradual projector glare without blurring
 contrasting object colors into that background estimate. The shared capture
-rectangle reserves the upper 23% for controls and a 1% guard at the sides and
-bottom. Call it only after hands and their projected lights have
+rectangle runs from 6% to 72% of board height, reserving the title above and
+controls/status below, with a 1% guard at the sides. Call it only after hands and their projected lights have
 left the view and exposure has settled. The returned `PhotoObjectTarget` owns
 an immutable alpha silhouette, including holes, plus board-space geometry for
-the object's spotlight. The app requires two stable candidates before locking
-that light, while hand spotlights continue to move independently.
+the object's spotlight. The app requires three stable candidates spanning at
+least 600 ms, including matching position, bounds, area, mask and light shape,
+before locking that light, while hand spotlights continue to move independently.
 
 `PhotoObjectSpotlight` recognizes supported pairs of opposite parallel edges,
 including the oblique coordinates produced by mapping a non-square board to a

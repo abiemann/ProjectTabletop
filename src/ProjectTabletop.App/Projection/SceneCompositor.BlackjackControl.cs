@@ -65,12 +65,10 @@ public sealed partial class SceneCompositor
             TickBlackjackVisuals(now);
             var flights = GetBlackjackFlights(now);
             var deal = GetBlackjackDealFrame(now);
-            if (_blackjackPreviewTarget is null || _blackjackPreviewTarget.Device != ds.Device)
-            {
-                _blackjackPreviewTarget?.Dispose();
-                _blackjackPreviewTarget = new CanvasRenderTarget(ds.Device, BoardSurfaceSize, BoardSurfaceSize, 96);
+            float size = Math.Min(width, height);
+            ReserveBoardPixels(ds.Device, size * ds.Dpi / 96, size * ds.Dpi / 96);
+            if (EnsureBoardRenderTarget(ref _blackjackPreviewTarget, ds.Device))
                 _blackjackPreviewRevision = -1;
-            }
             var game = _boardSession.BlackjackState;
             var hovered = HoveredBoardButtons;
             var hoverKey = string.Join(",", hovered);
@@ -80,7 +78,8 @@ public sealed partial class SceneCompositor
                 _blackjackPreviewFingerSelectionStep != selectionStep ||
                 _blackjackPreviewFlightRevision != _blackjackFlightRevision)
             {
-                using var surface = _blackjackPreviewTarget.CreateDrawingSession();
+                using var surface = _blackjackPreviewTarget!.CreateDrawingSession();
+                surface.Transform = BoardRasterTransform(_blackjackPreviewTarget);
                 DrawBlackjackTable(surface, game, _boardSession.Buttons, hovered, selectionFeedback,
                     HiddenBlackjackCards(flights), deal);
                 _blackjackPreviewRevision = game.Revision;
@@ -88,12 +87,11 @@ public sealed partial class SceneCompositor
                 _blackjackPreviewFingerSelectionStep = selectionStep;
                 _blackjackPreviewFlightRevision = _blackjackFlightRevision;
             }
-            float size = Math.Min(width, height);
-            ds.DrawImage(_blackjackPreviewTarget, new Rect((width - size) / 2, (height - size) / 2, size, size),
-                new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
+            ds.DrawImage(_blackjackPreviewTarget!, new Rect((width - size) / 2, (height - size) / 2, size, size),
+                new Rect(0, 0, _blackjackPreviewTarget!.SizeInPixels.Width, _blackjackPreviewTarget.SizeInPixels.Height));
             if (DrawBlackjackFlightLayer(ds.Device, flights, deal) is { } flightLayer)
                 ds.DrawImage(flightLayer, new Rect((width - size) / 2, (height - size) / 2, size, size),
-                    new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
+                    new Rect(0, 0, flightLayer.SizeInPixels.Width, flightLayer.SizeInPixels.Height));
         }
     }
 }

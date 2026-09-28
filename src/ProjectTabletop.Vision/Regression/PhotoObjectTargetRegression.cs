@@ -5,7 +5,8 @@ using ProjectTabletop.Vision;
 internal static class PhotoObjectTargetRegression
 {
     private const int Size = 500;
-    private static readonly double[] BoardMap = [1.0 / Size, 0, 0, 0, 1.0 / Size, 0, 0, 0, 1];
+    // Translate the unchanged camera fixtures into the upper capture field.
+    private static readonly double[] BoardMap = [1.0 / Size, 0, 0, 0, 1.0 / Size, -.2, 0, 0, 1];
     private static readonly Rect Subject = new(90, 185, 140, 150);
     private static readonly Scalar ObjectColor = new(40, 110, 170, 255);
     private static readonly HandDetection Shutter = CreateShutter();
@@ -37,6 +38,9 @@ internal static class PhotoObjectTargetRegression
         PhotoPrintedSurfaceRegression.Run();
         PhotoPrintedSurfaceAcquisitionRegression.Run();
         PhotoPrintedSurfaceAffineRegression.Run();
+        PhotoPrintedSurfaceTwoFaintEdgesRegression.Run();
+        PhotoSingleComponentBoxRegression.Run();
+        PhotoAcquisitionNoiseRegression.Run();
         PhotoConnectedPaleSurfaceRegression.Run();
         PhotoObjectPerforatedShapeRegression.Run();
         Console.WriteLine("Photo object target regression: grey dark/light/color acquisition, holes and immutable mask, " +
@@ -68,7 +72,7 @@ internal static class PhotoObjectTargetRegression
                 Require(cutout.BgraPixels[index * 4] == 0 && cutout.BgraPixels[index * 4 + 1] == 0 &&
                     cutout.BgraPixels[index * 4 + 2] == 0, "Exterior pixels retained photographed background.");
         }
-        int sample = (((220 * 2 - target.Top) * target.Width) + 120 * 2 - target.Left) * 4;
+        int sample = (((220 * 2 - 200 - target.Top) * target.Width) + 120 * 2 - target.Left) * 4;
         Require(cutout.BgraPixels[sample] == 70 && cutout.BgraPixels[sample + 1] == 150 &&
             cutout.BgraPixels[sample + 2] == 205, "Capture reused acquisition RGB instead of current photographed pixels.");
         Require(AlphaAt(target, 160, 260) == 0, "The current spotlight filled the stored hole.");
@@ -156,7 +160,7 @@ internal static class PhotoObjectTargetRegression
         Point2f[] corners = [new(0, 0), new(Size, 0), new(Size, Size), new(0, Size)];
         Point2f[] observed = [new(50, 20), new(470, 50), new(440, 480), new(30, 450)];
         using Mat forward = Cv2.GetPerspectiveTransform(corners, observed);
-        using Mat inverse = Cv2.GetPerspectiveTransform(observed, [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]);
+        using Mat inverse = Cv2.GetPerspectiveTransform(observed, [new(0, -.2f), new(1, -.2f), new(1, .8f), new(0, .8f)]);
         using Mat camera = new();
         Cv2.WarpPerspective(scene, camera, forward, new Size(Size, Size), InterpolationFlags.Linear,
             BorderTypes.Constant, new Scalar(110, 110, 110, 255));
@@ -175,7 +179,7 @@ internal static class PhotoObjectTargetRegression
         // A saturated lavender projector field with a broad brighter patch,
         // modelled after the live false-positive pattern without storing a photo.
         using Mat empty = Scene();
-        for (int y = 115; y < Size; y++)
+        for (int y = 105; y < Size; y++)
             for (int x = 0; x < Size; x++)
             {
                 double glow = 29 * Math.Exp(-.5 * (Math.Pow((x - 320) / 28.0, 2) + Math.Pow((y - 210) / 42.0, 2)));
@@ -205,19 +209,31 @@ internal static class PhotoObjectTargetRegression
 
     private static void CheckCaptureBoundary()
     {
-        foreach (Rect bounds in new[] { new Rect(180, 415, 140, 75), new Rect(8, 200, 60, 70) })
+        foreach (Rect bounds in new[] { new Rect(180, 370, 140, 75), new Rect(8, 200, 60, 70), new Rect(180, 133, 140, 75) })
         {
             using Mat scene = Scene(); Cv2.Rectangle(scene, bounds, ObjectColor, -1);
             var target = Locate(scene);
             using Mat lit = LitScene(target); Cv2.Rectangle(lit, bounds, ObjectColor, -1);
             Require(Observe(lit, target) == PhotoObjectTargetState.Present,
-                "An object wholly inside the one-percent guard could not be acquired and verified.");
+                "An object wholly inside the capture guard could not be acquired and verified.");
         }
         using Mat clipped = Scene();
-        Cv2.Rectangle(clipped, new Rect(180, 470, 80, 45), ObjectColor, -1);
+        Cv2.Rectangle(clipped, new Rect(180, 440, 80, 45), ObjectColor, -1);
         Require(PhotoObjectLocator.Locate(Size, Size, Size * 4, Bytes(clipped), BoardMap, out var failure) is null &&
             failure?.Contains("edges") == true,
-            "Expanding the capture area accepted an object clipped by the physical board edge.");
+            "The capture area accepted an object crossing into the bottom control strip.");
+
+        using Mat controlsOnly = Scene();
+        Cv2.Rectangle(controlsOnly, new Rect(80, 475, 70, 20), ObjectColor, -1);
+        Cv2.Rectangle(controlsOnly, new Rect(30, 110, 100, 15), ObjectColor, -1);
+        Require(PhotoObjectLocator.Locate(Size, Size, Size * 4, Bytes(controlsOnly), BoardMap, out _) is null,
+            "The title or bottom buttons were acquired as a Photo Copy object.");
+        using Mat aboveControls = controlsOnly.Clone(); DrawSubject(aboveControls, ObjectColor);
+        using Mat clearField = Scene(); DrawSubject(clearField, ObjectColor);
+        var withControls = Locate(aboveControls);
+        var withoutControls = Locate(clearField);
+        Require(withControls.Center == withoutControls.Center && withControls.Alpha.SequenceEqual(withoutControls.Alpha),
+            "The title or bottom buttons changed an upper-field object's acquired silhouette.");
     }
 
     private static void CheckSpotlightShape()
@@ -302,7 +318,7 @@ internal static class PhotoObjectTargetRegression
         for (int y = 0; y < maskHeight; y++)
             for (int x = 0; x < maskWidth; x++)
                 if (capturedMask.At<byte>(y, x) >= 200)
-                    capturedRemote.Set(145 + y, 180 + x, new Vec4b(40, 40, 40, 255));
+                    capturedRemote.Set(140 + y, 180 + x, new Vec4b(40, 40, 40, 255));
         var captured = Locate(capturedRemote);
         Require(captured.Spotlight.Shape == PhotoObjectSpotlightShape.RoundedRectangle,
             "The actual remote that formerly simplified to six corners still received circular light.");
@@ -474,7 +490,7 @@ internal static class PhotoObjectTargetRegression
         PhotoObjectLocator.ObserveTarget(Size, Size, Size * 4, Bytes(scene), BoardMap, target, out _, hands);
     private static int AlphaAt(PhotoObjectTarget target, int x, int y)
     {
-        int tx = x * 2 - target.Left, ty = y * 2 - target.Top;
+        int tx = x * 2 - target.Left, ty = y * 2 - 200 - target.Top;
         return tx < 0 || ty < 0 || tx >= target.Width || ty >= target.Height ? 0 : target.Alpha[ty * target.Width + tx];
     }
     private static Mat Scene(bool gradient = false)
@@ -482,15 +498,15 @@ internal static class PhotoObjectTargetRegression
         Mat result = new(Size, Size, MatType.CV_8UC4);
         for (int y = 0; y < Size; y++)
             for (int x = 0; x < Size; x++) result.Set(y, x, Background(x, y, false, gradient));
-        Cv2.Rectangle(result, new Rect(0, 0, Size, 105), new Scalar(25, 55, 35, 255), -1);
+        Cv2.Rectangle(result, new Rect(0, 470, Size, 30), new Scalar(25, 55, 35, 255), -1);
         return result;
     }
     private static Mat LitScene(PhotoObjectTarget target, bool gradient = false)
     {
         Mat result = Scene(gradient);
-        for (int y = PhotoObjectTarget.CaptureTop / 2; y < PhotoObjectTarget.CaptureBottom / 2; y++)
+        for (int y = (PhotoObjectTarget.CaptureTop + 200) / 2; y < (PhotoObjectTarget.CaptureBottom + 200) / 2; y++)
             for (int x = PhotoObjectTarget.CaptureLeft / 2; x < PhotoObjectTarget.CaptureRight / 2; x++)
-                if (InsideSpotlight(target.Spotlight, x * 2, y * 2))
+                if (InsideSpotlight(target.Spotlight, x * 2, y * 2 - 200))
                     result.Set(y, x, Background(x, y, true, gradient));
         return result;
     }

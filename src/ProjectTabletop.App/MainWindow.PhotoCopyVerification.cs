@@ -86,9 +86,9 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException($"Copies leave the board empty near ({u}, {v}).");
         }
         // Opaque buttons must remain identical even with hundreds of copies beneath.
-        foreach (var u in new[] { .075, .655 })
+        foreach (var u in new[] { .09, .67 })
         {
-            var index = PixelIndex(u, .1);
+            var index = PixelIndex(u, .85);
             if (!before.AsSpan(index, 4).SequenceEqual(rendered.AsSpan(index, 4)))
                 throw new InvalidOperationException("Photo Copy stamps covered a navigation button.");
         }
@@ -98,7 +98,7 @@ public sealed partial class MainWindow
         await target.SaveAsync(path, CanvasBitmapFileFormat.Png);
         var completedCopies = scene.PhotoCopyCount;
 
-        // A completed worker may return after Capture again or after leaving and
+        // A completed worker may return after Clear or after leaving and
         // reopening Photo Copy. Neither its pixels nor its error may enter the
         // new session, which must wait for its own grey field to settle.
         void RejectObsoleteResult(long revision)
@@ -111,23 +111,24 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException("An obsolete photo failure replaced the current status.");
         }
 
-        // Exercise the actual Capture again gesture path, not only the public
+        // Exercise the actual Clear gesture path, not only the public
         // ShowPhotoCopy reset. Its same-screen navigation still needs a revision.
         var restartTime = DateTimeOffset.UtcNow;
-        var restartTip = new PixelPoint(.1 + .8 * (inset / 2 + .8 * (1 - inset)),
-            .1 + .8 * (inset / 2 + .1 * (1 - inset)));
+        var restart = scene.CurrentBoardButtons.Single(button => button.Id == "capture-again").Bounds;
+        var restartTip = new PixelPoint(.1 + .8 * (inset / 2 + (restart.X + restart.Width / 2) * (1 - inset)),
+            .1 + .8 * (inset / 2 + (restart.Y + restart.Height / 2) * (1 - inset)));
         scene.SetHandCursors([new(restartTip, restartTime.AddSeconds(1), 1)], restartTime);
         if (scene.CurrentBoardScreen != BoardScreen.PhotoCopy || scene.PhotoCopyCount != 0 ||
             scene.TryGetPhotoCopyCaptureContext(out _))
-            throw new InvalidOperationException("Capture again did not clear the photo and require a new grey draw.");
+            throw new InvalidOperationException("Clear did not clear the photo and require a new grey draw.");
         RejectObsoleteResult(context.Revision);
         Draw();
         if (scene.TryGetPhotoCopyCaptureContext(out _))
-            throw new InvalidOperationException("Capture again skipped the grey-field settling interval.");
+            throw new InvalidOperationException("Clear skipped the grey-field settling interval.");
         await Task.Delay(1100);
         if (!scene.TryGetPhotoCopyCaptureContext(out var restartedContext) ||
             restartedContext.Revision <= context.Revision || restartedContext.ReadyAfter <= context.ReadyAfter)
-            throw new InvalidOperationException("Capture again did not create a fresh, settled capture context.");
+            throw new InvalidOperationException("Clear did not create a fresh, settled capture context.");
         RejectObsoleteResult(context.Revision);
 
         scene.ShowBoardMenu();

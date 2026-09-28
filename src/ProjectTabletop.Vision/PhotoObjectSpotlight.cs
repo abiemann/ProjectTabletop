@@ -55,17 +55,22 @@ public sealed record PhotoObjectSpotlight(PhotoObjectSpotlightShape Shape, Pixel
         double coreArea = Math.Abs(Cv2.ContourArea(contour));
         if (rectangleArea < 100 || coreArea < minimumCoreArea) return circle;
         double angle, shear;
-        if (!TryParallelEdges(corners, hull, coreArea, out angle, out shear))
+        if (corners.Length != 4 || !TryParallelEdges(corners, hull, coreArea, out angle, out shear))
         {
             // Rounded bodies can lack four clear corners. Keep the remote fit's
             // occupancy and long-side evidence; circles/ellipses must not pass.
-            if (coreArea / rectangleArea < .84 ||
-                (!(coreArea / rectangleArea >= .87 && HasSquareCorners(corners)) &&
-                 !HasLongParallelSides(hull, core))) return circle;
-            angle = core.Angle * Math.PI / 180;
-            while (angle > Math.PI / 4) angle -= Math.PI / 2;
-            while (angle <= -Math.PI / 4) angle += Math.PI / 2;
-            shear = 0;
+            bool rounded = coreArea / rectangleArea >= .84 &&
+                ((coreArea / rectangleArea >= .87 && HasSquareCorners(corners)) ||
+                 HasLongParallelSides(hull, core));
+            if (rounded)
+            {
+                angle = core.Angle * Math.PI / 180;
+                while (angle > Math.PI / 4) angle -= Math.PI / 2;
+                while (angle <= -Math.PI / 4) angle += Math.PI / 2;
+                shear = 0;
+            }
+            else if (corners.Length is not (5 or 6) ||
+                !TryClippedRectangle(corners, hull, coreArea, out angle, out shear)) return circle;
         }
         double cosine = Math.Cos(angle), sine = Math.Sin(angle);
         double minU = double.PositiveInfinity, minV = double.PositiveInfinity;
@@ -94,6 +99,8 @@ public sealed record PhotoObjectSpotlight(PhotoObjectSpotlightShape Shape, Pixel
         out double angle, out double shear)
     {
         angle = shear = 0;
+        if (corners.Length is 5 or 6)
+            return TryClippedRectangle(corners, hull, area, out angle, out shear);
         if (corners.Length != 4) return false;
         double quadArea = Math.Abs(Cv2.ContourArea(corners));
         double hullArea = Math.Abs(Cv2.ContourArea(hull));
@@ -118,6 +125,51 @@ public sealed record PhotoObjectSpotlight(PhotoObjectSpotlightShape Shape, Pixel
         angle = Math.Atan2(uy, ux);
         shear = dot / cross;
         return true;
+    }
+
+    // A carton standing on an edge can show several faces and one clipped
+    // corner. Require two measured pairs of opposing straight sides; a generic
+    // polygon or an ellipse must not become rectangular merely from its hull.
+    private static bool TryClippedRectangle(Point[] corners, Point[] hull, double area,
+        out double angle, out double shear)
+    {
+        angle = shear = 0;
+        double polygonArea = Math.Abs(Cv2.ContourArea(corners));
+        if (!Cv2.IsContourConvex(corners) || polygonArea < 100 ||
+            polygonArea < Math.Abs(Cv2.ContourArea(hull)) * .87 || area < polygonArea * .9) return false;
+        Point[] edges = Enumerable.Range(0, corners.Length)
+            .Select(i => corners[(i + 1) % corners.Length] - corners[i]).ToArray();
+        static double Length(Point p) => Math.Sqrt((double)p.X * p.X + (double)p.Y * p.Y);
+        var pairs = new List<(int First, int Second, Point Direction)>();
+        for (int first = 0; first < edges.Length; first++)
+            for (int second = first + 1; second < edges.Length; second++)
+            {
+                Point a = edges[first], b = edges[second];
+                double al = Length(a), bl = Length(b);
+                if (Math.Min(al, bl) < Math.Max(10, Math.Max(al, bl) * .5) ||
+                    (double)a.X * b.X + (double)a.Y * b.Y >= 0 ||
+                    Math.Abs((double)a.X * b.Y - (double)a.Y * b.X) > al * bl * .12) continue;
+                pairs.Add((first, second, a - b));
+            }
+        for (int first = 0; first < pairs.Count; first++)
+            for (int second = first + 1; second < pairs.Count; second++)
+            {
+                var a = pairs[first]; var b = pairs[second];
+                if (a.First == b.First || a.First == b.Second || a.Second == b.First || a.Second == b.Second) continue;
+                double ux = a.Direction.X / Length(a.Direction), uy = a.Direction.Y / Length(a.Direction);
+                double vx = b.Direction.X / Length(b.Direction), vy = b.Direction.Y / Length(b.Direction);
+                double determinant = ux * vy - uy * vx, dot = ux * vx + uy * vy;
+                if (Math.Abs(dot) > .65) continue;
+                var projected = hull.Select(p => (U: (p.X * vy - p.Y * vx) / determinant,
+                    V: (ux * p.Y - uy * p.X) / determinant)).ToArray();
+                double fitArea = (projected.Max(p => p.U) - projected.Min(p => p.U)) *
+                    (projected.Max(p => p.V) - projected.Min(p => p.V)) * Math.Abs(determinant);
+                if (fitArea <= 0 || polygonArea < fitArea * .82) continue;
+                angle = Math.Atan2(uy, ux);
+                shear = dot / determinant;
+                return true;
+            }
+        return false;
     }
 
     private static bool HasSquareCorners(Point[] corners)

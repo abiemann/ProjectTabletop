@@ -45,16 +45,14 @@ public sealed partial class MainWindow
     private bool _candidateWhiteBoardPresent;
     private int _spotIndex;
     private readonly List<PixelPoint> _spotCameraPoints = [];
-    private NearEdgeRegistrationTarget[]? _nearEdgeTargets;
     private string? _boardSetupDiagnostic;
     private double? _boardRegistrationError;
     private double? _boardCrossCheckErrorPixels;
     private float? _boardGridInset;
     private string? _boardProjectionWarning;
 
-    private const int BoardSetupSpotCount = 9;
-    private const int NearEdgeSpotStart = 4;
-    private const int CenterCheckSpotIndex = 8;
+    private const int BoardSetupSpotCount = BoardRegistration.SpotCount;
+    private const int CenterCheckSpotIndex = BoardSetupSpotCount - 1;
 
     private enum BoardSetupPhase { Inactive, Switching, ScanAmbient, ScanWhite, MeasureSpots, GridReady, Failed }
 
@@ -224,7 +222,6 @@ public sealed partial class MainWindow
         _candidateWhiteBoardPresent = false;
         _spotIndex = 0;
         _spotCameraPoints.Clear();
-        _nearEdgeTargets = null;
         _boardSetupDiagnostic = null;
         _boardRegistrationError = null;
         _boardCrossCheckErrorPixels = null;
@@ -478,13 +475,13 @@ public sealed partial class MainWindow
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.MeasureSpots);
         _boardSetupDiagnostic = null;
         BoardSetupStatusText.Text = _whiteOnlyFallback
-            ? "White-only board scan complete. Aligning projector, spot 1 of 9. Keep the cardboard still."
+            ? "White-only board scan complete. Aligning projector, spot 1 of 5. Keep the cardboard still."
             : _whiteEdgeUnavailable
             ? "White edge unavailable; using trusted ambient cardboard corners. " +
-              "Aligning projector, spot 1 of 9. Keep the cardboard still."
+              "Aligning projector, spot 1 of 5. Keep the cardboard still."
             : $"{(_ambientRecoveredFromPrior ? "Three-edge recovery" : "Four-edge ambient scan")} " +
               $"and white board edges agree within {_boardCrossCheckErrorPixels:F1} px. " +
-              "Aligning projector, spot 1 of 9. Keep the cardboard still.";
+              "Aligning projector, spot 1 of 5. Keep the cardboard still.";
         if (_frozenFrame is null) CameraCanvas.Invalidate();
     }
 
@@ -496,7 +493,7 @@ public sealed partial class MainWindow
             spotIndex != Volatile.Read(ref _spotIndex)) return;
         if (spot is null)
         {
-            _boardSetupDiagnostic = $"{RegistrationStage(spotIndex)} spot {spotIndex + 1} of 9 " +
+            _boardSetupDiagnostic = $"{RegistrationStage(spotIndex)} spot {spotIndex + 1} of 5 " +
                 "is not clear in the webcam view. " +
                 "Keep the cardboard still or press Scan again.";
             return;
@@ -514,57 +511,20 @@ public sealed partial class MainWindow
             _boardSetupDiagnostic = "Waiting for the next alignment spot to appear in a fresh camera frame.";
             return;
         }
-        if (spotIndex is >= NearEdgeSpotStart and < CenterCheckSpotIndex)
-        {
-            var expected = _nearEdgeTargets?[spotIndex - NearEdgeSpotStart].CameraEstimate;
-            if (expected is null ||
-                Distance(spot.Center, new PixelPoint(expected.Value.X, expected.Value.Y)) >
-                    Math.Min(frame.Width, frame.Height) * 0.075)
-            {
-                _boardSetupDiagnostic = $"Near-edge spot {spotIndex + 1} of 9 is away from " +
-                    "the predicted cardboard position. Keep the board still or press Scan again.";
-                return;
-            }
-        }
         _spotCameraPoints.Add(spot.Center);
         _boardSetupDiagnostic = null;
         try
         {
-            if (spotIndex == NearEdgeSpotStart - 1)
-            {
-                Point2[] centralCamera = _spotCameraPoints.Take(4)
-                    .Select(point => new Point2(point.X, point.Y)).ToArray();
-                Point2[] centralProjector = Enumerable.Range(0, 4)
-                    .Select(SceneCompositor.BoardCalibrationSpotPosition)
-                    .Select(point => new Point2(point.X, point.Y)).ToArray();
-                var provisionalMap = Homography.FromFourPoints(centralCamera, centralProjector);
-                var boardCorners = _physicalBoard?.Corners
-                    .Select(point => new Point2(point.X, point.Y)).ToArray() ??
-                    throw new InvalidOperationException("The physical board edges were lost.");
-                _nearEdgeTargets = NearEdgeRegistrationPlan.Create(boardCorners, provisionalMap);
-            }
-
             if (spotIndex + 1 < BoardSetupSpotCount)
             {
                 ShowNextRegistrationSpot(spotIndex + 1);
                 return;
             }
 
-            var nearEdgeTargets = _nearEdgeTargets ??
-                throw new InvalidOperationException("Near-edge targets were not measured.");
-            Point2[] cameraPoints = _spotCameraPoints.Skip(NearEdgeSpotStart).Take(4)
+            Point2[] cameraPoints = _spotCameraPoints
                 .Select(point => new Point2(point.X, point.Y)).ToArray();
-            Point2[] projectorPoints = nearEdgeTargets
-                .Select(target => target.ProjectorPosition).ToArray();
-            var map = Homography.FromFourPoints(cameraPoints, projectorPoints);
-            var check = map.Transform(new Point2(spot.Center.X, spot.Center.Y));
-            var expected = SceneCompositor.BoardCalibrationSpotPosition(4);
-            var error = Math.Sqrt(Math.Pow(check.X - expected.X, 2) +
-                                  Math.Pow(check.Y - expected.Y, 2));
+            var map = BoardRegistration.FitAndValidate(cameraPoints, out var error);
             _boardRegistrationError = error;
-            if (error > 0.015)
-                throw new InvalidOperationException(
-                    $"The center check error is {error:F4} normalized, above the 0.015 limit.");
 
             var board = _physicalBoard ?? throw new InvalidOperationException("Board edges were lost.");
             Vector2[] corners = board.Corners.Select(point =>
@@ -587,7 +547,7 @@ public sealed partial class MainWindow
                 ? "White edge unavailable; using trusted ambient cardboard corners. "
                 : $"{(_ambientRecoveredFromPrior ? "Three-edge inferred" : "Four-edge ambient")} " +
                   $"and white cardboard edges agreed within {_boardCrossCheckErrorPixels:F1} px. ") +
-                "Nine-spot near-edge registration complete. Content is projected inside " +
+                "Five-spot registration complete. Content is projected inside " +
                 $"its detected edges (center check error {error:F4} normalized; " +
                 $"grid inset {_boardGridInset:P1}). " +
                 (_boardProjectionWarning ?? "Press Scan again if the cardboard moves.");
@@ -613,27 +573,19 @@ public sealed partial class MainWindow
     private void ShowNextRegistrationSpot(int index)
     {
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.Switching);
-        if (index is >= NearEdgeSpotStart and < CenterCheckSpotIndex)
-        {
-            var target = _nearEdgeTargets?[index - NearEdgeSpotStart].ProjectorPosition ??
-                throw new InvalidOperationException("Near-edge targets have not been calculated.");
-            _scene.ShowBoardCalibrationSpotAt(new Vector2((float)target.X, (float)target.Y));
-        }
-        else
-            _scene.ShowBoardCalibrationSpot(index == CenterCheckSpotIndex ? 4 : index);
+        _scene.ShowBoardCalibrationSpot(index);
         Interlocked.Exchange(ref _boardPhaseStartedTick, Stopwatch.GetTimestamp());
         Interlocked.Exchange(ref _lastBoardDetectTick, 0);
         Interlocked.Exchange(ref _lastAnalyzedBoardFrame, null);
         Volatile.Write(ref _spotIndex, index);
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.MeasureSpots);
         BoardSetupStatusText.Text = $"Cardboard found. {RegistrationStage(index)} spot " +
-            $"{index + 1} of 9. Keep the cardboard still.";
+            $"{index + 1} of 5. Keep the cardboard still.";
     }
 
     private static string RegistrationStage(int spotIndex) => spotIndex switch
     {
-        < NearEdgeSpotStart => "Central alignment",
-        < CenterCheckSpotIndex => "Near-edge alignment",
+        < CenterCheckSpotIndex => "Alignment",
         _ => "Center validation"
     };
 
@@ -773,7 +725,7 @@ public sealed partial class MainWindow
                     ? "White edge unavailable; using trusted ambient corners"
                     : $"Black/white edges agree within {_boardCrossCheckErrorPixels:F1} px")}. " +
                 $"{RegistrationStage(Volatile.Read(ref _spotIndex))} spot " +
-                $"{Volatile.Read(ref _spotIndex) + 1} of 9. " +
+                $"{Volatile.Read(ref _spotIndex) + 1} of 5. " +
                 "Keep the cardboard still.",
             BoardSetupPhase.GridReady => (_whiteOnlyFallback
                 ? "White-only board scan complete. "
@@ -781,7 +733,7 @@ public sealed partial class MainWindow
                 ? "White edge unavailable; using trusted ambient cardboard corners. "
                 : $"{(_ambientRecoveredFromPrior ? "Three-edge inferred" : "Four-edge ambient")} " +
                   $"and white board edges agree within {_boardCrossCheckErrorPixels:F1} px. ") +
-                "Nine-spot near-edge registration complete. Grid is projected inside " +
+                "Five-spot registration complete. Grid is projected inside " +
                 $"its detected edges (center check error {_boardRegistrationError:F4} normalized; " +
                 $"grid inset {_boardGridInset:P1}). " +
                 (_boardProjectionWarning ?? "Press Scan again if the cardboard moves."),

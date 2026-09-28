@@ -21,17 +21,33 @@ public static partial class PhotoObjectLocator
         IReadOnlyList<double> cameraToBoard, out string? failure)
     {
         if (!TryRectify(width, height, stride, bgra, cameraToBoard, out var photo, out _, out failure)) return null;
-        if (!TryBackground(photo, new byte[BoardSize * BoardSize], out var background,
+        return LocateRectified(photo, denoise: false, out failure);
+    }
+
+    private static PhotoObjectTarget? LocateRectified(byte[] photo, bool denoise, out string? failure)
+    {
+        // Near-threshold camera noise around a bright projector hotspot can join
+        // into a false second component. Retry that failure with mild denoising;
+        // successful raw silhouettes, edge validation and saved RGB stay intact.
+        byte[] segmentation = photo;
+        if (denoise)
+        {
+            using Mat acquisition = Mat.FromPixelData(BoardSize, BoardSize, MatType.CV_8UC4, photo);
+            using Mat smoothed = new();
+            Cv2.GaussianBlur(acquisition, smoothed, new Size(3, 3), .8);
+            segmentation = Bytes(smoothed, 4);
+        }
+        if (!TryBackground(segmentation, new byte[BoardSize * BoardSize], out var background,
             out double threshold, neutralGrey: true))
         {
             failure = "Leave plain grey space around one object and keep hands off the capture area.";
             return null;
         }
-        float[] illumination = BuildIlluminationCorrection(photo, background, threshold);
+        float[] illumination = BuildIlluminationCorrection(segmentation, background, threshold);
         byte[] pixels = new byte[BoardSize * BoardSize];
         for (int y = Capture.Top; y < Capture.Bottom; y++)
             for (int x = Capture.Left; x < Capture.Right; x++)
-                if (Difference(photo, y * BoardSize + x, background, x, y, illumination) > threshold)
+                if (Difference(segmentation, y * BoardSize + x, background, x, y, illumination) > threshold)
                     pixels[y * BoardSize + x] = 255;
         using Mat mask = Mat.FromPixelData(BoardSize, BoardSize, MatType.CV_8UC1, pixels);
         using Mat kernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(3, 3));
@@ -52,6 +68,7 @@ public static partial class PhotoObjectLocator
             }
         int[] candidates = Enumerable.Range(1, count - 1).Where(id => area[id] >= 400).ToArray();
         byte[]? contrastEvidence = null;
+        bool recoveredSurface = false;
         int foregroundArea;
         if (candidates.Length != 1)
         {
@@ -61,9 +78,12 @@ public static partial class PhotoObjectLocator
                 Array.Copy(recovered, pixels, pixels.Length);
                 contrastEvidence = evidence;
                 foregroundArea = pixels.Count(value => value != 0);
+                recoveredSurface = true;
             }
             else
             {
+                if (candidates.Length > 1 && !denoise)
+                    return LocateRectified(photo, denoise: true, out failure);
                 failure = candidates.Length == 0
                     ? "Place one contrasting object on the grey area, then move your hands away."
                     : "Leave just one object in the grey capture area.";
@@ -78,9 +98,20 @@ public static partial class PhotoObjectLocator
                 failure = "Move the whole object inside the grey area and leave space around its edges.";
                 return null;
             }
-            foregroundArea = area[selected];
-            for (int index = 0; index < pixels.Length; index++) pixels[index] = ids[index] == selected ? (byte)255 : (byte)0;
-            contrastEvidence = SelectIlluminationStableEvidence(photo, pixels, background, illumination, threshold);
+            if (TryRecoverPrintedSurface(photo, pixels, ids, candidates, area, touchesEdge,
+                    out var recovered, out var evidence))
+            {
+                Array.Copy(recovered, pixels, pixels.Length);
+                contrastEvidence = evidence;
+                foregroundArea = pixels.Count(value => value != 0);
+                recoveredSurface = true;
+            }
+            else
+            {
+                foregroundArea = area[selected];
+                for (int index = 0; index < pixels.Length; index++) pixels[index] = ids[index] == selected ? (byte)255 : (byte)0;
+                contrastEvidence = SelectIlluminationStableEvidence(segmentation, pixels, background, illumination, threshold);
+            }
         }
         Marshal.Copy(pixels, 0, mask.Data, pixels.Length);
         using Mat feather = new();
@@ -107,7 +138,7 @@ public static partial class PhotoObjectLocator
         }
         failure = null;
         return new(left, top, targetWidth, targetHeight, alpha, foregroundArea, croppedEvidence)
-            { HasRecoveredSurface = candidates.Length != 1 && croppedEvidence is not null };
+            { HasRecoveredSurface = recoveredSurface };
     }
 
     // A pale face and its dark printing can join into a single component on

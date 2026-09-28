@@ -117,11 +117,30 @@ public sealed partial class MainWindow
             }
         });
         restored = ParseProjectionSettings(oldVersionTwo, "unused", fourThree);
-        Require(restored.Profiles[key] == profile && restored.Profiles[key].MeasuredBoardSize is null,
-            "Version 2 settings without measured fields changed optics or invented a board reference.");
+        Require(restored.Profiles[key] == profile && restored.Profiles[key].MeasuredBoardSize is null &&
+                restored.Profiles[key].EnableDisplayAudio,
+            "Version 2 settings without new fields changed optics, invented a board reference, or disabled display audio.");
+
+        var audioOnly = new ProjectionSizeProfile { EnableDisplayAudio = false };
+        Require(audioOnly.IsValid && audioOnly.ImageSize(fourThree, out _) is null &&
+                audioOnly.MeasuredBoardSize is null,
+            "An audio-only output preference required size settings or invented dimensions.");
+        var audioSettings = new ProjectionSetupSettings();
+        audioSettings.Profiles[key] = combined with { EnableDisplayAudio = false };
+        audioSettings.Profiles[secondKey] = otherReference with { EnableDisplayAudio = true };
+        var restoredAudio = ParseProjectionSettings(JsonSerializer.Serialize(audioSettings), "unused", fourThree);
+        Require(restoredAudio.Profiles[key] == (combined with { EnableDisplayAudio = false }) &&
+                restoredAudio.Profiles[secondKey] == (otherReference with { EnableDisplayAudio = true }),
+            "Display audio preferences were lost on reload or crossed output profiles.");
+        audioSettings.Profiles[key] = audioOnly;
+        restoredAudio = ParseProjectionSettings(JsonSerializer.Serialize(audioSettings), "unused", fourThree);
+        Require(restoredAudio.Profiles[key] == audioOnly && restoredAudio.Profiles[secondKey].EnableDisplayAudio &&
+                restoredAudio.Profiles[secondKey].MeasuredBoardSize == new BoardSizeEstimate(40, 60),
+            "Saving an audio-only preference changed its value or another display's settings.");
         const string legacy = "{\"Version\":1,\"LensHeightCentimeters\":123,\"GeometryConfirmed\":true,\"DisplayId\":\"old-id\"}";
         restored = ParseProjectionSettings(legacy, "old-id", fourThree);
         Require(restored.Profiles[key].LensHeightCentimeters == 123 && restored.Profiles[key].ThrowRatio is null &&
+            restored.Profiles[key].EnableDisplayAudio &&
             ParseProjectionSettings(legacy, "different-id", fourThree).Profiles.Count == 0,
             "Legacy settings invented a throw ratio or migrated to a different output.");
         var unidentified = fourThree with { MonitorDevicePath = null };
@@ -157,6 +176,8 @@ public sealed partial class MainWindow
             outputProfilesIsolated = true, persistenceAndLegacyMigration = true, invalidInputsRejected = true,
             boardUsesDetectedEdges = true, measuredReferenceIndependentOfOptics = true,
             measuredPartialAndClear = true, measuredPersistenceAndVersionTwoCompatibility = true,
+            displayAudioDefaultsAndPersistence = true, displayAudioProfilesIsolated = true,
+            displayAudioWithoutSizeSettings = true,
             opticalFormulaUnchanged = true, liveSettingsUnchanged = true };
 
         static DisplayModeInfo Mode(string id, int width, int height) => new("DISPLAY1", width, height, 60)

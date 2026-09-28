@@ -160,7 +160,7 @@ public sealed partial class MainWindow
         await Task.Delay(1100);
         Require(scene.TryGetPhotoCopyCaptureContext(out var photoContext), "The grey capture field never became ready.");
         const int fixtureSize = 1000;
-        const double objectAngle = Math.PI / 4, objectStretch = 1.6;
+        const double objectAngle = Math.PI / 4, objectStretch = 1.6, objectCenterX = 270, objectCenterY = 350;
         var fixture = new byte[fixtureSize * fixtureSize * 4];
         for (int y = 0; y < fixtureSize; y++)
         for (int x = 0; x < fixtureSize; x++)
@@ -169,7 +169,7 @@ public sealed partial class MainWindow
             // Normalizing a non-square physical board stretches a rotated
             // rectangle into a parallelogram. This must exercise the GPU shear,
             // not just rotation, or its long edges would no longer fit the object.
-            double unstretchedX = (x - 270) / objectStretch, unstretchedY = y - 600;
+            double unstretchedX = (x - objectCenterX) / objectStretch, unstretchedY = y - objectCenterY;
             double localX = unstretchedX * Math.Cos(objectAngle) + unstretchedY * Math.Sin(objectAngle);
             double localY = -unstretchedX * Math.Sin(objectAngle) + unstretchedY * Math.Cos(objectAngle);
             byte value = Math.Abs(localX) < 60 && Math.Abs(localY) < 80 ? (byte)30 : (byte)100;
@@ -212,9 +212,9 @@ public sealed partial class MainWindow
                 "The rectangular light did not shear and rotate with the object's corners.");
             // These expected source corners are independent of the fitted model.
             double objectX = signX * 58, objectY = signY * 78;
-            var sourceCorner = BoardPoint((270 + objectStretch *
+            var sourceCorner = BoardPoint((objectCenterX + objectStretch *
                 (objectX * Math.Cos(objectAngle) - objectY * Math.Sin(objectAngle))) / 1000,
-                (600 + objectX * Math.Sin(objectAngle) + objectY * Math.Cos(objectAngle)) / 1000);
+                (objectCenterY + objectX * Math.Sin(objectAngle) + objectY * Math.Cos(objectAngle)) / 1000);
             Require(WhiteAt(twoLights, sourceCorner), "The fitted light missed a corner of the source object.");
         }
         foreach (int sign in new[] { -1, 1 })
@@ -240,15 +240,15 @@ public sealed partial class MainWindow
         photoButtons.ShowPhotoCopy();
         var backBounds = photoButtons.Buttons.Single(button => button.Id == "menu").Bounds;
         var backCenter = BoardPoint(backBounds.X + backBounds.Width / 2, backBounds.Y + backBounds.Height / 2);
-        // This light reaches over the actual Back to menu button and crosses the
-        // physical top edge, so both full control coverage and outer clipping matter.
+        // This light reaches over the actual Exit button near the bottom edge,
+        // so both full control coverage and outer clipping matter.
         scene.SetHandSpotlights([Hand(backCenter.X, backCenter.Y)], DateTimeOffset.UtcNow);
         var litControls = Draw();
         Require(WhiteAt(litControls, backCenter) &&
             WhiteAt(litControls, BoardPoint(backBounds.X + backBounds.Width / 2, backBounds.Y + .02)),
-            "The hand spotlight was cut off over Photo Copy's Back to menu button.");
-        Require(BlackAt(litControls, new(backCenter.X, .08)),
-            "A Photo Copy hand spotlight spilled above the physical board.");
+            "The hand spotlight was cut off over Photo Copy's Exit button.");
+        Require(BlackAt(litControls, new(backCenter.X, .92)),
+            "A Photo Copy hand spotlight spilled below the physical board.");
         await Task.Delay(750);
         Require(scene.ActiveHandSpotlightCount == 0 && WhiteAt(Draw(), objectCenter),
             "The stationary object light disappeared when the hand light expired.");
@@ -315,7 +315,7 @@ public sealed partial class MainWindow
             perHandDropoutHold = true, suppressedOtherHandDoesNotCancelHold = true,
             recoveredTrackingIdDoesNotDuplicateLight = true, independentLightExpiry = true,
             knownSuppressedHandCannotClaimOtherHold = true,
-            sourceLifetimeMilliseconds = 700, photoCopyIndependentLights = true, photoCopyHandCoversTopControls = true,
+            sourceLifetimeMilliseconds = 700, photoCopyIndependentLights = true, photoCopyHandCoversBottomControls = true,
             photoCopyHandBoardClipping = true,
             photoCopyObjectLockLifecycle = true, rotatedRectangularObjectLight = true,
             shearedRectangularObjectLight = true, rectangularObjectLightBoundaryCoverage = true,

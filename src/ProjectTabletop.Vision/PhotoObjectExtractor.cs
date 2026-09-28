@@ -11,7 +11,7 @@ namespace ProjectTabletop.Vision;
 public static partial class PhotoObjectExtractor
 {
     private const int BoardSize = PhotoHandCutout.BoardPixels;
-    private static readonly Rect Capture = new(30, 230, 940, 740);
+    private static readonly Rect Capture = new(30, 80, 940, 620);
     private const int MinimumArea = 400;
 
     public static PhotoHandCutout? Extract(int width, int height, int stride, byte[] bgra,

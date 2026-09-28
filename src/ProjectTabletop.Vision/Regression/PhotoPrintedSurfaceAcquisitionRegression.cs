@@ -5,7 +5,8 @@ using ProjectTabletop.Vision;
 internal static class PhotoPrintedSurfaceAcquisitionRegression
 {
     private const int Size = PhotoHandCutout.BoardPixels;
-    private static readonly double[] BoardMap = [1.0 / Size, 0, 0, 0, 1.0 / Size, 0, 0, 0, 1];
+    // Keep fixture camera pixels unchanged while placing the carton above the controls.
+    private static readonly double[] BoardMap = [1.0 / Size, 0, 0, 0, 1.0 / Size, -.25, 0, 0, 1];
     private static readonly Scalar Grey = new(115, 115, 115, 255);
     private static readonly Scalar Ink = new(35, 35, 35, 255);
     private static readonly Point2f Center = new(479, 620);
@@ -150,7 +151,7 @@ internal static class PhotoPrintedSurfaceAcquisitionRegression
         target.ContrastEvidence is null ? (byte)0 : Sample(target, target.ContrastEvidence, point);
     private static byte Sample(PhotoObjectTarget target, IReadOnlyList<byte> values, Point point)
     {
-        int x = point.X - target.Left, y = point.Y - target.Top;
+        int x = point.X - target.Left, y = point.Y - 250 - target.Top;
         return x < 0 || y < 0 || x >= target.Width || y >= target.Height ? (byte)0 : values[y * target.Width + x];
     }
 

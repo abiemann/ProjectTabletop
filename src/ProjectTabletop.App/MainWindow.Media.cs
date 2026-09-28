@@ -30,6 +30,7 @@ public sealed partial class MainWindow
             if (_closing) return false;
             OpenOutputButton.IsEnabled = false;
             FullscreenButton.IsEnabled = false;
+            InvalidateDisplayAudio(disconnectOutput: true);
             if (Volatile.Read(ref _boardSetupActive))
             {
                 Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.Switching);
@@ -48,6 +49,7 @@ public sealed partial class MainWindow
                     if (!ReferenceEquals(_output, created)) return;
                     _output = null;
                     _outputDisplayId = null;
+                    InvalidateDisplayAudio(disconnectOutput: true);
                     ClearHandTracking();
                     _scene.ClearBoardMediaClip();
                     FullscreenButton.Content = "Full screen";
@@ -61,6 +63,8 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException("The output window or selected display changed while opening.");
             RequireProjectionOutput();
             _outputDisplayId = output.ActualDisplayId;
+            _displayAudioVideoReady = true;
+            _ = RefreshDisplayAudioAsync();
             FullscreenButton.Content = "Windowed";
             if (Volatile.Read(ref _boardSetupActive))
             {
@@ -74,6 +78,7 @@ public sealed partial class MainWindow
         {
             _output?.Close();
             _outputDisplayId = null;
+            InvalidateDisplayAudio(disconnectOutput: true);
             if (!_closing) SetStatus("Could not open projection output: " + ex.Message);
             return false;
         }
@@ -98,6 +103,7 @@ public sealed partial class MainWindow
             if (_closing || _output is null) return;
             OpenOutputButton.IsEnabled = false;
             FullscreenButton.IsEnabled = false;
+            InvalidateDisplayAudio(disconnectOutput: true);
             StopBoardSetup();
             ClearHandTracking();
             _scene.ClearBoardMediaClip();
@@ -108,6 +114,8 @@ public sealed partial class MainWindow
                 output.ActualDisplayId != display.Id)
                 throw new InvalidOperationException("The output window or selected display changed during the window-mode change.");
             _outputDisplayId = output.ActualDisplayId;
+            _displayAudioVideoReady = true;
+            _ = RefreshDisplayAudioAsync();
             FullscreenButton.Content = output.IsFullScreen ? "Windowed" : "Full screen";
             InvalidateCalibration("Output window mode changed. Recalibrate in full screen.");
         }
@@ -115,6 +123,7 @@ public sealed partial class MainWindow
         {
             _output?.Close();
             _outputDisplayId = null;
+            InvalidateDisplayAudio(disconnectOutput: true);
             if (!_closing) SetStatus("Could not change output window mode: " + ex.Message);
         }
         finally

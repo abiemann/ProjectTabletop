@@ -11,7 +11,7 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
-    // A square logical surface is fitted to the physical board by the very same
+    // A square logical layout is fitted to the physical board by the very same
     // homography used in reverse for hit testing. Buttons never occupy clipped
     // corners of the board's projector-space bounding rectangle.
     private const float BoardSurfaceSize = 1000;
@@ -114,13 +114,8 @@ public sealed partial class SceneCompositor
     {
         if (_boardSurfaceMap is null) return;
         SyncPhotoCopySession();
-        if (_boardApplicationTarget is null || _boardApplicationTarget.Device != ds.Device)
-        {
-            _boardApplicationTarget?.Dispose();
-            _boardApplicationTarget = new CanvasRenderTarget(ds.Device,
-                BoardSurfaceSize, BoardSurfaceSize, 96);
-            _renderedBoardState = null;
-        }
+        ReserveProjectedBoardPixels(ds, output, preview);
+        if (EnsureBoardRenderTarget(ref _boardApplicationTarget, ds.Device)) _renderedBoardState = null;
 
         var now = DateTimeOffset.UtcNow;
         var blackjackNow = _blackjackClock();
@@ -150,7 +145,8 @@ public sealed partial class SceneCompositor
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
         {
-            using var surface = _boardApplicationTarget.CreateDrawingSession();
+            using var surface = _boardApplicationTarget!.CreateDrawingSession();
+            surface.Transform = BoardRasterTransform(_boardApplicationTarget);
             surface.Clear(photoCopy ? AppPalette.PhotoCopyBackground : _boardSession.Screen == BoardScreen.HandTracking
                 ? Colors.Transparent : AppPalette.Background);
             if (photoCopy)
@@ -223,18 +219,20 @@ public sealed partial class SceneCompositor
 
                 if (photoCopy)
                 {
-                    // Opaque panels keep copied images below the controls.
+                    // Opaque panels keep copied images behind the lower controls.
                     // Hand illumination is drawn later, across the whole board.
-                    surface.DrawText("PHOTO COPY", 61, 18, AppPalette.AccentSecondary, small);
+                    surface.DrawText("PHOTO COPY", 61, 18, AppPalette.MutedText, small);
                     using var photoStatus = new CanvasTextFormat
                     {
                         FontFamily = "Segoe UI",
-                        FontSize = state.PhotoStatus == "Image Saved" ? 27 : 19,
+                        FontSize = state.PhotoStatus == "Image Saved" ? 27 : 21,
+                        VerticalAlignment = CanvasVerticalAlignment.Center,
                         WordWrapping = CanvasWordWrapping.Wrap
                     };
-                    DrawGlassPanel(surface, new Rect(50, 165, 900, 50));
+                    surface.FillRoundedRectangle(new Rect(80, 740, 840, 65), 12, 12,
+                        Windows.UI.Color.FromArgb(255, 185, 185, 185));
                     surface.DrawText(state.PhotoStatus ?? PhotoCopyReadyMessage,
-                        new Rect(69, 170, 862, 44), AppPalette.Text, photoStatus);
+                        new Rect(98, 745, 804, 55), Colors.Black, photoStatus);
                 }
                 else if (_boardSession.Screen == BoardScreen.HandTracking)
                 {
@@ -264,16 +262,17 @@ public sealed partial class SceneCompositor
         }
 
         var h = _boardSurfaceMap.ToMatrix();
+        var pixels = _boardApplicationTarget!.SizeInPixels;
         // System.Numerics uses row vectors. Include the source-pixel → UV scale,
         // the projective denominator, and the preview's fitted output rectangle.
         // Dividing the resulting XY by W exactly matches Homography.Transform.
         var matrix = new Matrix4x4(
-            (float)((output.Width * h[0] + output.X * h[6]) / BoardSurfaceSize),
-            (float)((output.Height * h[3] + output.Y * h[6]) / BoardSurfaceSize), 0,
-            (float)(h[6] / BoardSurfaceSize),
-            (float)((output.Width * h[1] + output.X * h[7]) / BoardSurfaceSize),
-            (float)((output.Height * h[4] + output.Y * h[7]) / BoardSurfaceSize), 0,
-            (float)(h[7] / BoardSurfaceSize),
+            (float)((output.Width * h[0] + output.X * h[6]) / pixels.Width),
+            (float)((output.Height * h[3] + output.Y * h[6]) / pixels.Width), 0,
+            (float)(h[6] / pixels.Width),
+            (float)((output.Width * h[1] + output.X * h[7]) / pixels.Height),
+            (float)((output.Height * h[4] + output.Y * h[7]) / pixels.Height), 0,
+            (float)(h[7] / pixels.Height),
             0, 0, 1, 0,
             (float)(output.Width * h[2] + output.X * h[8]),
             (float)(output.Height * h[5] + output.Y * h[8]), 0, (float)h[8]);
