@@ -79,6 +79,17 @@ and rendered-reference BGRA buffers with dimensions, mapping, source UTC and
 diagnostics under the app's `HandAcquisitionSnapshots` directory. These private
 captures support exact replay and are not repository fixtures.
 
+`PaintDisturbanceTracker` compares native camera samples with a bounded history of
+generated Paint frames through the camera-to-board homography. It estimates one
+global render delay from unobstructed regions, compares that historical frame and
+its immediate neighbors, and tolerates interpolated exposure colours. Two fresh
+observations and a minimum board-UV residual area (7% of the measured Photo Copy
+control interior) are required before emitting a drop. The header is excluded;
+scene/calibration changes, stale frames and missing current history clear pending
+evidence. Held and moving obstructions have separate bounded emission cadences.
+This detects physical interference, not hand identity or a gesture. Run `--paint`
+for animation-history, noise, generic-object, perspective, cadence and reset checks.
+
 During duplicate suppression, a fresh tracked fit with confidence at least .90
 and previous-bounds IoU at least .65 takes precedence over an overlapping search
 fit with at most .01 greater confidence. The original confidence and landmarks

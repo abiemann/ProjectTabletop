@@ -11,8 +11,10 @@ internal sealed record ProjectionSizeProfile
     public double? MeasuredBoardShortSideCentimeters { get; init; }
     public double? MeasuredBoardLongSideCentimeters { get; init; }
     public bool EnableDisplayAudio { get; init; } = true;
+    public double? BoardFacingDegrees { get; init; }
 
-    public bool IsValid => ValidOptics && ValidMeasuredInputs;
+    public bool IsValid => ValidOptics && ValidMeasuredInputs && (BoardFacingDegrees is null ||
+        double.IsFinite(BoardFacingDegrees.Value) && BoardFacingDegrees is >= 0 and < 360);
 
     // A supplied board reference does not depend on an optical estimate. Keep
     // only its two editable inputs in the persisted profile, not derived state.

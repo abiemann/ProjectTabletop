@@ -20,7 +20,7 @@ if (args.Length == 0)
 
 if (args.Length < 2 || args[0] != "--once" || args.Length > 3)
 {
-    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|blackjack_action|capture_blackjack_preview|shutdown> [JSON object]");
+    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|show_paint|blackjack_action|capture_blackjack_preview|shutdown> [JSON object]");
     return 2;
 }
 
@@ -70,6 +70,7 @@ static async Task RunMcpAsync()
             Tool("show_board_menu", "Show the board app menu and enable hand tracking for pinch selection."),
             Tool("show_hand_tracking_test", "Open the built-in Hand-Tracking gesture test and enable hand tracking."),
             Tool("show_photo_copy", "Open Photo Copy on grey output: bottom controls offer Exit, Swirl and Copy. Swirl repeats an object photo and becomes Clear; Copy immediately saves a PNG with a photocopier sound."),
+            Tool("show_paint", "Open Paint: physical disturbances add spreading, blending pigment and metallic particles. Exit is at the top left; spotlights are disabled."),
             Tool("show_blackjack", "Open the virtual-chip Blackjack table and laptop preview without opening projector output or starting the camera."),
             BlackjackActionTool(),
             Tool("capture_blackjack_preview", "Save the current Blackjack table as an unmapped laptop-preview PNG."),

@@ -343,27 +343,39 @@ public sealed partial class SceneCompositor : IDisposable
     {
         ArgumentNullException.ThrowIfNull(projectorCorners);
         ArgumentNullException.ThrowIfNull(cameraMap);
-        var grid = BoardGrid.Create(projectorCorners);
-        var mediaClip = ProjectionClipRegion.FromCorners(grid.GridCorners
-            .Select(point => new Point2(point.X, point.Y)).ToArray());
         lock (_gate)
         {
             if (!_boardSetup) throw new InvalidOperationException("Board setup is not active.");
-            _boardGrid = grid;
-            _detectedBoardCorners = grid.BoardCorners.Select(point => new Point2(point.X, point.Y)).ToArray();
-            _boardMediaClip = mediaClip;
-            _boardCameraMap = cameraMap;
-            _boardSurfaceMap = Homography.FromFourPoints(
-                [new(0, 0), new(1, 0), new(1, 1), new(0, 1)], mediaClip.Corners);
-            _handTips = [];
-            _handVisualResetThrough = DateTimeOffset.UtcNow;
-            ClearHandSpotlights();
-            _boardSession.ResetInput(DateTimeOffset.UtcNow);
-            CancelBlackjackDeal();
-            InvalidatePhotoCopyCapture();
-            _boardSetupStarted = DateTimeOffset.UtcNow;
+            var points = projectorCorners.Select(point => new Point2(point.X, point.Y)).ToArray();
+            var heading = _boardFacingDegrees ?? BoardOrientation.Heading(points, _displayAspect);
+            var ordered = BoardOrientation.Orient(points, heading, _displayAspect);
+            var grid = BoardGrid.Create(ordered.Select(point => new Vector2((float)point.X, (float)point.Y)).ToArray());
+            ApplyDetectedBoardGrid(grid, cameraMap);
+            // Learn the facing only after the geometry passed all validation.
+            _boardFacingDegrees ??= heading;
+            return grid.InsetFraction;
         }
-        return grid.InsetFraction;
+    }
+
+    private void ApplyDetectedBoardGrid(BoardGrid grid, Homography cameraMap)
+    {
+        var mediaClip = ProjectionClipRegion.FromCorners(grid.GridCorners
+            .Select(point => new Point2(point.X, point.Y)).ToArray());
+        var surfaceMap = Homography.FromFourPoints(
+            [new(0, 0), new(1, 0), new(1, 1), new(0, 1)], mediaClip.Corners);
+        ResetBoardRaster();
+        _boardGrid = grid;
+        _detectedBoardCorners = grid.BoardCorners.Select(point => new Point2(point.X, point.Y)).ToArray();
+        _boardMediaClip = mediaClip;
+        _boardCameraMap = cameraMap;
+        _boardSurfaceMap = surfaceMap;
+        _handTips = [];
+        _handVisualResetThrough = DateTimeOffset.UtcNow;
+        ClearHandSpotlights();
+        _boardSession.ResetInput(DateTimeOffset.UtcNow);
+        CancelBlackjackDeal();
+        InvalidatePhotoCopyCapture();
+        _boardSetupStarted = DateTimeOffset.UtcNow;
     }
 
     public void ShowCalibrationTarget(int index, bool pieceTop)
@@ -562,7 +574,8 @@ public sealed partial class SceneCompositor : IDisposable
         }
         DrawHandAcquisitionLight(ds, output);
         DrawHandSpotlights(ds, output);
-        DrawHandCursor(ds, output);
+        if (_boardSession.Screen == BoardScreen.Paint) DrawPaintNavigationCursor(ds, output);
+        else DrawHandCursor(ds, output);
     }
 
     private void DrawHandCursor(CanvasDrawingSession ds, Rect output)
@@ -831,6 +844,8 @@ public sealed partial class SceneCompositor : IDisposable
             _photoCopyCameraTarget = null;
             _photoCopyCutout = null;
             _photoCopyPremultipliedPixels = null;
+            DisposePaintResources();
+            DisposePaintReference();
         }
     }
 }

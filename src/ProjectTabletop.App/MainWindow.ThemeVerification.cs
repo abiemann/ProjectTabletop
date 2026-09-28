@@ -52,7 +52,7 @@ public sealed partial class MainWindow
         }
 
         long eventId = 0;
-        foreach (BoardScreen screen in new[] { BoardScreen.Blackjack, BoardScreen.Monopoly, BoardScreen.Gta, BoardScreen.Diablo })
+        foreach (BoardScreen screen in new[] { BoardScreen.Blackjack, BoardScreen.Paint, BoardScreen.Gta, BoardScreen.Diablo })
         {
             scene.ShowBoardMenu();
             await Task.Delay(2); // A new selection must follow external navigation.

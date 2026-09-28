@@ -20,14 +20,16 @@ public sealed partial class SceneCompositor
     private BoardSurfaceState? _renderedBoardState;
 
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
-        int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision);
+        int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision,
+        long PaintRevision);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
-        Func<DateTimeOffset>? boardRevealClock = null)
+        Func<DateTimeOffset>? boardRevealClock = null, Func<DateTimeOffset>? paintClock = null)
     {
         _boardSession = new BoardSession(blackjack);
         _blackjackClock = blackjackClock ?? (() => DateTimeOffset.UtcNow);
         _boardRevealClock = boardRevealClock ?? (() => DateTimeOffset.UtcNow);
+        _paintClock = paintClock ?? (() => DateTimeOffset.UtcNow);
         _boardSession.BlackjackHitOccurred += OnBlackjackHit;
         _boardSession.BlackjackDealOccurred += OnBlackjackDeal;
     }
@@ -114,6 +116,7 @@ public sealed partial class SceneCompositor
     {
         if (_boardSurfaceMap is null) return;
         SyncPhotoCopySession();
+        SyncPaintSession();
         ReserveProjectedBoardPixels(ds, output, preview);
         if (EnsureBoardRenderTarget(ref _boardApplicationTarget, ds.Device)) _renderedBoardState = null;
 
@@ -123,6 +126,8 @@ public sealed partial class SceneCompositor
         var flights = GetBlackjackFlights(blackjackNow);
         var deal = GetBlackjackDealFrame(blackjackNow);
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
+        var paint = _boardSession.Screen == BoardScreen.Paint;
+        var paintNow = _paintClock();
         if (photoCopy && !preview && PhotoCopyCaptureAllowed)
             MarkPhotoCopySurfacePresented(now);
         var handsFresh = _handFrameTime <= now &&
@@ -140,7 +145,7 @@ public sealed partial class SceneCompositor
             photoCopy ? PhotoCopyDisplayStatus(now) : null,
             photoCopy ? _photoCopyRevision : 0,
             _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision : 0,
-            _blackjackFlightRevision);
+            _blackjackFlightRevision, paint ? PaintVisualRevision(paintNow) : 0);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
@@ -149,7 +154,9 @@ public sealed partial class SceneCompositor
             surface.Transform = BoardRasterTransform(_boardApplicationTarget);
             surface.Clear(photoCopy ? AppPalette.PhotoCopyBackground : _boardSession.Screen == BoardScreen.HandTracking
                 ? Colors.Transparent : AppPalette.Background);
-            if (photoCopy)
+            if (paint)
+                DrawPaintSurface(surface, paintNow);
+            else if (photoCopy)
             {
                 DrawPhotoCopyStamps(surface, state.PhotoStampCount);
                 DrawPhotoCopyObjectSpotlight(surface);
@@ -217,7 +224,13 @@ public sealed partial class SceneCompositor
                         DrawBoardButton(surface, button,
                             handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id), label, small, selectionFeedback);
 
-                if (photoCopy)
+                if (paint)
+                {
+                    DrawGlassPanel(surface, new Rect(390, 55, 550, 105));
+                    surface.DrawText("PAINT", 415, 68, AppPalette.Text, label);
+                    surface.DrawText("Move above the board. Colour flows.", 415, 119, AppPalette.MutedText, small);
+                }
+                else if (photoCopy)
                 {
                     // Opaque panels keep copied images behind the lower controls.
                     // Hand illumination is drawn later, across the whole board.
@@ -260,6 +273,8 @@ public sealed partial class SceneCompositor
             }
             _renderedBoardState = state;
         }
+
+        if (paint && !preview) CapturePaintExpectedFrame(ds.Device, paintNow);
 
         var h = _boardSurfaceMap.ToMatrix();
         var pixels = _boardApplicationTarget!.SizeInPixels;
@@ -312,6 +327,7 @@ public sealed partial class SceneCompositor
             BoardScreen.HandTracking => "Test gestures",
             BoardScreen.PhotoCopy => "Copy hands and objects",
             BoardScreen.Blackjack => "Play against the dealer",
+            BoardScreen.Paint => "Liquid colour & metallic ink",
             _ => "Coming soon"
         };
         ds.DrawText(description, (float)rect.X + 32, (float)rect.Y + 111, AppPalette.MutedText, small);

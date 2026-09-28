@@ -11,6 +11,7 @@ public sealed partial class MainWindow
     private ProjectionSetupSettings _projectionSetup = new();
     private bool _projectionSetupInitialized, _loadingProjectionProfile;
     private string? _projectionProfileKey;
+    private double? _boardFacingDegrees;
     private readonly Dictionary<string, ProjectionSizeProfile> _sessionProjectionProfiles = new();
     private long _lastProjectionModeCheck;
     private string ProjectionSetupPath => Path.Combine(_appDataDirectory, "projection-setup.json");
@@ -103,7 +104,8 @@ public sealed partial class MainWindow
         ThrowRatio = OptionalNumber(ProjectorThrowRatioNumberBox.Value),
         MeasuredBoardShortSideCentimeters = OptionalNumber(MeasuredBoardShortSideNumberBox.Value),
         MeasuredBoardLongSideCentimeters = OptionalNumber(MeasuredBoardLongSideNumberBox.Value),
-        EnableDisplayAudio = _displayAudioRequested
+        EnableDisplayAudio = _displayAudioRequested,
+        BoardFacingDegrees = _boardFacingDegrees
     };
 
     private static double? OptionalNumber(double value) => double.IsNaN(value) ? null : value;
@@ -162,6 +164,9 @@ public sealed partial class MainWindow
             profile.MeasuredBoardLongSideCentimeters is not null;
         _loadingProjectionProfile = false;
         _displayAudioRequested = profile.EnableDisplayAudio;
+        _boardFacingDegrees = profile.BoardFacingDegrees;
+        _scene.SetBoardFacingDegrees(_boardFacingDegrees);
+        UpdateBoardFacingStatus();
         UpdateBoardSizeEstimate();
         _ = RefreshDisplayAudioAsync();
     }

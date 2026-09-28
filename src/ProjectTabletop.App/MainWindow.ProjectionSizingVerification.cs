@@ -88,6 +88,19 @@ public sealed partial class MainWindow
         Require(restored.Profiles[key] == empty, "Cleared optional fields returned after reload.");
 
         string secondKey = ProjectionSizeProfile.PersistentKey(Mode("projector-b", 1920, 1080))!;
+        Require(empty.BoardFacingDegrees is null, "A new profile invented the user's viewing side.");
+        settings.Profiles[key] = combined with { BoardFacingDegrees = 181.5 };
+        settings.Profiles[secondKey] = empty with { BoardFacingDegrees = 90 };
+        restored = ParseProjectionSettings(JsonSerializer.Serialize(settings), "unused", fourThree);
+        Require(restored.Profiles[key].BoardFacingDegrees == 181.5 &&
+            restored.Profiles[secondKey].BoardFacingDegrees == 90 &&
+            restored.Profiles[key].MeasuredBoardSize == reference,
+            "Board facing did not survive reload independently for each output.");
+        foreach (double invalid in new[] { -1d, 360d, double.NaN, double.PositiveInfinity })
+            Require(!(empty with { BoardFacingDegrees = invalid }).IsValid, "Invalid board facing was accepted.");
+        var editedFacing = EnteredProjectionProfile();
+        Require(editedFacing.BoardFacingDegrees == _boardFacingDegrees,
+            "Editing dimensions or audio would discard the current board facing.");
         var otherReference = measured with { MeasuredBoardShortSideCentimeters = 40, MeasuredBoardLongSideCentimeters = 60 };
         settings.Profiles[key] = combined;
         settings.Profiles[secondKey] = otherReference;

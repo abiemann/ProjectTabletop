@@ -360,6 +360,7 @@ public sealed partial class MainWindow
         if (pending is not null) await pending;
         if (_photoCopyTask is { } photoCopyTask) await photoCopyTask;
         if (_photoCopyObservationTask is { } observationTask) await observationTask;
+        if (_paintDetectionTask is { } paintTask) await paintTask;
         _handEngine?.Dispose();
         _handEngine = null;
         if (_handVideoRecorder is not null) await _handVideoRecorder.DisposeAsync();

@@ -534,6 +534,7 @@ public sealed partial class MainWindow
             }).ToArray();
             _boardProjectionWarning = ProjectionBoundaryWarning(corners);
             _boardGridInset = _scene.CompleteBoardSetup(corners, map);
+            RememberBoardFacing();
             Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.GridReady);
             if (_ambientBoard is not null && !_ambientRecoveredFromPrior &&
                 _camera.ActiveDeviceId is { } cameraId && _outputDisplayId is { } displayId)

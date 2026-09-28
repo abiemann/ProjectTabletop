@@ -34,7 +34,7 @@ public sealed partial class MainWindow
         scene.ShowHandTrackingTest(); VerifyButtons("Hand-Tracking");
         scene.ShowPhotoCopy(); VerifyButtons("Photo Copy");
         long selectionId = 770000;
-        foreach (var (id, title) in new[] { ("monopoly", "Monopoly"), ("gta", "GTA"), ("diablo", "Diablo") })
+        foreach (var (id, title) in new[] { ("paint", "Paint"), ("gta", "GTA"), ("diablo", "Diablo") })
         {
             scene.ShowBoardMenu();
             var button = scene.CurrentBoardButtons.Single(button => button.Id == id);
@@ -141,8 +141,12 @@ public sealed partial class MainWindow
                 }
                 scene.CompleteHandAcquisition(context, presence.Hints, [], now);
                 var lit = scene.GetHandAcquisitionContext(now)!;
-                Require(lit.IlluminatedHint is not null && CountWhite(Draw(), center) > CountWhite(empty, center) + 800,
-                    label + "/" + button.Label + " did not illuminate its control.");
+                if (screen == BoardScreen.Paint)
+                    Require(lit.IlluminatedHint is null && CountWhite(Draw(), center) == CountWhite(empty, center),
+                        "Paint must retain its Exit search crop without projecting a spotlight.");
+                else
+                    Require(lit.IlluminatedHint is not null && CountWhite(Draw(), center) > CountWhite(empty, center) + 800,
+                        label + "/" + button.Label + " did not illuminate its control.");
                 Require(scene.CurrentBoardScreen == screen && scene.BlackjackState.Revision == gameRevision &&
                         scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(ids) &&
                         scene.ActiveHandSpotlightCount == 0 && scene.HoveredBoardButtons.Count == 0 &&

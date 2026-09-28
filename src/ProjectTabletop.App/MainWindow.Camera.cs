@@ -380,6 +380,7 @@ public sealed partial class MainWindow
             return;
         }
 
+        QueuePaintDetection(frame, now);
         QueueHandDetection(frame, now);
         bool trained;
         lock (_visionGate) trained = _vision.IsTrained;

@@ -159,6 +159,7 @@ public sealed partial class SceneCompositor
         _blackjackPreviewTarget?.Dispose();
         _blackjackPreviewTarget = null;
         _blackjackPreviewRevision = -1;
+        ResetPaint();
     }
 
     private static Matrix3x2 BoardRasterTransform(CanvasRenderTarget target) =>

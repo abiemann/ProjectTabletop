@@ -7,6 +7,7 @@ CheckIndependentHands();
 CheckFreshness();
 CheckResetAndExternalNavigation();
 CheckPhotoCopyNavigation();
+PaintBoardRegression.Run();
 CheckAnchoredSelection();
 CheckAnchorFreshnessAndConsumption();
 CheckAnchorNavigationAndReset();
@@ -23,7 +24,7 @@ static void CheckMenuAndNavigation()
 {
     var session = new BoardSession();
     Require(session.Screen == BoardScreen.Menu, "The board did not start at the menu.");
-    string[] names = ["Hand-Tracking", "Photo Copy", "Blackjack", "Monopoly", "GTA", "Diablo"];
+    string[] names = ["Hand-Tracking", "Photo Copy", "Blackjack", "Paint", "GTA", "Diablo"];
     Require(session.Buttons.Select(button => button.Label).SequenceEqual(names), "Menu order or labels differ from the requested menu.");
     BoardButton[] buttons = session.Buttons.ToArray();
     for (int index = 0; index < buttons.Length; index++)
@@ -261,6 +262,7 @@ static void CheckAnchorNavigationAndReset()
         (board, time) => board.ShowMenu(time),
         (board, time) => board.ShowHandTrackingTest(time),
         (board, time) => board.ShowPhotoCopy(time),
+        (board, time) => board.ShowPaint(time),
         (board, time) => { board.ShowMedia(time); board.ShowMenu(time); }
     ];
     foreach (var navigate in show)

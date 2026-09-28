@@ -2,6 +2,11 @@ using System.Runtime.InteropServices;
 using OpenCvSharp;
 using ProjectTabletop.Vision;
 
+if (args is ["--paint"])
+{
+    PaintDisturbanceRegression.Run();
+    return;
+}
 if (args is ["--boards"])
 {
     CheckBoardDetection();

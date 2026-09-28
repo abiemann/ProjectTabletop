@@ -54,6 +54,9 @@
                         </StackPanel>
                         <TextBlock x:Name="ProjectionPropertiesText" Text="Reading output display properties."
                                    TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <Button x:Name="RotateBoardButton" Content="Rotate board 90°" IsEnabled="False" Click="RotateBoard_Click" />
+                        <TextBlock x:Name="BoardFacingStatusText" Text="Board setup will remember the board's facing direction."
+                                   TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <CheckBox x:Name="EnableDisplayAudioCheckBox" Content="Enable Audio on Display Device"
                                   IsEnabled="False" IsChecked="False" Checked="EnableDisplayAudio_Changed"
                                   Unchecked="EnableDisplayAudio_Changed" />

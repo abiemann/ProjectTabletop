@@ -141,6 +141,12 @@ public sealed partial class SceneCompositor
             var now = _blackjackClock();
             var current = GetHandAcquisitionContext(frameTime);
             if (current is null || requested is null || requested.Revision != current.Revision) return;
+            if (_boardSession.Screen == BoardScreen.Paint)
+            {
+                // Paint uses disturbances as input, with no exploratory spotlight.
+                ClearAcquisitionLight();
+                return;
+            }
             if (hands.Count > 0)
             {
                 ClearAcquisitionLight();
@@ -277,8 +283,8 @@ public sealed partial class SceneCompositor
             // a lighting reference, without allowing it to suggest a search light.
             IReadOnlyList<HandTrackingBounds>? referenceRegions = _boardSession.Screen switch
             {
-                BoardScreen.HandTracking => [new(.40, .065, .53, .04)],
-                BoardScreen.Monopoly or BoardScreen.Gta or BoardScreen.Diablo =>
+                BoardScreen.HandTracking or BoardScreen.Paint => [new(.40, .065, .53, .04)],
+                BoardScreen.Gta or BoardScreen.Diablo =>
                     [new(.10, .29, .78, .40)],
                 BoardScreen.Blackjack => [new(.05, .24, .90, .50), new(.31, .05, .63, .095)],
                 _ => null
@@ -303,7 +309,7 @@ public sealed partial class SceneCompositor
     private void DrawHandAcquisitionLight(CanvasDrawingSession ds, Rect output)
     {
         var now = _blackjackClock();
-        if (!AcquisitionBoardReady || HasAcquiredHandOrSuppression(now) ||
+        if (_boardSession.Screen == BoardScreen.Paint || !AcquisitionBoardReady || HasAcquiredHandOrSuppression(now) ||
             now >= _acquisitionLightUntil || _acquisitionLight is not { } light ||
             _acquisitionScene != CurrentAcquisitionState() ||
             !_acquisitionButtons.SequenceEqual(_boardSession.Buttons) ||

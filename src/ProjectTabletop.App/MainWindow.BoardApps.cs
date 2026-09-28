@@ -49,6 +49,7 @@ public sealed partial class MainWindow
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :
              _scene.CurrentBoardScreen == BoardScreen.PhotoCopy ? _scene.PhotoCopyStatus :
+             _scene.CurrentBoardScreen == BoardScreen.Paint ? "Move your fingers or an object over the canvas to add paint. Select Exit to return." :
              "Aim with the middle fingertip and four fingers together, then move the index sideways to select. Pinch also works.");
     }
 

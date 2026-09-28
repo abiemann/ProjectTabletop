@@ -56,7 +56,8 @@ public sealed partial class SceneCompositor
             lock (_gate)
             {
                 var now = DateTimeOffset.UtcNow;
-                return _handSpotlights.Count(hand => SpotlightOpacity(now, hand.SourceFrameTime) > 0);
+                return _boardSession.Screen == BoardScreen.Paint ? 0 :
+                    _handSpotlights.Count(hand => SpotlightOpacity(now, hand.SourceFrameTime) > 0);
             }
         }
     }
@@ -172,7 +173,7 @@ public sealed partial class SceneCompositor
     private float SpotlightOpacity(DateTimeOffset now, DateTimeOffset sourceFrameTime)
     {
         var age = now - sourceFrameTime;
-        if (_blackOutput || _boardSetup || IsBoardRevealActive || _calibrationTarget >= 0 || _boardMediaClip is null ||
+        if (_boardSession.Screen == BoardScreen.Paint || _blackOutput || _boardSetup || IsBoardRevealActive || _calibrationTarget >= 0 || _boardMediaClip is null ||
             age < TimeSpan.Zero || age >= SpotlightLifetime)
             return 0;
         return age <= SpotlightHold ? 1 :
@@ -184,6 +185,7 @@ public sealed partial class SceneCompositor
     // labels back over the light would put those dark markings back on the hand.
     private void DrawHandSpotlights(CanvasDrawingSession ds, Rect output)
     {
+        if (_boardSession.Screen == BoardScreen.Paint) return;
         var now = DateTimeOffset.UtcNow;
         if (_handSpotlights.Length == 0 || SpotlightOpacity(now) <= 0) return;
         using var brush = new CanvasRadialGradientBrush(ds.Device,

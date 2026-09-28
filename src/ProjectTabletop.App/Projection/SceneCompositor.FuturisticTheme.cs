@@ -127,13 +127,12 @@ public sealed partial class SceneCompositor
                     using (var diamond = CanvasGeometry.CreatePolygon(ds.Device, [new(0, -10), new(8, 0), new(0, 10), new(-8, 0)]))
                         ds.FillGeometry(diamond, color);
                     break;
-                case BoardScreen.Monopoly:
-                    Stroke([-22, 21, 22, 21]);
-                    ds.DrawRectangle(new Rect(-17, -3, 12, 24), color, 2.5f);
-                    ds.DrawRectangle(new Rect(-1, -18, 18, 39), color, 2.5f);
-                    ds.DrawLine(5, -10, 11, -10, color, 2);
-                    ds.DrawLine(5, -2, 11, -2, color, 2);
-                    ds.DrawLine(5, 6, 11, 6, color, 2);
+                case BoardScreen.Paint:
+                    ds.DrawEllipse(new Vector2(-2, 1), 22, 19, color, 2.5f);
+                    ds.FillCircle(new Vector2(-12, -5), 3.5f, color);
+                    ds.FillCircle(new Vector2(-2, -11), 3.5f, color);
+                    ds.FillCircle(new Vector2(10, -6), 3.5f, color);
+                    Stroke([-9, 19, 13, -16, 20, -12, -3, 22, -9, 19]);
                     break;
                 case BoardScreen.Gta:
                     Stroke([-23, 9, -19, -2, -11, -6, -6, -16, 11, -16, 18, -4, 24, 0, 24, 10, -23, 10, -23, 9]);

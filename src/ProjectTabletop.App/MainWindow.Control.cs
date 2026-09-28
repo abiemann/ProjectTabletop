@@ -30,11 +30,15 @@ public sealed partial class MainWindow
         {
             case "set_projection_size":
                 return SetProjectionSize(parameters);
+            case "set_board_facing":
+                return SetBoardFacingForControl(parameters);
 #if DEBUG
             case "verify_photo_copy_memory_save":
                 return await VerifyPhotoCopyMemorySaveAsync();
             case "verify_board_resolution":
                 return await VerifyBoardResolutionAsync();
+            case "verify_board_orientation":
+                return await VerifyBoardOrientationAsync();
             case "play_photo_copy_sound":
                 _photocopierSound.Play();
                 return _photocopierSound.Status;
@@ -70,6 +74,8 @@ public sealed partial class MainWindow
                 return await VerifyPhotoCopyAcquisitionAsync();
             case "verify_shared_board_acquisition":
                 return await VerifySharedBoardAcquisitionAsync();
+            case "verify_paint":
+                return await VerifyPaintAsync();
             case "capture_hand_acquisition":
                 return await SaveHandAcquisitionSnapshotAsync();
             case "verify_hand_detection_log":
@@ -122,6 +128,7 @@ public sealed partial class MainWindow
                         throwRatio = EnteredProjectionProfile().ThrowRatio,
                         measuredBoardShortSideCentimeters = EnteredProjectionProfile().MeasuredBoardShortSideCentimeters,
                         measuredBoardLongSideCentimeters = EnteredProjectionProfile().MeasuredBoardLongSideCentimeters,
+                        boardFacingDegrees = _boardFacingDegrees,
                         profileSavedPerOutput = ProjectTabletop.App.Projection.ProjectionSizeProfile.PersistentKey(SelectedDisplay?.PhysicalMode) is not null,
                         estimateSource = BoardSizeSource,
                         boardSizeEstimate = CurrentBoardSizeEstimate(),
@@ -155,6 +162,9 @@ public sealed partial class MainWindow
                     handTestStatus = _scene.HandTrackingTestStatus,
                     lastHandDetection = _lastHandDetection,
                     handDetectionLog = _handDetectionLog?.Status,
+                    paint = _scene.GetPaintDiagnostics(),
+                    paintInput = _scene.GetPaintInputDiagnostics(),
+                    lastPaintDetection = _lastPaintDetection,
                     handVideoRecording = _handVideoRecorder?.Status,
                     handLighting = _scene.GetHandLightingDiagnostics(),
                     handAcquisition = new { lighting = _scene.GetHandAcquisitionDiagnostics(),
@@ -221,6 +231,10 @@ public sealed partial class MainWindow
                 return new { path = await SaveProjectionPreviewAsync() };
             case "show_photo_copy":
                 ShowPhotoCopy();
+                return new { boardApp = _scene.CurrentBoardScreen.ToString(),
+                    boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
+            case "show_paint":
+                ShowPaint();
                 return new { boardApp = _scene.CurrentBoardScreen.ToString(),
                     boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
             case "show_blackjack":

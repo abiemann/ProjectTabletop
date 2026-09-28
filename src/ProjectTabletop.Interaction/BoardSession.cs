@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Monopoly, Gta, Diablo, Media }
+public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, Gta, Diablo, Media }
 
 /// <summary>A rectangle in the board's normalized, perspective-corrected coordinate system.</summary>
 public readonly record struct BoardRect(double X, double Y, double Width, double Height)
@@ -60,7 +60,7 @@ public sealed partial class BoardSession
         new BoardButton("hand-tracking", "Hand-Tracking", new(.08, .25, .40, .16), BoardScreen.HandTracking),
         new BoardButton("photo-copy", "Photo Copy", new(.52, .25, .40, .16), BoardScreen.PhotoCopy),
         new BoardButton("blackjack", "Blackjack", new(.08, .45, .40, .16), BoardScreen.Blackjack),
-        new BoardButton("monopoly", "Monopoly", new(.52, .45, .40, .16), BoardScreen.Monopoly),
+        new BoardButton("paint", "Paint", new(.52, .45, .40, .16), BoardScreen.Paint),
         new BoardButton("gta", "GTA", new(.08, .65, .40, .16), BoardScreen.Gta),
         new BoardButton("diablo", "Diablo", new(.52, .65, .40, .16), BoardScreen.Diablo)
     });
@@ -73,6 +73,10 @@ public sealed partial class BoardSession
         new BoardButton("menu", "Exit", new(.08, .835, .26, .105), BoardScreen.Menu),
         new BoardButton("photo-swirl", "Swirl", new(.37, .835, .26, .105), BoardScreen.PhotoCopy),
         new BoardButton("photo-copy-once", "Copy", new(.66, .835, .26, .105), BoardScreen.PhotoCopy)
+    });
+    private static readonly IReadOnlyList<BoardButton> PaintButtons = Array.AsReadOnly(new[]
+    {
+        new BoardButton("menu", "Exit", new(.06, .055, .30, .105), BoardScreen.Menu)
     });
     private DateTimeOffset? _lastFrameTime;
     private DateTimeOffset? _lastNow;
@@ -90,7 +94,7 @@ public sealed partial class BoardSession
         BoardScreen.HandTracking => "Hand-Tracking",
         BoardScreen.PhotoCopy => "Photo Copy",
         BoardScreen.Blackjack => "Blackjack",
-        BoardScreen.Monopoly => "Monopoly",
+        BoardScreen.Paint => "Paint",
         BoardScreen.Gta => "GTA",
         BoardScreen.Diablo => "Diablo",
         BoardScreen.Media => "Media",
@@ -100,6 +104,7 @@ public sealed partial class BoardSession
     {
         BoardScreen.Menu => MenuButtons,
         BoardScreen.PhotoCopy => CurrentPhotoCopyButtons(),
+        BoardScreen.Paint => PaintButtons,
         BoardScreen.Blackjack => BlackjackButtons(),
         BoardScreen.Media => Array.Empty<BoardButton>(),
         _ => AppButtons
@@ -175,6 +180,7 @@ public sealed partial class BoardSession
     public void ShowMenu(DateTimeOffset? now = null) => Show(BoardScreen.Menu, now ?? DateTimeOffset.UtcNow);
     public void ShowHandTrackingTest(DateTimeOffset? now = null) => Show(BoardScreen.HandTracking, now ?? DateTimeOffset.UtcNow);
     public void ShowPhotoCopy(DateTimeOffset? now = null) => Show(BoardScreen.PhotoCopy, now ?? DateTimeOffset.UtcNow);
+    public void ShowPaint(DateTimeOffset? now = null) => Show(BoardScreen.Paint, now ?? DateTimeOffset.UtcNow);
     public void ShowBlackjack(DateTimeOffset? now = null) => Show(BoardScreen.Blackjack, now ?? DateTimeOffset.UtcNow);
     public void ShowMedia(DateTimeOffset? now = null) => Show(BoardScreen.Media, now ?? DateTimeOffset.UtcNow);
 
