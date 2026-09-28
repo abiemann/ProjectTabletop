@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, Gta, Diablo, Media }
+public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, Monopoly, Diablo, Media }
 
 /// <summary>A rectangle in the board's normalized, perspective-corrected coordinate system.</summary>
 public readonly record struct BoardRect(double X, double Y, double Width, double Height)
@@ -61,7 +61,7 @@ public sealed partial class BoardSession
         new BoardButton("photo-copy", "Photo Copy", new(.52, .25, .40, .16), BoardScreen.PhotoCopy),
         new BoardButton("blackjack", "Blackjack", new(.08, .45, .40, .16), BoardScreen.Blackjack),
         new BoardButton("paint", "Paint", new(.52, .45, .40, .16), BoardScreen.Paint),
-        new BoardButton("gta", "GTA", new(.08, .65, .40, .16), BoardScreen.Gta),
+        new BoardButton("monopoly", "Monopoly", new(.08, .65, .40, .16), BoardScreen.Monopoly),
         new BoardButton("diablo", "Diablo", new(.52, .65, .40, .16), BoardScreen.Diablo)
     });
     private static readonly IReadOnlyList<BoardButton> AppButtons = Array.AsReadOnly(new[]
@@ -96,7 +96,7 @@ public sealed partial class BoardSession
         BoardScreen.PhotoCopy => "Photo Copy",
         BoardScreen.Blackjack => "Blackjack",
         BoardScreen.Paint => "Paint",
-        BoardScreen.Gta => "GTA",
+        BoardScreen.Monopoly => "Monopoly",
         BoardScreen.Diablo => "Diablo",
         BoardScreen.Media => "Media",
         _ => throw new InvalidOperationException("Unknown board screen.")
@@ -107,6 +107,7 @@ public sealed partial class BoardSession
         BoardScreen.PhotoCopy => CurrentPhotoCopyButtons(),
         BoardScreen.Paint => CurrentPaintButtons(),
         BoardScreen.Blackjack => BlackjackButtons(),
+        BoardScreen.Monopoly => MonopolyButtons(),
         BoardScreen.Media => Array.Empty<BoardButton>(),
         _ => AppButtons
     };
@@ -162,7 +163,7 @@ public sealed partial class BoardSession
             var result = new BoardNavigation(Screen, selected.Destination, selected.Id)
                 { TrackingId = hand.TrackingId, Gesture = BoardSelectionGesture.Pinch };
             if (!SelectButton(selected, now)) continue;
-            return result;
+            return result with { Current = Screen };
         }
         if (fingerSelection is not null)
         {
@@ -172,7 +173,7 @@ public sealed partial class BoardSession
             if (SelectButton(selected, now))
             {
                 MarkFingerSelection(fingerSelection, frameTime);
-                return result;
+                return result with { Current = Screen };
             }
         }
         return null;

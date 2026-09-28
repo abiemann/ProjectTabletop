@@ -7,7 +7,7 @@ internal static class PaintBoardRegression
         var board = new BoardSession();
         var paint = board.Buttons.Single(button => button.Id == "paint");
         Require(paint.Label == "Paint" && paint.Destination == BoardScreen.Paint &&
-            board.Buttons.All(button => button.Id != "monopoly"), "Paint did not replace the Monopoly menu target.");
+            board.Buttons[3].Id == "paint", "The Paint menu target or its placement changed.");
         Require(board.ActivateButton("paint", Time(0)) && board.Screen == BoardScreen.Paint && board.Title == "Paint",
             "The Paint menu target did not launch Paint.");
         var exit = board.Buttons.Single(button => button.Id == "menu");

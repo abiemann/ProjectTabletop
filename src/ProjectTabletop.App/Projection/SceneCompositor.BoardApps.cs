@@ -22,15 +22,17 @@ public sealed partial class SceneCompositor
 
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision,
-        long PaintRevision, string? PaintStatus, bool PaintSaveEnabled);
+        long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long MonopolyRevision);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
-        Func<DateTimeOffset>? boardRevealClock = null, Func<DateTimeOffset>? paintClock = null)
+        Func<DateTimeOffset>? boardRevealClock = null, Func<DateTimeOffset>? paintClock = null,
+        MonopolyGame? monopoly = null, Func<DateTimeOffset>? monopolyClock = null)
     {
-        _boardSession = new BoardSession(blackjack);
+        _boardSession = new BoardSession(blackjack, monopoly);
         _blackjackClock = blackjackClock ?? (() => DateTimeOffset.UtcNow);
         _boardRevealClock = boardRevealClock ?? (() => DateTimeOffset.UtcNow);
         _paintClock = paintClock ?? (() => DateTimeOffset.UtcNow);
+        _monopolyClock = monopolyClock ?? blackjackClock ?? (() => DateTimeOffset.UtcNow);
         _boardSession.BlackjackHitOccurred += OnBlackjackHit;
         _boardSession.BlackjackDealOccurred += OnBlackjackDeal;
     }
@@ -124,6 +126,7 @@ public sealed partial class SceneCompositor
         var now = DateTimeOffset.UtcNow;
         var blackjackNow = _blackjackClock();
         TickBlackjackVisuals(blackjackNow);
+        _boardSession.TickMonopoly(_monopolyClock());
         var flights = GetBlackjackFlights(blackjackNow);
         var deal = GetBlackjackDealFrame(blackjackNow);
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
@@ -148,7 +151,8 @@ public sealed partial class SceneCompositor
             photoCopy ? _photoCopyRevision : 0,
             _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision : 0,
             _blackjackFlightRevision, paint ? PaintVisualRevision(paintNow) : 0,
-            paint ? GetPaintSaveStatus(paintNow) : null, paint && _boardSession.PaintSaveEnabled);
+            paint ? GetPaintSaveStatus(paintNow) : null, paint && _boardSession.PaintSaveEnabled,
+            _boardSession.Screen == BoardScreen.Monopoly ? _boardSession.MonopolyState.Revision : 0);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
@@ -164,7 +168,7 @@ public sealed partial class SceneCompositor
                 DrawPhotoCopyStamps(surface, state.PhotoStampCount);
                 DrawPhotoCopyObjectSpotlight(surface);
             }
-            else if (_boardSession.Screen is not (BoardScreen.HandTracking or BoardScreen.Blackjack))
+            else if (_boardSession.Screen is not (BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.Monopoly))
                 DrawMetalBackdrop(surface);
             using var heading = new CanvasTextFormat
             {
@@ -193,6 +197,11 @@ public sealed partial class SceneCompositor
                 DrawBlackjackTable(surface, _boardSession.BlackjackState, _boardSession.Buttons,
                     handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback,
                     HiddenBlackjackCards(flights), deal);
+            }
+            else if (_boardSession.Screen == BoardScreen.Monopoly)
+            {
+                DrawMonopolyBoard(surface, _boardSession.MonopolyState, _boardSession.Buttons,
+                    handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback, PaintBoardAspect());
             }
             else if (_boardSession.Screen == BoardScreen.Menu)
             {

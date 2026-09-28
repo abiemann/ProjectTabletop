@@ -35,7 +35,7 @@ public sealed partial class MainWindow
         scene.ShowHandTrackingTest(); VerifyButtons("Hand-Tracking");
         scene.ShowPhotoCopy(); VerifyButtons("Photo Copy");
         long selectionId = 770000;
-        foreach (var (id, title) in new[] { ("paint", "Paint"), ("gta", "GTA"), ("diablo", "Diablo") })
+        foreach (var (id, title) in new[] { ("paint", "Paint"), ("monopoly", "Monopoly"), ("diablo", "Diablo") })
         {
             scene.ShowBoardMenu();
             var button = scene.CurrentBoardButtons.Single(button => button.Id == id);

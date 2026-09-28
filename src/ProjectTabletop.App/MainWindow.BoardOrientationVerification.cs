@@ -23,7 +23,7 @@ public sealed partial class MainWindow
         Vector2[] physicalCorners = [new(.10f, .14f), new(.90f, .14f), new(.90f, .86f), new(.10f, .86f)];
         Point2[] unit = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
         BoardScreen[] boards = [BoardScreen.Menu, BoardScreen.HandTracking, BoardScreen.PhotoCopy,
-            BoardScreen.Paint, BoardScreen.Blackjack];
+            BoardScreen.Paint, BoardScreen.Blackjack, BoardScreen.Monopoly];
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
         var referencePixels = new Dictionary<BoardScreen, byte[]>();
         var comparisons = new List<object>();
@@ -247,6 +247,7 @@ public sealed partial class MainWindow
                 case BoardScreen.PhotoCopy: scene.ShowPhotoCopy(); break;
                 case BoardScreen.Paint: scene.ShowPaint(); break;
                 case BoardScreen.Blackjack: scene.ShowBlackjack(); break;
+                case BoardScreen.Monopoly: scene.ShowMonopoly(); break;
                 default: throw new InvalidOperationException("Unexpected board orientation fixture.");
             }
         }

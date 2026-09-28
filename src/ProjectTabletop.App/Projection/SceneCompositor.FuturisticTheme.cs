@@ -134,11 +134,12 @@ public sealed partial class SceneCompositor
                     ds.FillCircle(new Vector2(10, -6), 3.5f, color);
                     Stroke([-9, 19, 13, -16, 20, -12, -3, 22, -9, 19]);
                     break;
-                case BoardScreen.Gta:
-                    Stroke([-23, 9, -19, -2, -11, -6, -6, -16, 11, -16, 18, -4, 24, 0, 24, 10, -23, 10, -23, 9]);
-                    ds.DrawCircle(new Vector2(-13, 11), 5, color, 2.5f);
-                    ds.DrawCircle(new Vector2(14, 11), 5, color, 2.5f);
-                    ds.DrawLine(-6, -5, 12, -5, color, 2);
+                case BoardScreen.Monopoly:
+                    ds.DrawRectangle(new Rect(-21, -21, 42, 42), color, 2.5f);
+                    ds.DrawRectangle(new Rect(-12, -12, 24, 24), color, 1.5f);
+                    Stroke([-9, 6, -9, -2, 0, -10, 9, -2, 9, 6, -9, 6]);
+                    ds.DrawLine(-21, -10, -12, -10, color, 1.5f);
+                    ds.DrawLine(12, 10, 21, 10, color, 1.5f);
                     break;
                 case BoardScreen.Diablo:
                     Stroke([0, -22, 17, -3, 0, 24, -17, -3, 0, -22]);

@@ -1,5 +1,7 @@
 using ProjectTabletop.Interaction;
 
+MonopolyRegression.Run();
+MonopolyBoardRegression.Run();
 CheckMenuAndNavigation();
 CheckOffTargetAndBounds();
 CheckHeldPinchAndDropout();
@@ -24,7 +26,7 @@ static void CheckMenuAndNavigation()
 {
     var session = new BoardSession();
     Require(session.Screen == BoardScreen.Menu, "The board did not start at the menu.");
-    string[] names = ["Hand-Tracking", "Photo Copy", "Blackjack", "Paint", "GTA", "Diablo"];
+    string[] names = ["Hand-Tracking", "Photo Copy", "Blackjack", "Paint", "Monopoly", "Diablo"];
     Require(session.Buttons.Select(button => button.Label).SequenceEqual(names), "Menu order or labels differ from the requested menu.");
     BoardButton[] buttons = session.Buttons.ToArray();
     for (int index = 0; index < buttons.Length; index++)
@@ -44,7 +46,8 @@ static void CheckMenuAndNavigation()
         Require(navigation is { Previous: BoardScreen.Menu } && navigation.Current == button.Destination &&
             navigation.ButtonId == button.Id && session.Screen == button.Destination, "Menu pinch opened the wrong application.");
         Require(session.Title == names[index], "The application title is incorrect.");
-        Require(session.Buttons.Count >= 1 && session.Buttons[0].Destination == BoardScreen.Menu,
+        Require(session.Buttons.Count >= 1 && (session.Buttons[0].Destination == BoardScreen.Menu ||
+            button.Destination == BoardScreen.Monopoly && session.Buttons[0].Id == "mp-exit"),
             "An application lacks a back-to-menu target.");
         Require(Update(session, time + 20, Over(session.Buttons[0], 2 * index + 2, time + 20))?.Current == BoardScreen.Menu,
             "The back-to-menu target did not return to the launcher.");

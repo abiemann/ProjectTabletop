@@ -94,6 +94,8 @@ public sealed partial class MainWindow
                 return await VerifyThemeAsync();
             case "verify_blackjack":
                 return await VerifyBlackjackAsync();
+            case "verify_monopoly":
+                return await VerifyMonopolyAsync();
             case "verify_blackjack_animation":
                 return await VerifyBlackjackAnimationAsync();
             case "verify_board_reveal":
@@ -186,6 +188,9 @@ public sealed partial class MainWindow
                     boardApp = _scene.CurrentBoardScreen.ToString(),
                     boardAppTitle = _scene.CurrentBoardTitle,
                     blackjack = _scene.BlackjackState,
+                    monopoly = _scene.MonopolyState,
+                    monopolySavePath = MonopolySavePath,
+                    monopolySaveError = _monopolySaveError,
                     blackjackAnimation = _scene.GetBlackjackAnimationDiagnostics(),
                     hoveredBoardButtons = _scene.HoveredBoardButtons,
                     photoCopyStatus = _scene.PhotoCopyStatus,
@@ -262,6 +267,18 @@ public sealed partial class MainWindow
                 return new { accepted, blackjack = _scene.BlackjackState };
             case "capture_blackjack_preview":
                 return new { path = await SaveBlackjackPreviewAsync() };
+            case "show_monopoly":
+                ShowMonopoly();
+                return new { boardApp = _scene.CurrentBoardScreen.ToString(), monopoly = _scene.MonopolyState };
+            case "monopoly_action":
+                if (!parameters.TryGetProperty("id", out var monopolyAction) || monopolyAction.ValueKind != JsonValueKind.String)
+                    throw new ArgumentException("Provide a Monopoly button id.");
+                bool monopolyAccepted = _scene.ActivateMonopolyButton(monopolyAction.GetString()!);
+                QueueMonopolySave();
+                UpdateBoardAppStatus();
+                return new { accepted = monopolyAccepted, monopoly = _scene.MonopolyState };
+            case "capture_monopoly_preview":
+                return new { path = await SaveMonopolyPreviewAsync() };
             case "capture_raw_frame":
                 return new { path = await SaveRawSnapshotAsync() };
             case "start_camera":

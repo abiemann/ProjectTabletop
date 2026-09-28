@@ -20,6 +20,7 @@ internal static class HandAcquisitionPresenceRegression
         CompactReferenceControlOcclusion();
         ControlTriggerRegions();
         RenderedCompactControls();
+        HandAcquisitionShortLabelRegression.Run();
         RenderedLocalCaptionLoss();
         BaselineFallbackAndBarriers();
         PhotoCopyControlRegionsRegression.Run();

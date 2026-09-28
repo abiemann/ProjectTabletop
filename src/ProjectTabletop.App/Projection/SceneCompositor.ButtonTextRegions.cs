@@ -11,6 +11,14 @@ public sealed partial class SceneCompositor
     private HandTrackingBounds BoardButtonTextRegion(CanvasDevice device, BoardButton button)
     {
         if (_boardSession.Screen == BoardScreen.Paint) return PaintButtonTextRegion(device, button);
+        if (_boardSession.Screen == BoardScreen.Monopoly)
+        {
+            var rectangle = MonopolyButtonTextRectangle(button);
+            using var format = MonopolyButtonTextFormat(button);
+            using var layout = new CanvasTextLayout(device, button.Label, format,
+                (float)rectangle.Width, (float)rectangle.Height);
+            return ButtonInkRegion(button, layout.DrawBounds, rectangle.X, rectangle.Y);
+        }
         if (_boardSession.Screen == BoardScreen.Blackjack)
         {
             var spec = CasinoButtonTextSpec(button);

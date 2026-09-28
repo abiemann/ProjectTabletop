@@ -518,9 +518,12 @@ public sealed class HandAcquisitionPresenceTracker
         bool[] fitAllowed)
     {
         if (_controlRegions is null) return;
-        var obstructed = observations.Where(observation => observation.StrongCorruption &&
-            observation.ChangedBoardPixels.Count / 1_000_000.0 /
-            _controlTriggerBoardAreas![observation.Region] >= MinimumControlCoverage)
+        // A short caption can lose its shape while supplying little glyph area.
+        // Keep that panel out of camera-colour training so a broad obstruction
+        // cannot teach its new colour as the expected board. This creates no
+        // foreground area: illumination still needs measured control and label
+        // coverage plus two fresh confirming frames below.
+        var obstructed = observations.Where(observation => observation.StrongCorruption)
             .Select(observation => observation.Region).ToHashSet();
         if (obstructed.Count == 0) return;
         bool[] independent = Enumerable.Range(0, fitAllowed.Length)

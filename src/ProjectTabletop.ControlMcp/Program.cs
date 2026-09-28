@@ -20,7 +20,7 @@ if (args.Length == 0)
 
 if (args.Length < 2 || args[0] != "--once" || args.Length > 3)
 {
-    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|show_paint|blackjack_action|capture_blackjack_preview|shutdown> [JSON object]");
+    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|show_monopoly|show_paint|blackjack_action|monopoly_action|capture_blackjack_preview|capture_monopoly_preview|shutdown> [JSON object]");
     return 2;
 }
 
@@ -50,6 +50,13 @@ static async Task RunMcpAsync()
                 Name = "blackjack_action",
                 Description = "Activate an enabled Blackjack button by id, such as bj-deal, bj-hit, bj-stand, bj-double, bj-split, bj-bet-25 or bj-reset. Uses virtual credits only."
             });
+    static McpServerTool MonopolyActionTool() =>
+        McpServerTool.Create((Func<string, Task<string>>)MonopolyActionAsync,
+            new McpServerToolCreateOptions
+            {
+                Name = "monopoly_action",
+                Description = "Activate an enabled Monopoly button by its current id. Player setup, turn actions and save-on-exit use the same board controls."
+            });
     var options = new McpServerOptions
     {
         ServerInfo = new Implementation { Name = "ProjectTabletop.ControlMcp", Version = "0.1.0" },
@@ -70,9 +77,12 @@ static async Task RunMcpAsync()
             Tool("show_board_menu", "Show the board app menu and enable hand tracking for pinch selection."),
             Tool("show_hand_tracking_test", "Open the built-in Hand-Tracking gesture test and enable hand tracking."),
             Tool("show_photo_copy", "Open Photo Copy on grey output: bottom controls offer Exit, Swirl and Copy. Swirl repeats an object photo and becomes Clear; Copy immediately saves a PNG with a photocopier sound."),
-            Tool("show_paint", "Open GPU fluid Paint: physical disturbances deposit spreading, blending pigment and metallic particles. Exit and Save float at the bottom sides; only interference with their text enables a local button light. Canvas hand spotlights stay disabled."),
+            Tool("show_paint", "Open GPU fluid Paint: physical disturbances deposit slowly settling coats of paint and metallic particles. Exit and Save float at the bottom sides; only interference with their text enables a local button light. Canvas hand spotlights stay disabled."),
             Tool("show_blackjack", "Open the virtual-chip Blackjack table and laptop preview without opening projector output or starting the camera."),
             BlackjackActionTool(),
+            Tool("show_monopoly", "Open the regal Monopoly board with human/AI player setup and a clickable laptop preview, without starting camera or projector."),
+            MonopolyActionTool(),
+            Tool("capture_monopoly_preview", "Save the current Monopoly board as an unmapped laptop-preview PNG."),
             Tool("capture_blackjack_preview", "Save the current Blackjack table as an unmapped laptop-preview PNG."),
             Tool("capture_projection_preview", "Save the current compositor scene as a PNG, without capturing desktop windows."),
             Tool("shutdown", "Close the local ProjectTabletop app cleanly.")
@@ -90,6 +100,9 @@ static Task<string> SetHandTrackingAsync(bool enabled) =>
 
 static Task<string> BlackjackActionAsync(string id) =>
     CallToolAsync("blackjack_action", JsonSerializer.SerializeToElement(new { id }));
+
+static Task<string> MonopolyActionAsync(string id) =>
+    CallToolAsync("monopoly_action", JsonSerializer.SerializeToElement(new { id }));
 
 static async Task<string> CallToolAsync(string method, JsonElement? parameters = null)
 {

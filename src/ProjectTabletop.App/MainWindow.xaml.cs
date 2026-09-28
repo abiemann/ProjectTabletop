@@ -78,6 +78,7 @@ public sealed partial class MainWindow : Window
         UpdateTrainingStatus();
         SyncVisionSettingsControls();
         _ = TryLoadAutosavedVisionAsync();
+        _ = InitializeMonopolySaveAsync();
         StartControlHost();
     }
 
@@ -206,6 +207,8 @@ public sealed partial class MainWindow : Window
         else if (_visionError is not null) SetStatus(_visionError);
         UpdateCameraHealth();
         UpdateBoardSetupStatus();
+        _scene.TickMonopoly(DateTimeOffset.UtcNow);
+        QueueMonopolySave();
         UpdateBoardAppStatus();
         UpdateBoardSizeEstimate();
         RenderStatusText.Text = $"Draw callbacks: {outputFps:F1}/s output ({outputSlowDelta} slow), " +
@@ -225,6 +228,7 @@ public sealed partial class MainWindow : Window
         _photocopierSound.Dispose();
         _statusTimer.Stop();
         await DisposeHandTrackingAsync();
+        if (_monopolySaveTask is not null) await _monopolySaveTask;
         if (_controlHost is not null) await _controlHost.DisposeAsync();
         _output?.Close();
         _camera.FrameReceived -= Camera_FrameReceived;
