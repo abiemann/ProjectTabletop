@@ -127,6 +127,7 @@ public sealed partial class BoardSession
         }
         _lastNow = now;
         AdvanceBlackjackPresentation(now);
+        AdvanceMonopolyPresentation(now);
         if (frameTime > now || now - frameTime > ObservationLifetime ||
             frameTime <= _ignoreFramesThrough ||
             (_lastFrameTime is { } previousFrame && frameTime <= previousFrame))
@@ -192,6 +193,8 @@ public sealed partial class BoardSession
     {
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
+        ClearMonopolyPresentationHold();
+        AdvanceMonopolyPresentation(now);
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreFramesThrough = Later(_ignoreFramesThrough, now);
@@ -206,6 +209,8 @@ public sealed partial class BoardSession
     {
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
+        ClearMonopolyPresentationHold();
+        AdvanceMonopolyPresentation(now);
         if (screen == BoardScreen.Globe) _globe.Start(now);
         Screen = screen;
         Revision++;

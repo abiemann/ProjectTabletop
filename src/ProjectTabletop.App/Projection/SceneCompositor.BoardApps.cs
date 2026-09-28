@@ -22,7 +22,7 @@ public sealed partial class SceneCompositor
 
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision,
-        long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long MonopolyRevision,
+        long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long MonopolyRevision, long MonopolyDiceRevision,
         long GlobeRevision, long GlobeFrame);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
@@ -38,6 +38,7 @@ public sealed partial class SceneCompositor
         _globeClock = globeClock ?? blackjackClock ?? (() => DateTimeOffset.UtcNow);
         _boardSession.BlackjackHitOccurred += OnBlackjackHit;
         _boardSession.BlackjackDealOccurred += OnBlackjackDeal;
+        _boardSession.MonopolyRollOccurred += OnMonopolyRoll;
     }
 
     public BoardScreen CurrentBoardScreen
@@ -129,7 +130,10 @@ public sealed partial class SceneCompositor
         var now = DateTimeOffset.UtcNow;
         var blackjackNow = _blackjackClock();
         TickBlackjackVisuals(blackjackNow);
-        _boardSession.TickMonopoly(_monopolyClock());
+        var monopolyNow = _monopolyClock();
+        _boardSession.TickMonopoly(monopolyNow);
+        var monopolyPresented = MonopolyPresentedState(monopolyNow);
+        var monopolyDicePresented = HasMonopolyDicePresentation(monopolyNow);
         var flights = GetBlackjackFlights(blackjackNow);
         var deal = GetBlackjackDealFrame(blackjackNow);
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
@@ -158,6 +162,7 @@ public sealed partial class SceneCompositor
             _blackjackFlightRevision, paint ? PaintVisualRevision(paintNow) : 0,
             paint ? GetPaintSaveStatus(paintNow) : null, paint && _boardSession.PaintSaveEnabled,
             _boardSession.Screen == BoardScreen.Monopoly ? _boardSession.MonopolyState.Revision : 0,
+            _boardSession.Screen == BoardScreen.Monopoly ? MonopolyDicePresentationRevision : 0,
             globe ? _boardSession.GetGlobeSnapshot(globeNow).Revision : 0,
             globe ? GlobeVisualFrame(globeNow) : 0);
         // Cursor motion is drawn separately. Reuse the UI texture until its
@@ -207,8 +212,10 @@ public sealed partial class SceneCompositor
             }
             else if (_boardSession.Screen == BoardScreen.Monopoly)
             {
-                DrawMonopolyBoard(surface, _boardSession.MonopolyState, _boardSession.Buttons,
-                    handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback, PaintBoardAspect());
+                DrawMonopolyBoard(surface, monopolyPresented, _boardSession.Buttons,
+                    handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback,
+                    PaintBoardAspect(), hideDiceDisplay: monopolyDicePresented,
+                    rolling: HasMonopolyDiceAnimation(monopolyNow));
             }
             else if (globe)
             {
@@ -342,6 +349,15 @@ public sealed partial class SceneCompositor
                 InterpolationMode = CanvasImageInterpolation.Linear, BorderMode = EffectBorderMode.Soft
             };
             ds.DrawImage(moving);
+        }
+        if (DrawMonopolyDiceLayer(ds.Device, monopolyNow, PaintBoardAspect()) is { } diceLayer)
+        {
+            using var movingDice = new Transform3DEffect
+            {
+                Source = diceLayer, TransformMatrix = matrix,
+                InterpolationMode = CanvasImageInterpolation.Linear, BorderMode = EffectBorderMode.Soft
+            };
+            ds.DrawImage(movingDice);
         }
     }
 

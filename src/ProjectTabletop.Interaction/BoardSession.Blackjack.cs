@@ -26,6 +26,7 @@ public sealed partial class BoardSession
     {
         _blackjack = blackjack ?? new BlackjackGame();
         _monopoly = monopoly ?? new MonopolyGame();
+        _monopoly.RollOccurred += RelayMonopolyRoll;
         _globe = globe ?? new GlobeState();
     }
     public BlackjackSnapshot BlackjackState => _blackjack.Snapshot;
@@ -66,6 +67,7 @@ public sealed partial class BoardSession
     public bool ActivateButton(string id, DateTimeOffset now)
     {
         AdvanceBlackjackPresentation(now);
+        AdvanceMonopolyPresentation(now);
         var button = Buttons.FirstOrDefault(item => item.Id == id && item.Enabled);
         return button is not null && SelectButton(button, now, pointerAction: true);
     }
@@ -73,6 +75,7 @@ public sealed partial class BoardSession
     private bool SelectButton(BoardButton button, DateTimeOffset now, bool pointerAction = false)
     {
         AdvanceBlackjackPresentation(now);
+        AdvanceMonopolyPresentation(now);
         BlackjackHit? hit = null;
         BlackjackDeal? deal = null;
         if (Screen == BoardScreen.Monopoly)
@@ -113,6 +116,7 @@ public sealed partial class BoardSession
         else
         {
             ClearBlackjackPresentationHold();
+            ClearMonopolyPresentationHold();
             Screen = button.Destination;
             if (Screen == BoardScreen.Globe) _globe.Start(now);
             Revision++;

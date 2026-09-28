@@ -99,6 +99,7 @@ public sealed partial class SceneCompositor
 
     private void SyncPhotoCopySession()
     {
+        HasMonopolyDicePresentation(_monopolyClock());
         if (_photoCopySessionRevision != _boardSession.Revision)
             InvalidatePhotoCopyCapture();
     }

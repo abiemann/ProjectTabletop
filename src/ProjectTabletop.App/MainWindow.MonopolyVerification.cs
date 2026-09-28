@@ -51,7 +51,10 @@ public sealed partial class MainWindow
         Require(roll.Label == "Roll" && roll.Enabled && roll.Bounds.Width > roll.Bounds.Height,
             "The dice pill lacks its exact Roll caption or enabled target.");
         await CheckAcquisition("game");
-        Act("mp-roll"); Act("mp-buy");
+        Act("mp-roll");
+        now += TimeSpan.FromSeconds(3.6);
+        scene.TickMonopoly(now);
+        Act("mp-buy");
         await Capture("property-purchased");
         Require(scene.MonopolyState.Players[0].Position == 3 &&
             scene.MonopolyState.Properties.Single(property => property.SpaceIndex == 3).OwnerId == scene.MonopolyState.Players[0].Id,

@@ -97,6 +97,8 @@ public sealed partial class MainWindow
                 return await VerifyBlackjackAsync();
             case "verify_monopoly":
                 return await VerifyMonopolyAsync();
+            case "verify_monopoly_dice":
+                return await VerifyMonopolyDiceAnimationAsync();
             case "verify_globe":
                 return await VerifyGlobeAsync();
             case "verify_blackjack_animation":
@@ -196,6 +198,7 @@ public sealed partial class MainWindow
                     monopolySavePath = MonopolySavePath,
                     monopolySaveError = _monopolySaveError,
                     blackjackAnimation = _scene.GetBlackjackAnimationDiagnostics(),
+                    monopolyDiceAnimation = _scene.GetMonopolyDiceAnimationDiagnostics(DateTimeOffset.UtcNow),
                     hoveredBoardButtons = _scene.HoveredBoardButtons,
                     photoCopyStatus = _scene.PhotoCopyStatus,
                     photoCopyLighting = _scene.PhotoCopyLightingStatus,

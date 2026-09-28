@@ -148,6 +148,8 @@ public sealed partial class SceneCompositor
 
     private void ResetBoardRaster()
     {
+        CancelMonopolyDiceAnimation();
+        DisposeMonopolyDiceLayer();
         _boardRasterPixels = new(1000, 1000);
         _boardRasterDevice = null;
         _projectorPixelWidth = _projectorPixelHeight = 0;

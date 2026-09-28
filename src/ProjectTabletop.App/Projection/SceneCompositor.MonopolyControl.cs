@@ -9,7 +9,7 @@ public sealed partial class SceneCompositor
 {
     private readonly Func<DateTimeOffset> _monopolyClock;
     private CanvasRenderTarget? _monopolyPreviewTarget;
-    private (long Revision, string Hover, int Feedback, double Aspect)? _monopolyPreviewState;
+    private (long Revision, long DiceRevision, string Hover, int Feedback, double Aspect)? _monopolyPreviewState;
     public double MonopolyPreviewAspect { get { lock (_gate) return PaintBoardAspect(); } }
 
     public MonopolySnapshot MonopolyState { get { lock (_gate) return _boardSession.MonopolyState; } }
@@ -19,6 +19,7 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             CancelBoardReveal();
+            CancelMonopolyDiceAnimation();
             _blackOutput = false;
             _boardSession.ShowMonopoly(_monopolyClock());
             SyncPhotoCopySession();
@@ -52,7 +53,12 @@ public sealed partial class SceneCompositor
 
     public bool LoadMonopolySave(string json, bool resume = false)
     {
-        lock (_gate) return _boardSession.LoadMonopolySave(json, _monopolyClock(), resume);
+        lock (_gate)
+        {
+            bool loaded = _boardSession.LoadMonopolySave(json, _monopolyClock(), resume);
+            if (loaded) CancelMonopolyDiceAnimation();
+            return loaded;
+        }
     }
 
     public string ExportMonopolySave()
@@ -86,27 +92,35 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             if (_disposed || _boardSession.Screen != BoardScreen.Monopoly) return;
-            _boardSession.TickMonopoly(_monopolyClock());
+            var now = _monopolyClock();
+            _boardSession.TickMonopoly(now);
             double aspect = PaintBoardAspect();
             double drawWidth = Math.Min(width, height * aspect);
             double drawHeight = drawWidth / aspect;
             ReserveBoardPixels(ds.Device, drawWidth * ds.Dpi / 96, drawHeight * ds.Dpi / 96);
             if (EnsureBoardRenderTarget(ref _monopolyPreviewTarget, ds.Device)) _monopolyPreviewState = null;
-            var state = _boardSession.MonopolyState;
+            var state = MonopolyPresentedState(now);
+            bool dicePresented = HasMonopolyDicePresentation(now);
             var hovered = HoveredBoardButtons;
             var feedback = CurrentFingerSelectionFeedback;
-            var key = (state.Revision, string.Join(",", hovered), FingerSelectionRenderStep(feedback), aspect);
+            var key = (state.Revision, MonopolyDicePresentationRevision, string.Join(",", hovered),
+                FingerSelectionRenderStep(feedback), aspect);
             if (_monopolyPreviewState != key)
             {
                 using var surface = _monopolyPreviewTarget!.CreateDrawingSession();
                 surface.Transform = BoardRasterTransform(_monopolyPreviewTarget);
-                DrawMonopolyBoard(surface, state, _boardSession.Buttons, hovered, feedback, aspect);
+                DrawMonopolyBoard(surface, state, _boardSession.Buttons, hovered, feedback, aspect,
+                    hideDiceDisplay: dicePresented, rolling: HasMonopolyDiceAnimation(now));
                 _monopolyPreviewState = key;
             }
             var rendered = _monopolyPreviewTarget!;
             ds.DrawImage(rendered,
                 new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight),
                 new Rect(0, 0, rendered.SizeInPixels.Width, rendered.SizeInPixels.Height));
+            if (DrawMonopolyDiceLayer(ds.Device, now, aspect) is { } diceLayer)
+                ds.DrawImage(diceLayer,
+                    new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight),
+                    new Rect(0, 0, diceLayer.SizeInPixels.Width, diceLayer.SizeInPixels.Height));
         }
     }
 }

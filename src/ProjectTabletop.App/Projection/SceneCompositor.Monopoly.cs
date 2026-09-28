@@ -47,22 +47,25 @@ public sealed partial class SceneCompositor
     // effect over the camera's text-acquisition regions.
     private static void DrawMonopolyBoard(CanvasDrawingSession ds, MonopolySnapshot game,
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
-        IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback, double boardAspect = 1)
+        IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback, double boardAspect = 1, bool hideDiceDisplay = false,
+        bool rolling = false)
     {
         DrawMonopolyFrame(ds);
         for (int index = 0; index < MonopolyGame.Spaces.Count; index++)
             DrawMonopolySpace(ds, MonopolyGame.Spaces[index], game, boardAspect);
-        DrawMonopolyCenter(ds, game, boardAspect);
+        DrawMonopolyCenter(ds, game, boardAspect, hideDiceDisplay);
 
         if (game.Phase is MonopolyPhase.ExitConfirmation or MonopolyPhase.Saving)
             DrawMonopolyExitPanel(ds, game, boardAspect);
 
         foreach (var button in buttons)
         {
+            if (rolling && button.Id != "mp-exit") continue;
             DrawMonopolyButton(ds, button, hovered.Contains(button.Id), boardAspect);
             DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, MonopolyGold);
         }
-        MonopolyText(ds, FingerSelectionCaption(selectionFeedback, "Bring fingers together. Aim, then separate index."),
+        MonopolyText(ds, rolling ? "Rolling the dice…" :
+            FingerSelectionCaption(selectionFeedback, "Bring fingers together. Aim, then separate index."),
             new Rect(145, 958, 710, 24), 14, MonopolyGold);
     }
 
@@ -310,7 +313,8 @@ public sealed partial class SceneCompositor
         return (float)(preferred * scale);
     }
 
-    private static void DrawMonopolyCenter(CanvasDrawingSession ds, MonopolySnapshot game, double boardAspect)
+    private static void DrawMonopolyCenter(CanvasDrawingSession ds, MonopolySnapshot game, double boardAspect,
+        bool hideDiceDisplay = false)
     {
         if (game.Phase == MonopolyPhase.Landing)
         {
@@ -372,8 +376,11 @@ public sealed partial class SceneCompositor
         MonopolyText(ds, game.Status, new Rect(243, 510, 514, 49), 18, MonopolyIvory, wrap: true);
         if (game.Dice is { First: > 0, Second: > 0 } dice)
         {
-            DrawMonopolyDie(ds, new Rect(413, 563, 23, 23), dice.First, MonopolyIvory, MonopolyInk, boardAspect);
-            DrawMonopolyDie(ds, new Rect(442, 563, 23, 23), dice.Second, MonopolyIvory, MonopolyInk, boardAspect);
+            if (!hideDiceDisplay)
+            {
+                DrawMonopolyDie(ds, new Rect(413, 563, 23, 23), dice.First, MonopolyIvory, MonopolyInk, boardAspect);
+                DrawMonopolyDie(ds, new Rect(442, 563, 23, 23), dice.Second, MonopolyIvory, MonopolyInk, boardAspect);
+            }
             MonopolyText(ds, dice.IsDouble ? $"{dice.Total} · DOUBLES" : $"ROLLED {dice.Total}", new Rect(479, 562, 176, 25), 13, MonopolyGold, "Bahnschrift", true);
         }
         else MonopolyText(ds, "Every empire begins with a roll.", new Rect(252, 563, 496, 24), 14, MonopolyMuted);

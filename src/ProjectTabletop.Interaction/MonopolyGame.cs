@@ -3,6 +3,10 @@ using System.Text.Json.Serialization;
 
 namespace ProjectTabletop.Interaction;
 
+/// <summary>An accepted human or AI roll, after its complete gameplay result is committed.</summary>
+public sealed record MonopolyRoll(long Sequence, MonopolySnapshot Previous, MonopolySnapshot Current,
+    DateTimeOffset StartedAt);
+
 /// <summary>
 /// Classic US Monopoly for two to six local players. All state changes are synchronous;
 /// AI makes at most one visible decision per Tick. Saves preserve decks and decisions.
@@ -26,6 +30,7 @@ public sealed partial class MonopolyGame
     private MonopolyPhase _exitReturnPhase;
     private string _exitReturnStatus = "";
     private string? _resumeSave;
+    private long _rollSequence;
 
     public MonopolyGame(int? seed = null, IEnumerable<MonopolyDice>? initialRolls = null)
     {
@@ -38,9 +43,13 @@ public sealed partial class MonopolyGame
     public long Revision { get; private set; }
     public MonopolySnapshot Snapshot => _snapshot ??= CreateSnapshot();
 
+    /// <summary>Raised once per accepted roll; sequence numbers survive new games and save loads.</summary>
+    public event Action<MonopolyRoll>? RollOccurred;
+
     public bool HandleAction(string id, DateTimeOffset now)
     {
         if (!ObserveTime(now) || !AvailableActions().Contains(id, StringComparer.Ordinal)) return false;
+        var beforeRoll = id == "mp-roll" ? Snapshot : null;
         if (id == "mp-exit")
         {
             if (_state.Players.Count == 0 || _state.Phase == MonopolyPhase.GameOver)
@@ -93,6 +102,7 @@ public sealed partial class MonopolyGame
         else PerformGameAction(id, now);
         _nextAiStep = now + AiPause;
         Changed();
+        PublishRoll(beforeRoll, now);
         return true;
     }
 
@@ -119,9 +129,11 @@ public sealed partial class MonopolyGame
             MonopolyPhase.Debt => AiLiquidate(actor, now),
             _ => null
         };
+        var beforeRoll = action == "mp-roll" ? Snapshot : null;
         if (action is not null) PerformGameAction(action, now);
         _nextAiStep = now + AiPause;
         Changed();
+        PublishRoll(beforeRoll, now);
         return true;
     }
 
@@ -718,6 +730,12 @@ public sealed partial class MonopolyGame
         return true;
     }
     private void Changed() { Revision++; _snapshot = null; }
+    private void PublishRoll(MonopolySnapshot? previous, DateTimeOffset now)
+    {
+        if (previous is null) return;
+        long sequence = ++_rollSequence;
+        RollOccurred?.Invoke(new(sequence, previous, Snapshot, now));
+    }
     private MonopolySnapshot CreateSnapshot() => new(_state.Phase, _state.Humans, _state.Ais,
         Array.AsReadOnly(_state.Players.Select(p => new MonopolyPlayerSnapshot(p.Id, p.Name, p.IsAi, p.Money,
             p.Position, p.InJail, p.JailTurns, p.GetOutOfJailCards, p.Bankrupt, p.ColorIndex)).ToArray()),

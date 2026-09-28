@@ -2,6 +2,8 @@ using ProjectTabletop.Interaction;
 
 MonopolyRegression.Run();
 MonopolyBoardRegression.Run();
+MonopolyRollEventRegression.Run();
+MonopolyPresentationRegression.Run();
 GlobeBoardRegression.Run();
 CheckMenuAndNavigation();
 CheckOffTargetAndBounds();

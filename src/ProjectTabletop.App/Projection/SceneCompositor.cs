@@ -142,6 +142,7 @@ public sealed partial class SceneCompositor : IDisposable
                 ClearHandSpotlights();
                 _boardSession.ResetInput(DateTimeOffset.UtcNow);
                 CancelBlackjackDeal();
+                CancelMonopolyDiceAnimation();
             }
         }
     }
@@ -302,6 +303,7 @@ public sealed partial class SceneCompositor : IDisposable
         lock (_gate)
         {
             CancelBoardReveal();
+            if (enabled) CancelMonopolyDiceAnimation();
             if (enabled && !_boardSetup) _boardSetupStarted = DateTimeOffset.UtcNow;
             if (enabled) ClearBoardMediaClip();
             _boardSetup = enabled;
@@ -316,7 +318,11 @@ public sealed partial class SceneCompositor : IDisposable
     {
         lock (_gate)
         {
-            if (enabled) CancelBoardReveal();
+            if (enabled)
+            {
+                CancelBoardReveal();
+                CancelMonopolyDiceAnimation();
+            }
             _blackOutput = enabled;
             if (enabled) ClearHandSpotlights();
         }
@@ -843,6 +849,7 @@ public sealed partial class SceneCompositor : IDisposable
             _blackjackPreviewTarget = null;
             _monopolyPreviewTarget?.Dispose();
             _monopolyPreviewTarget = null;
+            DisposeMonopolyDiceLayer();
             _globePreviewTarget?.Dispose();
             _globePreviewTarget = null;
             DisposeGlobeRenderer();
@@ -852,6 +859,7 @@ public sealed partial class SceneCompositor : IDisposable
             _blackjackDeal = null;
             _boardSession.BlackjackHitOccurred -= OnBlackjackHit;
             _boardSession.BlackjackDealOccurred -= OnBlackjackDeal;
+            _boardSession.MonopolyRollOccurred -= OnMonopolyRoll;
             _photoCopyBitmap?.Dispose();
             _photoCopyBitmap = null;
             _photoCopyCameraTarget?.Dispose();
