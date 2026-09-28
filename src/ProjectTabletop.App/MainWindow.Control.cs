@@ -76,6 +76,8 @@ public sealed partial class MainWindow
                 return await VerifySharedBoardAcquisitionAsync();
             case "verify_paint":
                 return await VerifyPaintAsync();
+            case "verify_paint_save":
+                return await VerifyPaintSaveAsync();
             case "capture_hand_acquisition":
                 return await SaveHandAcquisitionSnapshotAsync();
             case "verify_hand_detection_log":
@@ -164,6 +166,9 @@ public sealed partial class MainWindow
                     handDetectionLog = _handDetectionLog?.Status,
                     paint = _scene.GetPaintDiagnostics(),
                     paintInput = _scene.GetPaintInputDiagnostics(),
+                    paintSaveStatus = _scene.GetPaintSaveStatus(DateTimeOffset.UtcNow),
+                    lastSavedPaintPath = _lastSavedPaintPath,
+                    paintSaveDirectory = PaintSaveDirectory,
                     lastPaintDetection = _lastPaintDetection,
                     handVideoRecording = _handVideoRecorder?.Status,
                     handLighting = _scene.GetHandLightingDiagnostics(),

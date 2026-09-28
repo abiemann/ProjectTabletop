@@ -11,13 +11,31 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
-    private static readonly HandTrackingBounds PaintInputBounds = new(.012, .19, .976, .798);
+    private static readonly HandTrackingBounds PaintInputBounds = new(.01, .01, .98, .98);
+    private static readonly BoardRect PaintTitleBounds = new(.06, .018, .10, .028);
+    private static readonly BoardRect PaintStatusBounds = new(.28, .895, .44, .045);
+
+    // Paint may spread beneath every overlay. Only new physical disturbances
+    // inside the floating controls are excluded, so operating Save does not paint.
+    private HandTrackingBounds[] PaintIgnoredRegions() => _boardSession.Buttons
+        .Select(button => button.Bounds).Append(PaintTitleBounds).Append(PaintStatusBounds)
+        .Select(bounds =>
+        {
+            // The floating chrome extends beyond its hit box (6px shadow and
+            // hover glow). Include camera blur and roughly two analysis samples
+            // of registration tolerance so these known edges cannot seed paint.
+            const double margin = .02;
+            double left = Math.Max(0, bounds.X - margin), top = Math.Max(0, bounds.Y - margin);
+            return new HandTrackingBounds(left, top, Math.Min(1, bounds.X + bounds.Width + margin) - left,
+                Math.Min(1, bounds.Y + bounds.Height + margin) - top);
+        }).ToArray();
     private readonly List<PaintExpectedFrame> _paintExpectedFrames = [];
     private CanvasRenderTarget? _paintReferenceTarget;
     private Homography? _paintReferenceCameraMap, _paintReferenceSurfaceMap;
     private long _paintReferenceNavigation = -1, _paintReferenceRevision;
     private bool _paintReferenceActive;
     private string? _paintReferenceError;
+    private DateTimeOffset _paintInputReadyAfter;
 
     private bool PaintInputReady => !_disposed && _boardSession.Screen == BoardScreen.Paint &&
         !_blackOutput && !_boardSetup && !IsBoardRevealActive && _calibrationTarget < 0 &&
@@ -37,6 +55,10 @@ public sealed partial class SceneCompositor
         _paintReferenceRevision++;
         _paintExpectedFrames.Clear();
         _paintReferenceError = null;
+        // When entering/clearing Paint, the webcam can still show the white
+        // calibration screen or the previous painting. Build reference history
+        // before accepting obstructions, including exposure/readout settling.
+        _paintInputReadyAfter = _paintClock().AddMilliseconds(900);
     }
 
     // Bounded copies of frames submitted to the projector, not the current camera.
@@ -78,7 +100,7 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             SyncPaintReference();
-            if (!PaintInputReady) return null;
+            if (!PaintInputReady || _paintClock() < _paintInputReadyAfter) return null;
             var cameraToProjector = _boardCameraMap!.ToMatrix();
             var projectorToBoard = _boardSurfaceMap!.Inverse().ToMatrix();
             var matrix = new double[9];
@@ -86,7 +108,7 @@ public sealed partial class SceneCompositor
             for (int column = 0; column < 3; column++)
             for (int k = 0; k < 3; k++)
                 matrix[row * 3 + column] += projectorToBoard[row * 3 + k] * cameraToProjector[k * 3 + column];
-            return new(_paintReferenceRevision, matrix, _paintExpectedFrames.ToArray(), PaintInputBounds);
+            return new(_paintReferenceRevision, matrix, _paintExpectedFrames.ToArray(), PaintInputBounds, PaintIgnoredRegions());
         }
     }
 
@@ -97,7 +119,7 @@ public sealed partial class SceneCompositor
         {
             SyncPaintReference();
             var now = _paintClock();
-            if (!PaintInputReady || requested.Revision != _paintReferenceRevision ||
+            if (!PaintInputReady || now < _paintInputReadyAfter || requested.Revision != _paintReferenceRevision ||
                 frameTime > now || now - frameTime > TimeSpan.FromMilliseconds(350)) return 0;
             int accepted = 0;
             foreach (var drop in result.Drops.Take(2))
@@ -106,7 +128,9 @@ public sealed partial class SceneCompositor
                 if (drop.ObservedAt != frameTime || !double.IsFinite(point.X) || !double.IsFinite(point.Y) ||
                     point.X < PaintInputBounds.X || point.Y < PaintInputBounds.Y ||
                     point.X > PaintInputBounds.X + PaintInputBounds.Width || point.Y > PaintInputBounds.Y + PaintInputBounds.Height ||
-                    drop.ForegroundBoardArea < PaintDisturbanceTracker.MinimumBoardArea) continue;
+                    drop.ForegroundBoardArea < PaintDisturbanceTracker.MinimumBoardArea ||
+                    PaintIgnoredRegions().Any(bounds => point.X >= bounds.X && point.X <= bounds.X + bounds.Width &&
+                        point.Y >= bounds.Y && point.Y <= bounds.Y + bounds.Height)) continue;
                 if (AddPaintDrop(new(point.X, point.Y), drop.RadiusUv, frameTime)) accepted++;
             }
             return accepted;
@@ -119,6 +143,7 @@ public sealed partial class SceneCompositor
             return new { active = PaintInputReady, revision = _paintReferenceRevision,
                 expectedFrameCount = _paintExpectedFrames.Count,
                 newestExpectedUtc = _paintExpectedFrames.LastOrDefault()?.PresentedAt,
+                readyAfterUtc = _paintInputReadyAfter,
                 minimumForegroundBoardArea = PaintDisturbanceTracker.MinimumBoardArea,
                 spotlightsEnabled = false, error = _paintReferenceError };
     }
@@ -126,13 +151,18 @@ public sealed partial class SceneCompositor
     private void DrawPaintNavigationCursor(CanvasDrawingSession drawing, Rect output)
     {
         if (_boardSurfaceMap is null) return;
-        var points = new[] { new Point2(0, 0), new Point2(1, 0), new Point2(1, .18), new Point2(0, .18) }
-            .Select(point => _boardSurfaceMap.Transform(point))
-            .Select(point => new Vector2((float)(output.X + point.X * output.Width),
-                (float)(output.Y + point.Y * output.Height))).ToArray();
-        using var geometry = CanvasGeometry.CreatePolygon(drawing.Device, points);
-        using var layer = drawing.CreateLayer(1, geometry);
-        DrawHandCursor(drawing, output);
+        foreach (var button in _boardSession.Buttons)
+        {
+            var b = button.Bounds;
+            var points = new[] { new Point2(b.X, b.Y), new Point2(b.X + b.Width, b.Y),
+                new Point2(b.X + b.Width, b.Y + b.Height), new Point2(b.X, b.Y + b.Height) }
+                .Select(point => _boardSurfaceMap.Transform(point))
+                .Select(point => new Vector2((float)(output.X + point.X * output.Width),
+                    (float)(output.Y + point.Y * output.Height))).ToArray();
+            using var geometry = CanvasGeometry.CreatePolygon(drawing.Device, points);
+            using var layer = drawing.CreateLayer(1, geometry);
+            DrawHandCursor(drawing, output);
+        }
     }
 
     private void DisposePaintReference()
@@ -141,5 +171,6 @@ public sealed partial class SceneCompositor
         _paintReferenceTarget = null;
         _paintExpectedFrames.Clear();
         _paintReferenceRevision++;
+        _paintInputReadyAfter = _paintClock().AddMilliseconds(900);
     }
 }

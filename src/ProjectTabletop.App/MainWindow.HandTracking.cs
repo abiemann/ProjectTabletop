@@ -254,6 +254,7 @@ public sealed partial class MainWindow
                                     inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, cursors, "accepted");
                                 QueuePhotoCopyObservation(frame, visibleHands);
                                 QueuePhotoCopyCapture(frame, visibleHands, cursors);
+                                QueuePaintSave(frame.Timestamp);
                             }
                         }
                         if (_frozenFrame is null) CameraCanvas.Invalidate();
@@ -359,6 +360,7 @@ public sealed partial class MainWindow
         lock (_handGate) pending = _handDetectionTask;
         if (pending is not null) await pending;
         if (_photoCopyTask is { } photoCopyTask) await photoCopyTask;
+        if (_paintSaveTask is { } paintSaveTask) await paintSaveTask;
         if (_photoCopyObservationTask is { } observationTask) await observationTask;
         if (_paintDetectionTask is { } paintTask) await paintTask;
         _handEngine?.Dispose();

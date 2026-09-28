@@ -30,10 +30,11 @@ public sealed partial class MainWindow
         using var firstOnly = NewScene(out _);
         using var secondReference = NewScene(out _);
         var blank = Draw(scene);
-        var exit = scene.CurrentBoardButtons.Single();
+        var exit = scene.CurrentBoardButtons.Single(button => button.Id == "menu");
         Require(scene.CurrentBoardScreen == BoardScreen.Paint && exit is { Id: "menu", Label: "Exit" } &&
-                scene.GetPaintDiagnostics().DropCount == 0,
-            "Paint must open blank with its top-left Exit control.");
+                scene.GetPaintDiagnostics().DropCount == 0 &&
+                scene.CurrentBoardButtons.Any(button => button.Id == "paint-save" && !button.Enabled),
+            "Paint must open blank with bottom-side Exit and an unavailable Save until paint exists.");
         await Save(target, "paint-blank");
         var canvas = new BoardRect(.025, .19, .95, .79);
         Require(ChangedPixels(blank, Draw(scene), canvas) == 0,
@@ -103,7 +104,7 @@ public sealed partial class MainWindow
         await Save(target, "paint-overlapping-pigments");
 
         long countBeforeRejectedInput = scene.GetPaintDiagnostics().DropCount;
-        foreach (var point in new[] { new Point2(.2, .1), new Point2(-.1, .5), new Point2(.5, 1.1),
+        foreach (var point in new[] { new Point2(.2, -.01), new Point2(-.1, .5), new Point2(.5, 1.1),
             new Point2(double.NaN, .5), new Point2(.5, double.PositiveInfinity) })
             Require(!scene.AddPaintDrop(point, .075, now), "An Exit, off-board or invalid disturbance deposited paint.");
         Require(!scene.AddPaintDrop(new(.8, .8), double.NaN, now) &&
@@ -159,18 +160,105 @@ public sealed partial class MainWindow
         scene.ClearBoardMediaClip();
         Require(scene.GetPaintDiagnostics().DropCount == 0, "Clearing calibration retained the prior painting.");
 
+        using var fullCanvas = NewScene(out _);
+        var cleanControls = Draw(fullCanvas);
+        foreach (var position in new Point2[] { new(.20, .04), new(.5, .025), new(.82, .04), new(.02, .20) })
+        {
+            now += TimeSpan.FromMilliseconds(250);
+            Require(fullCanvas.AddPaintDrop(position, .10, now), "The former header is still excluded from paint.");
+        }
+        // Enable Save before comparing its opaque interior: availability alone
+        // changes the label styling independently of paint beneath the button.
+        var enabledControls = Draw(fullCanvas);
+        foreach (var position in new Point2[] { new(.13, .9175), new(.87, .9175) })
+        {
+            now += TimeSpan.FromMilliseconds(250);
+            Require(fullCanvas.AddPaintDrop(position, .10, now), "Paint cannot flow beneath the bottom-side controls.");
+        }
+        now += TimeSpan.FromSeconds(8);
+        var paintedFullCanvas = Draw(fullCanvas);
+        Require(ChangedPixels(cleanControls, paintedFullCanvas, new(.18, .012, .72, .035)) > 1000 &&
+                ChangedPixels(cleanControls, paintedFullCanvas, new(.075, .965, .11, .025)) > 100 &&
+                ChangedPixels(cleanControls, paintedFullCanvas, new(.815, .965, .11, .025)) > 100 &&
+                ChangedPixels(enabledControls, paintedFullCanvas, new(.075, .895, .11, .04)) == 0 &&
+                ChangedPixels(enabledControls, paintedFullCanvas, new(.815, .895, .11, .04)) == 0,
+            "Paint must reach the top and flow below both bottom controls while their interiors remain opaque above it.");
+        await Save(target, "paint-beneath-floating-controls");
+
+        using var gallery = NewScene(out double galleryInset);
+        gallery.SetDisplayAspect(16d / 9);
+        DrawNative(gallery, native, 3840, 2160);
+        var emptyGallery = native.GetPixelBytes();
+        Point2[] galleryPositions = (from y in new[] { .34, .58, .82 }
+                                    from x in new[] { .18, .40, .62, .84 }
+                                    select new Point2(x, y)).ToArray();
+        foreach (var position in galleryPositions)
+        {
+            // Each observation is distinct, but all drops have effectively the
+            // same age so the snapshots show comparable spreading stages.
+            now += TimeSpan.FromMilliseconds(1);
+            Require(gallery.AddPaintDrop(position, .035, now), "The varied paint gallery rejected an independent drop.");
+        }
+        var galleryStarted = now;
+        foreach (double age in new[] { .6, 2d, 8d })
+        {
+            now = galleryStarted.AddSeconds(age);
+            DrawNative(gallery, native, 3840, 2160);
+            await Save(native, age == 8 ? "paint-variety-native-4k" :
+                age == 2 ? "paint-variety-2s-native-4k" : "paint-variety-0_6s-native-4k");
+        }
+        var galleryPixels = native.GetPixelBytes();
+        var silhouettes = galleryPositions.Select((position, index) =>
+            MeasurePaintSilhouette(galleryPixels, emptyGallery, position, galleryInset, index + 1)).ToArray();
+        Require(silhouettes.All(shape => shape.Area > 300 && double.IsFinite(shape.Elongation) &&
+                double.IsFinite(shape.Compactness)), "One of the twelve paint seeds has no measurable silhouette.");
+        Require(silhouettes.All(shape => shape.BoundaryPixels == 0),
+            "The paint gallery does not isolate complete silhouettes: " + string.Join("; ",
+                silhouettes.Where(shape => shape.BoundaryPixels > 0).Select(shape =>
+                    $"seed{shape.Seed}:boundary pixels={shape.BoundaryPixels}")));
+        double areaRatio = (double)silhouettes.Max(shape => shape.Area) / silhouettes.Min(shape => shape.Area);
+        double elongationRange = silhouettes.Max(shape => shape.Elongation) - silhouettes.Min(shape => shape.Elongation);
+        double compactnessRange = silhouettes.Max(shape => shape.Compactness) - silhouettes.Min(shape => shape.Compactness);
+        var distinctProfiles = new List<PaintSilhouetteMetrics>();
+        foreach (var shape in silhouettes)
+            if (distinctProfiles.All(other => Math.Abs(Math.Log((double)shape.Area / other.Area)) > .22 ||
+                Math.Abs(shape.Elongation - other.Elongation) > .25 ||
+                Math.Abs(shape.Compactness - other.Compactness) > .08)) distinctProfiles.Add(shape);
+        Require(areaRatio > 1.25 && (elongationRange > .3 || compactnessRange > .08) && distinctProfiles.Count >= 3,
+            $"Paint repeats substantially the same rendered silhouette across colors: area ratio {areaRatio:F3}, " +
+            $"elongation range {elongationRange:F3}, compactness range {compactnessRange:F3}, " +
+            $"distinct profiles {distinctProfiles.Count}. " + string.Join("; ", silhouettes.Select(shape =>
+                $"seed{shape.Seed}:area={shape.Area},elongation={shape.Elongation:F3},compactness={shape.Compactness:F3}")));
+
         using var inputScene = NewScene(out double inputInset, nativeCamera: true);
         var detector = new PaintDisturbanceTracker();
         var submittedFrames = new List<byte[]>();
-        Require(inputScene.AddPaintDrop(new(.45, .43), .11, now), "The Paint animation fixture could not begin.");
+        for (int warmup = 0; warmup < 8; warmup++)
+        {
+            Draw(inputScene);
+            Require(inputScene.GetPaintDisturbanceContext() is null,
+                "Paint accepted camera input before the previous projection could leave the webcam feed.");
+            now += TimeSpan.FromMilliseconds(125);
+        }
+        Draw(inputScene);
+        Require(inputScene.GetPaintDisturbanceContext() is not null, "Paint did not become ready after camera settling.");
+        Require(inputScene.AddPaintDrop(new(.45, .03), .11, now), "The Paint animation fixture could not begin above the old header.");
         int animationFramesCompared = 0;
         // A webcam observes an older submitted projector frame. Feed actual GPU
         // pixels with 250 ms delay while the current painting keeps spreading.
-        for (int frame = 0; frame < 24; frame++)
+        for (int frame = 0; frame < 32; frame++)
         {
             now += TimeSpan.FromMilliseconds(125);
-            if (frame is 4 or 8)
-                Require(inputScene.AddPaintDrop(new(frame == 4 ? .62 : .35, .50), .10, now),
+            Point2? addedPosition = frame switch
+            {
+                4 => new Point2(.62, .50),
+                8 => new Point2(.35, .50),
+                12 => new Point2(.72, .65),
+                16 => new Point2(.38, .66),
+                _ => null
+            };
+            if (addedPosition is { } position)
+                Require(inputScene.AddPaintDrop(position, .10, now),
                     "The multicolor delayed-render fixture rejected a separate drop.");
             submittedFrames.Add(Draw(inputScene));
             if (submittedFrames.Count < 3) continue;
@@ -184,6 +272,26 @@ public sealed partial class MainWindow
             animationFramesCompared++;
         }
         long beforePhysicalInput = inputScene.GetPaintDiagnostics().DropCount;
+        // Selecting floating controls must not deposit paint beneath the hand.
+        // Paint can already be flowing behind those opaque controls.
+        var controlDetector = new PaintDisturbanceTracker();
+        for (int observation = 0; observation < 2; observation++)
+        {
+            now += TimeSpan.FromMilliseconds(125);
+            submittedFrames.Add(Draw(inputScene));
+            var overControls = (byte[])submittedFrames[^3].Clone();
+            // A small camera registration error and projector blur can move the
+            // bright bevel/shadow outside a control's logical hit rectangle.
+            foreach (var control in inputScene.CurrentBoardButtons.Select(button => button.Bounds)
+                .Append(new BoardRect(.06, .018, .10, .028)))
+                ShiftControlEdge(overControls, submittedFrames[^3], control, inputInset);
+            FillObstruction(overControls, .13, .9175, inputInset);
+            FillObstruction(overControls, .87, .9175, inputInset);
+            var controlContext = inputScene.GetPaintDisturbanceContext()!;
+            var controlResult = controlDetector.Update(size, size, size * 4, overControls, controlContext, now, now);
+            Require(controlResult.ReferenceReady && controlResult.Drops.Count == 0 && controlResult.CandidateCount == 0,
+                "Floating control edges or operating Exit/Save deposited paint.");
+        }
         PaintDisturbanceScene? physicalContext = null;
         PaintDisturbanceResult? physicalResult = null;
         foreach (int observation in new[] { 0, 1 })
@@ -216,6 +324,8 @@ public sealed partial class MainWindow
         inputScene.ShowPaint();
         Require(inputScene.CompletePaintDisturbance(physicalContext!, physicalResult!, now) == 0,
             "The previous Paint visit's camera result contaminated a new painting.");
+        now += TimeSpan.FromSeconds(1);
+        Draw(inputScene);
         var beforeRescan = inputScene.GetPaintDisturbanceContext()!;
         inputScene.SetBoardSetup(true);
         Point2[] cameraPixels = [new(0, 0), new(size, 0), new(size, size), new(0, size)];
@@ -223,10 +333,14 @@ public sealed partial class MainWindow
         inputScene.SetDetectedBoardGrid([new(.02f, .02f), new(.98f, .02f), new(.98f, .98f), new(.02f, .98f)],
             Homography.FromFourPoints(cameraPixels, unit));
         inputScene.SetBoardSetup(false);
-        Require(inputScene.GetPaintDisturbanceContext()!.Revision != beforeRescan.Revision &&
+        Require(inputScene.GetPaintDisturbanceContext() is null &&
                 inputScene.CompletePaintDisturbance(beforeRescan, physicalResult!, now) == 0 &&
                 inputScene.GetPaintDiagnostics().DropCount == 0,
             "A result mapped before recalibration deposited paint at an obsolete board position.");
+        now += TimeSpan.FromSeconds(1);
+        Draw(inputScene);
+        Require(inputScene.GetPaintDisturbanceContext()!.Revision != beforeRescan.Revision,
+            "Recalibration reused the old Paint reference generation.");
 
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
                 Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
@@ -237,7 +351,11 @@ public sealed partial class MainWindow
             nativePaintRaster = paintRaster, nativeBoardRaster = boardRaster, previewCannotShrinkPaint = true,
             allPaintSpotlightsDisabled = true, animationFramesCompared, cameraDelayMilliseconds = 250,
             renderedAnimationDoesNotRetrigger = true, twoStationaryObstructionsApplyIndependently = true,
+            fullCanvasBeneathFloatingControls = true,
             completedInputReplayAndNavigationCalibrationBarriers = true,
+            variedRenderedSilhouettes = true, silhouettes, silhouetteAreaRatio = areaRatio,
+            silhouetteElongationRange = elongationRange, silhouetteCompactnessRange = compactnessRange,
+            distinctSilhouetteProfiles = distinctProfiles.Count,
             liveHardwareUnchanged = true, directory, images };
 
         SceneCompositor NewScene(out double safetyInset, bool nativeCamera = false)
@@ -298,6 +416,16 @@ public sealed partial class MainWindow
                 pixels[offset] = 95; pixels[offset + 1] = 145; pixels[offset + 2] = 195; pixels[offset + 3] = 255;
             }
         }
+        static void ShiftControlEdge(byte[] pixels, byte[] source, BoardRect bounds, double safetyInset)
+        {
+            int left = (int)(size * (safetyInset / 2 + bounds.X * (1 - safetyInset)));
+            int top = (int)(size * (safetyInset / 2 + bounds.Y * (1 - safetyInset)));
+            int right = (int)(size * (safetyInset / 2 + (bounds.X + bounds.Width) * (1 - safetyInset)));
+            int bottom = (int)(size * (safetyInset / 2 + (bounds.Y + bounds.Height) * (1 - safetyInset)));
+            for (int y = top - 3; y <= bottom + 7; y++)
+            for (int x = left - 3; x <= right + 3; x++)
+                Buffer.BlockCopy(source, (y * size + x) * 4, pixels, ((y + 7) * size + x + 6) * 4, 4);
+        }
         static HandDetection Hand(double x, double y)
         {
             PixelPoint[] local =
@@ -327,6 +455,78 @@ public sealed partial class MainWindow
         {
             if (!valid) throw new InvalidOperationException(message);
         }
+    }
+
+    private sealed record PaintSilhouetteMetrics(int Seed, int Area, double Elongation, double Compactness,
+        int Width, int Height, int BoundaryPixels);
+
+    private static PaintSilhouetteMetrics MeasurePaintSilhouette(byte[] pixels, byte[] empty, Point2 center,
+        double inset, int seed)
+    {
+        const int width = 3840, height = 2160, step = 3;
+        int left = (int)(width * (inset / 2 + (center.X - .11) * (1 - inset)));
+        int top = (int)(height * (inset / 2 + (center.Y - .12) * (1 - inset)));
+        int columns = (int)(width * .22 * (1 - inset)) / step;
+        int rows = (int)(height * .24 * (1 - inset)) / step;
+        var ink = new bool[columns * rows];
+        for (int y = 0; y < rows; y++)
+        for (int x = 0; x < columns; x++)
+        {
+            int offset = ((top + y * step + step / 2) * width + left + x * step + step / 2) * 4;
+            int pixelDifference = Math.Max(Math.Abs(pixels[offset] - empty[offset]),
+                Math.Max(Math.Abs(pixels[offset + 1] - empty[offset + 1]),
+                    Math.Abs(pixels[offset + 2] - empty[offset + 2])));
+            ink[y * columns + x] = pixelDifference > 12;
+        }
+
+        // Discard color and fill enclosed texture holes. The remaining binary
+        // shape measures footprint and edge structure, rather than glitter,
+        // pigment hue, or a particular implementation's family identifier.
+        var outside = new bool[ink.Length];
+        var pending = new Queue<int>();
+        void Visit(int x, int y)
+        {
+            if (x < 0 || x >= columns || y < 0 || y >= rows) return;
+            int index = y * columns + x;
+            if (ink[index] || outside[index]) return;
+            outside[index] = true;
+            pending.Enqueue(index);
+        }
+        for (int x = 0; x < columns; x++) { Visit(x, 0); Visit(x, rows - 1); }
+        for (int y = 0; y < rows; y++) { Visit(0, y); Visit(columns - 1, y); }
+        while (pending.TryDequeue(out int index))
+        {
+            int x = index % columns, y = index / columns;
+            Visit(x - 1, y); Visit(x + 1, y); Visit(x, y - 1); Visit(x, y + 1);
+        }
+        int area = 0, perimeter = 0, boundary = 0;
+        int minX = columns, maxX = -1, minY = rows, maxY = -1;
+        double sumX = 0, sumY = 0, sumXX = 0, sumYY = 0, sumXY = 0;
+        bool Filled(int x, int y) => x >= 0 && x < columns && y >= 0 && y < rows && !outside[y * columns + x];
+        for (int y = 0; y < rows; y++)
+        for (int x = 0; x < columns; x++)
+        {
+            if (!Filled(x, y)) continue;
+            area++;
+            sumX += x; sumY += y; sumXX += x * x; sumYY += y * y; sumXY += x * y;
+            minX = Math.Min(minX, x); maxX = Math.Max(maxX, x);
+            minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
+            if (!Filled(x - 1, y)) perimeter++;
+            if (!Filled(x + 1, y)) perimeter++;
+            if (!Filled(x, y - 1)) perimeter++;
+            if (!Filled(x, y + 1)) perimeter++;
+            if (x is 0 || x == columns - 1 || y is 0 || y == rows - 1) boundary++;
+        }
+        if (area == 0) return new(seed, 0, double.NaN, double.NaN, 0, 0, 0);
+        double varianceX = sumXX / area - Math.Pow(sumX / area, 2);
+        double varianceY = sumYY / area - Math.Pow(sumY / area, 2);
+        double covariance = sumXY / area - sumX * sumY / (area * (double)area);
+        double trace = varianceX + varianceY;
+        double eigenvalueGap = Math.Sqrt(Math.Pow(varianceX - varianceY, 2) + 4 * covariance * covariance);
+        double elongation = Math.Sqrt((trace + eigenvalueGap) / Math.Max(.000001, trace - eigenvalueGap));
+        double compactness = 4 * Math.PI * area / (perimeter * (double)perimeter);
+        return new(seed, area * step * step, elongation, compactness,
+            (maxX - minX + 1) * step, (maxY - minY + 1) * step, boundary * step);
     }
 }
 #endif

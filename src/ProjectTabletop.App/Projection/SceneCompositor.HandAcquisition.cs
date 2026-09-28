@@ -223,6 +223,7 @@ public sealed partial class SceneCompositor
     private HandAcquisitionSceneImage? CaptureExpectedAcquisitionScene()
     {
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
+        var paint = _boardSession.Screen == BoardScreen.Paint;
         if (_boardApplicationTarget is null || _renderedBoardState is not { } rendered ||
             rendered.Screen != _boardSession.Screen) return null;
         if (!photoCopy && (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
@@ -254,15 +255,16 @@ public sealed partial class SceneCompositor
             var sourceSize = _boardApplicationTarget.SizeInPixels;
             using (var drawing = _acquisitionReferenceTarget.CreateDrawingSession())
             {
-                if (photoCopy)
+                if (photoCopy || paint)
                 {
                     // Compare only the opaque interiors of the generated controls.
                     // Swirl stamps, object lighting and status text change independently
                     // and must never look like an arriving hand.
-                    drawing.Clear(AppPalette.PhotoCopyBackground);
+                    drawing.Clear(paint ? PaintColor(3, 5, 12) : AppPalette.PhotoCopyBackground);
                     using var small = new CanvasTextFormat { FontFamily = "Segoe UI", FontSize = 20 };
                     foreach (var button in _boardSession.Buttons)
-                        DrawPhotoCopyButton(drawing, button, false, small, []);
+                        if (paint) DrawPaintButton(drawing, button, false, []);
+                        else DrawPhotoCopyButton(drawing, button, false, small, []);
                 }
                 else
                 {
@@ -283,7 +285,10 @@ public sealed partial class SceneCompositor
             // a lighting reference, without allowing it to suggest a search light.
             IReadOnlyList<HandTrackingBounds>? referenceRegions = _boardSession.Screen switch
             {
-                BoardScreen.HandTracking or BoardScreen.Paint => [new(.40, .065, .53, .04)],
+                BoardScreen.HandTracking => [new(.40, .065, .53, .04)],
+                // The plain Paint title and surrounding artwork have no opaque
+                // panel. Use the generated button interiors as lighting anchors.
+                BoardScreen.Paint => regions,
                 BoardScreen.Gta or BoardScreen.Diablo =>
                     [new(.10, .29, .78, .40)],
                 BoardScreen.Blackjack => [new(.05, .24, .90, .50), new(.31, .05, .63, .095)],

@@ -134,7 +134,7 @@ public sealed partial class MainWindow
         turned.SetHandCursors([new HandCursor(new(point.X, point.Y), sourceTime.AddSeconds(1), 880001)], sourceTime);
         Require(turned.CurrentBoardScreen == BoardScreen.Paint,
             "A rotated camera's fresh gesture did not select the physically rotated Paint button.");
-        var exit = turned.CurrentBoardButtons.Single();
+        var exit = turned.CurrentBoardButtons.Single(button => button.Id == "menu");
         await Hover(turned, rescannedCameraMap, halfTurnSurface, exit);
         await Task.Delay(2);
         sourceTime = DateTimeOffset.UtcNow;

@@ -61,7 +61,7 @@ public sealed partial class SceneCompositor
                 _calibrationTarget >= 0 || IsBoardRevealActive || _boardSurfaceMap is null ||
                 _paintBlooms.Count >= MaximumActivePaintBlooms * 2 ||
                 !double.IsFinite(boardUv.X) || !double.IsFinite(boardUv.Y) || !double.IsFinite(radiusUv) || radiusUv <= 0 ||
-                boardUv.X < .01 || boardUv.X > .99 || boardUv.Y < .19 || boardUv.Y > .99 ||
+                boardUv.X < .01 || boardUv.X > .99 || boardUv.Y < .01 || boardUv.Y > .99 ||
                 sourceTime > now + TimeSpan.FromMilliseconds(50) || now - sourceTime > TimeSpan.FromMilliseconds(500) ||
                 sourceTime < _paintLastDropAt || sourceTime == _paintLastDropAt && _paintDropsAtLastTimestamp >= 2)
                 return false;
@@ -86,6 +86,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
+            ResetPaintSave();
             DisposePaintResources();
             DisposePaintReference();
             _paintDropCount = _paintSettledCount = 0;
@@ -146,7 +147,7 @@ public sealed partial class SceneCompositor
         {
             using var settled = _paintSettledTarget!.CreateDrawingSession();
             settled.Transform = BoardRasterTransform(_paintSettledTarget);
-            using var clip = settled.CreateLayer(1, new Rect(0, 180, BoardSurfaceSize, BoardSurfaceSize - 180));
+            using var clip = settled.CreateLayer(1, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
             for (int i = 0; i < settleCount; i++)
             {
                 DrawPaintBloom(settled, _paintBlooms[i], now, aspect);
@@ -159,7 +160,7 @@ public sealed partial class SceneCompositor
         var pixels = _paintSettledTarget!.SizeInPixels;
         ds.DrawImage(_paintSettledTarget, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize),
             new Rect(0, 0, pixels.Width, pixels.Height));
-        using (ds.CreateLayer(1, new Rect(0, 180, BoardSurfaceSize, BoardSurfaceSize - 180)))
+        using (ds.CreateLayer(1, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize)))
             foreach (var bloom in _paintBlooms) DrawPaintBloom(ds, bloom, now, aspect);
     }
 
@@ -185,52 +186,81 @@ public sealed partial class SceneCompositor
     {
         bloom.EnsureGeometry(ds.Device);
         float age = (float)Math.Clamp((now - bloom.CreatedAt).TotalSeconds, 0, PaintSpreadSeconds);
-        float flow = 1 - MathF.Exp(-age / 2.35f);
+        float flow = 1 - MathF.Exp(-age / bloom.SpreadTime);
         float radius = (float)bloom.Radius * BoardSurfaceSize * (.25f + .75f * flow);
-        float turn = bloom.Phase + .07f * flow;
         Matrix3x2 previous = ds.Transform;
-        ds.Transform = Matrix3x2.CreateScale(radius / 100) * Matrix3x2.CreateRotation(turn) *
-            Matrix3x2.CreateScale((float)(1 / aspect), 1) *
+        // Unequal wetting rates relax into the final shape; the board's physical
+        // aspect correction remains separate from intentional paint asymmetry.
+        ds.Transform = Matrix3x2.CreateScale(radius / 100 * (.88f + .12f * flow), radius / 100) *
+            Matrix3x2.CreateRotation(bloom.Phase) * Matrix3x2.CreateScale((float)(1 / aspect), 1) *
             Matrix3x2.CreateTranslation((float)bloom.Center.X * BoardSurfaceSize, (float)bloom.Center.Y * BoardSurfaceSize) * previous;
         try
         {
             var palette = PaintPalettes[(bloom.Seed - 1) % PaintPalettes.Length];
-            // Translucent pigment, not opaque discs: overlapping blooms retain
-            // their underpainting and mix at the fine bands and feathered edges.
             using var pigment = new CanvasRadialGradientBrush(ds.Device,
             [
-                new() { Position = 0, Color = PaintAlpha(palette.Main, 200) },
-                new() { Position = .32f, Color = PaintAlpha(palette.Light, 205) },
-                new() { Position = .72f, Color = PaintAlpha(palette.Main, 185) },
-                new() { Position = 1, Color = PaintAlpha(palette.Dark, 45) }
-            ]) { Center = new(-9, -5), RadiusX = 119, RadiusY = 115 };
+                new() { Position = 0, Color = PaintAlpha(palette.Light, 218) },
+                new() { Position = .23f, Color = PaintAlpha(palette.Main, 220) },
+                new() { Position = .73f, Color = PaintAlpha(palette.Main, 194) },
+                new() { Position = 1, Color = PaintAlpha(palette.Dark, 155) }
+            ]) { Center = bloom.Source, RadiusX = 155, RadiusY = 140 };
             ds.FillGeometry(bloom.Outline!, pigment);
-            for (int i = 0; i < bloom.Bands!.Length; i++)
+            using (ds.CreateLayer(1, bloom.Outline))
             {
-                Color main = i % 7 == 0 ? PaintColor(218, 194, 39) : i % 4 == 0 ? palette.Dark : palette.Light;
-                using var ribbon = new CanvasLinearGradientBrush(ds.Device,
-                    PaintAlpha(main, 190), PaintAlpha(i % 4 == 0 ? palette.Main : palette.Light, 10))
+                for (int i = 0; i < bloom.Bands!.Length; i++)
                 {
-                    StartPoint = bloom.BandStarts![i], EndPoint = bloom.BandEnds![i]
-                };
-                ds.FillGeometry(bloom.Bands[i], ribbon);
+                    Color color = i % 5 == 0 && bloom.Metallic ? PaintColor(226, 176, 59) :
+                        i % 3 == 0 ? palette.Dark : palette.Light;
+                    using var ribbon = new CanvasLinearGradientBrush(ds.Device,
+                        PaintAlpha(color, (byte)(i % 3 == 0 ? 140 : 165)), PaintAlpha(color, 8))
+                    { StartPoint = bloom.BandStarts![i], EndPoint = bloom.BandEnds![i] };
+                    ds.FillGeometry(bloom.Bands[i], ribbon);
+                }
+                for (int i = 0; i < bloom.Ribbons!.Length; i++)
+                    ds.DrawGeometry(bloom.Ribbons[i], PaintAlpha(i % 3 == 0 ? palette.Light : palette.Dark,
+                        (byte)(i % 3 == 0 ? 90 : 58)), i % 3 == 0 ? .20f : .42f);
+                foreach (var cell in bloom.Cells)
+                {
+                    using var interior = new CanvasRadialGradientBrush(ds.Device,
+                    [
+                        new() { Position = 0, Color = PaintAlpha(palette.Dark, 202) },
+                        new() { Position = .61f, Color = PaintAlpha(palette.Dark, 170) },
+                        new() { Position = .87f, Color = PaintAlpha(palette.Main, 130) },
+                        new() { Position = 1, Color = PaintAlpha(palette.Light, 185) }
+                    ]) { Center = cell.Center + new Vector2(cell.Radius * .14f), RadiusX = cell.Radius, RadiusY = cell.Radius * .88f };
+                    ds.FillGeometry(cell.Body, interior);
+                    ds.DrawGeometry(cell.Rim, PaintAlpha(palette.Light, 205), .75f);
+                    ds.DrawGeometry(cell.Rim, PaintColor(241, 255, 235, 90), .22f);
+                }
+                ds.FillGeometry(bloom.Grain!, PaintAlpha(palette.Light, bloom.Kind == PaintKind.Wash ? (byte)96 : (byte)38));
+                for (int layer = 0; layer < bloom.Dust!.Length; layer++)
+                    ds.FillGeometry(bloom.Dust[layer], PaintColor((byte)(layer == 0 ? 156 : 255),
+                        (byte)(layer == 0 ? 104 : 219), (byte)(layer == 0 ? 29 : 123), (byte)(layer == 2 ? 240 : 175)));
             }
-            for (int i = 0; i < bloom.Ribbons!.Length; i++)
+            if (bloom.Kind != PaintKind.Wash)
             {
-                var color = i % 7 == 0 ? palette.Light : i % 3 == 0 ? palette.Dark : palette.Main;
-                ds.DrawGeometry(bloom.Ribbons[i], PaintAlpha(color, (byte)(i % 7 == 0 ? 108 : 47)),
-                    i % 7 == 0 ? .24f : .35f + (i % 4) * .24f);
-                if (i % 4 == 0)
-                    ds.DrawGeometry(bloom.Ribbons[i], PaintAlpha(palette.Light, 96), .16f);
+                using var surface = ds.CreateLayer(1, bloom.Outline);
+                Vector2 shine = bloom.Source + new Vector2(-18, -32);
+                using var reflection = new CanvasRadialGradientBrush(ds.Device,
+                    PaintColor(231, 248, 255, 58), PaintColor(231, 248, 255, 0))
+                { Center = shine, RadiusX = 33, RadiusY = 7 };
+                ds.FillEllipse(shine, 33, 7, reflection);
             }
-            ds.DrawGeometry(bloom.Feathers!, PaintAlpha(palette.Light, 80), .20f);
-            ds.FillGeometry(bloom.Grain!, PaintAlpha(palette.Light, 84));
-            bool metallic = bloom.Seed % 3 != 0;
-            for (int layer = 0; layer < bloom.Dust!.Length; layer++)
-                ds.FillGeometry(bloom.Dust[layer], metallic
-                    ? PaintColor((byte)(layer == 0 ? 185 : 250), (byte)(layer == 0 ? 124 : 207),
-                        (byte)(layer == 0 ? 39 : 103), (byte)(layer == 2 ? 245 : 195))
-                    : PaintAlpha(palette.Light, (byte)(layer == 2 ? 175 : 95)));
+            ds.DrawGeometry(bloom.Outline!, PaintAlpha(palette.Dark, 120), bloom.Kind == PaintKind.Wash ? .30f : 1.15f);
+            if (bloom.Feathers is not null) ds.DrawGeometry(bloom.Feathers, PaintAlpha(palette.Light, 65), .17f);
+            // Broken meniscus reflections, not a uniformly glowing perimeter.
+            ds.DrawGeometry(bloom.Highlights!, PaintAlpha(palette.Light, 160), .80f);
+            ds.DrawGeometry(bloom.Highlights!, PaintColor(241, 253, 255, 130), .23f);
+            foreach (var bead in bloom.Beads)
+            {
+                float flight = Math.Clamp(age / .65f, 0, 1);
+                Vector2 position = bead.Center * (.76f + .24f * flight);
+                ds.FillEllipse(position, bead.Radius, bead.Radius * bead.Aspect, PaintAlpha(palette.Dark, 190));
+                ds.FillEllipse(position - new Vector2(bead.Radius * .10f), bead.Radius * .84f,
+                    bead.Radius * bead.Aspect * .84f, PaintAlpha(palette.Main, 235));
+                ds.FillEllipse(position - new Vector2(bead.Radius * .29f), bead.Radius * .30f,
+                    bead.Radius * .13f, PaintAlpha(palette.Light, 180));
+            }
         }
         finally { ds.Transform = previous; }
     }
@@ -247,149 +277,214 @@ public sealed partial class SceneCompositor
     ];
     private static Color PaintColor(byte r, byte g, byte b, byte a = 255) => Color.FromArgb(a, r, g, b);
     private static Color PaintAlpha(Color color, byte alpha) => Color.FromArgb(alpha, color.R, color.G, color.B);
+    private enum PaintKind { Pool, Wash, Splash, Cells, Pour }
 
-    private sealed class PaintBloom(Point2 center, double radius, DateTimeOffset createdAt, int seed) : IDisposable
+    private sealed class PaintBloom : IDisposable
     {
-        public Point2 Center { get; } = center;
-        public double Radius { get; } = radius;
-        public DateTimeOffset CreatedAt { get; } = createdAt;
-        public int Seed { get; } = seed;
-        public float Phase { get; } = seed * 2.39996323f;
-        public CanvasGeometry? Outline;
+        public Point2 Center { get; }
+        public double Radius { get; }
+        public DateTimeOffset CreatedAt { get; }
+        public int Seed { get; }
+        public PaintKind Kind { get; }
+        public float Phase { get; }
+        public float SpreadTime { get; }
+        public Vector2 Source { get; }
+        public bool Metallic { get; }
+        public CanvasGeometry? Outline, Grain, Feathers, Highlights;
         public CanvasGeometry[]? Bands, Ribbons, Dust;
         public Vector2[]? BandStarts, BandEnds;
-        public CanvasGeometry? Grain, Feathers;
+        public readonly List<(Vector2 Center, float Radius, float Aspect)> Beads = [];
+        public readonly List<(Vector2 Center, float Radius, CanvasGeometry Body, CanvasGeometry Rim)> Cells = [];
+        private readonly float _lobes, _roughness, _skew, _curl, _stretch, _detailPhase;
+        private readonly (float Angle, float Width, float Length)[] _fingers;
         private CanvasDevice? _device;
+
+        public PaintBloom(Point2 center, double radius, DateTimeOffset createdAt, int seed)
+        {
+            Center = center; CreatedAt = createdAt; Seed = seed;
+            Kind = (PaintKind)((seed - 1) % 5);
+            var random = new Random(unchecked(seed * 8191));
+            float Next(float min, float max) => min + (float)random.NextDouble() * (max - min);
+            Radius = radius * Next(.83f, 1.10f);
+            Phase = Next(0, MathF.Tau);
+            SpreadTime = Next(2.3f, 3.5f);
+            _detailPhase = Next(0, MathF.Tau);
+            _lobes = random.Next(2, 6);
+            _roughness = Next(.05f, .13f);
+            _skew = Next(-.22f, .25f);
+            _curl = Next(-1.1f, 1.1f);
+            _stretch = Kind == PaintKind.Pour ? Next(1.3f, 1.6f) : Next(.88f, 1.13f);
+            Source = Kind == PaintKind.Wash ? new(-42, Next(-20, 20)) : new(Next(-25, 25), Next(-22, 22));
+            Metallic = random.NextDouble() < .58;
+            _fingers = Enumerable.Range(0, random.Next(6, 12)).Select(_ =>
+                (Next(0, MathF.Tau), Next(.025f, .10f), Next(.18f, .56f))).ToArray();
+        }
 
         public void EnsureGeometry(CanvasDevice device)
         {
             if (_device == device && Outline is not null) return;
-            Dispose();
-            _device = device;
-            Outline = ClosedContour(device, 1, 0);
-            var random = new Random(Seed * 8191);
-            Bands = new CanvasGeometry[27];
-            BandStarts = new Vector2[Bands.Length];
-            BandEnds = new Vector2[Bands.Length];
-            for (int i = 0; i < Bands.Length; i++)
+            Dispose(); _device = device;
+            var random = new Random(unchecked(Seed * 16547));
+            float Next(float min, float max) => min + (float)random.NextDouble() * (max - min);
+            Outline = Path(device, 540, t => FlowPoint(t * MathF.Tau, 1), true);
+            int bandCount = Kind == PaintKind.Wash ? 25 : random.Next(9, 18);
+            Bands = new CanvasGeometry[bandCount];
+            BandStarts = new Vector2[bandCount]; BandEnds = new Vector2[bandCount];
+            for (int i = 0; i < bandCount; i++)
             {
+                float lane = (i + Next(.1f, .9f)) / bandCount;
+                float width = Next(.003f, .029f);
                 using var path = new CanvasPathBuilder(device);
-                float angle = i * MathF.Tau / Bands.Length + .18f * MathF.Sin(i * 2.7f + Seed);
-                float width = .020f + (float)random.NextDouble() * .12f;
                 for (int side = 0; side < 2; side++)
                 for (int j = 0; j <= 80; j++)
                 {
-                    float r = -.12f + (side == 0 ? j : 80 - j) / 80f * 1.12f;
-                    float a = StreamAngle(angle, r) + (side == 0 ? -1 : 1) * width *
-                        (.30f + .70f * MathF.Sin((r + .12f) / 1.12f * MathF.PI));
-                    var p = FlowPoint(a, r);
+                    float t = (side == 0 ? j : 80 - j) / 80f;
+                    var p = StreamPoint(lane + (side == 0 ? -1 : 1) * width *
+                        (.35f + .65f * MathF.Sin(t * MathF.PI)), t);
                     if (side == 0 && j == 0) { path.BeginFigure(p); BandStarts[i] = p; }
                     else path.AddLine(p);
-                    if (side == 0 && j == 65) BandEnds[i] = p;
+                    if (side == 0 && j == 72) BandEnds[i] = p;
                 }
-                path.EndFigure(CanvasFigureLoop.Closed);
-                Bands[i] = CanvasGeometry.CreatePath(path);
+                path.EndFigure(CanvasFigureLoop.Closed); Bands[i] = CanvasGeometry.CreatePath(path);
             }
-            Ribbons = new CanvasGeometry[79];
-            for (int i = 0; i < Ribbons.Length; i++)
+            int ribbonCount = Kind == PaintKind.Wash ? 115 : random.Next(28, 52);
+            Ribbons = new CanvasGeometry[ribbonCount];
+            for (int i = 0; i < ribbonCount; i++)
             {
-                using var path = new CanvasPathBuilder(device);
-                float angle = i * MathF.Tau / Ribbons.Length + .035f * MathF.Sin(i * 3.7f + Seed);
-                for (int j = 0; j <= 64; j++)
-                {
-                    float r = -.11f + j / 64f * 1.09f;
-                    float a = StreamAngle(angle, r);
-                    Vector2 p = FlowPoint(a, r);
-                    if (j == 0) path.BeginFigure(p); else path.AddLine(p);
-                }
-                path.EndFigure(CanvasFigureLoop.Open);
-                Ribbons[i] = CanvasGeometry.CreatePath(path);
+                float lane = Next(0, 1);
+                Ribbons[i] = Path(device, 80, t => StreamPoint(lane, t), false);
             }
-            using (var path = new CanvasPathBuilder(device))
+            if (Kind == PaintKind.Wash)
             {
-                for (int i = 0; i < 310; i++)
+                using var featherPath = new CanvasPathBuilder(device);
+                for (int i = 0; i < 190; i++)
                 {
-                    float angle = (float)random.NextDouble() * MathF.Tau;
-                    float start = .67f + (float)random.NextDouble() * .18f;
-                    float end = .98f + (float)random.NextDouble() * .09f;
-                    for (int j = 0; j <= 24; j++)
+                    float angle = Next(-1.7f, 1.7f);
+                    for (int j = 0; j <= 16; j++)
                     {
-                        float r = start + (end - start) * j / 24;
-                        var p = FlowPoint(StreamAngle(angle, r), r);
-                        if (j == 0) path.BeginFigure(p); else path.AddLine(p);
+                        float r = .84f + .21f * j / 16;
+                        var p = FlowPoint(angle + .025f * MathF.Sin(r * 35 + i), r);
+                        if (j == 0) featherPath.BeginFigure(p); else featherPath.AddLine(p);
                     }
-                    path.EndFigure(CanvasFigureLoop.Open);
+                    featherPath.EndFigure(CanvasFigureLoop.Open);
                 }
-                Feathers = CanvasGeometry.CreatePath(path);
+                Feathers = CanvasGeometry.CreatePath(featherPath);
             }
-            using (var path = new CanvasPathBuilder(device))
+            // Pigment grains and metallic deposits follow a few flow seams.
+            // Most wet pools have quiet interiors instead of uniform glitter.
+            Grain = Particles(device, random, Kind == PaintKind.Wash ? 7800 : 1600, false, 0);
+            Dust = new CanvasGeometry[Metallic ? 3 : 0];
+            for (int layer = 0; layer < Dust.Length; layer++)
+                Dust[layer] = Particles(device, random, layer == 2 ? 95 : 1250, true, layer);
+            using (var highlightPath = new CanvasPathBuilder(device))
             {
-                for (int i = 0; i < 10500; i++)
+                int arcs = Kind == PaintKind.Wash ? 2 : random.Next(3, 7);
+                for (int i = 0; i < arcs; i++)
                 {
-                    float a = (float)random.NextDouble() * MathF.Tau;
-                    float r = MathF.Sqrt((float)random.NextDouble());
-                    var p = FlowPoint(StreamAngle(a, r), r);
-                    float size = .05f + (float)random.NextDouble() * .13f;
-                    path.BeginFigure(p + new Vector2(-size, size));
-                    path.AddLine(p + new Vector2(size, -size));
-                    path.AddLine(p + new Vector2(size, size));
-                    path.EndFigure(CanvasFigureLoop.Closed);
+                    float start = Next(3.2f, 5.9f), length = Next(.10f, .40f);
+                    for (int j = 0; j <= 30; j++)
+                    {
+                        var p = FlowPoint(start + length * j / 30, .977f);
+                        if (j == 0) highlightPath.BeginFigure(p); else highlightPath.AddLine(p);
+                    }
+                    highlightPath.EndFigure(CanvasFigureLoop.Open);
                 }
-                Grain = CanvasGeometry.CreatePath(path);
+                Highlights = CanvasGeometry.CreatePath(highlightPath);
             }
-            Dust = new CanvasGeometry[3];
-            for (int layer = 0; layer < 3; layer++)
+            if (Kind is PaintKind.Splash or PaintKind.Pool)
             {
-                using var path = new CanvasPathBuilder(device);
-                int count = layer == 2 ? 250 : 2200;
+                int count = Kind == PaintKind.Splash ? random.Next(14, 26) : random.Next(2, 6);
                 for (int i = 0; i < count; i++)
                 {
-                    // Denser metallic deposits ride one side of the curling
-                    // flow instead of covering the paint in uniform glitter.
-                    float a = (float)(random.NextDouble() * Math.Tau);
-                    if (i % 3 != 0) a = -.7f + (float)random.NextDouble() * 2.1f;
-                    float r = .94f * MathF.Sqrt((float)random.NextDouble());
-                    a += (1 - r) * 1.2f;
-                    var p = FlowPoint(a, r);
-                    float size = layer == 2 ? .22f + (float)random.NextDouble() * .55f : .07f + (float)random.NextDouble() * .20f;
-                    path.BeginFigure(p + new Vector2(-size, size * .7f));
-                    path.AddLine(p + new Vector2(size * .75f, -size));
-                    path.AddLine(p + new Vector2(size, size * .4f));
-                    path.EndFigure(CanvasFigureLoop.Closed);
+                    float a = Next(0, MathF.Tau);
+                    Beads.Add((FlowPoint(a, Next(1.13f, 1.55f)), Next(.7f, Kind == PaintKind.Splash ? 4.4f : 2.3f), Next(.55f, 1.05f)));
                 }
-                Dust[layer] = CanvasGeometry.CreatePath(path);
+            }
+            if (Kind is PaintKind.Cells or PaintKind.Pour)
+            {
+                int attempts = Kind == PaintKind.Cells ? 45 : 5;
+                for (int i = 0; i < attempts && Cells.Count < 11; i++)
+                {
+                    var center = FlowPoint(Next(0, MathF.Tau), Next(.05f, .70f));
+                    float radius = Next(7, Kind == PaintKind.Cells ? 25 : 13), phase = Next(0, MathF.Tau);
+                    if (Cells.Any(cell => Vector2.Distance(cell.Center, center) < (cell.Radius + radius) * 1.1f)) continue;
+                    Vector2 CellPoint(float a) => center + new Vector2(MathF.Cos(a), MathF.Sin(a) * .88f) *
+                        radius * (1 + .08f * MathF.Sin(a * 3 + phase) + .045f * MathF.Sin(a * 5 - phase));
+                    Cells.Add((center, radius, Path(device, 100, t => CellPoint(t * MathF.Tau), true),
+                        Path(device, 45, t => CellPoint(3.4f + t * 1.8f), false)));
+                }
             }
         }
 
-        private float StreamAngle(float angle, float radius) => angle +
-            1.75f * MathF.Pow(MathF.Max(0, 1 - radius), 1.4f) +
-            .18f * MathF.Sin(radius * 13 + angle * 3 + Seed) +
-            .055f * MathF.Sin(radius * 41 + angle * 9);
-
-        private CanvasGeometry ClosedContour(CanvasDevice device, float radius, float curl)
+        private CanvasGeometry Particles(CanvasDevice device, Random random, int count, bool metallic, int layer)
         {
             using var path = new CanvasPathBuilder(device);
-            for (int i = 0; i < 720; i++)
+            for (int i = 0; i < count; i++)
             {
-                float a = i * MathF.Tau / 720;
-                var p = FlowPoint(a + curl * (1 - radius), radius);
-                if (i == 0) path.BeginFigure(p); else path.AddLine(p);
+                float t = (float)random.NextDouble();
+                float lane = metallic && i % 4 != 0 ? .28f + .035f * (float)random.NextDouble() : (float)random.NextDouble();
+                Vector2 p = metallic ? StreamPoint(lane, t) : FlowPoint(t * MathF.Tau, MathF.Sqrt((float)random.NextDouble()));
+                float size = layer == 2 ? .30f + (float)random.NextDouble() * .8f : .06f + (float)random.NextDouble() * .18f;
+                path.BeginFigure(p + new Vector2(-size, size * .6f));
+                path.AddLine(p + new Vector2(size * .6f, -size));
+                path.AddLine(p + new Vector2(size, size * .3f));
+                path.EndFigure(CanvasFigureLoop.Closed);
             }
-            path.EndFigure(CanvasFigureLoop.Closed);
             return CanvasGeometry.CreatePath(path);
+        }
+
+        private Vector2 StreamPoint(float lane, float t)
+        {
+            if (Kind == PaintKind.Wash)
+            {
+                float angle = (lane - .5f) * 4.9f;
+                float bend = _curl * (1 - t) * (1 - t) + .075f * MathF.Sin(t * 23 + lane * 12);
+                var edge = FlowPoint(angle + bend, t);
+                return edge + Source * MathF.Pow(1 - t, 1.8f);
+            }
+            // Off-centre folds cross the body rather than all converging on one
+            // repeated spiral. Different layers carry different pigment widths.
+            float x = -145 + 290 * t;
+            float y = (lane - .5f) * 240;
+            y += 17 * MathF.Sin(t * 7 + lane * 8 + _detailPhase) +
+                9 * MathF.Sin(t * 17 - lane * 11 + _detailPhase) + 3 * MathF.Sin(t * 39 + lane * 18);
+            float dx = x - Source.X, dy = y - Source.Y;
+            float twist = _curl * 2.1f * MathF.Exp(-(dx * dx + dy * dy) / 7800);
+            return Source + Vector2.Transform(new(dx, dy), Matrix3x2.CreateRotation(twist));
         }
 
         private Vector2 FlowPoint(float angle, float radius)
         {
-            float seedPhase = Seed * 1.173f;
-            float feather = .036f * MathF.Sin(angle * 37 + seedPhase) + .018f * MathF.Sin(angle * 71 - seedPhase);
-            float edge = 1 + .16f * MathF.Sin(angle * 5 + seedPhase) + .09f * MathF.Sin(angle * 9 - seedPhase * 2) +
-                .075f * MathF.Sin(angle * 13 + .8f * MathF.Sin(angle * 7)) + feather;
-            float r = 100 * radius * (1 + (edge - 1) * (.28f + .72f * radius));
-            float curled = angle + .14f * MathF.Sin(angle * 3 + seedPhase) * radius +
-                .07f * MathF.Sin(angle * 11 + seedPhase) * radius * radius;
-            return new(r * MathF.Cos(curled) + 7 * radius * MathF.Sin(angle * 2 + seedPhase),
-                r * MathF.Sin(curled) + 5 * radius * MathF.Cos(angle * 3 - seedPhase));
+            float edge = 1 + _roughness * MathF.Sin(angle * _lobes + _detailPhase) +
+                .045f * MathF.Sin(angle * (_lobes + 3) - _detailPhase) + _skew * MathF.Cos(angle);
+            if (Kind == PaintKind.Splash)
+            {
+                edge *= .79f;
+                foreach (var finger in _fingers)
+                {
+                    float difference = MathF.Atan2(MathF.Sin(angle - finger.Angle), MathF.Cos(angle - finger.Angle));
+                    edge += finger.Length * MathF.Exp(-difference * difference / (2 * finger.Width * finger.Width));
+                }
+            }
+            else if (Kind == PaintKind.Wash)
+                edge += .23f * MathF.Cos(angle) + .065f * MathF.Sin(angle * 23 + _detailPhase) +
+                    .027f * MathF.Sin(angle * 61 - _detailPhase);
+            else if (Kind == PaintKind.Pour)
+                edge += .16f * MathF.Sin(angle * 3 + _detailPhase);
+            float r = 100 * radius * (1 + (edge - 1) * radius);
+            return new(r * MathF.Cos(angle) * _stretch, r * MathF.Sin(angle) / _stretch);
+        }
+
+        private static CanvasGeometry Path(CanvasDevice device, int steps, Func<float, Vector2> point, bool closed)
+        {
+            using var path = new CanvasPathBuilder(device);
+            for (int i = 0; i <= steps; i++)
+            {
+                var p = point(i / (float)steps);
+                if (i == 0) path.BeginFigure(p); else path.AddLine(p);
+            }
+            path.EndFigure(closed ? CanvasFigureLoop.Closed : CanvasFigureLoop.Open);
+            return CanvasGeometry.CreatePath(path);
         }
 
         public void Dispose()
@@ -397,7 +492,10 @@ public sealed partial class SceneCompositor
             Outline?.Dispose(); Outline = null;
             Grain?.Dispose(); Grain = null;
             Feathers?.Dispose(); Feathers = null;
+            Highlights?.Dispose(); Highlights = null;
             foreach (var geometry in (Bands ?? []).Concat(Ribbons ?? []).Concat(Dust ?? [])) geometry.Dispose();
+            foreach (var cell in Cells) { cell.Body.Dispose(); cell.Rim.Dispose(); }
+            Cells.Clear(); Beads.Clear();
             Bands = Ribbons = Dust = null;
             BandStarts = BandEnds = null;
             _device = null;

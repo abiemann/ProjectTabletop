@@ -49,7 +49,8 @@ public sealed partial class MainWindow
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :
              _scene.CurrentBoardScreen == BoardScreen.PhotoCopy ? _scene.PhotoCopyStatus :
-             _scene.CurrentBoardScreen == BoardScreen.Paint ? "Move your fingers or an object over the canvas to add paint. Select Exit to return." :
+             _scene.CurrentBoardScreen == BoardScreen.Paint ?
+                (_scene.GetPaintSaveStatus(DateTimeOffset.UtcNow) ?? "Paint anywhere around the floating controls. Save keeps the artwork; Exit returns to the menu.") :
              "Aim with the middle fingertip and four fingers together, then move the index sideways to select. Pinch also works.");
     }
 

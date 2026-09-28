@@ -21,7 +21,7 @@ public sealed partial class SceneCompositor
 
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision,
-        long PaintRevision);
+        long PaintRevision, string? PaintStatus, bool PaintSaveEnabled);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
         Func<DateTimeOffset>? boardRevealClock = null, Func<DateTimeOffset>? paintClock = null)
@@ -128,6 +128,7 @@ public sealed partial class SceneCompositor
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
         var paint = _boardSession.Screen == BoardScreen.Paint;
         var paintNow = _paintClock();
+        _boardSession.PaintSaveEnabled = paint && CanSavePaint;
         if (photoCopy && !preview && PhotoCopyCaptureAllowed)
             MarkPhotoCopySurfacePresented(now);
         var handsFresh = _handFrameTime <= now &&
@@ -145,7 +146,8 @@ public sealed partial class SceneCompositor
             photoCopy ? PhotoCopyDisplayStatus(now) : null,
             photoCopy ? _photoCopyRevision : 0,
             _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision : 0,
-            _blackjackFlightRevision, paint ? PaintVisualRevision(paintNow) : 0);
+            _blackjackFlightRevision, paint ? PaintVisualRevision(paintNow) : 0,
+            paint ? GetPaintSaveStatus(paintNow) : null, paint && _boardSession.PaintSaveEnabled);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
@@ -220,15 +222,32 @@ public sealed partial class SceneCompositor
                     if (photoCopy)
                         DrawPhotoCopyButton(surface, button, handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id),
                             small, selectionFeedback);
+                    else if (paint)
+                        DrawPaintButton(surface, button, handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id),
+                            selectionFeedback);
                     else
                         DrawBoardButton(surface, button,
                             handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id), label, small, selectionFeedback);
 
                 if (paint)
                 {
-                    DrawGlassPanel(surface, new Rect(390, 55, 550, 105));
-                    surface.DrawText("PAINT", 415, 68, AppPalette.Text, label);
-                    surface.DrawText("Move above the board. Colour flows.", 415, 119, AppPalette.MutedText, small);
+                    surface.DrawText("PAINT", 61, 18, AppPalette.MutedText, small);
+                    if (state.PaintStatus is { } paintStatus)
+                    {
+                        using var statusFormat = new CanvasTextFormat
+                        {
+                            FontFamily = "Segoe UI", FontSize = 20,
+                            HorizontalAlignment = CanvasHorizontalAlignment.Center,
+                            VerticalAlignment = CanvasVerticalAlignment.Center,
+                            WordWrapping = CanvasWordWrapping.NoWrap
+                        };
+                        var statusBounds = new Rect(PaintStatusBounds.X * BoardSurfaceSize,
+                            PaintStatusBounds.Y * BoardSurfaceSize, PaintStatusBounds.Width * BoardSurfaceSize,
+                            PaintStatusBounds.Height * BoardSurfaceSize);
+                        DrawGlassPanel(surface, statusBounds);
+                        surface.DrawText(paintStatus, statusBounds,
+                            paintStatus == "Image Saved" ? AppPalette.IndicatorOn : AppPalette.Text, statusFormat);
+                    }
                 }
                 else if (photoCopy)
                 {
@@ -343,6 +362,25 @@ public sealed partial class SceneCompositor
         DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, AppPalette.IndicatorOn);
     }
 
+    private static void DrawPaintButton(CanvasDrawingSession ds, BoardButton button, bool hovered,
+        IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback)
+    {
+        var bounds = button.Bounds;
+        var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
+            bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
+        DrawButtonSurface(ds, rect, hovered && button.Enabled);
+        using var text = new CanvasTextFormat
+        {
+            FontFamily = "Segoe UI", FontSize = 26, FontWeight = FontWeights.SemiBold,
+            HorizontalAlignment = CanvasHorizontalAlignment.Center,
+            VerticalAlignment = CanvasVerticalAlignment.Center,
+            WordWrapping = CanvasWordWrapping.NoWrap
+        };
+        ds.DrawText(button.Label, new Rect(rect.X + 20, rect.Y + 6, rect.Width - 40, rect.Height - 18),
+            button.Enabled ? AppPalette.ButtonText : AppPalette.MutedText, text);
+        DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, AppPalette.IndicatorOn);
+    }
+
     private static void DrawBoardButton(CanvasDrawingSession ds, BoardButton button,
         bool hovered, CanvasTextFormat label, CanvasTextFormat small, IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback,
         string? description = null)
@@ -350,10 +388,10 @@ public sealed partial class SceneCompositor
         var bounds = button.Bounds;
         var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
             bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
-        DrawButtonSurface(ds, rect, hovered);
+        DrawButtonSurface(ds, rect, hovered && button.Enabled);
         var x = (float)rect.X + 33;
         var y = (float)rect.Y + (description is null ? 27 : 33);
-        ds.DrawText(button.Label, x, y, AppPalette.ButtonText, label);
+        ds.DrawText(button.Label, x, y, button.Enabled ? AppPalette.ButtonText : AppPalette.MutedText, label);
         if (description is not null)
             ds.DrawText(description, x, (float)rect.Y + 100,
                 AppPalette.ButtonText, small);

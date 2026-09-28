@@ -35,9 +35,12 @@ internal static class PhotoCopyImageStore
 
     // A stride-aware entry point also supports unresized camera-buffer callers.
     internal static async Task<string> SaveBgraAsync(int width, int height, int stride, byte[] bgra,
-        string? directory = null, CancellationToken cancellationToken = default)
+        string? directory = null, CancellationToken cancellationToken = default, string filenamePrefix = "photo-copy")
     {
         ArgumentNullException.ThrowIfNull(bgra);
+        if (string.IsNullOrWhiteSpace(filenamePrefix) || filenamePrefix.Length > 40 ||
+            filenamePrefix.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '-'))
+            throw new ArgumentException("The image filename prefix must contain only letters, digits or hyphens.", nameof(filenamePrefix));
         if (width is <= 0 or > 16384 || height is <= 0 or > 16384 || stride < width * 4L ||
             bgra.LongLength < (height - 1L) * stride + width * 4L)
             throw new ArgumentException("Invalid BGRA image dimensions, stride, or buffer length.");
@@ -65,7 +68,7 @@ internal static class PhotoCopyImageStore
 
         cancellationToken.ThrowIfCancellationRequested();
         Directory.CreateDirectory(folder);
-        string name = $"photo-copy-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fffffff}Z-{Guid.NewGuid():N}.png";
+        string name = $"{filenamePrefix}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fffffff}Z-{Guid.NewGuid():N}.png";
         string finalPath = Path.Combine(folder, name);
         string temporaryPath = Path.Combine(folder, "." + name + ".tmp");
         bool published = false;

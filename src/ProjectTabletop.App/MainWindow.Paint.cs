@@ -20,7 +20,7 @@ public sealed partial class MainWindow
         _scene.ShowPaint();
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
-        SetStatus(_scene.HasBoardMediaClip ? "Paint: move your fingers or an object over the canvas to release colour. Exit is at the top left."
+        SetStatus(_scene.HasBoardMediaClip ? "Paint: colour fills the board beneath floating controls. Save exports the artwork to Pictures / Project Tabletop / Paint."
             : "Paint selected. Scan the board to start painting.");
     }
 

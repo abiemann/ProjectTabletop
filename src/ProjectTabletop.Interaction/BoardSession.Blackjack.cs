@@ -70,7 +70,13 @@ public sealed partial class BoardSession
         AdvanceBlackjackPresentation(now);
         BlackjackHit? hit = null;
         BlackjackDeal? deal = null;
-        if (TryGetPhotoCopyAction(button.Id, out var photoAction))
+        if (button.Id == "paint-save")
+        {
+            if (Screen != BoardScreen.Paint || !PaintSaveEnabled) return false;
+            // Save reports an action while preserving the active canvas and its
+            // session revision. The application owns the image export.
+        }
+        else if (TryGetPhotoCopyAction(button.Id, out var photoAction))
         {
             if (Screen != BoardScreen.PhotoCopy || (photoAction == PhotoCopyAction.Save
                 ? !PhotoCopyHasSwirl : !PhotoCopyShutterEnabled || PhotoCopyHasSwirl)) return false;

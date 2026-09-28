@@ -76,7 +76,8 @@ public sealed partial class BoardSession
     });
     private static readonly IReadOnlyList<BoardButton> PaintButtons = Array.AsReadOnly(new[]
     {
-        new BoardButton("menu", "Exit", new(.06, .055, .30, .105), BoardScreen.Menu)
+        new BoardButton("menu", "Exit", new(.06, .88, .14, .075), BoardScreen.Menu),
+        new BoardButton("paint-save", "Save", new(.80, .88, .14, .075), BoardScreen.Paint, Enabled: false)
     });
     private DateTimeOffset? _lastFrameTime;
     private DateTimeOffset? _lastNow;
@@ -104,7 +105,7 @@ public sealed partial class BoardSession
     {
         BoardScreen.Menu => MenuButtons,
         BoardScreen.PhotoCopy => CurrentPhotoCopyButtons(),
-        BoardScreen.Paint => PaintButtons,
+        BoardScreen.Paint => CurrentPaintButtons(),
         BoardScreen.Blackjack => BlackjackButtons(),
         BoardScreen.Media => Array.Empty<BoardButton>(),
         _ => AppButtons
