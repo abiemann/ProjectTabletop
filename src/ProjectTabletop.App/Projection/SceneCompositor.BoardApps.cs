@@ -368,14 +368,15 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private static void DrawMenuButton(CanvasDrawingSession ds, BoardButton button,
+    private void DrawMenuButton(CanvasDrawingSession ds, BoardButton button,
         bool hovered, CanvasTextFormat label, CanvasTextFormat small,
         IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback)
     {
         var bounds = button.Bounds;
         var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
             bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
-        DrawButtonSurface(ds, rect, hovered);
+        DrawButtonSurface(ds, rect, hovered,
+            (inside, radius) => DrawMenuPreview(ds, rect, inside, radius, button.Destination));
         ds.DrawText(button.Label, (float)rect.X + 32, (float)rect.Y + 52,
             AppPalette.ButtonText, label);
         var description = button.Destination switch

@@ -30,6 +30,9 @@ public sealed partial class MainWindow
         using var scene = NewScene();
         using var dpiScene = NewScene();
         using var legacyScene = NewScene();
+        // The menu's Globe tile previews Earth; load it before comparing scenes.
+        await Task.WhenAll(scene.EnsureGlobeResourcesAsync(device), dpiScene.EnsureGlobeResourcesAsync(device),
+            legacyScene.EnsureGlobeResourcesAsync(device));
         var menuButtons = scene.CurrentBoardButtons.ToArray();
 
         Draw(scene, native, width, height);
@@ -90,6 +93,11 @@ public sealed partial class MainWindow
         await Save(enlargedLegacy, "menu-1000-pixels-enlarged-to-4k");
         await Save(highDpi, "menu-4k-at-300-percent-windows-scaling");
 
+        // The violet "06 / BOARDS" caption is the menu's only AccentSecondary ink.
+        // Locate it on the upright board, then predict it on each mapped board.
+        var uprightMap = ReferenceMap([new(0, 0), new(1, 0), new(1, 1), new(0, 1)]);
+        var uprightMarker = MarkerCentroid(nativePixels, uprightMap);
+        var marker = uprightMap.Inverse().Transform(new(uprightMarker.X / width, uprightMarker.Y / height));
         var mappedBoards = new List<object>();
         foreach (var (name, corners) in new (string, Vector2[])[]
         {
@@ -99,6 +107,7 @@ public sealed partial class MainWindow
         {
             using var mapped = NewScene(corners);
             using var scaledMapped = NewScene(corners);
+            await Task.WhenAll(mapped.EnsureGlobeResourcesAsync(device), scaledMapped.EnsureGlobeResourcesAsync(device));
             var reference = ReferenceMap(corners);
             Draw(mapped, native, width, height);
             var mappedPixels = native.GetPixelBytes();
@@ -109,7 +118,10 @@ public sealed partial class MainWindow
             if (name == "rotated")
                 Require(mappedRaster.BoardPixelWidth < mappedRaster.BoardPixelHeight,
                     "A 90-degree board rotation did not exchange the source axes' physical pixel requirements.");
-            double markerError = MarkerPositionError(mappedPixels, reference);
+            var expectedMarker = reference.Transform(marker);
+            var mappedMarker = MarkerCentroid(mappedPixels, reference);
+            double markerError = Math.Sqrt(Math.Pow(mappedMarker.X - expectedMarker.X * width, 2) +
+                Math.Pow(mappedMarker.Y - expectedMarker.Y * height, 2));
             Require(markerError < 2,
                 $"The {name} board moved a known logical marker {markerError:F2} pixels away from its calibrated position.");
             Require(new[] { 0, width - 1, (height - 1) * width, width * height - 1 }
@@ -249,6 +261,10 @@ public sealed partial class MainWindow
             Point2[] unit = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
             corners ??= [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
             created.SetDisplayAspect(16d / 9);
+            // A new output now faces projector-upright regardless of corner order.
+            // Request each fixture's own facing so the rotated board stays rotated.
+            created.SetBoardFacingDegrees(BoardOrientation.Heading(
+                corners.Select(point => new Point2(point.X, point.Y)).ToArray(), 16d / 9));
             created.SetBoardSetup(true);
             Require(Math.Abs(created.SetDetectedBoardGrid(corners, Homography.FromFourPoints(unit, unit)) - .01f) < 1e-6,
                 "The reference fixture no longer has its known one-percent calibration guard band.");
@@ -280,23 +296,35 @@ public sealed partial class MainWindow
             return (maximumU, maximumV);
         }
 
-        static double MarkerPositionError(byte[] pixels, Homography map)
+        // Returns the caption's ink-coverage-weighted pixel centroid. Weighting
+        // antialiased edges by coverage makes it independent of raster density
+        // and orientation, unlike counting only fully coloured pixels.
+        static Point2 MarkerCentroid(byte[] pixels, Homography map)
         {
-            var expected = map.Transform(new(.088, .894));
-            double xSum = 0, ySum = 0;
-            int count = 0;
-            // The menu's isolated cyan status dot is a known logical reference.
-            for (int y = (int)(expected.Y * height) - 28; y <= expected.Y * height + 28; y++)
-            for (int x = (int)(expected.X * width) - 28; x <= expected.X * width + 28; x++)
+            // The caption's logical box, clear of the backdrop's border lines.
+            var box = new[] { new Point2(.765, .050), new Point2(.915, .050), new Point2(.915, .088), new Point2(.765, .088) }
+                .Select(point => map.Transform(point)).ToArray();
+            int left = Math.Max(0, (int)(box.Min(point => point.X) * width));
+            int right = Math.Min(width - 1, (int)Math.Ceiling(box.Max(point => point.X) * width));
+            int top = Math.Max(0, (int)(box.Min(point => point.Y) * height));
+            int bottom = Math.Min(height - 1, (int)Math.Ceiling(box.Max(point => point.Y) * height));
+            var blues = new List<int>();
+            for (int y = top; y <= bottom; y++)
+            for (int x = left; x <= right; x++)
+                blues.Add(pixels[(y * width + x) * 4]);
+            blues.Sort();
+            // Most of the box is backdrop; its median blue, plus a small margin
+            // for the backdrop's gentle gradient, is the local background.
+            double background = blues[blues.Count / 2] + 6, ink = AppPalette.AccentSecondary.B;
+            double xSum = 0, ySum = 0, weightSum = 0;
+            for (int y = top; y <= bottom; y++)
+            for (int x = left; x <= right; x++)
             {
-                int offset = (y * width + x) * 4;
-                if (Math.Abs(pixels[offset] - AppPalette.IndicatorOn.B) +
-                    Math.Abs(pixels[offset + 1] - AppPalette.IndicatorOn.G) +
-                    Math.Abs(pixels[offset + 2] - AppPalette.IndicatorOn.R) > 20) continue;
-                xSum += x + .5; ySum += y + .5; count++;
+                double weight = Math.Clamp((pixels[(y * width + x) * 4] - background) / (ink - background), 0, 1);
+                xSum += (x + .5) * weight; ySum += (y + .5) * weight; weightSum += weight;
             }
-            Require(count > 10, "The independently located menu marker was missing from the projected pixels.");
-            return Math.Sqrt(Math.Pow(xSum / count - expected.X * width, 2) + Math.Pow(ySum / count - expected.Y * height, 2));
+            Require(weightSum > 10, "The independently located menu marker was missing from the projected pixels.");
+            return new(xSum / weightSum, ySum / weightSum);
         }
 
         static void Draw(SceneCompositor source, CanvasRenderTarget target, float logicalWidth, float logicalHeight,

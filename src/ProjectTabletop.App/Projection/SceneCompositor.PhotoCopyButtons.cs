@@ -1,5 +1,6 @@
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Text;
+using Microsoft.UI.Text;
 using ProjectTabletop.Interaction;
 using Windows.Foundation;
 
@@ -22,15 +23,17 @@ public sealed partial class SceneCompositor
 
     private static CanvasTextFormat PhotoCopyButtonTextFormat() => new()
         {
-            FontFamily = "Segoe UI", FontSize = 29,
+            FontFamily = "Segoe UI", FontSize = 36, FontWeight = FontWeights.SemiBold,
             HorizontalAlignment = CanvasHorizontalAlignment.Center,
             VerticalAlignment = CanvasVerticalAlignment.Center,
             WordWrapping = CanvasWordWrapping.NoWrap
         };
+    // Centered in the plate like Paint's controls, clear of the bottom
+    // selection track; the camera's label mask uses the same rectangle.
     private static Rect PhotoCopyButtonTextRectangle(BoardButton button)
     {
         var b = button.Bounds;
-        return new(b.X * BoardSurfaceSize + 8, b.Y * BoardSurfaceSize + 8,
-            b.Width * BoardSurfaceSize - 16, 63);
+        return new(b.X * BoardSurfaceSize + 8, b.Y * BoardSurfaceSize + 6,
+            b.Width * BoardSurfaceSize - 16, b.Height * BoardSurfaceSize - 18);
     }
 }

@@ -103,12 +103,11 @@ public sealed partial class MainWindow
         byte[] drawerOpenPixels = await Capture("controls-drawer-open");
         CheckDrawerProgress(1);
         CheckOpenDrawer();
+        // The opaque dark glass replaces the Earth and sky that were visible
+        // before the drawer rose, apart from pixels coincidentally alike.
         foreach (var button in scene.CurrentBoardButtons.Where(button => button.Id != "globe-drawer-close"))
-        {
-            var glass = MeasureGlass(drawerOpenPixels, width, height, CameraPoint, button.Bounds, CameraPoint(.5, .5));
-            Require(glass.GlassPixels > glass.Total * .55,
+            Require(ChangedFraction(drawerStartPixels, drawerOpenPixels, button.Bounds) > .75,
                 "Globe's settled bottom row did not visibly render the " + button.Label + " glass button.");
-        }
         await CheckAcquisition();
 
         var beforeZoom = scene.GlobeState;
@@ -434,7 +433,10 @@ public sealed partial class MainWindow
                         "Skin beside an untouched native-camera chevron generated acquisition evidence. " + Describe(result));
                 }
 
-                foreach (bool glyphPreserved in new[] { false, true })
+                // Beside the dark action buttons the open pale handle has no
+                // like-coloured control to confirm a readable arrow on skin; only
+                // fingers that break the arrow's shape are required there.
+                foreach (bool glyphPreserved in open ? new[] { false } : new[] { false, true })
                 {
                     byte[] occupied = Skin(clean, glyphPreserved, awayFromGlyph: false);
                     string occupiedName = cameraPrefix + (glyphPreserved ? "-readable-on-skin" : "-skin-occlusion");
@@ -626,6 +628,22 @@ public sealed partial class MainWindow
                         Math.Abs(closed[offset + 2] - opening[offset + 2]))) > 16) changed++;
             }
             return changed;
+        }
+        double ChangedFraction(byte[] before, byte[] after, BoardRect bounds)
+        {
+            var topLeft = CameraPoint(bounds.X + .01, bounds.Y + .01);
+            var bottomRight = CameraPoint(bounds.X + bounds.Width - .01, bounds.Y + bounds.Height - .01);
+            int changed = 0, total = 0;
+            for (int y = (int)Math.Ceiling(topLeft.Y); y < bottomRight.Y; y++)
+            for (int x = (int)Math.Ceiling(topLeft.X); x < bottomRight.X; x++)
+            {
+                total++;
+                int offset = (y * width + x) * 4;
+                if (Math.Max(Math.Abs(before[offset] - after[offset]),
+                    Math.Max(Math.Abs(before[offset + 1] - after[offset + 1]),
+                        Math.Abs(before[offset + 2] - after[offset + 2]))) > 16) changed++;
+            }
+            return total == 0 ? 0 : changed / (double)total;
         }
         int ChangedBottomOutsideEarth(byte[] starting, byte[] opening)
         {

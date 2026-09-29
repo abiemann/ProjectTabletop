@@ -41,7 +41,9 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private static void DrawGlassPanel(CanvasDrawingSession ds, Rect rect, bool illuminated = false)
+    // An optional interior (a menu preview) sits beneath the sheen and rim.
+    private static void DrawGlassPanel(CanvasDrawingSession ds, Rect rect, bool illuminated = false,
+        Action<Rect, float>? interior = null)
     {
         const float radius = 19;
         ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 6, rect.Width, rect.Height), radius, radius,
@@ -64,6 +66,7 @@ public sealed partial class SceneCompositor
             new() { Position = 1, Color = ThemeColor(13, 24, 39) }
         ]) { StartPoint = new((float)rect.X, (float)rect.Y), EndPoint = new((float)rect.X + 30, (float)rect.Bottom) };
         ds.FillRoundedRectangle(inside, radius - 2, radius - 2, glass);
+        interior?.Invoke(inside, radius - 2);
         using var clip = CanvasGeometry.CreateRoundedRectangle(ds.Device, inside, radius - 2, radius - 2);
         using (ds.CreateLayer(1, clip))
         {
@@ -93,9 +96,10 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private static void DrawButtonSurface(CanvasDrawingSession ds, Rect rect, bool hovered)
+    private static void DrawButtonSurface(CanvasDrawingSession ds, Rect rect, bool hovered,
+        Action<Rect, float>? interior = null)
     {
-        DrawGlassPanel(ds, rect, hovered);
+        DrawGlassPanel(ds, rect, hovered, interior);
         var lamp = new Rect(rect.X + 11, rect.Y + rect.Height / 2 - 21, 3, 42);
         if (hovered)
             ds.FillRoundedRectangle(new Rect(lamp.X - 4, lamp.Y - 3, 11, 48), 5, 5,

@@ -506,6 +506,7 @@ public sealed partial class SceneCompositor : IDisposable
         lock (_gate)
         {
             if (_disposed) return;
+            PrepareMenuPreviews(ds.Device);
             if (_blackOutput) return;
             var output = FitDisplay(canvasWidth, canvasHeight, preview);
 
@@ -878,6 +879,7 @@ public sealed partial class SceneCompositor : IDisposable
             DisposeMonopolyEntranceLayers();
             _globePreviewTarget?.Dispose();
             _globePreviewTarget = null;
+            DisposeMenuPreviews();
             DisposeGlobeRenderer();
             _blackjackFlightTarget?.Dispose();
             _blackjackFlightTarget = null;
