@@ -36,6 +36,10 @@ public sealed partial class BoardSession
     {
         ArgumentNullException.ThrowIfNull(heldIds);
         if (frameTime > now || now - frameTime > ObservationLifetime) return [];
+        // Like any camera frame, hold evidence advances timed presentations.
+        AdvanceBlackjackPresentation(now);
+        AdvanceMonopolyPresentation(now);
+        AdvanceGlobeDrawer(now);
         var holdButtons = Buttons.Where(button => button.IsHold && button.Enabled)
             .ToDictionary(button => button.Id);
         var heldPlaces = heldIds.Where(holdButtons.ContainsKey).Select(id => holdButtons[id].Bounds).ToHashSet();

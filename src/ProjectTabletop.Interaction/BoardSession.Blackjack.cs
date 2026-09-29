@@ -170,14 +170,17 @@ public sealed partial class BoardSession
         }
         else
         {
+            // Round actions are long-press hold buttons: each acts once after a
+            // second of covered caption, again only after the fingers lift.
             string[] ids = ["hit", "stand", "double", "split"];
             string[] labels = ["Hit", "Stand", "Double", "Split"];
             for (int i = 0; i < ids.Length; i++)
-                Add("bj-" + ids[i], labels[i], new(.08 + i * .215, .775, .195, .095));
+                Add("bj-" + ids[i], labels[i], new(.08 + i * .215, .775, .195, .095), BoardButtonHold.Once);
         }
         return result.AsReadOnly();
 
-        void Add(string id, string label, BoardRect bounds) => result.Add(new(id, label, bounds,
-            BoardScreen.Blackjack, _blackjackPresentationUntil is null && game.AvailableActions.Contains(id)));
+        void Add(string id, string label, BoardRect bounds, BoardButtonHold hold = BoardButtonHold.None) =>
+            result.Add(new(id, label, bounds, BoardScreen.Blackjack,
+                _blackjackPresentationUntil is null && game.AvailableActions.Contains(id), hold));
     }
 }

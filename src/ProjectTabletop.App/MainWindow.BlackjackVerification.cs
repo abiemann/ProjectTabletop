@@ -75,23 +75,24 @@ public sealed partial class MainWindow
             "The opening cards are not visibly rendered on the table.");
         await Save("player-turn");
 
+        // Round actions are long-press hold buttons: pinches, held or fresh, never act on them.
         await Pinch("bj-hit", 2);
-        Require(scene.BlackjackState.Hands.Single().Cards.Count == 2,
-            "Holding the deal pinch also hit the player hand.");
         await Pinch("bj-hit", 3);
-        Require(scene.BlackjackState.Hands.Single().Total == 18 && scene.BlackjackState.Hands.Single().Cards.Count == 3,
-            "A fresh hit gesture did not deal exactly one card.");
+        Require(scene.BlackjackState.Hands.Single().Cards.Count == 2,
+            "A pinch hit the long-press Hit button.");
+        Require(scene.ActivateBlackjackButton("bj-hit") &&
+            scene.BlackjackState.Hands.Single().Total == 18 && scene.BlackjackState.Hands.Single().Cards.Count == 3,
+            "Hit did not deal exactly one card.");
         scene.ClearHandTips(resetInput: false);
         await Task.Delay(760); // Inspect the settled hand after its HIT card flies in.
         var hit = DrawPreview(scene);
         Require(DifferentPixels(player, hit) > 1000, "Hit changed the model but left an old table texture visible.");
         await Save("player-hit");
         await Pinch("bj-stand", 3);
-        Require(scene.BlackjackState.Phase == BlackjackPhase.PlayerTurn,
-            "Moving the held hit pinch onto Stand ended the turn.");
-
         await Pinch("bj-stand", 4);
-        Require(scene.BlackjackState.Phase == BlackjackPhase.DealerTurn &&
+        Require(scene.BlackjackState.Phase == BlackjackPhase.PlayerTurn,
+            "A pinch stood on the long-press Stand button.");
+        Require(scene.ActivateBlackjackButton("bj-stand") && scene.BlackjackState.Phase == BlackjackPhase.DealerTurn &&
             scene.CurrentBoardButtons.Where(button => button.Id != "menu").All(button => !button.Enabled),
             "The dealer turn retained an enabled player action.");
         scene.ClearHandTips(resetInput: false);

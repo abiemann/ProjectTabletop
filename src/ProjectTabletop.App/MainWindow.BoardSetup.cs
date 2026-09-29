@@ -55,7 +55,7 @@ public sealed partial class MainWindow
     private const int BoardSetupSpotCount = BoardRegistration.SpotCount;
     private const int CenterCheckSpotIndex = BoardSetupSpotCount - 1;
 
-    private enum BoardSetupPhase { Inactive, Switching, ScanAmbient, ScanWhite, MeasureSpots, GridReady, Failed }
+    private enum BoardSetupPhase { Inactive, Switching, ScanAmbient, ScanWhite, ShowCorners, MeasureSpots, GridReady, Failed }
 
     private sealed record BoardPreviewState(BoardDetection Detection, int Width, int Height,
                                             DateTimeOffset Timestamp);
@@ -247,10 +247,11 @@ public sealed partial class MainWindow
         if (_outputOperation.CurrentCount == 0) return;
         var phase = (BoardSetupPhase)Volatile.Read(ref _boardSetupPhase);
         if (phase is not (BoardSetupPhase.ScanAmbient or BoardSetupPhase.ScanWhite or
-                          BoardSetupPhase.MeasureSpots)) return;
+                          BoardSetupPhase.ShowCorners or BoardSetupPhase.MeasureSpots)) return;
         var phaseStarted = Interlocked.Read(ref _boardPhaseStartedTick);
         // Let the projector and Android Webcam exposure settle after each scene change.
-        if (phaseStarted == 0 || Stopwatch.GetElapsedTime(phaseStarted, tick) < TimeSpan.FromMilliseconds(900))
+        var settle = phase == BoardSetupPhase.ShowCorners ? SetupCornersSettle : TimeSpan.FromMilliseconds(900);
+        if (phaseStarted == 0 || Stopwatch.GetElapsedTime(phaseStarted, tick) < settle)
             return;
         var previous = Interlocked.Read(ref _lastBoardDetectTick);
         if (previous != 0 && Stopwatch.GetElapsedTime(previous, tick) < TimeSpan.FromMilliseconds(200))
@@ -292,6 +293,8 @@ public sealed partial class MainWindow
                         frame.Bgra);
                     DispatcherQueue.TryEnqueue(() => ProcessWhiteScan(frame, board, field, generation));
                 }
+                else if (phase == BoardSetupPhase.ShowCorners)
+                    DispatcherQueue.TryEnqueue(() => ProcessSetupCornersShown(frame, generation));
                 else if (whiteReference is not null && whiteReference.Width == frame.Width &&
                          whiteReference.Height == frame.Height && whiteReference.Stride == frame.Stride)
                 {
@@ -472,6 +475,13 @@ public sealed partial class MainWindow
         _projectorField = field;
         Volatile.Write(ref _latestBoardPreview,
             new BoardPreviewState(_physicalBoard, frame.Width, frame.Height, frame.Timestamp));
+        _boardSetupDiagnostic = null;
+        if (!TryShowSetupCorners(frame, field, _physicalBoard)) BeginRegistrationSpots(frame);
+        if (_frozenFrame is null) CameraCanvas.Invalidate();
+    }
+
+    private void BeginRegistrationSpots(CameraFrame frame)
+    {
         Volatile.Write(ref _whiteBoardReference, frame);
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.Switching);
         _scene.ShowBoardCalibrationSpot(0);
@@ -546,6 +556,7 @@ public sealed partial class MainWindow
             _boardProjectionWarning = ProjectionBoundaryWarning(corners);
             _boardGridInset = _scene.CompleteBoardSetup(corners, map);
             RememberBoardFacing();
+            SaveCameraAlignment(frame, map);
             Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.GridReady);
             if (_ambientBoard is not null && !_ambientRecoveredFromPrior &&
                 _camera.ActiveDeviceId is { } cameraId && _outputDisplayId is { } displayId)
@@ -732,6 +743,7 @@ public sealed partial class MainWindow
                     ? "Ambient edges unavailable; white-only scan is finding the cardboard and projector field."
                     : $"White light is cross-checking {(_ambientRecoveredFromPrior ? "three inferred" : "four")} " +
                       "ambient cardboard edges and projector field."),
+            BoardSetupPhase.ShowCorners => "Cardboard corners found. Marking them before alignment. Keep the cardboard still.",
             BoardSetupPhase.MeasureSpots => _boardSetupDiagnostic ??
                 $"{(_whiteOnlyFallback ? "White-only scan" : _whiteEdgeUnavailable
                     ? "White edge unavailable; using trusted ambient corners"

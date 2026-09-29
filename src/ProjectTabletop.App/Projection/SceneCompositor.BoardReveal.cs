@@ -17,15 +17,20 @@ public sealed partial class SceneCompositor
     private bool _boardRevealInputPending;
 
     public sealed record BoardRevealDiagnostics(bool Active, double Progress, double DurationMilliseconds,
-        double[] Center);
+        double[] Center, double FlairMilliseconds = 0);
 
     public bool BoardRevealActive
     {
         get { lock (_gate) return IsBoardRevealActive; }
     }
 
-    private double BoardRevealProgress => _boardRevealStartedAt is { } started
-        ? Math.Clamp((_boardRevealClock() - started).TotalMilliseconds / BoardRevealDuration.TotalMilliseconds, 0, 1)
+    private double BoardRevealElapsedMilliseconds => _boardRevealStartedAt is { } started
+        ? (_boardRevealClock() - started).TotalMilliseconds : double.PositiveInfinity;
+
+    // The corner flair plays first; the reveal proper then runs for its own duration.
+    private double BoardRevealProgress => _boardRevealStartedAt is not null
+        ? Math.Clamp((BoardRevealElapsedMilliseconds - CurrentFlairDuration.TotalMilliseconds) /
+            BoardRevealDuration.TotalMilliseconds, 0, 1)
         : 1;
 
     private bool IsBoardRevealActive => _boardRevealStartedAt is not null && BoardRevealProgress < 1;
@@ -33,7 +38,8 @@ public sealed partial class SceneCompositor
     public BoardRevealDiagnostics GetBoardRevealDiagnostics()
     {
         lock (_gate) return new(IsBoardRevealActive, BoardRevealProgress,
-            BoardRevealDuration.TotalMilliseconds, [_boardRevealCenter.X, _boardRevealCenter.Y]);
+            BoardRevealDuration.TotalMilliseconds, [_boardRevealCenter.X, _boardRevealCenter.Y],
+            CurrentFlairDuration.TotalMilliseconds);
     }
 
     /// <summary>Commit a validated final center measurement and reveal the selected scene atomically.</summary>
@@ -45,12 +51,13 @@ public sealed partial class SceneCompositor
                 throw new InvalidOperationException("Complete the center registration spot before revealing the board.");
             var center = BoardCalibrationSpotPosition(BoardCalibrationSpotCount - 1);
             var inset = SetDetectedBoardGrid(projectorCorners, cameraMap);
+            _revealFlairAnimated = _setupFlairCorners is null;
             SetBoardSetup(false);
             _boardRevealCenter = center;
             _boardRevealStartedAt = _boardRevealClock();
             _boardRevealInputPending = true;
             if (_boardSession.Screen == BoardScreen.Monopoly)
-                StartMonopolyEntrance(_monopolyClock() + BoardRevealDuration);
+                StartMonopolyEntrance(_monopolyClock() + CurrentFlairDuration + BoardRevealDuration);
             return inset;
         }
     }
@@ -99,6 +106,8 @@ public sealed partial class SceneCompositor
         using var outputLayer = ds.CreateLayer(1, output);
         ds.FillRectangle(output, Colors.White);
         ds.FillCircle(center, radius, Colors.Black);
+        // The corner arrows and test strips fade as the reveal begins.
+        DrawBoardFlair(ds, output, BoardRevealElapsedMilliseconds, (float)Math.Clamp(1 - milliseconds / 450, 0, 1));
 
         float scale = Ease((milliseconds - 100) / 1200);
         if (scale <= 0) return true;

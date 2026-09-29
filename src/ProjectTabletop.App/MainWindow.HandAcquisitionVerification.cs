@@ -202,10 +202,17 @@ public sealed partial class MainWindow
         now += TimeSpan.FromMilliseconds(600);
         Draw();
         ready = scene.GetHandAcquisitionContext(now)!;
+        // Player-turn actions are long-press buttons and stay unlit; Exit keeps gesture assistance.
         scene.CompleteHandAcquisition(ready, [hint with { ObservedAt = now }], [], now);
-        Require(IsWhite(Draw(), center), "Player-turn controls did not allow assistance.");
+        Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && !IsWhite(Draw(), center),
+            "A long-press player action was lit.");
+        var exitCenter = BoardPoint(.15, .10);
+        var exitHint = hint with { SearchBounds = new(exitCenter.X - 140, Math.Max(0, exitCenter.Y - 140), 280, 280),
+            Center = exitCenter, ObservedAt = now };
+        scene.CompleteHandAcquisition(ready, [exitHint], [], now);
+        Require(IsWhite(Draw(), exitCenter), "Player-turn Exit did not allow assistance.");
         Require(scene.ActivateBlackjackButton("bj-hit"), "The fixture could not HIT.");
-        Require(!IsWhite(Draw(), center) && scene.GetHandAcquisitionContext(now) is { ObserveMotion: false },
+        Require(!IsWhite(Draw(), exitCenter) && scene.GetHandAcquisitionContext(now) is { ObserveMotion: false },
             "A card flight kept the obsolete light or enabled motion scanning.");
         now += TimeSpan.FromMilliseconds(800);
         Draw(); // Observe the completed HIT before requesting its new control template.
@@ -214,6 +221,18 @@ public sealed partial class MainWindow
         Draw();
         ready = scene.GetHandAcquisitionContext(now)!;
         Require(ready.ObserveMotion, "Motion watching did not recover after the HIT animation.");
+        // Finish the round so later checks use the betting row's gesture controls.
+        Require(scene.ActivateBlackjackButton("bj-stand"), "The fixture could not stand.");
+        for (int step = 0; step < 20 && scene.BlackjackState.Phase != BlackjackPhase.RoundOver; step++)
+        {
+            now += TimeSpan.FromMilliseconds(400);
+            Draw();
+        }
+        Require(scene.BlackjackState.Phase == BlackjackPhase.RoundOver, "The dealer fixture did not settle.");
+        Draw(); scene.GetHandAcquisitionContext(now);
+        now += TimeSpan.FromMilliseconds(600);
+        Draw();
+        ready = scene.GetHandAcquisitionContext(now)!;
         scene.ShowBoardMenu();
         scene.CompleteHandAcquisition(ready, [hint with { ObservedAt = now }], [], now);
         Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null },

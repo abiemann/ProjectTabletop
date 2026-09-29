@@ -107,7 +107,8 @@ public sealed partial class MainWindow
         MeasuredBoardShortSideCentimeters = OptionalNumber(MeasuredBoardShortSideNumberBox.Value),
         MeasuredBoardLongSideCentimeters = OptionalNumber(MeasuredBoardLongSideNumberBox.Value),
         EnableDisplayAudio = _displayAudioRequested,
-        BoardFacingDegrees = _boardFacingDegrees
+        BoardFacingDegrees = _boardFacingDegrees,
+        LastAlignment = _cameraAlignment
     };
 
     private static double? OptionalNumber(double value) => double.IsNaN(value) ? null : value;
@@ -185,6 +186,7 @@ public sealed partial class MainWindow
         _loadingProjectionProfile = false;
         _displayAudioRequested = profile.EnableDisplayAudio;
         _boardFacingDegrees = profile.BoardFacingDegrees;
+        _cameraAlignment = profile.LastAlignment is { IsValid: true } alignment ? alignment : null;
         _scene.SetBoardFacingDegrees(_boardFacingDegrees);
         UpdateBoardFacingStatus();
         UpdateBoardSizeEstimate();

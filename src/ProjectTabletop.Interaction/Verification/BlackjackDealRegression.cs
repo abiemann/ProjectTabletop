@@ -76,10 +76,11 @@ internal static class BlackjackDealRegression
         Require(!board.ActivateButton("bj-hit", Time(200)) && !board.ActivateButton("bj-stand", Time(250)) &&
             board.Update([Pinch(hit, 1, 300)], Time(300), Time(300)) is null && board.HoveredButtonIds.Count == 0,
             "A pointer/pinch or hover passed the presentation lock.");
-        var hand = Fingers(hit);
-        board.Update([hand], Time(400), Time(400));
-        board.Update([hand], Time(500), Time(500));
-        Require(board.FingerSelectionFeedback.Count == 0, "Disabled button armed a finger gesture.");
+        // Round actions are long-press buttons: holding a locked Hit does nothing
+        // and does not count toward a hold once the controls return.
+        for (int time = 300; time <= 900; time += 100)
+            Require(board.ObserveHeldButtons(["bj-hit"], Time(time), Time(time)).Count == 0,
+                "A hold acted through the presentation lock.");
         board.HoldBlackjackPresentationUntil(Time(600));
         Require(!board.ActivateButton("bj-hit", Time(700)), "A shorter hold shortened the presentation.");
         Require(!board.TickBlackjack(Time(999)) && !hit.Enabled && !Button(board, "bj-hit").Enabled,
@@ -89,25 +90,22 @@ internal static class BlackjackDealRegression
         Require(Button(board, "bj-hit").Enabled, "The supplied deadline did not release controls.");
         Require(board.Update([Pinch(hit, 2, 900)], Time(1001), Time(1001)) is null,
             "An unseen pinch begun during the hold fired after it ended.");
-        Require(board.Update([Pinch(hit, 3, 1010) with { SelectionFrameTime = Time(950) }], Time(1010), Time(1010)) is null,
-            "A disabled-period pointing anchor survived presentation release.");
-        var separated = hand with { FingersTogether = false, IndexFingerSeparated = true };
-        board.Update([separated], Time(1020), Time(1020));
-        Require(board.Update([separated], Time(1110), Time(1110)) is null && board.BlackjackState.Hands[0].Cards.Count == 2,
-            "Fingers armed while disabled selected immediately on release.");
-        board.Update([hand], Time(1120), Time(1120));
-        board.Update([hand], Time(1220), Time(1220));
-        board.Update([separated], Time(1240), Time(1240));
-        Require(board.Update([separated], Time(1330), Time(1330))?.ButtonId == "bj-hit",
-            "The hold blocked a fresh finger gesture after release.");
+        for (int time = 1010; time < 2010; time += 100)
+            Require(board.ObserveHeldButtons(["bj-hit"], Time(time), Time(time)).Count == 0 &&
+                board.BlackjackState.Hands[0].Cards.Count == 2,
+                "Hold evidence from the locked period shortened the hold after release.");
+        Require(board.ObserveHeldButtons(["bj-hit"], Time(2010), Time(2010)).SequenceEqual(["bj-hit"]) &&
+            board.BlackjackState.Hands[0].Cards.Count == 3, "A fresh one-second hold after release did not hit.");
 
         var noTick = Board();
         noTick.ActivateButton("bj-deal", Time(100));
         noTick.HoldBlackjackPresentationUntil(Time(500));
         Require(noTick.ActivateButton("bj-hit", Time(500)), "Pointer time alone did not release the presentation.");
         noTick.HoldBlackjackPresentationUntil(Time(900));
-        Require(noTick.Update([Pinch(Button(noTick, "bj-hit"), 10, 901)], Time(901), Time(901))?.ButtonId == "bj-hit",
-            "Camera update time alone did not release the presentation for a fresh pinch.");
+        for (int time = 901; time < 1901; time += 100)
+            noTick.ObserveHeldButtons(["bj-hit"], Time(time), Time(time));
+        Require(noTick.ObserveHeldButtons(["bj-hit"], Time(1901), Time(1901)).SequenceEqual(["bj-hit"]),
+            "Camera evidence time alone did not release the presentation for a fresh hold.");
     }
 
     private static void CheckLifecycleAndDealer()

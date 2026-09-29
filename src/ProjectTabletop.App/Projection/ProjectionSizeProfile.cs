@@ -3,6 +3,23 @@ using ProjectTabletop.Calibration;
 
 namespace ProjectTabletop.App.Projection;
 
+/// <param name="CameraToProjector">Row-major 3 × 3 map from camera pixels to normalized projector coordinates.</param>
+internal sealed record CameraProjectorAlignment(string CameraDeviceId, int Width, int Height, double[] CameraToProjector)
+{
+    [JsonIgnore]
+    public bool IsValid => !string.IsNullOrEmpty(CameraDeviceId) && Width > 0 && Height > 0 &&
+        CameraToProjector is { Length: 9 } matrix && matrix.All(double.IsFinite);
+
+    public (double X, double Y)? Transform(double x, double y)
+    {
+        var m = CameraToProjector;
+        double divisor = m[6] * x + m[7] * y + m[8];
+        if (!double.IsFinite(divisor) || Math.Abs(divisor) < 1e-12) return null;
+        double u = (m[0] * x + m[1] * y + m[2]) / divisor, v = (m[3] * x + m[4] * y + m[5]) / divisor;
+        return double.IsFinite(u) && double.IsFinite(v) ? (u, v) : null;
+    }
+}
+
 // Values belong to one output device and mode, never to a projector brand.
 internal sealed record ProjectionSizeProfile
 {
@@ -12,9 +29,13 @@ internal sealed record ProjectionSizeProfile
     public double? MeasuredBoardLongSideCentimeters { get; init; }
     public bool EnableDisplayAudio { get; init; } = true;
     public double? BoardFacingDegrees { get; init; }
+    // The last registration's camera-to-projector map on this output. It only
+    // places the next scan's corner flair before that scan's own dots measure.
+    public CameraProjectorAlignment? LastAlignment { get; init; }
 
     public bool IsValid => ValidOptics && ValidMeasuredInputs && (BoardFacingDegrees is null ||
-        double.IsFinite(BoardFacingDegrees.Value) && BoardFacingDegrees is >= 0 and < 360);
+        double.IsFinite(BoardFacingDegrees.Value) && BoardFacingDegrees is >= 0 and < 360) &&
+        (LastAlignment is null || LastAlignment.IsValid);
 
     // A supplied board reference does not depend on an optical estimate. Keep
     // only its two editable inputs in the persisted profile, not derived state.

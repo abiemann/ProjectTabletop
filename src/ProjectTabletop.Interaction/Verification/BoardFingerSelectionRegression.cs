@@ -67,14 +67,15 @@ internal static class BoardFingerSelectionRegression
         Require(At(board, 380, opened)?.ButtonId == button.Id,
             "A small opening motion outside the visual edge lost the bounded target anchor.");
 
+        // Adjacent bet chips: 50 spans .36-.48 and 100 spans .50-.62.
         board = new BoardSession(new BlackjackGame(initialShoe: Cards(8, 6, 8, 10)));
-        board.ShowBlackjack(Time(0)); board.ActivateButton("bj-deal", Time(10));
-        var hit = Together(Button(board, "bj-hit")) with { FingerAim = new(.273, .82) };
-        At(board, 100, hit); At(board, 200, hit);
-        var neighboringStand = Apart(hit) with { FingerAim = new(.300, .82) };
-        Require(At(board, 300, neighboringStand) is null && At(board, 380, neighboringStand) is null &&
-            board.BlackjackState.Phase == BlackjackPhase.PlayerTurn && board.BlackjackState.Hands[0].Cards.Count == 2,
-            "Opening across a neighboring target fired HIT or transferred its anchor to STAND.");
+        board.ShowBlackjack(Time(0));
+        var bet = Together(Button(board, "bj-bet-50")) with { FingerAim = new(.478, .82) };
+        At(board, 100, bet); At(board, 200, bet);
+        var neighboringBet = Apart(bet) with { FingerAim = new(.505, .82) };
+        Require(At(board, 300, neighboringBet) is null && At(board, 380, neighboringBet) is null &&
+            board.BlackjackState is { Phase: BlackjackPhase.Betting, SelectedBet: 25 },
+            "Opening across a neighboring target selected 50 or transferred its anchor to 100.");
 
         board = PhotoCopy(); var hand = Together(Button(board, "capture-again"));
         At(board, 100, hand); At(board, 200, hand);
@@ -195,14 +196,23 @@ internal static class BoardFingerSelectionRegression
         Require(Select(board, Together(Button(board, "bj-deal")), 100)?.ButtonId == "bj-deal",
             "Index separation failed to deal blackjack.");
         Require(board.ActivateButton("bj-split", Time(500)), "The split-hand fixture could not split.");
+        // Round actions are long-press buttons: the finger gesture never selects them.
         var hit = Together(Button(board, "bj-hit"));
-        Require(Select(board, hit, 600)?.ButtonId == "bj-hit" && board.BlackjackState.ActiveHandIndex == 1 &&
+        Require(Select(board, hit, 600) is null && board.BlackjackState.Hands[0].Cards.Count == 2,
+            "The finger gesture selected the long-press Hit button.");
+        IReadOnlyList<string> Hold(int time) => board.ObserveHeldButtons(["bj-hit"], Time(time), Time(time));
+        for (int time = 1000; time < 2000; time += 100) Require(Hold(time).Count == 0, "Hit acted before a second.");
+        Require(Hold(2000).SequenceEqual(["bj-hit"]) && board.BlackjackState.ActiveHandIndex == 1 &&
             board.BlackjackState.Hands[0].IsBust && board.BlackjackState.Hands[1].Cards.Count == 2,
-            "HIT did not bust the first split hand and move to the second.");
-        Require(At(board, 980, Apart(hit)) is null && At(board, 1060, Apart(hit)) is null,
-            "A held separated index also hit the second hand.");
-        Require(Select(board, hit, 1160)?.ButtonId == "bj-hit" && board.BlackjackState.Hands[1].Cards.Count == 3,
-            "Rejoining the four fingers did not rearm HIT for the next split hand.");
+            "A long-press HIT did not bust the first split hand and move to the second.");
+        for (int time = 2100; time <= 3500; time += 100)
+            Require(Hold(time).Count == 0 && board.BlackjackState.Hands[1].Cards.Count == 2,
+                "Fingers still resting on Hit also hit the second hand.");
+        for (int time = 3600; time <= 4000; time += 100)
+            board.ObserveHeldButtons([], Time(time), Time(time));
+        for (int time = 4100; time < 5100; time += 100) Hold(time);
+        Require(Hold(5100).SequenceEqual(["bj-hit"]) && board.BlackjackState.Hands[1].Cards.Count == 3,
+            "Lifting and holding again did not rearm HIT for the next split hand.");
 
         board = new BoardSession(new BlackjackGame(initialShoe: Cards(10, 10, 8, 7)));
         board.ShowBlackjack(Time(0)); var deal = Together(Button(board, "bj-deal"));

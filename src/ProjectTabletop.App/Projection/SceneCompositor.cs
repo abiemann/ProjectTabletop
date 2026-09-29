@@ -325,6 +325,7 @@ public sealed partial class SceneCompositor : IDisposable
             _blackOutput = false;
             _boardGrid = null;
             _boardCalibrationSpot = -1;
+            _setupFlairCorners = null;
         }
     }
 
@@ -531,6 +532,7 @@ public sealed partial class SceneCompositor : IDisposable
                 else
                 {
                     ds.FillRectangle(output, Colors.White);
+                    DrawSetupFlair(ds, output);
                     if (_boardCalibrationSpot >= 0)
                     {
                         var point = BoardCalibrationSpotPosition(_boardCalibrationSpot);

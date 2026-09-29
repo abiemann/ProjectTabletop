@@ -57,6 +57,18 @@ public sealed partial class MainWindow
         Require(ReferenceEquals(menuSelection, scene.GetLastHandBoardSelection()),
             "Held separation overwrote the menu selection route after navigation.");
 
+        // Same-target rearming, on a gesture chip before the round starts.
+        var chip = AtButton("bj-bet-10");
+        await Arm(chip);
+        await Select(chip, "bj-bet-10", () => scene.BlackjackState.SelectedBet == 10);
+        var chipSelection = scene.GetLastHandBoardSelection();
+        for (int i = 0; i < 4; i++) await Send(Separate(chip));
+        Require(scene.BlackjackState.SelectedBet == 10 && ReferenceEquals(chipSelection, scene.GetLastHandBoardSelection()),
+            "Keeping the index apart repeated the bet selection.");
+        // Rearm at precisely the same point without folding or moving away.
+        await Arm(chip);
+        await Select(chip, "bj-bet-10", () => !ReferenceEquals(chipSelection, scene.GetLastHandBoardSelection()));
+
         var deal = AtButton("bj-deal");
         var dealBounds = scene.CurrentBoardButtons.Single(button => button.Id == "bj-deal").Bounds;
         await Send(deal);
@@ -76,19 +88,14 @@ public sealed partial class MainWindow
         Require(ReferenceEquals(dealSelection, scene.GetLastHandBoardSelection()),
             "A held gesture overwrote the successful Deal route.");
 
+        // Round actions are long-press buttons: grouped fingers never arm or select Hit.
         var hit = AtButton("bj-hit");
-        await Arm(hit);
-        await Select(hit, "bj-hit", () => scene.BlackjackState.Hands.Single().Cards.Count == 3);
-        var hitSelection = scene.GetLastHandBoardSelection();
-        for (int i = 0; i < 4; i++) await Send(Separate(hit));
-        Require(scene.BlackjackState.Hands.Single().Cards.Count == 3, "Keeping index apart repeated HIT.");
-        Require(ReferenceEquals(hitSelection, scene.GetLastHandBoardSelection()),
-            "A held gesture overwrote the successful Hit route.");
-        // Rearm at precisely the same point without folding or moving away.
-        await Arm(hit);
-        await Select(hit, "bj-hit", () => scene.BlackjackState.Hands.Single().Cards.Count == 4);
-        Require(scene.BlackjackState.Phase == BlackjackPhase.PlayerTurn, "The repeated HIT fixture ended too early.");
-        Require(new[] { menuHand, deal, hit }.All(hand => hand.ExecuteEventId == 0), "Selection generated a pinch event.");
+        for (int i = 0; i < 3; i++) await Send(hit);
+        for (int i = 0; i < 3; i++) await Send(Separate(hit));
+        Require(scene.CurrentFingerSelectionFeedback.Count == 0 && scene.BlackjackState.Hands.Single().Cards.Count == 2 &&
+            ReferenceEquals(dealSelection, scene.GetLastHandBoardSelection()),
+            "The finger gesture armed or selected the long-press Hit button.");
+        Require(new[] { menuHand, chip, deal, hit }.All(hand => hand.ExecuteEventId == 0), "Selection generated a pinch event.");
         var lastHitSelection = scene.GetLastHandBoardSelection();
         scene.ShowPaint();
         scene.SetHandCursors([], DateTimeOffset.UtcNow);

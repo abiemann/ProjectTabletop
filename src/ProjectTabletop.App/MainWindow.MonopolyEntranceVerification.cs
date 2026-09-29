@@ -286,11 +286,14 @@ public sealed partial class MainWindow
             scanned.ShowBoardCalibrationSpot(SceneCompositor.BoardCalibrationSpotCount - 1);
             scanned.CompleteBoardSetup(Corners(), CameraMap());
             var revealStarted = now;
-            now = revealStarted.AddMilliseconds(1299); Draw(scanned);
+            // The corner flair plays before the reveal proper.
+            var reveal = scanned.GetBoardRevealDiagnostics();
+            double revealTotal = reveal.FlairMilliseconds + reveal.DurationMilliseconds;
+            now = revealStarted.AddMilliseconds(revealTotal - 1); Draw(scanned);
             Require(scanned.BoardRevealActive && Frame(scanned) is { ElapsedMilliseconds: 0, LandedTiles: 0, CenterProgress: 0 } &&
-                    scanned.GetMonopolyEntranceDiagnostics().StartedAt == revealStarted.AddMilliseconds(1300),
+                    scanned.GetMonopolyEntranceDiagnostics().StartedAt == revealStarted.AddMilliseconds(revealTotal),
                 "Monopoly pieces progressed before the calibration reveal finished.");
-            now = revealStarted.AddMilliseconds(1300); Draw(scanned);
+            now = revealStarted.AddMilliseconds(revealTotal); Draw(scanned);
             Require(!scanned.BoardRevealActive && scanned.MonopolyEntranceActive && Frame(scanned).ElapsedMilliseconds == 0,
                 "Completing the calibration reveal failed to begin a fresh Monopoly entrance.");
         }
