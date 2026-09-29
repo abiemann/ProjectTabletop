@@ -24,6 +24,7 @@ internal static class HandAcquisitionPresenceRegression
         HandAcquisitionOpticalHistoryRegression.Run();
         HandAcquisitionGoldDealRegression.Run();
         HandAcquisitionShortLabelRegression.Run();
+        HandAcquisitionCompactControlRegression.Run();
         HandAcquisitionLocalContextRegression.Run();
         HandAcquisitionHintRegression.Run();
         RenderedLocalCaptionLoss();

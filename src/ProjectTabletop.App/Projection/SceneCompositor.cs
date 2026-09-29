@@ -253,6 +253,10 @@ public sealed partial class SceneCompositor : IDisposable
             _handFrameTime = acceptVisual ? frameTime : DateTimeOffset.MinValue;
             if (acceptVisual) _lastHandVisualFrameTime = frameTime;
             var shutterContext = PreparePhotoCopyGesture(cursors, frameTime, acceptVisual, photoCopyCaptureBusy);
+            if (_boardSession.Screen == BoardScreen.Paint && acceptVisual &&
+                boardSamples.Any(sample => sample.U is >= 0 and <= 1 && sample.V is >= 0 and <= 1 ||
+                    sample.FingerAim is { U: >= 0 and <= 1, V: >= 0 and <= 1 }))
+                NotePaintUserActivity();
             _boardSession.PaintSaveEnabled = CanSavePaint;
             var selectionResult = _boardSession.Update(boardSamples, frameTime, now);
             if (selectionResult is not null)
@@ -260,7 +264,10 @@ public sealed partial class SceneCompositor : IDisposable
                     previous = selectionResult.Previous.ToString(), current = selectionResult.Current.ToString(),
                     selectionResult.ButtonId, selectionResult.TrackingId, gesture = selectionResult.Gesture.ToString() };
             if (selectionResult is { ButtonId: "paint-save" } && acceptVisual)
+            {
+                NotePaintUserActivity();
                 QueuePaintSaveRequest(frameTime);
+            }
             if (selectionResult is { ButtonId: "photo-save" } && acceptVisual && !photoCopyCaptureBusy &&
                 TryGetPhotoCopyMemoryImage(out var memoryImage))
                 _photoCopyMemorySaveRequest = new(frameTime, memoryImage);
@@ -331,6 +338,7 @@ public sealed partial class SceneCompositor : IDisposable
                 CancelBoardReveal();
                 CancelMonopolyDiceAnimation();
                 CancelMonopolyEntrance();
+                PausePaintIdle();
             }
             _blackOutput = enabled;
             if (enabled) ClearHandSpotlights();
@@ -412,6 +420,7 @@ public sealed partial class SceneCompositor : IDisposable
             if (_calibrationTarget >= 0)
             {
                 CancelMonopolyEntrance();
+                PausePaintIdle();
                 ClearHandSpotlights();
             }
         }
@@ -610,7 +619,7 @@ public sealed partial class SceneCompositor : IDisposable
     {
         // Four-finger aiming is visible on each board. Red pinch feedback stays
         // confined to the gesture tester.
-        if (_boardSetup || _calibrationTarget >= 0 || MonopolyEntranceActive) return;
+        if (_boardSetup || _calibrationTarget >= 0 || MonopolyEntranceActive || HasGlobeDrawerAnimation(_globeClock())) return;
         var now = DateTimeOffset.UtcNow;
         if (_boardMediaClip is not { } clip || _boardCameraMap is null ||
             _handTips.Length == 0 || _handFrameTime > now ||
@@ -852,6 +861,8 @@ public sealed partial class SceneCompositor : IDisposable
         {
             if (_disposed) return;
             CancelMonopolyEntrance();
+            CancelPaintIntroduction();
+            ResetPaintAutomatic();
             _disposed = true;
             foreach (var asset in _overlays.Values.Append(_background).OfType<MediaAsset>().Distinct()) asset.Dispose();
             _overlays.Clear();

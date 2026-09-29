@@ -113,7 +113,7 @@
                         <Button Content="Monopoly" Click="Monopoly_Click" />
                         <TextBlock Text="Choose 2–6 human and AI players, then play on the gold-and-emerald board. Click the laptop table or use the same four-finger selection gesture. Exit offers Save &amp; Exit, Exit without saving, or Cancel; saved games can be resumed." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Globe" Click="Globe_Click" />
-                        <TextBlock Text="Explore a detailed Earth with a distant arrival and slow spin. Zoom and rotate using the board controls or laptop clicks; Exit returns to the menu." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <TextBlock Text="Explore a detailed Earth with a distant arrival and slow spin. Open the left drawer for Exit and zoom controls, using gestures or laptop clicks." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Border Height="1" Background="{StaticResource TabletopPanelBorderBrush}" Margin="0,2" />
                         <TextBlock Text="Background media" FontWeight="SemiBold" />
                         <StackPanel Orientation="Horizontal" Spacing="8">

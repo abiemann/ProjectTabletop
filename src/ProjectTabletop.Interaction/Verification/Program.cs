@@ -53,7 +53,8 @@ static void CheckMenuAndNavigation()
             navigation.ButtonId == button.Id && session.Screen == button.Destination, "Menu pinch opened the wrong application.");
         Require(session.Title == names[index], "The application title is incorrect.");
         Require(session.Buttons.Count >= 1 && (session.Buttons[0].Destination == BoardScreen.Menu ||
-            button.Destination == BoardScreen.Monopoly && session.Buttons[0].Id == "mp-exit"),
+            button.Destination == BoardScreen.Monopoly && session.Buttons[0].Id == "mp-exit" ||
+            button.Destination == BoardScreen.Globe && session.Buttons[0].Id == "globe-drawer-open"),
             "An application lacks a back-to-menu target.");
         if (button.Destination == BoardScreen.Monopoly)
         {
@@ -63,6 +64,15 @@ static void CheckMenuAndNavigation()
             var exit = session.Buttons.Single(item => item.Id == "mp-exit-game");
             Require(Update(session, time + 321, Over(exit, ++eventId, time + 321))?.Current == BoardScreen.Menu,
                 "The drawer's Exit Game target did not return to the launcher.");
+        }
+        else if (button.Destination == BoardScreen.Globe)
+        {
+            Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is
+                { Current: BoardScreen.Globe, ButtonId: "globe-drawer-open" } && session.GlobeDrawerOpen,
+                "The Globe chevron did not open its drawer.");
+            var exit = session.Buttons.Single(item => item.Id == "globe-exit");
+            Require(Update(session, time + 321, Over(exit, ++eventId, time + 321))?.Current == BoardScreen.Menu,
+                "The Globe drawer's Exit target did not return to the launcher.");
         }
         else
             Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20))?.Current == BoardScreen.Menu,

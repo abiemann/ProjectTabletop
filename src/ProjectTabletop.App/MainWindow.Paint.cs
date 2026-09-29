@@ -48,6 +48,11 @@ public sealed partial class MainWindow
                     }
                     var result = _paintDisturbances.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
                         context, frame.Timestamp, DateTimeOffset.UtcNow);
+#if DEBUG
+                    var diagnostic = new PaintDiagnosticObservation(frame, context, result);
+                    Volatile.Write(ref _lastPaintDiagnostic, diagnostic);
+                    if (result.ConfirmedCandidateCount > 0) Volatile.Write(ref _lastConfirmedPaintDiagnostic, diagnostic);
+#endif
                     var milliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                     DispatcherQueue.TryEnqueue(() =>
                     {

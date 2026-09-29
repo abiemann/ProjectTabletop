@@ -68,6 +68,7 @@ public sealed partial class BoardSession
     {
         AdvanceBlackjackPresentation(now);
         AdvanceMonopolyPresentation(now);
+        AdvanceGlobeDrawer(now);
         var button = Buttons.FirstOrDefault(item => item.Id == id && item.Enabled);
         return button is not null && SelectButton(button, now, pointerAction: true);
     }
@@ -76,6 +77,7 @@ public sealed partial class BoardSession
     {
         AdvanceBlackjackPresentation(now);
         AdvanceMonopolyPresentation(now);
+        AdvanceGlobeDrawer(now);
         BlackjackHit? hit = null;
         BlackjackDeal? deal = null;
         bool openedBoard = false;
@@ -119,6 +121,7 @@ public sealed partial class BoardSession
             ClearBlackjackPresentationHold();
             ClearMonopolyPresentationHold();
             ClearMonopolyDrawerUi();
+            ClearGlobeDrawerUi();
             Screen = button.Destination;
             if (Screen == BoardScreen.Globe) _globe.Start(now);
             Revision++;

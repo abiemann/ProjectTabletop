@@ -46,18 +46,28 @@ public sealed partial class MainWindow
         scene.ShowBoardMenu(); VerifyButtons("Menu");
         scene.ShowHandTrackingTest(); VerifyButtons("Hand-Tracking");
         scene.ShowPhotoCopy(); VerifyButtons("Photo Copy");
-        long selectionId = 770000;
         foreach (var (id, title) in new[] { ("paint", "Paint"), ("monopoly", "Monopoly"), ("globe", "Globe") })
         {
-            scene.ShowBoardMenu();
-            var button = scene.CurrentBoardButtons.Single(button => button.Id == id);
-            await Task.Delay(10);
-            var observedAt = DateTimeOffset.UtcNow;
-            scene.SetHandCursors([new(CameraPoint(button.Bounds.X + button.Bounds.Width / 2,
-                button.Bounds.Y + button.Bounds.Height / 2), observedAt.AddSeconds(1), ++selectionId)], observedAt);
-            Require(scene.CurrentBoardTitle == title, "The navigation fixture could not open " + title + ".");
+            // Acquisition runs on a synthetic presentation clock. Navigation
+            // gestures use wall time and are covered by Interaction verification.
+            switch (id)
+            {
+                case "paint": scene.ShowPaint(); break;
+                case "monopoly": scene.ShowMonopoly(); break;
+                case "globe": scene.ShowGlobe(); break;
+            }
+            Require(scene.CurrentBoardTitle == title, "The acquisition fixture could not open " + title + ".");
             scene.ClearHandTips();
             VerifyButtons(title);
+            if (id == "globe")
+            {
+                globeNow = now;
+                Require(scene.ActivateGlobeButton("globe-drawer-open"), "The Globe drawer fixture could not open.");
+                globeNow += BoardSession.GlobeDrawerOpeningDuration;
+                now = globeNow;
+                scene.TickGlobe(globeNow);
+                VerifyButtons("Globe drawer");
+            }
         }
         scene.ShowBlackjack(); VerifyButtons("Blackjack betting");
         Require(scene.CurrentBoardButtons.Any(button => button.Id == "bj-reset" && button.Label == "Your Chips" &&
@@ -101,7 +111,7 @@ public sealed partial class MainWindow
             untouchedLabelRejectsControlEdgeDisturbanceAcrossBoards = true,
             blackjackExitAndYourChipsIncluded = true, yourChipsAcquiresHeadingInsteadOfBalance = true,
             mediaAndCalibrationInactive = true,
-            globeAllFiveControlsCovered = tested.Count(label => label.StartsWith("Globe/", StringComparison.Ordinal)) == 5,
+            globeClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Globe", StringComparison.Ordinal)) == 5,
             liveHardwareUnchanged = true };
 
         void VerifyButtons(string label)
@@ -209,9 +219,27 @@ public sealed partial class MainWindow
                 // Keep this geometric fixture visibly distinct even from the
                 // gold Deal button. Actual skin/projector contrast is evaluated
                 // in recorded camera captures, not asserted by a painted patch.
-                for (int finger = 0; finger < 4; finger++)
-                    Fill(occupied, (int)center.X - (loneBack ? 107 : 38) + finger * (loneBack ? 55 : 20),
-                        (int)center.Y - height / 2, loneBack ? 49 : 18, height, 75, 95, 185);
+                bool globeArrow = button.Id is "globe-drawer-open" or "globe-drawer-close";
+                if (globeArrow)
+                {
+                    // Obstruct the arrow and >7% of its glass while retaining a
+                    // clean photometric reference around the simulated fingers.
+                    double scale = size * .93 * (1 - inset);
+                    double coveredHeight = Math.Max(trigger.Height, button.Bounds.Height * .42);
+                    double searchedArea = (button.Bounds.Width - .024) * (button.Bounds.Height - .024);
+                    double coveredWidth = Math.Min(Math.Max(trigger.Width + .004, button.Bounds.Width * .40),
+                        .36 * searchedArea / coveredHeight);
+                    int span = (int)Math.Ceiling(coveredWidth * scale);
+                    int stripeHeight = (int)Math.Ceiling(coveredHeight * scale);
+                    int stripeWidth = Math.Max(2, (span - 9) / 4);
+                    for (int finger = 0; finger < 4; finger++)
+                        Fill(occupied, (int)center.X - span / 2 + finger * (stripeWidth + 3),
+                            (int)center.Y - stripeHeight / 2, stripeWidth, stripeHeight, 75, 95, 185);
+                }
+                else
+                    for (int finger = 0; finger < 4; finger++)
+                        Fill(occupied, (int)center.X - (loneBack ? 107 : 38) + finger * (loneBack ? 55 : 20),
+                            (int)center.Y - height / 2, loneBack ? 49 : 18, height, 75, 95, 185);
                 var occupiedTracker = new HandAcquisitionPresenceTracker();
                 var firstArrival = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
                     context, occupiedTracker, now);

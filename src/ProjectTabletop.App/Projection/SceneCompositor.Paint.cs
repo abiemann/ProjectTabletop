@@ -34,19 +34,24 @@ public sealed partial class SceneCompositor
 
     internal sealed record PaintDiagnostics(long SessionRevision, long Revision, long DropCount,
         int ActiveDrops, long SettledDrops, int NativeWidth, int NativeHeight, DateTimeOffset LastDropAt,
-        PaintFluidDiagnostics? Fluid);
+        PaintFluidDiagnostics? Fluid, int PendingIntroductionDrops, DateTimeOffset? IntroductionStartedAt,
+        int PendingIdleStreakDrops, DateTimeOffset? IdleStreakStartedAt, DateTimeOffset? NextIdleStreakAt,
+        DateTimeOffset? LastUserActivityAt, long IdleStreakCount);
 
     internal PaintDiagnostics GetPaintDiagnostics()
     {
         lock (_gate)
         {
             SyncPaintSession();
-            bool active = _paintPendingDrops.Count > 0 || _paintFluid is { IsActive: true };
+            bool active = _paintIntroductionDrops.Count > 0 || _paintIdleStreakDrops.Count > 0 ||
+                _paintPendingDrops.Count > 0 || _paintFluid is { IsActive: true };
             return new(_paintSessionRevision, _paintRevision, _paintDropCount,
                 active ? (int)Math.Min(int.MaxValue, _paintDropCount) : 0, active ? 0 : _paintDropCount,
                 _paintFluid is null ? 0 : (int)_boardRasterPixels.Width,
                 _paintFluid is null ? 0 : (int)_boardRasterPixels.Height,
-                _paintLastDropAt, _paintFluid?.GetDiagnostics());
+                _paintLastDropAt, _paintFluid?.GetDiagnostics(), _paintIntroductionDrops.Count, _paintIntroductionStartedAt,
+                _paintIdleStreakDrops.Count, _paintIdleStreakStartedAt, _paintNextIdleStreakAt,
+                _paintLastUserActivityAt, _paintIdleStreakCount);
         }
     }
 
@@ -77,6 +82,7 @@ public sealed partial class SceneCompositor
                 sourceTime > now + TimeSpan.FromMilliseconds(50) || now - sourceTime > TimeSpan.FromMilliseconds(500) ||
                 sourceTime < _paintLastDropAt || sourceTime == _paintLastDropAt && _paintDropsAtLastTimestamp >= 2)
                 return false;
+            NotePaintUserActivity();
             _paintRecentDrops.RemoveAll(item => sourceTime - item.Time >= TimeSpan.FromMilliseconds(900));
             double aspect = PaintBoardAspect();
             if (_paintRecentDrops.Any(item =>
@@ -86,11 +92,9 @@ public sealed partial class SceneCompositor
             _paintDropsAtLastTimestamp = sourceTime == _paintLastDropAt ? _paintDropsAtLastTimestamp + 1 : 1;
             _paintLastDropAt = sourceTime;
             _paintRecentDrops.Add((boardUv, sourceTime));
-            _paintDropCount++;
-            int seed = (int)(_paintDropCount % int.MaxValue);
-            _paintPendingDrops.Enqueue(new(boardUv, (float)Math.Clamp(radiusUv, .035, .11),
-                PaintPigments[(int)((_paintDropCount - 1) % PaintPigments.Length)], seed));
-            _paintRevision++;
+            long nextDrop = _paintDropCount + 1;
+            QueuePaintDrop(new(boardUv, (float)Math.Clamp(radiusUv, .035, .11),
+                PaintPigments[(int)((nextDrop - 1) % PaintPigments.Length)], (int)(nextDrop % int.MaxValue)));
             return true;
         }
     }
@@ -100,6 +104,8 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             ResetPaintSave();
+            CancelPaintIntroduction();
+            ResetPaintAutomatic();
             DisposePaintResources();
             DisposePaintReference();
             _paintDropCount = 0;
@@ -119,6 +125,7 @@ public sealed partial class SceneCompositor
         if (_paintPreviousScreen == BoardScreen.Paint || _boardSession.Screen == BoardScreen.Paint) ResetPaint();
         _paintSessionRevision = _boardSession.Revision;
         _paintPreviousScreen = _boardSession.Screen;
+        if (_boardSession.Screen == BoardScreen.Paint) SchedulePaintIntroduction();
     }
 
     private void DisposePaintResources()
@@ -135,7 +142,8 @@ public sealed partial class SceneCompositor
         SyncPaintSession();
         if (_boardSession.Screen != BoardScreen.Paint) return 0;
         AdvancePaintFluid(now);
-        long tick = _paintPendingDrops.Count > 0 || _paintFluid is { IsActive: true }
+        long tick = _paintIntroductionDrops.Count > 0 || _paintIdleStreakDrops.Count > 0 ||
+            _paintPendingDrops.Count > 0 || _paintFluid is { IsActive: true }
             ? now.UtcTicks / (TimeSpan.TicksPerSecond / 30) : 0;
         return unchecked(_paintRevision * 1000000007 + tick);
     }
@@ -167,6 +175,7 @@ public sealed partial class SceneCompositor
         }
 
         AdvancePaintFluid(now);
+        AdvancePaintAutomatic(now);
         while (_paintPendingDrops.TryDequeue(out var drop))
             _paintFluid.AddDrop(new((float)drop.Center.X, (float)drop.Center.Y),
                 drop.Radius, drop.Pigment, 1, drop.Seed);

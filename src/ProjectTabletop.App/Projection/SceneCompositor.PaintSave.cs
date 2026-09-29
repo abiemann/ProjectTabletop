@@ -64,6 +64,7 @@ public sealed partial class SceneCompositor
         {
             image = null!;
             if (!CanSavePaint) return false;
+            NotePaintUserActivity();
             _paintSaving = true;
             _paintSaveError = null;
             _paintSavedUntil = default;

@@ -1,6 +1,7 @@
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Brushes;
+using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.Text;
 using Microsoft.UI.Text;
 using ProjectTabletop.App.Projection.GlobeRendering;
@@ -53,7 +54,8 @@ public sealed partial class SceneCompositor
 
     private void DrawGlobeBoard(CanvasDrawingSession ds, GlobeSnapshot state,
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
-        IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback, double boardAspect = 1)
+        IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback, double boardAspect = 1,
+        bool drawerOpen = false, float drawerProgress = 1)
     {
         var renderer = GetGlobeRenderer(ds.Device);
         if (!renderer.Draw(ds, (float)state.Zoom, (float)state.RotationDegrees, boardAspect))
@@ -63,30 +65,127 @@ public sealed partial class SceneCompositor
                 new Rect(140, 395, 720, 80), 24, AppPalette.MutedText);
         }
 
-        DrawGlobeControls(ds, buttons, hovered, selectionFeedback);
+        DrawGlobeControls(ds, buttons, hovered, selectionFeedback, drawerOpen, drawerProgress, boardAspect);
 
-        GlobeText(ds, "NASA EARTH OBSERVATIONS", new Rect(130, 680, 740, 22), 13,
-            ThemeColor(116, 148, 169), true);
+        const string credit = "NASA EARTH OBSERVATIONS";
         var zoomLabel = state.TargetZoom.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "×";
-        GlobeText(ds, zoomLabel + "  ·  SLOW EASTWARD ROTATION", new Rect(130, 705, 740, 25), 15,
+        var zoomCaption = zoomLabel + "  ·  SLOW EASTWARD ROTATION";
+        // Anchor the actual two-line group to the bottom-right, independently
+        // of the drawer. A measured shared width preserves centered captions.
+        double captionWidth = Math.Ceiling(Math.Max(CaptionWidth(credit, 13), CaptionWidth(zoomCaption, 15)));
+        double captionLeft = BoardSurfaceSize - 40 - captionWidth;
+        GlobeText(ds, credit, new Rect(captionLeft, 910, captionWidth, 22), 13,
+            ThemeColor(116, 148, 169), true);
+        GlobeText(ds, zoomCaption, new Rect(captionLeft, 935, captionWidth, 25), 15,
             ThemeColor(150, 190, 216), true);
+
+        double CaptionWidth(string text, float size)
+        {
+            using var format = new CanvasTextFormat
+            {
+                FontFamily = "Segoe UI", FontSize = size, FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = CanvasHorizontalAlignment.Center,
+                VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap
+            };
+            using var layout = new CanvasTextLayout(ds.Device, text, format, BoardSurfaceSize, 25);
+            return layout.DrawBounds.Width;
+        }
     }
 
     private static void DrawGlobeControls(CanvasDrawingSession ds, IReadOnlyList<BoardButton> buttons,
-        IReadOnlyList<string> hovered, IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback)
+        IReadOnlyList<string> hovered, IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback,
+        bool drawerOpen = false, float drawerProgress = 1, double boardAspect = 1)
     {
-        // The control interiors stay opaque as Earth rotates behind them.
         DrawBoardTitle(ds, "GLOBE");
-        GlobeText(ds, "EARTH  /  BLUE MARBLE", new Rect(658, 41, 300, 27), 15,
-            ThemeColor(137, 174, 195), true);
 
-        foreach (var button in buttons)
+        var drawerButtons = buttons.Where(button => !IsGlobeDrawerHandle(button)).ToArray();
+        if (drawerOpen && drawerButtons.Length > 0)
         {
-            DrawGlobeButton(ds, button, button.Enabled && hovered.Contains(button.Id));
-            DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, ThemeColor(24, 104, 124));
+            // Clip the viewport rather than the final row footprint so the
+            // actions visibly rise from below the board's lower edge.
+            using var clip = CanvasGeometry.CreateRectangle(ds.Device,
+                new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
+            using var layer = ds.CreateLayer(1, clip);
+            var previous = ds.Transform;
+            float rowTop = (float)drawerButtons.Min(button => button.Bounds.Y) * BoardSurfaceSize;
+            ds.Transform = Matrix3x2.CreateTranslation(0, GlobeDrawerSlide(drawerProgress, rowTop)) * previous;
+            try
+            {
+                foreach (var button in drawerButtons)
+                {
+                    DrawGlobeButton(ds, button, button.Enabled && hovered.Contains(button.Id));
+                    DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, ThemeColor(24, 104, 124));
+                }
+            }
+            finally { ds.Transform = previous; }
         }
-        GlobeText(ds, FingerSelectionCaption(selectionFeedback, "Four fingers together. Aim, then separate index."),
-            new Rect(100, 968, 800, 23), 13, ThemeColor(134, 169, 191), true);
+
+        // The handle remains fixed while its row's actions rise beside it.
+        foreach (var button in buttons.Where(IsGlobeDrawerHandle))
+        {
+            DrawGlobeDrawerHandle(ds, button, button.Enabled && hovered.Contains(button.Id), boardAspect);
+            DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, ThemeColor(24, 104, 124),
+                showCaption: false);
+        }
+    }
+
+    // Start below the edge by more than the hover outline's half-width.
+    private static float GlobeDrawerSlide(float progress, float rowTop) =>
+        (BoardSurfaceSize - rowTop + 4) * MathF.Pow(1 - Math.Clamp(progress, 0, 1), 3);
+
+    private static bool IsGlobeDrawerHandle(BoardButton button) =>
+        button.Id is "globe-drawer-open" or "globe-drawer-close";
+
+    // The camera trigger measures the same vector silhouette that is rendered.
+    // Its physical proportions remain stable on portrait and landscape boards.
+    private static Vector2[] GlobeDrawerArrowVertices(BoardButton button, double aspect)
+    {
+        aspect = double.IsFinite(aspect) ? Math.Clamp(aspect, .2, 5) : 1;
+        float x = aspect >= 1 ? (float)(1 / aspect) : 1;
+        float y = (aspect >= 1 ? 1 : (float)aspect) * (button.Id == "globe-drawer-open" ? -1 : 1);
+        var center = new Vector2((float)(button.Bounds.X + button.Bounds.Width / 2) * BoardSurfaceSize,
+            (float)(button.Bounds.Y + button.Bounds.Height / 2) * BoardSurfaceSize);
+        Vector2[] profile = [new(-27, -8), new(0, 12), new(27, -8),
+            new(22.5f, -12), new(0, 4.5f), new(-22.5f, -12)];
+        return profile.Select(point => center + new Vector2(point.X * x, point.Y * y)).ToArray();
+    }
+
+    private static Rect GlobeDrawerArrowInk(BoardButton button, double aspect)
+    {
+        var points = GlobeDrawerArrowVertices(button, aspect);
+        float left = points.Min(point => point.X), top = points.Min(point => point.Y);
+        return new(left, top, points.Max(point => point.X) - left, points.Max(point => point.Y) - top);
+    }
+
+    private static void DrawGlobeDrawerHandle(CanvasDrawingSession ds, BoardButton button, bool hovered, double aspect)
+    {
+        var b = button.Bounds;
+        var rectangle = new Rect(b.X * BoardSurfaceSize, b.Y * BoardSurfaceSize,
+            b.Width * BoardSurfaceSize, b.Height * BoardSurfaceSize);
+        using var glass = new CanvasLinearGradientBrush(ds.Device,
+        [
+            new() { Position = 0, Color = ThemeColor(231, 239, 244) },
+            new() { Position = .48f, Color = ThemeColor(201, 218, 229) },
+            new() { Position = 1, Color = ThemeColor(176, 199, 214) }
+        ]) { StartPoint = new((float)rectangle.X, (float)rectangle.Y),
+            EndPoint = new((float)rectangle.X, (float)rectangle.Bottom) };
+        ds.FillRoundedRectangle(rectangle, 25, 25, glass);
+        ds.DrawRoundedRectangle(rectangle, 25, 25,
+            hovered ? ThemeColor(124, 238, 255) : ThemeColor(96, 155, 185), hovered ? 2.5f : 1.25f);
+        ds.DrawLine((float)rectangle.X + 25, (float)rectangle.Y + 2,
+            (float)rectangle.Right - 25, (float)rectangle.Y + 2, ThemeColor(247, 252, 255, 185), 1);
+        var vertices = GlobeDrawerArrowVertices(button, aspect);
+        using var geometry = CanvasGeometry.CreatePolygon(ds.Device, vertices);
+        var ink = GlobeDrawerArrowInk(button, aspect);
+        using var titanium = new CanvasLinearGradientBrush(ds.Device,
+        [
+            new() { Position = 0, Color = ThemeColor(22, 83, 112) },
+            new() { Position = .5f, Color = ThemeColor(36, 65, 89) },
+            new() { Position = 1, Color = ThemeColor(13, 37, 59) }
+        ]) { StartPoint = new((float)ink.X, (float)ink.Y), EndPoint = new((float)ink.X, (float)ink.Bottom) };
+        ds.FillGeometry(geometry, titanium);
+        using var bevel = new CanvasStrokeStyle { LineJoin = CanvasLineJoin.Round };
+        ds.DrawGeometry(geometry, ThemeColor(63, 116, 143), .65f, bevel);
     }
 
     private static Rect GlobeButtonTextRectangle(BoardButton button)
@@ -98,7 +197,7 @@ public sealed partial class SceneCompositor
 
     private static CanvasTextFormat GlobeButtonTextFormat(BoardButton button) => new()
     {
-        FontFamily = "Segoe UI", FontWeight = FontWeights.SemiBold, FontSize = 36,
+        FontFamily = "Segoe UI", FontWeight = FontWeights.SemiBold, FontSize = 32,
         HorizontalAlignment = CanvasHorizontalAlignment.Center,
         VerticalAlignment = CanvasVerticalAlignment.Center,
         WordWrapping = CanvasWordWrapping.NoWrap

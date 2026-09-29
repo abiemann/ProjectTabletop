@@ -81,6 +81,8 @@ public sealed partial class MainWindow
                     ? acquisitionBoard.GetString() : null);
             case "verify_paint":
                 return await VerifyPaintAsync();
+            case "capture_paint_diagnostics":
+                return await SavePaintDiagnosticsAsync();
             case "verify_paint_save":
                 return await VerifyPaintSaveAsync();
             case "capture_hand_acquisition":
@@ -199,6 +201,7 @@ public sealed partial class MainWindow
                     blackjack = _scene.BlackjackState,
                     monopoly = _scene.MonopolyState,
                     globe = _scene.GlobeState,
+                    globeDrawer = _scene.GetGlobeDrawerDiagnostics(DateTimeOffset.UtcNow),
                     monopolySavePath = MonopolySavePath,
                     monopolySaveError = _monopolySaveError,
                     blackjackAnimation = _scene.GetBlackjackAnimationDiagnostics(),
@@ -301,7 +304,8 @@ public sealed partial class MainWindow
                     throw new ArgumentException("Provide a Globe button id.");
                 bool globeAccepted = _scene.ActivateGlobeButton(globeAction.GetString()!);
                 UpdateBoardAppStatus();
-                return new { accepted = globeAccepted, globe = _scene.GlobeState };
+                return new { accepted = globeAccepted, globe = _scene.GlobeState,
+                    drawer = _scene.GetGlobeDrawerDiagnostics(DateTimeOffset.UtcNow) };
             case "capture_globe_preview":
                 return new { path = await SaveGlobePreviewAsync() };
             case "capture_raw_frame":

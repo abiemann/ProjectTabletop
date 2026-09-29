@@ -70,7 +70,6 @@ public sealed partial class SceneCompositor
         {
             DrawCasinoCardWell(ds, new Rect(377, 526, 112, 154));
             DrawCasinoCardWell(ds, new Rect(509, 526, 112, 154));
-            DrawCasinoChipStack(ds, new Vector2(725, 617), 34, game.SelectedBet);
             CasinoText(ds, "YOUR HAND", new Rect(300, 706, 400, 27), 18, CasinoMuted,
                 "Bahnschrift", true);
         }
@@ -109,7 +108,7 @@ public sealed partial class SceneCompositor
 
         bool betting = game.Phase is BlackjackPhase.Betting or BlackjackPhase.RoundOver;
         CasinoText(ds, FingerSelectionCaption(selectionFeedback, betting
-                ? $"BET {CasinoAmount(game.SelectedBet)} · Bring fingers together" : "Bring fingers together"),
+                ? $"BET {CasinoAmount(game.SelectedBet)}" : string.Empty, includeGroupingInstruction: false),
             new Rect(80, 742, 840, 24), 15, CasinoGold, "Bahnschrift", true);
         foreach (var button in buttons)
         {
@@ -119,7 +118,7 @@ public sealed partial class SceneCompositor
         }
 
         CasinoText(ds, "Dealer stands on soft 17  ·  One split  ·  No insurance or surrender",
-            new Rect(65, 911, 605, 24), 16, CasinoMuted);
+            new Rect(65, 911, 870, 24), 16, CasinoMuted);
     }
 
     private static string CasinoAmount(decimal amount) => amount.ToString("0.##", CultureInfo.InvariantCulture);
@@ -454,18 +453,6 @@ public sealed partial class SceneCompositor
 
     private static void DrawCasinoDiamond(CanvasDrawingSession ds, Vector2 center, float size, Color color) =>
         DrawCasinoSuit(ds, BlackjackSuit.Diamonds, center, size, color);
-
-    private static void DrawCasinoChipStack(CanvasDrawingSession ds, Vector2 center, float radius, decimal value)
-    {
-        for (int index = 3; index >= 1; index--)
-        {
-            ds.FillEllipse(new Vector2(center.X, center.Y + index * 5), radius, radius,
-                ThemeColor(28, 53, 75));
-            ds.DrawEllipse(new Vector2(center.X, center.Y + index * 5), radius, radius,
-                ThemeColor(166, 172, 156), 1);
-        }
-        DrawCasinoChip(ds, center, radius, ThemeColor(37, 93, 153), CasinoAmount(value), false);
-    }
 
     private static void DrawCasinoChip(CanvasDrawingSession ds, Vector2 center, float radius,
         Color body, string value, bool dimmed)

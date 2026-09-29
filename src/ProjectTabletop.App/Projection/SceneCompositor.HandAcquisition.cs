@@ -71,7 +71,8 @@ public sealed partial class SceneCompositor
             var blackjack = _boardSession.Screen == BoardScreen.Blackjack;
             var animating = blackjack && HasBlackjackCardAnimation(now) ||
                 _boardSession.Screen == BoardScreen.Monopoly &&
-                    (MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()));
+                    (MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock())) ||
+                HasGlobeDrawerAnimation(_globeClock());
             var state = CurrentAcquisitionState();
             var buttons = _boardSession.Buttons;
             if (_acquisitionScene != state || !_acquisitionButtons.SequenceEqual(buttons))
@@ -180,6 +181,7 @@ public sealed partial class SceneCompositor
                 {
                     _acquisitionLightUntil = frameTime + TimeSpan.FromMilliseconds(800);
                     RetainPaintButtonLightExclusion();
+                    if (_boardSession.Screen == BoardScreen.Paint) NotePaintUserActivity();
                 }
                 else if (illuminatedPresence is not null)
                 {
@@ -211,6 +213,8 @@ public sealed partial class SceneCompositor
             }
             if (!double.IsFinite(radius) || radius <= 0 || !double.IsFinite(center.X) || !double.IsFinite(center.Y)) return;
             _acquisitionHint = hint;
+            if (_boardSession.Screen == BoardScreen.Paint && frameTime <= now &&
+                now - frameTime <= TimeSpan.FromMilliseconds(350)) NotePaintUserActivity();
             _acquisitionLight = new(new(center.X, center.Y), Math.Min(radius, hint.ValidatedCandidateBounds is null ? .24 : .32));
             _acquisitionLightUntil = now + AcquisitionLightDuration;
             _acquisitionLightStarted = now;
@@ -272,7 +276,8 @@ public sealed partial class SceneCompositor
             rendered.MonopolyDiceRevision != MonopolyDicePresentationRevision ||
             rendered.MonopolySessionRevision != _boardSession.Revision ||
             MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()))) return null;
-        if (globe && rendered.GlobeRevision != _boardSession.GetGlobeSnapshot(_globeClock()).Revision) return null;
+        if (globe && (rendered.GlobeRevision != _boardSession.GetGlobeSnapshot(_globeClock()).Revision ||
+            rendered.GlobeSessionRevision != _boardSession.Revision || HasGlobeDrawerAnimation(_globeClock()))) return null;
         var cameraToProjector = _boardCameraMap!.ToMatrix();
         var projectorToBoard = _boardSurfaceMap!.Inverse().ToMatrix();
         var cameraToBoard = new double[9];
@@ -302,7 +307,9 @@ public sealed partial class SceneCompositor
                     // The sphere rotates independently. Only fixed, opaque controls
                     // may explain camera interference or suggest hand illumination.
                     drawing.Clear(Colors.Black);
-                    DrawGlobeControls(drawing, _boardSession.Buttons, [], []);
+                    DrawGlobeControls(drawing, _boardSession.Buttons, [], [],
+                        drawerOpen: _boardSession.GlobeDrawerOpen, drawerProgress: GlobeDrawerProgress(_globeClock()),
+                        boardAspect: PaintBoardAspect());
                 }
                 else if (photoCopy || paint)
                 {
@@ -375,6 +382,7 @@ public sealed partial class SceneCompositor
             now >= _acquisitionLightUntil || _acquisitionLight is not { } light ||
             _acquisitionScene != CurrentAcquisitionState() ||
             !_acquisitionButtons.SequenceEqual(_boardSession.Buttons) ||
+            HasGlobeDrawerAnimation(_globeClock()) ||
             _boardSession.Screen == BoardScreen.Blackjack && HasBlackjackCardAnimation(now) ||
             _boardSession.Screen == BoardScreen.Monopoly &&
                 (MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()))) return;

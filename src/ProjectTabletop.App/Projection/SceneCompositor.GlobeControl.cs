@@ -54,6 +54,8 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             if (_disposed || _boardSession.Screen != BoardScreen.Globe) return;
+            var now = _globeClock();
+            _boardSession.TickGlobe(now);
             double aspect = PaintBoardAspect();
             double drawWidth = Math.Min(width, height * aspect), drawHeight = drawWidth / aspect;
             ReserveBoardPixels(ds.Device, drawWidth * ds.Dpi / 96, drawHeight * ds.Dpi / 96);
@@ -62,7 +64,8 @@ public sealed partial class SceneCompositor
             {
                 surface.Transform = BoardRasterTransform(_globePreviewTarget);
                 DrawGlobeBoard(surface, GlobeState, _boardSession.Buttons,
-                    HoveredBoardButtons, CurrentFingerSelectionFeedback, aspect);
+                    HoveredBoardButtons, CurrentFingerSelectionFeedback, aspect,
+                    drawerOpen: _boardSession.GlobeDrawerOpen, drawerProgress: GlobeDrawerProgress(now));
             }
             var rendered = _globePreviewTarget;
             ds.DrawImage(rendered,

@@ -19,8 +19,9 @@ public sealed record HandAcquisitionSceneImage(int Width, int Height, byte[] Bgr
 
 /// <summary>Fresh generated-letter structure evidence, independent of panel palette fitting.
 /// Coverage counts measured changed glyph/halo pixels against the complete paired rectangles.</summary>
-/// <param name="CaptionReflectanceCoverage">Fresh chromatic residual on registered generated glyph/halo
-/// support, measured against the whole control, independent of structural letter corruption.</param>
+/// <param name="CaptionReflectanceCoverage">Fresh chromatic residual measured against the whole control,
+/// independent of structural letter corruption. Normally limited to registered glyph/halo support;
+/// qualified thin captions also count actual changed control pixels after fresh opposite-margin fitting.</param>
 /// <param name="CaptionReflectanceTriggerCoverage">The same residual measured against the caption region.</param>
 /// <param name="CaptionReflectanceInkFraction">Fraction of sampled generated ink with fresh chromatic residual.</param>
 /// <param name="CaptionReflectanceChanged">Readable letters have independently verified localized reflectance
@@ -39,7 +40,12 @@ public sealed record HandAcquisitionTextPatternResult(int ControlRegion, bool La
 /// When separate reference regions are supplied, their fit quality is checked independently.</param>
 public sealed record HandAcquisitionPresenceResult(IReadOnlyList<HandAcquisitionHint> Hints,
     bool BaselineReady, bool? IlluminatedPresence, double ForegroundFraction, string Reason,
-    IReadOnlyList<HandAcquisitionTextPatternResult>? TextPatterns = null);
+    IReadOnlyList<HandAcquisitionTextPatternResult>? TextPatterns = null,
+    IReadOnlyList<HandAcquisitionLocalFitResult>? LocalFits = null);
+
+/// <summary>Current-frame opposite-margin fitting diagnostics for compact controls.</summary>
+public sealed record HandAcquisitionLocalFitResult(int ControlRegion, int TrainingSamples,
+    int WitnessSamples, double WitnessCoverage, double MedianError, string Reason);
 
 /// <summary>
 /// Compares the camera with a known rendered scene after robust photometric compensation.
@@ -73,6 +79,7 @@ public sealed partial class HandAcquisitionPresenceTracker
     private PhotometricFit? _unobstructedFit;
     private Dictionary<int, double[]>? _unobstructedColorOffsets;
     private HandAcquisitionTextPatterns? _textPatterns;
+    private readonly Dictionary<int, bool> _thinCaptionSupport = new();
     private int[]? _textCorruptionFrames;
     private DateTimeOffset[]? _textCorruptionTimes;
     private int _width, _height, _columns, _rows, _validCount;
@@ -107,8 +114,10 @@ public sealed partial class HandAcquisitionPresenceTracker
             if (frameTime < _lastTime) ResetTextConfirmation();
             return Empty("old-camera-frame");
         }
-        if (width != _width || height != _height || !_polygon.SequenceEqual(searchPolygon))
-            if (!Configure(width, height, searchPolygon)) return Empty("invalid-search-polygon");
+        int samplingAxis = SamplingAxis(searchPolygon, expectedScene);
+        if (width != _width || height != _height || !_polygon.SequenceEqual(searchPolygon) ||
+            (!ReferenceEquals(_scene, expectedScene) && Math.Abs(_scale - SamplingScale(searchPolygon, samplingAxis)) > .001))
+            if (!Configure(width, height, searchPolygon, samplingAxis)) return Empty("invalid-search-polygon");
         _lastTime = frameTime;
         SampledCellCount = 0;
         LocalContextSampledCellCount = 0;
@@ -199,6 +208,17 @@ public sealed partial class HandAcquisitionPresenceTracker
         var captionReflectance = MeasureCaptionReflectance(reference, current, foreground, fit, colorOffsets);
         var reflectedControls = ValidateCaptionReflectance(reference, current, captionReflectance,
             textObservations, fitAllowed);
+        var localFits = new List<HandAcquisitionLocalFitResult>();
+        var localizedControls = !activeLight ? FitLocalizedControls(reference, current, allowed, fitAllowed,
+            foreground, textObservations, captionReflectance, reflectedControls, localFits) : [];
+        foreach (var localized in localizedControls)
+        {
+            if (localized.Reflectance is { } evidence)
+            {
+                reflectedControls = reflectedControls.Where(other => other.Region != evidence.Region).Append(evidence).ToArray();
+                captionReflectance = captionReflectance.Where(other => other.Region != evidence.Region).Append(evidence).ToArray();
+            }
+        }
         // Readable letters usually disprove a panel palette/exposure mismatch.
         // The projector can also print the same readable letters onto fingers:
         // retain only independently verified new chroma on their generated ink
@@ -235,6 +255,15 @@ public sealed partial class HandAcquisitionPresenceTracker
 
         var hints = modelReliable ? Components(foreground, frameTime,
             searchMask: _templateMask, evidenceArea: _templateMask is null ? null : eligibleCount) : new List<HandAcquisitionHint>();
+        foreach (var localized in localizedControls)
+            foreach (var hint in Components(localized.Mask, frameTime, searchMask: _templateMask,
+                evidenceArea: eligibleCount, requiredControlRegion: localized.Region))
+                if (!hints.Any(other => ControlRegionAt(other.Center) == localized.Region))
+                {
+                    hints.Add(hint);
+                    fraction = Math.Max(fraction, hint.MotionFraction);
+                    reason = "localized-control-foreground";
+                }
         if (!activeLight && reflectedControls.Count > 0 && hints.Count > 0)
             reason = "caption-reflectance-foreground";
         foreach (var observation in textObservations.Where(observation => observation.StrongCorruption))
@@ -300,7 +329,7 @@ public sealed partial class HandAcquisitionPresenceTracker
             captionReflectance.FirstOrDefault(evidence => evidence.Region == observation.Region)?.InkFraction ?? 0,
             reflectedControls.Any(evidence => evidence.Region == observation.Region))).ToArray();
         return new(hints, _baseline is not null || _expected is not null, illuminatedPresence, fraction, reason,
-            textDiagnostics.Length == 0 ? null : textDiagnostics);
+            textDiagnostics.Length == 0 ? null : textDiagnostics, localFits.Count == 0 ? null : localFits);
     }
 
     public void Reset()
@@ -311,6 +340,7 @@ public sealed partial class HandAcquisitionPresenceTracker
         _controlTriggerRegions = null; _controlTriggerBoardAreas = null;
         _unobstructedFit = null; _unobstructedColorOffsets = null;
         _textPatterns = null;
+        _thinCaptionSupport.Clear();
         _textCorruptionFrames = null;
         _textCorruptionTimes = null;
         _width = _height = _columns = _rows = _validCount = 0;
@@ -327,7 +357,32 @@ public sealed partial class HandAcquisitionPresenceTracker
         if (_textCorruptionTimes is not null) Array.Clear(_textCorruptionTimes);
     }
 
-    private bool Configure(int width, int height, IReadOnlyList<PixelPoint> polygon)
+    private static double SamplingScale(IReadOnlyList<PixelPoint> polygon, int axis) => polygon.Count == 0 ? 1 :
+        Math.Max(1, Math.Max(polygon.Max(point => point.X) - polygon.Min(point => point.X),
+            polygon.Max(point => point.Y) - polygon.Min(point => point.Y)) / axis);
+
+    private static int SamplingAxis(IReadOnlyList<PixelPoint> polygon, HandAcquisitionSceneImage? scene)
+    {
+        var references = scene?.BoardReferenceRegions ?? scene?.BoardSearchRegions;
+        if (polygon.Count < 3 || references is not { Count: > 0 }) return 192;
+        if (scene?.BoardSearchRegions is not { Count: 1 }) return 192;
+        var control = scene.BoardSearchRegions[0];
+        if (references.Any(region => region.X < control.X || region.Y < control.Y ||
+            region.X + region.Width > control.X + control.Width + 1e-12 ||
+            region.Y + region.Height > control.Y + control.Height + 1e-12)) return 192;
+        double width = polygon.Max(point => point.X) - polygon.Min(point => point.X);
+        double height = polygon.Max(point => point.Y) - polygon.Min(point => point.Y);
+        double scale = SamplingScale(polygon, 192);
+        // A compact self-reference needs enough independent native samples on
+        // its two glass margins. Increase only the bounded POI grid density;
+        // sampling is still restricted to controls/references and never duplicates
+        // native pixels when the camera already resolves fewer than 384 cells.
+        double referenceSamples = width * height / (scale * scale) *
+            references.Sum(region => region.Width * region.Height);
+        return referenceSamples * .20 < 100 ? 384 : 192;
+    }
+
+    private bool Configure(int width, int height, IReadOnlyList<PixelPoint> polygon, int samplingAxis = 192)
     {
         Reset();
         if (polygon.Count is < 3 or > 16 || polygon.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y))) return false;
@@ -337,7 +392,7 @@ public sealed partial class HandAcquisitionPresenceTracker
         double bottom = Math.Clamp(polygon.Max(point => point.Y), 0, height);
         if (right - _left < 8 || bottom - _top < 8) return false;
         _width = width; _height = height; _polygon = polygon.ToArray();
-        _scale = Math.Max(1, Math.Max(right - _left, bottom - _top) / 192);
+        _scale = Math.Max(1, Math.Max(right - _left, bottom - _top) / samplingAxis);
         _columns = (int)Math.Ceiling((right - _left) / _scale);
         _rows = (int)Math.Ceiling((bottom - _top) / _scale);
         _mask = new bool[_columns * _rows];
@@ -385,6 +440,7 @@ public sealed partial class HandAcquisitionPresenceTracker
         _scene = scene; _baseline = _expected = null;
         _unobstructedFit = null; _unobstructedColorOffsets = null;
         _textPatterns = null;
+        _thinCaptionSupport.Clear();
         _textCorruptionFrames = null;
         _textCorruptionTimes = null;
         _templateEdges = _templateMask = _templateReferenceMask = _templateSampleMask = null;

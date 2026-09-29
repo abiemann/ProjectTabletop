@@ -34,11 +34,20 @@ public sealed partial class MainWindow
         scene.SetBoardSetup(false);
         scene.ShowPaint();
         Draw();
+        Require(scene.CanSavePaint && scene.GetPaintDiagnostics().DropCount == 1 &&
+                scene.GetPaintDiagnostics().PendingIntroductionDrops == 4 &&
+                scene.TryBeginPaintSave(out var introductionImage) && scene.CompletePaintSave(introductionImage),
+            "The introductory central drop cannot be saved from the in-memory painting.");
+        // The remaining exact-pigment/PNG comparisons begin with explicit clear
+        // film; Reset also cancels later introductory launches.
+        scene.DisablePaintIdleStreaksForVerification();
+        scene.ResetPaint();
+        Draw();
         var clearFilm = scene.CapturePaintArtworkForVerification();
         Require(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(["menu", "paint-save"]) &&
                 scene.CurrentBoardButtons[0].Label == "Exit" && scene.CurrentBoardButtons[1].Label == "Save" &&
                 !scene.CanSavePaint && !scene.TryBeginPaintSave(out _),
-            "A blank Paint board did not expose Exit and an unavailable Save.");
+            "An explicitly reset Paint board did not expose Exit and an unavailable Save.");
 
         // One drop lies in the old reserved header. The body receives a second
         // coat, so exports must preserve piled paint and its newest pigment.
@@ -166,8 +175,13 @@ public sealed partial class MainWindow
         Require(!scene.TryTakePaintSaveRequest(pendingBeforeExit, out _) && !scene.CanSavePaint,
             "Navigation left an unconsumed Paint Save request available.");
         scene.ShowPaint();
-        Require(!scene.CanSavePaint && scene.GetPaintDiagnostics().DropCount == 0,
-            "A fresh Paint session retained the old painting or Save state.");
+        Require(!scene.CanSavePaint && scene.GetPaintDiagnostics().DropCount == 0 &&
+                scene.GetPaintDiagnostics().PendingIntroductionDrops == 5 && scene.GetPaintSaveStatus(now) is null,
+            "A fresh Paint session retained the old painting or Save state instead of queuing a new introduction.");
+        Draw();
+        Require(scene.CanSavePaint && scene.GetPaintDiagnostics().DropCount == 1,
+            "The first visible frame of a new Paint session did not enable saving its introductory drop.");
+        scene.ResetPaint();
         now += TimeSpan.FromSeconds(1);
         Require(scene.AddPaintDrop(new(.5, .5), .08, now), "The reset fixture rejected its new drop.");
         Draw();
@@ -204,6 +218,7 @@ public sealed partial class MainWindow
             failureRecoversWithoutFalseSuccess = true, temporaryBlankingReleasesBusyState = true,
             resetAndNavigationInvalidateSnapshots = true,
             imageSavedFeedbackThreeSeconds = true, liveHardwareUnchanged = true, noPicturesWrites = true,
+            introductoryPaintSaveableInMemory = true, reentryReplacesPreviousPaintingWithIntroduction = true,
             directory, images = new[] { first, second, third } };
 
         void Draw()

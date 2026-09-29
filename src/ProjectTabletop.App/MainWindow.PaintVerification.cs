@@ -35,7 +35,7 @@ public sealed partial class MainWindow
         Require(scene.CurrentBoardScreen == BoardScreen.Paint && exit is { Id: "menu", Label: "Exit" } &&
                 scene.GetPaintDiagnostics().DropCount == 0 &&
                 scene.CurrentBoardButtons.Any(button => button.Id == "paint-save" && !button.Enabled),
-            "Paint must open blank with bottom-side Exit and an unavailable Save until paint exists.");
+            "Explicitly resetting Paint must leave bottom-side Exit and an unavailable Save until paint exists.");
         await Save(target, "paint-blank");
         var canvas = new BoardRect(.025, .08, .95, .79);
         var blankFluid = scene.GetPaintDiagnostics().Fluid ??
@@ -46,6 +46,101 @@ public sealed partial class MainWindow
         Require(ChangedPixels(blank, Draw(scene), canvas) == 0 &&
                 scene.GetPaintDiagnostics().Fluid!.SimulationSteps == blankFluid.SimulationSteps,
             "An idle painting changed without an observed disturbance.");
+
+        // Intro paint uses the same liquid field and delayed rendered-frame
+        // history as real input. Keep the older pigment/flow fixtures blank so
+        // their deterministic comparison colors and layer depths stay exact.
+        using (var introduction = NewScene(out _, nativeCamera: true, keepIntroduction: true))
+        {
+            var queued = introduction.GetPaintDiagnostics();
+            Require(queued.DropCount == 0 && queued.PendingIntroductionDrops == 5 &&
+                    queued.IntroductionStartedAt is null && !introduction.CanSavePaint,
+                "Opening Paint must queue a few drops without consuming its visual hint before the first visible draw.");
+            now += TimeSpan.FromSeconds(2);
+            Require(introduction.GetPaintDiagnostics().PendingIntroductionDrops == 5 &&
+                    introduction.GetPaintDiagnostics().DropCount == 0,
+                "Diagnostic queries or time spent offscreen consumed the Paint introduction.");
+            Draw(introduction);
+            var started = introduction.GetPaintDiagnostics();
+            Require(started.DropCount == 1 && started.PendingIntroductionDrops == 4 &&
+                    started.IntroductionStartedAt == now && started.LastDropAt == default &&
+                    introduction.CanSavePaint && introduction.CurrentBoardButtons.Single(button => button.Id == "paint-save").Enabled,
+                "The first visible frame must launch an introductory drop and make its in-memory painting saveable.");
+            await Save(target, "paint-introduction-first-drop");
+            Require(ChangedPixels(blank, Draw(introduction), new(.30, .30, .40, .40)) > 100 &&
+                    introduction.GetPaintDiagnostics().DropCount == 1,
+                "The first introductory drop is invisible, or a same-timestamp redraw deposited another one.");
+            now += TimeSpan.FromMilliseconds(179);
+            Draw(introduction);
+            Require(introduction.GetPaintDiagnostics().DropCount == 1,
+                "The second introductory drop landed before its staggered launch time.");
+            now += TimeSpan.FromMilliseconds(1);
+            Draw(introduction);
+            Require(introduction.GetPaintDiagnostics().DropCount == 2,
+                "The introduction did not launch its second drop after 180 milliseconds.");
+            now = started.IntroductionStartedAt!.Value.AddMilliseconds(540);
+            Draw(introduction);
+            Require(introduction.GetPaintDiagnostics().DropCount == 4,
+                "The first four introductory drops did not land before the final center drop.");
+            now = started.IntroductionStartedAt.Value.AddMilliseconds(719);
+            Draw(introduction);
+            Require(introduction.GetPaintDiagnostics().DropCount == 4,
+                "The final center drop landed before its 720 millisecond launch time.");
+            now = started.IntroductionStartedAt.Value.AddMilliseconds(720);
+            Draw(introduction);
+            var introDrops = introduction.GetPaintAutomaticDropsForVerification()
+                .Where(drop => drop.Kind == "Introduction").ToArray();
+            Require(introDrops.Length == 5 && introDrops[^1].Center == new Point2(.5, .5) &&
+                    introDrops.Take(4).All(drop => drop.Center != new Point2(.5, .5)),
+                "The fifth introductory drop must land exactly at board center after the four random surrounding drops.");
+
+            var introDetector = new PaintDisturbanceTracker();
+            var introFrames = new List<byte[]>();
+            int cleanIntroFramesCompared = 0;
+            for (int frame = 0; frame < 18; frame++)
+            {
+                now += TimeSpan.FromMilliseconds(125);
+                introFrames.Add(Draw(introduction));
+                var context = introduction.GetPaintDisturbanceContext();
+                if (introFrames.Count < 3 || context is null) continue;
+                var result = introDetector.Update(size, size, size * 4, introFrames[^3], context, now, now);
+                Require(result.ReferenceReady && result.Drops.Count == 0 &&
+                        introduction.CompletePaintDisturbance(context, result, now) == 0,
+                    "The webcam's delayed view of the introductory liquid animation deposited extra paint.");
+                cleanIntroFramesCompared++;
+            }
+            var complete = introduction.GetPaintDiagnostics();
+            Require(complete.DropCount == 5 && complete.PendingIntroductionDrops == 0 &&
+                    complete.LastDropAt == default && cleanIntroFramesCompared > 5,
+                "The introduction must finish with exactly five independent drops and no camera-observation cooldown.");
+            Draw(introduction);
+            Require(ChangedPixels(blank, target.GetPixelBytes(), new(.10, .10, .15, .65)) == 0 &&
+                    ChangedPixels(blank, target.GetPixelBytes(), new(.75, .10, .15, .65)) == 0,
+                "Introductory paint was launched away from the board's center.");
+            await Save(target, "paint-introduction-central-drops");
+            Require(introduction.AddPaintDrop(new(.5, .5), .06, now),
+                "Introductory paint prevented the first real camera disturbance from depositing paint in the same central area.");
+            introduction.ResetPaint();
+            Draw(introduction);
+            now += TimeSpan.FromSeconds(1);
+            Require(introduction.GetPaintDiagnostics().DropCount == 0 &&
+                    introduction.GetPaintDiagnostics().PendingIntroductionDrops == 0 &&
+                    ChangedPixels(blank, Draw(introduction), canvas) == 0,
+                "Explicit ResetPaint restarted its introduction or kept the earlier paint.");
+            introduction.ShowBoardMenu();
+            introduction.ShowPaint();
+            Draw(introduction);
+            Require(introduction.GetPaintDiagnostics().DropCount == 1 &&
+                    introduction.GetPaintDiagnostics().PendingIntroductionDrops == 4,
+                "A new Paint visit did not launch a fresh central introduction.");
+            introduction.ResetPaint();
+            now += TimeSpan.FromSeconds(1);
+            Draw(introduction);
+            Require(introduction.GetPaintDiagnostics().DropCount == 0 &&
+                    introduction.GetPaintDiagnostics().PendingIntroductionDrops == 0,
+                "Resetting during the introduction left later introductory drops scheduled.");
+        }
+        await VerifyPaintIdleStreaks();
 
         // Paint's canvas never uses hand lighting. Its navigation assistance is
         // separate and must first prove interference with a control's label.
@@ -193,9 +288,12 @@ public sealed partial class MainWindow
         Draw(scene);
         Require(!scene.AddPaintDrop(new(.5, .5), .075, now), "Paint accepted a disturbance after Exit.");
         scene.ShowPaint();
-        var reopened = Draw(scene);
-        Require(scene.GetPaintDiagnostics().DropCount == 0 && ChangedPixels(blank, reopened, canvas) == 0,
-            "A fresh Paint session retained the previous painting.");
+        Draw(scene);
+        Require(scene.GetPaintDiagnostics().DropCount == 1 &&
+                scene.GetPaintDiagnostics().PendingIntroductionDrops == 4 &&
+                scene.CapturePaintFieldProbeForVerification(new(.985, .98)).Height < 1e-6,
+            "A fresh Paint session retained its previous edge painting instead of starting a new central introduction.");
+        scene.ResetPaint();
 
         // Fluid transport uses a bounded field; wet-surface shading and the UI
         // still render at the physical board's native projected pixel density.
@@ -443,6 +541,7 @@ public sealed partial class MainWindow
         inputScene.ShowPaint();
         Require(inputScene.CompletePaintDisturbance(physicalContext!, physicalResult!, now) == 0,
             "The previous Paint visit's camera result contaminated a new painting.");
+        inputScene.ResetPaint();
         now += TimeSpan.FromSeconds(1);
         Draw(inputScene);
         var beforeRescan = inputScene.GetPaintDisturbanceContext()!;
@@ -481,7 +580,295 @@ public sealed partial class MainWindow
             fixedTimeStepIndependentOfRenderFrequency = true, changedAtThirtyHz, changedAtOneTwentyHz,
             boundedLongGapCatchUp = true, zeroAndBackwardsTimeCannotAdvance = true,
             framesObservedBeforeProjectionWarmupRejected = true,
+            introductoryCentralDropsStaggeredAndSaveable = true,
+            delayedIntroductionCannotDepositExtraPaint = true,
+            introductionStartsOnVisibleDrawAndReentry = true,
+            explicitResetCancelsIntroduction = true,
+            fifthIntroductionDropLandsAtExactCenter = true,
+            tenSecondUserInactivityStartsCurvedSingleColorStreak = true,
+            activityAndSaveCancelPendingStreaks = true,
+            hiddenOrDelayedDrawsCannotCatchUpIdleStreaks = true,
             liveHardwareUnchanged = true, directory, images };
+
+        async Task VerifyPaintIdleStreaks()
+        {
+            using var idle = NewScene(out _, nativeCamera: true, keepIntroduction: true);
+            var delayedDetector = new PaintDisturbanceTracker();
+            var submitted = new List<CameraFrame>();
+            int delayedStreakFramesCompared = 0;
+            DrawNative(idle, target, size, size);
+            var armed = idle.GetPaintDiagnostics();
+            var firstDeadline = armed.NextIdleStreakAt ??
+                throw new InvalidOperationException("Paint did not arm its visible inactivity timer.");
+            Require(firstDeadline == now.AddSeconds(10) && armed.IdleStreakCount == 0,
+                "The first visible Paint frame must schedule idle paint after ten seconds.");
+            PrepareObservedStreak(firstDeadline);
+            Require(idle.GetPaintDiagnostics() is { DropCount: 5, PendingIdleStreakDrops: 0, IdleStreakCount: 0 },
+                "Idle paint started before ten seconds of user inactivity.");
+            now = firstDeadline;
+            ObserveDraw();
+            var firstStarted = idle.GetPaintDiagnostics();
+            Require(firstStarted is { DropCount: 6, PendingIdleStreakDrops: 17, IdleStreakCount: 1 } &&
+                    firstStarted.IdleStreakStartedAt == now && firstStarted.LastDropAt == default,
+                "Ten seconds of user inactivity did not start one staggered streak independent of camera cooldowns.");
+            Draw(idle);
+            idle.CapturePaintArtworkForVerification();
+            Require(idle.GetPaintDiagnostics().DropCount == firstStarted.DropCount,
+                "Repeated preview/output/memory draws deposited an idle streak more than once.");
+            AdvanceObservedTo(firstDeadline.AddMilliseconds(2040));
+            var streak = idle.GetPaintAutomaticDropsForVerification()
+                .Where(drop => drop.Kind == "IdleStreak" && drop.StreakId == 1).ToArray();
+            Require(streak.Length == 18 && idle.GetPaintDiagnostics().PendingIdleStreakDrops == 0 &&
+                    streak.All(drop => drop.Pigment == streak[0].Pigment && drop.Radius is > .02f and < .05f &&
+                        drop.Center.X is > .01 and < .99 && drop.Center.Y is > .01 and < .99) &&
+                    streak.Zip(streak.Skip(1), (first, second) => second.GeneratedAt > first.GeneratedAt).All(value => value),
+                "The idle brush must use one pigment across a bounded staggered eighteen-drop path.");
+            var chord = new Point2(streak[^1].Center.X - streak[0].Center.X,
+                streak[^1].Center.Y - streak[0].Center.Y);
+            double chordLength = Math.Sqrt(chord.X * chord.X + chord.Y * chord.Y);
+            double bow = streak.Max(drop => Math.Abs(chord.X * (drop.Center.Y - streak[0].Center.Y) -
+                chord.Y * (drop.Center.X - streak[0].Center.X)) / chordLength);
+            double[] spacing = streak.Zip(streak.Skip(1), (first, second) =>
+                Math.Sqrt(Math.Pow(first.Center.X - second.Center.X, 2) +
+                    Math.Pow(first.Center.Y - second.Center.Y, 2))).ToArray();
+            Require(chordLength > .30 && bow > .025 && spacing.All(distance => distance is > .002 and < .12) &&
+                    spacing[spacing.Length / 2] > spacing[0] * 2,
+                "The idle brush did not sweep a curved continuous path, slowing toward its ends.");
+            await Save(target, "paint-idle-single-color-swing");
+            Require(idle.TryBeginPaintSave(out var idleArtwork), "The idle-created painting could not be saved from memory.");
+            var beforeSave = idle.GetPaintDiagnostics();
+            Require(beforeSave.LastUserActivityAt == now && beforeSave.NextIdleStreakAt == now.AddSeconds(10) &&
+                    idleArtwork.BgraPixels.Length == idleArtwork.Width * idleArtwork.Height * 4 &&
+                    idle.CompletePaintSave(idleArtwork),
+                "Saving idle paint failed to freeze the in-memory artwork or restart user inactivity.");
+            idle.CapturePaintArtworkForVerification();
+            Require(idle.GetPaintDiagnostics().DropCount == beforeSave.DropCount,
+                "Saving a same-clock in-memory idle painting generated another automatic drop.");
+
+            var dueSave = idle.GetPaintDiagnostics().NextIdleStreakAt!.Value;
+            AdvanceQuietlyTo(dueSave.AddTicks(-1));
+            long beforeDueSave = idle.GetPaintDiagnostics().DropCount;
+            now = dueSave;
+            Require(idle.TryBeginPaintSave(out var dueArtwork) &&
+                    idle.GetPaintDiagnostics().DropCount == beforeDueSave &&
+                    idle.GetPaintDiagnostics().PendingIdleStreakDrops == 0 &&
+                    idle.GetPaintDiagnostics().NextIdleStreakAt == now.AddSeconds(10) &&
+                    idle.CompletePaintSave(dueArtwork),
+                "Saving at an expired idle deadline generated paint before freezing the selected artwork.");
+            var secondDeadline = idle.GetPaintDiagnostics().NextIdleStreakAt!.Value;
+            PrepareObservedStreak(secondDeadline);
+            now = secondDeadline;
+            ObserveDraw();
+            var second = idle.GetPaintAutomaticDropsForVerification().Last(drop => drop.Kind == "IdleStreak");
+            Require(idle.GetPaintDiagnostics().IdleStreakCount == 2 && second.StreakId == 2 &&
+                    second.Pigment != streak[0].Pigment && idle.GetPaintDiagnostics().PendingIdleStreakDrops == 17,
+                "The next idle streak did not choose a new pigment or retained the earlier streak's launch state.");
+            AdvanceObservedTo(secondDeadline.AddMilliseconds(2040));
+            Require(idle.GetPaintDiagnostics().PendingIdleStreakDrops == 0 &&
+                    idle.GetPaintAutomaticDropsForVerification().Count(drop => drop.Kind == "IdleStreak" && drop.StreakId == 2) == 18,
+                "The second observed idle streak did not finish its staggered eighteen drops.");
+            AdvanceQuietlyTo(idle.GetPaintDiagnostics().NextIdleStreakAt!.Value);
+            Require(idle.GetPaintDiagnostics().PendingIdleStreakDrops == 17,
+                "The held-input cancellation fixture did not start a fresh idle streak.");
+            long countBeforeHeldInput = idle.GetPaintDiagnostics().DropCount;
+            var context = idle.GetPaintDisturbanceContext()!;
+            var unconfirmed = new PaintDisturbanceResult([], 1, .01, true, "disturbance-pending", 250);
+            var beforeUnconfirmed = idle.GetPaintDiagnostics().NextIdleStreakAt;
+            Require(idle.CompletePaintDisturbance(context, unconfirmed, now) == 0 &&
+                    idle.GetPaintDiagnostics().NextIdleStreakAt == beforeUnconfirmed &&
+                    idle.GetPaintDiagnostics().PendingIdleStreakDrops == 17,
+                "One unconfirmed disturbance canceled idle paint or restarted user inactivity.");
+            var held = new PaintDisturbanceResult([], 1, .01, true, "disturbance-held", 250,
+                ConfirmedCandidateCount: 1);
+            Require(idle.CompletePaintDisturbance(context, held, now) == 0 &&
+                    idle.GetPaintDiagnostics().PendingIdleStreakDrops == 0 &&
+                    idle.GetPaintDiagnostics().DropCount == countBeforeHeldInput &&
+                    idle.GetPaintDiagnostics().LastUserActivityAt == now &&
+                    idle.GetPaintDiagnostics().NextIdleStreakAt == now.AddSeconds(10) &&
+                    idle.GetPaintDiagnostics().LastDropAt == default,
+                "A fresh stationary user disturbance must cancel idle paint even when it creates no new drop.");
+            var renewedDeadline = idle.GetPaintDiagnostics().NextIdleStreakAt;
+            Require(idle.CompletePaintDisturbance(context, held, now.AddMilliseconds(-500)) == 0 &&
+                    idle.GetPaintDiagnostics().NextIdleStreakAt == renewedDeadline,
+                "A stale camera disturbance restarted the idle deadline.");
+            now += TimeSpan.FromMilliseconds(125);
+            var emptyObservation = new PaintDisturbanceResult([], 0, 0, true, "clean-generated-paint", 250);
+            Require(idle.CompletePaintDisturbance(context, emptyObservation, now) == 0 &&
+                    idle.GetPaintDiagnostics().NextIdleStreakAt == renewedDeadline,
+                "A clean expected camera frame counted as user activity.");
+            Require(idle.AddPaintDrop(new(.82, .72), .04, now), "A real user drop could not interrupt idle decoration.");
+            Draw(idle);
+            long afterUserDrop = idle.GetPaintDiagnostics().DropCount;
+            now += TimeSpan.FromMilliseconds(125);
+            Require(!idle.AddPaintDrop(new(.82, .72), .04, now) &&
+                    idle.GetPaintDiagnostics().DropCount == afterUserDrop &&
+                    idle.GetPaintDiagnostics().NextIdleStreakAt == now.AddSeconds(10),
+                "A held real disturbance did not restart inactivity while its duplicate drop was suppressed.");
+
+            var handDeadline = idle.GetPaintDiagnostics().NextIdleStreakAt!.Value;
+            AdvanceQuietlyTo(handDeadline);
+            Require(idle.GetPaintDiagnostics().PendingIdleStreakDrops == 17,
+                "The next idle streak fixture did not start after user activity ended.");
+            idle.NotifyPaintUserActivityForVerification();
+            Require(idle.GetPaintDiagnostics().PendingIdleStreakDrops == 0 &&
+                    idle.GetPaintDiagnostics().NextIdleStreakAt == now.AddSeconds(10),
+                "Fresh hand/control activity did not cancel an unfinished idle streak.");
+            long beforeGap = idle.GetPaintDiagnostics().DropCount;
+            now += TimeSpan.FromMinutes(1);
+            Draw(idle);
+            Require(idle.GetPaintDiagnostics().DropCount == beforeGap &&
+                    idle.GetPaintDiagnostics().PendingIdleStreakDrops == 0 &&
+                    idle.GetPaintDiagnostics().NextIdleStreakAt == now.AddSeconds(10),
+                "A delayed renderer replayed missed idle paint instead of giving ten new visible seconds.");
+            foreach (bool setup in new[] { false, true })
+            {
+                AdvanceQuietlyTo(idle.GetPaintDiagnostics().NextIdleStreakAt!.Value);
+                Require(idle.GetPaintDiagnostics().PendingIdleStreakDrops == 17,
+                    "The hidden/setup interruption fixture did not have a running idle streak. " +
+                    $"Setup: {setup}. " + System.Text.Json.JsonSerializer.Serialize(idle.GetPaintDiagnostics()));
+                long beforeHidden = idle.GetPaintDiagnostics().DropCount;
+                if (setup) idle.SetBoardSetup(true); else idle.SetBlackOutput(true);
+                now += TimeSpan.FromSeconds(30);
+                Draw(idle);
+                long expectedAfterPause = setup ? 0 : beforeHidden;
+                Require(idle.GetPaintDiagnostics().DropCount == expectedAfterPause &&
+                        idle.GetPaintDiagnostics().PendingIdleStreakDrops == 0,
+                    "Black output generated idle decoration, or board setup retained the previous painting and pending streak.");
+                if (setup)
+                {
+                    // Starting board setup intentionally clears both the old
+                    // painting and calibration. Restore an isolated map before
+                    // checking the new visible inactivity deadline.
+                    Point2[] camera = [new(0, 0), new(size, 0), new(size, size), new(0, size)];
+                    Point2[] unit = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
+                    idle.SetDetectedBoardGrid([new(0, 0), new(1, 0), new(1, 1), new(0, 1)],
+                        Homography.FromFourPoints(camera, unit));
+                    idle.SetBoardSetup(false);
+                }
+                else idle.SetBlackOutput(false);
+                Draw(idle);
+                Require(idle.GetPaintDiagnostics().DropCount == expectedAfterPause &&
+                        idle.GetPaintDiagnostics().NextIdleStreakAt == now.AddSeconds(10),
+                    "Returning from hidden/setup output burst missed streaks or retained an expired idle deadline.");
+            }
+            idle.ResetPaint();
+            Draw(idle);
+            Require(idle.GetPaintDiagnostics() is { DropCount: 0, PendingIntroductionDrops: 0,
+                    PendingIdleStreakDrops: 0, IdleStreakCount: 0 } &&
+                    idle.GetPaintAutomaticDropsForVerification().Length == 0,
+                "Reset left scheduled idle paint or the previous generated painting in its lifecycle.");
+            idle.ShowBoardMenu();
+            now += TimeSpan.FromSeconds(30);
+            Draw(idle);
+            Require(idle.GetPaintDiagnostics().DropCount == 0 && idle.GetPaintDiagnostics().PendingIdleStreakDrops == 0,
+                "Idle paint continued after Exit.");
+            idle.ShowPaint();
+            Require(idle.GetPaintDiagnostics() is { DropCount: 0, PendingIntroductionDrops: 5, PendingIdleStreakDrops: 0 },
+                "Paint reentry did not replace the departed session with its five-drop introduction.");
+            Draw(idle);
+            Require(idle.GetPaintDiagnostics().NextIdleStreakAt == now.AddSeconds(10) &&
+                    delayedStreakFramesCompared > 30,
+                "A fresh Paint visit did not arm a new idle deadline or delayed animation was not exercised.");
+
+            // A visible but slow surface still reaches its inactivity deadline;
+            // its stretched swing can release only one drop per shown frame.
+            using var slow = NewScene(out _, nativeCamera: true, keepIntroduction: true);
+            Draw(slow);
+            var slowDeadline = slow.GetPaintDiagnostics().NextIdleStreakAt!.Value;
+            for (int frame = 0; frame < 9; frame++)
+            {
+                now += TimeSpan.FromSeconds(1.2);
+                Draw(slow);
+                if (now < slowDeadline)
+                    Require(slow.GetPaintDiagnostics().NextIdleStreakAt == slowDeadline &&
+                            slow.GetPaintDiagnostics().IdleStreakCount == 0,
+                        "Visible 1.2-second frame gaps continually reset the idle deadline.");
+            }
+            Require(slow.GetPaintDiagnostics() is { DropCount: 6, PendingIdleStreakDrops: 17, IdleStreakCount: 1 },
+                "A slow visible Paint surface did not start one idle drop after ten seconds.");
+            now += TimeSpan.FromSeconds(1.2);
+            Draw(slow);
+            Require(slow.GetPaintDiagnostics() is { DropCount: 7, PendingIdleStreakDrops: 16 },
+                "A delayed visible frame dumped a backlog instead of one staggered brush drop.");
+            Draw(slow);
+            slow.CapturePaintArtworkForVerification();
+            Require(slow.GetPaintDiagnostics().DropCount == 7,
+                "A second view at the same slow-frame timestamp duplicated its automatic drop.");
+            slow.ResetPaint();
+            slow.ShowBoardMenu();
+
+            void AdvanceQuietlyTo(DateTimeOffset destination)
+            {
+                // Idle deadlines need a visibly drawing timeline, not a native
+                // camera comparison for every empty waiting frame. Keep gaps
+                // well below the production pause threshold and avoid readback.
+                while (now < destination)
+                {
+                    now += TimeSpan.FromTicks(Math.Min(TimeSpan.FromSeconds(1).Ticks, (destination - now).Ticks));
+                    DrawNative(idle, target, size, size);
+                }
+            }
+            void PrepareObservedStreak(DateTimeOffset deadline)
+            {
+                AdvanceQuietlyTo(deadline.AddMilliseconds(-250));
+                submitted.Clear();
+                delayedDetector.Reset();
+                ObserveDraw();
+                now = deadline.AddMilliseconds(-125);
+                ObserveDraw();
+                now = deadline.AddTicks(-1);
+                ObserveDraw();
+            }
+            void AdvanceObservedTo(DateTimeOffset destination)
+            {
+                while (now < destination)
+                {
+                    now += TimeSpan.FromTicks(Math.Min(TimeSpan.FromMilliseconds(125).Ticks, (destination - now).Ticks));
+                    ObserveDraw();
+                }
+            }
+            void ObserveDraw()
+            {
+                submitted.Add(new(size, size, size * 4, Draw(idle), now));
+                if (submitted.Count > 4) submitted.RemoveAt(0);
+                var expected = idle.GetPaintDisturbanceContext();
+                if (submitted.Count < 3 || expected is null) return;
+                var rendered = submitted[^3];
+                var frame = rendered with { Timestamp = now };
+                var result = delayedDetector.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
+                    expected, frame.Timestamp, now);
+                int accepted = idle.CompletePaintDisturbance(expected, result, frame.Timestamp);
+                if (!result.ReferenceReady || result.Drops.Count != 0 || accepted != 0)
+                {
+                    string failureDirectory = Path.Combine(directory, "paint-idle-delayed-failure");
+                    Directory.CreateDirectory(failureDirectory);
+                    File.WriteAllBytes(Path.Combine(failureDirectory, "confirmed.camera.bgra"), frame.Bgra);
+                    var history = new List<object>();
+                    for (int index = 0; index < expected.ExpectedHistory.Count; index++)
+                    {
+                        var reference = expected.ExpectedHistory[index];
+                        string file = $"confirmed.expected-{index}.bgra";
+                        File.WriteAllBytes(Path.Combine(failureDirectory, file), reference.Bgra);
+                        history.Add(new { reference.Width, reference.Height, reference.PresentedAt, file });
+                    }
+                    File.WriteAllText(Path.Combine(failureDirectory, "confirmed.json"),
+                        System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            frame.Timestamp, frame.Width, frame.Height, frame.Stride,
+                            cameraWasRenderedAt = rendered.Timestamp,
+                            expected.Revision, expected.CameraToBoard, expected.PaintBounds, expected.IgnoredRegions,
+                            expectedHistory = history, result, acceptedDrops = accepted,
+                            paint = idle.GetPaintDiagnostics()
+                        }));
+                    throw new InvalidOperationException(
+                        "The webcam's delayed view of an idle brush streak failed its comparison. " +
+                        $"Accepted drops: {accepted}. Result: " + System.Text.Json.JsonSerializer.Serialize(result) +
+                        $". Exact replay: {failureDirectory}.");
+                }
+                if (idle.GetPaintDiagnostics().IdleStreakStartedAt is not null)
+                    delayedStreakFramesCompared++;
+            }
+        }
 
         void VerifyPaintButtonLighting()
         {
@@ -652,7 +1039,7 @@ public sealed partial class MainWindow
                 point.Y >= bounds.Y && point.Y <= bounds.Y + bounds.Height;
         }
 
-        SceneCompositor NewScene(out double safetyInset, bool nativeCamera = false)
+        SceneCompositor NewScene(out double safetyInset, bool nativeCamera = false, bool keepIntroduction = false)
         {
             var result = new SceneCompositor(blackjackClock: () => now, paintClock: () => now);
             result.SetDisplayAspect(1);
@@ -663,6 +1050,13 @@ public sealed partial class MainWindow
             safetyInset = result.SetDetectedBoardGrid(corners, Homography.FromFourPoints(camera, unit));
             result.SetBoardSetup(false);
             result.ShowPaint();
+            if (!keepIntroduction)
+            {
+                // These existing fixtures isolate paint transport, camera
+                // comparison and exact pigment/export behavior from decoration.
+                result.DisablePaintIdleStreaksForVerification();
+                result.ResetPaint();
+            }
             return result;
         }
         byte[] Draw(SceneCompositor drawingScene)

@@ -2,6 +2,24 @@ using System.Runtime.InteropServices;
 using OpenCvSharp;
 using ProjectTabletop.Vision;
 
+if (args is ["--hand-acquisition-compact-native-replay", var compactNativeSnapshot])
+{
+    HandAcquisitionCompactControlRegression.ReplayNative(compactNativeSnapshot);
+    return;
+}
+
+if (args is ["--hand-acquisition-compact"])
+{
+    HandAcquisitionCompactControlRegression.Run();
+    return;
+}
+
+if (args is ["--hand-acquisition-compact-replay", var compactSnapshot, var compactOccupied])
+{
+    HandAcquisitionCompactControlRegression.Replay(compactSnapshot, compactOccupied);
+    return;
+}
+
 if (args is ["--hand-local-context"])
 {
     HandAcquisitionLocalContextRegression.Run();

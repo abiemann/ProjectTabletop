@@ -44,7 +44,8 @@ public sealed partial class SceneCompositor
     private static double FingerSelectionProgress(double progress) =>
         double.IsFinite(progress) ? Math.Clamp(progress, 0, 1) : 0;
 
-    private static string FingerSelectionCaption(IReadOnlyList<BoardFingerSelectionFeedback> feedback, string idle)
+    private static string FingerSelectionCaption(IReadOnlyList<BoardFingerSelectionFeedback> feedback, string idle,
+        bool includeGroupingInstruction = true)
     {
         if (feedback.Count == 0) return idle;
         // A currently selecting/ready hand takes priority over another hand's
@@ -55,15 +56,17 @@ public sealed partial class SceneCompositor
                 ? BoardFingerSelectionStage.Armed
                 : feedback.Any(item => item.Stage == BoardFingerSelectionStage.Arming)
                     ? BoardFingerSelectionStage.Arming : BoardFingerSelectionStage.Selected;
-        return FingerSelectionStageCaption(stage);
+        return stage == BoardFingerSelectionStage.Arming && !includeGroupingInstruction
+            ? idle : FingerSelectionStageCaption(stage, includeGroupingInstruction);
     }
 
-    private static string FingerSelectionStageCaption(BoardFingerSelectionStage stage) => stage switch
+    private static string FingerSelectionStageCaption(BoardFingerSelectionStage stage,
+        bool includeGroupingInstruction = true) => stage switch
     {
         BoardFingerSelectionStage.Armed => "Ready · separate index",
         BoardFingerSelectionStage.Separating => "Selecting",
-        BoardFingerSelectionStage.Selected => "Selected · bring fingers together",
-        _ => "Bring fingers together"
+        BoardFingerSelectionStage.Selected => includeGroupingInstruction ? "Selected · bring fingers together" : "Selected",
+        _ => includeGroupingInstruction ? "Bring fingers together" : string.Empty
     };
 
     private static void DrawButtonFingerSelectionFeedback(CanvasDrawingSession ds, BoardButton button,

@@ -1,5 +1,6 @@
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
+using ProjectTabletop.Interaction;
 using Windows.Foundation;
 
 namespace ProjectTabletop.App.Projection;
@@ -148,6 +149,7 @@ public sealed partial class SceneCompositor
 
     private void ResetBoardRaster()
     {
+        bool unseenPaintIntroduction = _paintIntroductionStartedAt is null && _paintIntroductionDrops.Count > 0;
         CancelMonopolyDiceAnimation();
         DisposeMonopolyDiceLayer();
         CancelMonopolyEntrance();
@@ -164,6 +166,9 @@ public sealed partial class SceneCompositor
         _blackjackPreviewTarget = null;
         _blackjackPreviewRevision = -1;
         ResetPaint();
+        // A first launch can wait for calibration. Keep its unseen hint pending;
+        // resetting an already visible painting still leaves the board blank.
+        if (unseenPaintIntroduction && _boardSession.Screen == BoardScreen.Paint) SchedulePaintIntroduction();
     }
 
     private static Matrix3x2 BoardRasterTransform(CanvasRenderTarget target) =>

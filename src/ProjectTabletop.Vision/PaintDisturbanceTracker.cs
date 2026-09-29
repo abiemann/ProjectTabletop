@@ -14,7 +14,7 @@ public sealed record PaintDisturbanceObservation(PixelPoint BoardCenter, double 
 
 public sealed record PaintDisturbanceResult(IReadOnlyList<PaintDisturbanceObservation> Drops,
     int CandidateCount, double ForegroundBoardArea, bool ReferenceReady, string Reason,
-    double? EstimatedDelayMilliseconds = null);
+    double? EstimatedDelayMilliseconds = null, int ConfirmedCandidateCount = 0);
 
 /// <summary>
 /// Finds physical obstructions of a moving projected painting. It compares native camera samples
@@ -27,9 +27,10 @@ public sealed class PaintDisturbanceTracker
     // Preserve the measured four-finger noise floor in board area. Seven percent
     // of the whole canvas would require an obstruction much larger than a hand.
     public const double MinimumBoardArea = HandAcquisitionPresenceTracker.MinimumControlCoverage * .236 * .081;
-    private const int Features = 7;
+    private const int OpticalFeatures = 12;
     private readonly List<Track> _tracks = [];
     private readonly Dictionary<PaintExpectedFrame, double[]> _expectedSamples = [];
+    private readonly Dictionary<double[], double[]> _expectedFeatures = [];
     private long _revision = long.MinValue;
     private double[] _homography = [];
     private HandTrackingBounds? _paintBounds;
@@ -39,6 +40,8 @@ public sealed class PaintDisturbanceTracker
     private PixelPoint[] _cameraPoints = [], _boardPoints = [];
     private double[] _areas = [];
     private bool[] _mask = [];
+    private int[] _training = [];
+    private double[] _ambientOffsets = [];
     private DateTimeOffset _lastFrame;
 
     public PaintDisturbanceResult Update(int width, int height, int stride, byte[] bgra,
@@ -69,24 +72,47 @@ public sealed class PaintDisturbanceTracker
 
         double[] current = SampleCamera(stride, bgra);
         foreach (var expired in _expectedSamples.Keys.Where(item => !history.Contains(item)).ToArray())
-            _expectedSamples.Remove(expired);
+            if (_expectedSamples.Remove(expired, out var samples)) _expectedFeatures.Remove(samples);
         double[][] expected = history.Select(item =>
         {
             if (!_expectedSamples.TryGetValue(item, out var samples))
                 _expectedSamples[item] = samples = SampleExpected(item);
             return samples;
         }).ToArray();
+        _ambientOffsets = FitDryAmbientOffsets(expected, current);
+        // Compare the same observations with the same weights for every possible
+        // delay. A newly painted cell must not become cheap background merely
+        // because an older candidate predates its paint. Weight each known color
+        // wherever it appears in the bounded history; fitting remains robust per color.
+        var scoreWeights = new double[_mask.Length];
+        foreach (double[] reference in expected)
+        {
+            var colorCounts = _training.GroupBy(index => ColorKey(reference, index))
+                .ToDictionary(group => group.Key, group => group.Count());
+            foreach (int index in _training)
+                scoreWeights[index] = Math.Max(scoreWeights[index], 1 / Math.Sqrt(colorCounts[ColorKey(reference, index)]));
+        }
+        double scoreWeight = _training.Sum(index => scoreWeights[index]);
         Fit? bestFit = null;
         int bestIndex = 0;
         for (int reference = 0; reference < expected.Length; reference++)
         {
-            Fit? fit = FitCamera(expected[reference], current);
+            Fit? fit = FitCamera(expected[reference], current, scoreWeights, scoreWeight);
             if (fit is not null && (bestFit is null || fit.MatchError < bestFit.MatchError))
             { bestFit = fit; bestIndex = reference; }
         }
         if (bestFit is null || bestFit.MedianError > 20)
         { _tracks.Clear(); return Empty("paint-reference-uncertain"); }
-        double threshold = Math.Clamp(bestFit.MedianError * 3.5 + 10, 25, 48);
+        double noiseMedian = bestFit.MedianError;
+        if (_ambientOffsets.Length > 0)
+        {
+            // Correcting smooth illumination must not lower the already measured
+            // optical noise allowance. Calibrate it with the same selected render,
+            // never by choosing a different delay or vetoing the corrected response.
+            Fit? original = FitCamera(expected[bestIndex], current, scoreWeights, scoreWeight, applyAmbient: false);
+            if (original is { MedianError: <= 20 }) noiseMedian = Math.Max(noiseMedian, original.MedianError);
+        }
+        double threshold = Math.Clamp(noiseMedian * 3.5 + 10, 25, 48);
         // Estimate one shared projection/camera delay from the unobstructed scene.
         // Only that render and its immediate neighbors may explain a pixel; a
         // much older unrelated paint color cannot conceal a new physical object.
@@ -107,6 +133,7 @@ public sealed class PaintDisturbanceTracker
 
         var candidates = Components(foreground, frameTime);
         var drops = new List<PaintDisturbanceObservation>(2);
+        int confirmedCandidates = 0;
         _tracks.RemoveAll(track => frameTime - track.LastSeen > TimeSpan.FromMilliseconds(450));
         var used = new HashSet<Track>();
         foreach (var candidate in candidates)
@@ -127,6 +154,7 @@ public sealed class PaintDisturbanceTracker
             }
             used.Add(track);
             if (track.Observations < 2 || frameTime - track.FirstSeen < TimeSpan.FromMilliseconds(60)) continue;
+            confirmedCandidates++;
             bool moved = track.LastDropCenter is { } previous && Distance(previous, candidate.BoardCenter) >= .04;
             TimeSpan interval = TimeSpan.FromMilliseconds(moved ? 150 : 900);
             if (track.LastDrop != default && frameTime - track.LastDrop < interval) continue;
@@ -136,14 +164,14 @@ public sealed class PaintDisturbanceTracker
         }
         return new(drops, candidates.Count, foregroundArea, true,
             drops.Count > 0 ? "physical-disturbance" : candidates.Count > 0 ? "disturbance-held" : "projected-paint-only",
-            estimatedDelay);
+            estimatedDelay, confirmedCandidates);
     }
 
     public void Reset()
     {
-        _tracks.Clear(); _expectedSamples.Clear(); _revision = long.MinValue; _homography = []; _paintBounds = null; _ignored = [];
+        _tracks.Clear(); _expectedSamples.Clear(); _expectedFeatures.Clear(); _revision = long.MinValue; _homography = []; _paintBounds = null; _ignored = [];
         _width = _height = _columns = _rows = 0; _cameraPoints = []; _boardPoints = []; _areas = []; _mask = [];
-        _lastFrame = default;
+        _training = []; _ambientOffsets = []; _lastFrame = default;
     }
 
     private static PaintDisturbanceResult Empty(string reason) => new([], 0, 0, false, reason);
@@ -201,6 +229,7 @@ public sealed class PaintDisturbanceTracker
             _mask[index] = true; valid++;
         }
         if (valid < 100) { Reset(); return false; }
+        _training = Enumerable.Range(0, _mask.Length).Where(index => _mask[index] && index % 11 == 0).ToArray();
         _revision = scene.Revision; _width = width; _height = height;
         return true;
     }
@@ -244,37 +273,157 @@ public sealed class PaintDisturbanceTracker
 
     private sealed record Fit(double[][] Coefficients, double MedianError, double MatchError);
 
-    private Fit? FitCamera(double[] expected, double[] current)
+    private double[] FitDryAmbientOffsets(double[][] history, double[] current)
     {
-        int[] training = Enumerable.Range(0, _mask.Length).Where(index => _mask[index] && index % 11 == 0).ToArray();
-        if (training.Length < 80) return null;
-        int[] retained = training;
+        if (_training.Length < 200) return [];
+        var dominant = _training.GroupBy(index => (
+            (int)Math.Round(history[0][index * 3]), (int)Math.Round(history[0][index * 3 + 1]),
+            (int)Math.Round(history[0][index * 3 + 2]))).MaxBy(group => group.Count())!.Key;
+        double[] dry = [dominant.Item1, dominant.Item2, dominant.Item3];
+        if (dry.Max() > 16) return [];
+        // Only known dry underlay that stays unchanged in every eligible render
+        // can teach the ambient field. Moving pigment and projected coats cannot.
+        var stable = _training.Where(index => history.All(frame =>
+            Enumerable.Range(0, 3).All(channel => Math.Abs(frame[index * 3 + channel] - dry[channel]) <= 2))).ToArray();
+        if (stable.Length < 200 || stable.Length < _training.Length * .15 ||
+            stable.Max(index => _boardPoints[index].X) - stable.Min(index => _boardPoints[index].X) < .65 ||
+            stable.Max(index => _boardPoints[index].Y) - stable.Min(index => _boardPoints[index].Y) < .65)
+            return []; // No retained camera baseline or local substitute when dry support is insufficient.
+        const int count = 6;
+        var features = new double[((_mask.Length + 10) / 11) * count];
+        foreach (int index in stable)
+        {
+            double u = _boardPoints[index].X - .5, v = _boardPoints[index].Y - .5;
+            int offset = index / 11 * count;
+            features[offset] = 1; features[offset + 1] = u; features[offset + 2] = v;
+            features[offset + 3] = u * u; features[offset + 4] = u * v; features[offset + 5] = v * v;
+        }
+        int[] retained = stable;
         double[][] coefficients = new double[3][];
-        double[] features = new double[Features];
-        double median = 0, matchingError = 0;
         for (int iteration = 0; iteration < 3; iteration++)
         {
+            double[,] matrix = new double[count, count];
+            double[][] values = [new double[count], new double[count], new double[count]];
+            foreach (int index in retained)
+            {
+                int offset = index / 11 * count;
+                for (int row = 0; row < count; row++)
+                {
+                    double feature = features[offset + row];
+                    for (int channel = 0; channel < 3; channel++) values[channel][row] += feature * current[index * 3 + channel];
+                    for (int column = 0; column < count; column++) matrix[row, column] += feature * features[offset + column];
+                }
+            }
+            for (int diagonal = 0; diagonal < count; diagonal++)
+                matrix[diagonal, diagonal] += retained.Length * (diagonal >= 3 ? .0003 : .00001);
             for (int channel = 0; channel < 3; channel++)
             {
-                double[,] matrix = new double[Features, Features]; double[] values = new double[Features];
-                foreach (int index in retained)
+                coefficients[channel] = Solve((double[,])matrix.Clone(), values[channel]);
+                if (coefficients[channel].Any(value => !double.IsFinite(value))) return [];
+            }
+            var errors = stable.Select(index =>
+            {
+                int offset = index / 11 * count;
+                double error = 0;
+                for (int channel = 0; channel < 3; channel++)
                 {
-                    FeatureVector(expected, index, channel, features);
-                    for (int row = 0; row < Features; row++)
-                    {
-                        values[row] += features[row] * current[index * 3 + channel];
-                        for (int column = 0; column < Features; column++) matrix[row, column] += features[row] * features[column];
-                    }
+                    double prediction = 0;
+                    for (int feature = 0; feature < count; feature++) prediction += coefficients[channel][feature] * features[offset + feature];
+                    error += Math.Pow(current[index * 3 + channel] - prediction, 2);
                 }
-                for (int diagonal = 0; diagonal < Features; diagonal++)
-                    matrix[diagonal, diagonal] += retained.Length * (diagonal == 4 ? .0003 : .00001);
-                coefficients[channel] = Solve(matrix, values);
+                return (Index: index, Error: error);
+            }).OrderBy(item => item.Error);
+            // Retain broad support while rejecting localized occlusions. Each
+            // quarter-board tile contributes its best 70%, so an entire dim region
+            // cannot be dropped simply because the initial global fit was brighter.
+            retained = errors.GroupBy(item => ((int)(_boardPoints[item.Index].X * 4), (int)(_boardPoints[item.Index].Y * 4)))
+                .SelectMany(group => group.Take(Math.Max(1, (int)(group.Count() * .7))))
+                .Select(item => item.Index).ToArray();
+        }
+        var result = new double[current.Length];
+        for (int index = 0; index < _mask.Length; index++)
+        {
+            if (!_mask[index]) continue;
+            double u = _boardPoints[index].X - .5, v = _boardPoints[index].Y - .5;
+            for (int channel = 0; channel < 3; channel++)
+            {
+                var field = coefficients[channel];
+                result[index * 3 + channel] = field[1] * u + field[2] * v + field[3] * u * u + field[4] * u * v + field[5] * v * v;
+            }
+        }
+        return result;
+    }
+
+    private Fit? FitCamera(double[] expected, double[] current, double[] scoreWeights, double scoreWeight, bool applyAmbient = true)
+    {
+        if (_training.Length < 80) return null;
+        // Fit the same response for delay selection and obstruction comparison.
+        // A simpler response can mistake a freshly painted color for camera lag.
+        if (!_expectedFeatures.TryGetValue(expected, out var cachedFeatures))
+        {
+            cachedFeatures = new double[((_mask.Length + 10) / 11) * OpticalFeatures];
+            foreach (int index in _training)
+                FeatureVector(expected, index, cachedFeatures.AsSpan(index / 11 * OpticalFeatures, OpticalFeatures));
+            _expectedFeatures[expected] = cachedFeatures;
+        }
+        int[] retained = _training;
+        double[][] coefficients = new double[3][];
+        double median = 0, matchingError = 0;
+        Span<double> targets = stackalloc double[3];
+        for (int iteration = 0; iteration < 6; iteration++)
+        {
+            // Known rendered colors must not be drowned out by a large dark
+            // canvas. Square-root balancing still gives populated bins more influence.
+            var colorCounts = retained.GroupBy(index => ColorKey(expected, index))
+                .ToDictionary(group => group.Key, group => group.Count());
+            double weightScale = retained.Length /
+                retained.Sum(index => 1 / Math.Sqrt(colorCounts[ColorKey(expected, index)]));
+            double[,] matrix = new double[OpticalFeatures, OpticalFeatures];
+            double[][] values = [new double[OpticalFeatures], new double[OpticalFeatures], new double[OpticalFeatures]];
+            foreach (int index in retained)
+            {
+                ReadOnlySpan<double> features = cachedFeatures.AsSpan(index / 11 * OpticalFeatures, OpticalFeatures);
+                double weight = weightScale / Math.Sqrt(colorCounts[ColorKey(expected, index)]);
+                for (int channel = 0; channel < 3; channel++)
+                {
+                    double target = current[index * 3 + channel];
+                    double ambient = applyAmbient && _ambientOffsets.Length > 0 ? _ambientOffsets[index * 3 + channel] : 0;
+                    if (coefficients[channel] is not null && (target <= 3 || target >= 252))
+                    {
+                        // A clipped channel is a bound, not a measurement of its
+                        // underlying response. Retain predictions already beyond
+                        // that bound instead of bending the other rendered colors.
+                        double predicted = Dot(coefficients[channel], features) + ambient;
+                        if ((target <= 3 && predicted < target) || (target >= 252 && predicted > target))
+                            target = predicted;
+                    }
+                    targets[channel] = target - ambient;
+                }
+                // All channels share a feature basis and weights. Build its matrix
+                // once, rather than repeating the expensive work for three channels.
+                for (int row = 0; row < OpticalFeatures; row++)
+                {
+                    double weighted = weight * features[row];
+                    for (int channel = 0; channel < 3; channel++) values[channel][row] += weighted * targets[channel];
+                    for (int column = 0; column < OpticalFeatures; column++)
+                        matrix[row, column] += weighted * features[column];
+                }
+            }
+            for (int diagonal = 0; diagonal < OpticalFeatures; diagonal++)
+                matrix[diagonal, diagonal] += retained.Length * (diagonal >= 4 && diagonal < 10 ? .0003 : .00001);
+            for (int channel = 0; channel < 3; channel++)
+            {
+                coefficients[channel] = Solve((double[,])matrix.Clone(), values[channel]);
                 if (coefficients[channel].Any(value => !double.IsFinite(value))) return null;
             }
-            var errors = training.Select(index => (Index: index, Error: Error(coefficients, expected, index, current, index)))
+            var errors = _training.Select(index => (Index: index, Error: Error(coefficients, expected, index, current, index, applyAmbient)))
                 .OrderBy(item => item.Error).ToArray();
             median = errors[errors.Length / 2].Error;
-            matchingError = errors.Average(item => Math.Min(item.Error, 50));
+            // Score the final response on identical samples and shared weights
+            // for every candidate delay, without mixing reference ages per pixel.
+            if (iteration == 5)
+                matchingError = errors.Sum(item => Math.Min(item.Error, 50) *
+                    scoreWeights[item.Index]) / scoreWeight;
             retained = errors.GroupBy(item => ColorKey(expected, item.Index))
                 .SelectMany(group => group.Take(Math.Max(1, (int)(group.Count() * .7))))
                 .Select(item => item.Index).ToArray();
@@ -282,25 +431,47 @@ public sealed class PaintDisturbanceTracker
         return new(coefficients, median, matchingError);
     }
 
-    private void FeatureVector(double[] expected, int index, int channel, double[] features)
+    private void FeatureVector(double[] expected, int index, Span<double> features)
     {
         features[0] = 1;
         for (int color = 0; color < 3; color++) features[color + 1] = expected[index * 3 + color] / 255;
-        features[4] = Math.Pow(expected[index * 3 + channel] / 255, 2);
-        features[5] = _boardPoints[index].X - .5; features[6] = _boardPoints[index].Y - .5;
+        // Phone/projector color correction can subtract other channels before
+        // clipping. Include every RGB square and cross term in the bounded fit.
+        features[4] = features[1] * features[1];
+        features[5] = features[2] * features[2];
+        features[6] = features[3] * features[3];
+        features[7] = features[1] * features[2];
+        features[8] = features[1] * features[3];
+        features[9] = features[2] * features[3];
+        features[10] = _boardPoints[index].X - .5; features[11] = _boardPoints[index].Y - .5;
     }
 
-    private double Predict(double[] coefficients, double[] expected, int colorIndex, int positionIndex, int channel) =>
-        Math.Clamp(coefficients[0] + coefficients[1] * expected[colorIndex * 3] / 255 +
-            coefficients[2] * expected[colorIndex * 3 + 1] / 255 + coefficients[3] * expected[colorIndex * 3 + 2] / 255 +
-            coefficients[4] * Math.Pow(expected[colorIndex * 3 + channel] / 255, 2) +
-            coefficients[5] * (_boardPoints[positionIndex].X - .5) + coefficients[6] * (_boardPoints[positionIndex].Y - .5), 0, 255);
+    private static double Dot(double[] coefficients, ReadOnlySpan<double> features)
+    {
+        double result = 0;
+        for (int feature = 0; feature < OpticalFeatures; feature++) result += coefficients[feature] * features[feature];
+        return result;
+    }
 
-    private double Error(double[][] coefficients, double[] expected, int colorIndex, double[] current, int index)
+    private double Predict(double[] coefficients, double[] expected, int colorIndex, int positionIndex, int channel, bool applyAmbient = true) =>
+        Math.Clamp(PredictRaw(coefficients, expected, colorIndex, positionIndex, channel, applyAmbient), 0, 255);
+
+    private double PredictRaw(double[] coefficients, double[] expected, int colorIndex, int positionIndex, int channel, bool applyAmbient = true)
+    {
+        double blue = expected[colorIndex * 3] / 255, green = expected[colorIndex * 3 + 1] / 255,
+            red = expected[colorIndex * 3 + 2] / 255;
+        return coefficients[0] + coefficients[1] * blue + coefficients[2] * green + coefficients[3] * red +
+            coefficients[4] * blue * blue + coefficients[5] * green * green + coefficients[6] * red * red +
+            coefficients[7] * blue * green + coefficients[8] * blue * red + coefficients[9] * green * red +
+            coefficients[10] * (_boardPoints[positionIndex].X - .5) + coefficients[11] * (_boardPoints[positionIndex].Y - .5) +
+            (applyAmbient && _ambientOffsets.Length > 0 ? _ambientOffsets[positionIndex * 3 + channel] : 0);
+    }
+
+    private double Error(double[][] coefficients, double[] expected, int colorIndex, double[] current, int index, bool applyAmbient = true)
     {
         double sum = 0;
         for (int channel = 0; channel < 3; channel++)
-            sum += Math.Pow(current[index * 3 + channel] - Predict(coefficients[channel], expected, colorIndex, index, channel), 2);
+            sum += Math.Pow(current[index * 3 + channel] - Predict(coefficients[channel], expected, colorIndex, index, channel, applyAmbient), 2);
         return Math.Sqrt(sum / 3);
     }
 
@@ -419,23 +590,24 @@ public sealed class PaintDisturbanceTracker
     }
     private static double[] Solve(double[,] matrix, double[] values)
     {
-        for (int pivot = 0; pivot < Features; pivot++)
+        int featureCount = values.Length;
+        for (int pivot = 0; pivot < featureCount; pivot++)
         {
             int best = pivot;
-            for (int row = pivot + 1; row < Features; row++)
+            for (int row = pivot + 1; row < featureCount; row++)
                 if (Math.Abs(matrix[row, pivot]) > Math.Abs(matrix[best, pivot])) best = row;
-            if (Math.Abs(matrix[best, pivot]) < 1e-12) return Enumerable.Repeat(double.NaN, Features).ToArray();
-            for (int column = 0; column < Features; column++)
+            if (Math.Abs(matrix[best, pivot]) < 1e-12) return Enumerable.Repeat(double.NaN, featureCount).ToArray();
+            for (int column = 0; column < featureCount; column++)
                 (matrix[best, column], matrix[pivot, column]) = (matrix[pivot, column], matrix[best, column]);
             (values[best], values[pivot]) = (values[pivot], values[best]);
             double divisor = matrix[pivot, pivot];
-            for (int column = pivot; column < Features; column++) matrix[pivot, column] /= divisor;
+            for (int column = pivot; column < featureCount; column++) matrix[pivot, column] /= divisor;
             values[pivot] /= divisor;
-            for (int row = 0; row < Features; row++)
+            for (int row = 0; row < featureCount; row++)
             {
                 if (row == pivot) continue;
                 double amount = matrix[row, pivot];
-                for (int column = pivot; column < Features; column++) matrix[row, column] -= amount * matrix[pivot, column];
+                for (int column = pivot; column < featureCount; column++) matrix[row, column] -= amount * matrix[pivot, column];
                 values[row] -= amount * values[pivot];
             }
         }

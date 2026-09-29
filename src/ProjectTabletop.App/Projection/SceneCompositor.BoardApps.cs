@@ -24,7 +24,7 @@ public sealed partial class SceneCompositor
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision,
         long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long MonopolyRevision, long MonopolyDiceRevision,
         long MonopolySessionRevision, int MonopolyDrawerFrame, long MonopolyEntranceRevision, int MonopolyEntranceFrame,
-        long GlobeRevision, long GlobeFrame);
+        long GlobeRevision, long GlobeFrame, long GlobeSessionRevision);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
         Func<DateTimeOffset>? boardRevealClock = null, Func<DateTimeOffset>? paintClock = null,
@@ -144,6 +144,8 @@ public sealed partial class SceneCompositor
         var paintNow = _paintClock();
         var globeNow = _globeClock();
         var globe = _boardSession.Screen == BoardScreen.Globe;
+        if (globe) _boardSession.TickGlobe(globeNow);
+        if (paint) AdvancePaintAutomatic(paintNow);
         _boardSession.PaintSaveEnabled = paint && CanSavePaint;
         if (photoCopy && !preview && PhotoCopyCaptureAllowed)
             MarkPhotoCopySurfacePresented(now);
@@ -171,7 +173,8 @@ public sealed partial class SceneCompositor
             _boardSession.Screen == BoardScreen.Monopoly ? MonopolyEntranceRevision : 0,
             MonopolyEntranceRenderFrame(monopolyEntrance),
             globe ? _boardSession.GetGlobeSnapshot(globeNow).Revision : 0,
-            globe ? GlobeVisualFrame(globeNow) : 0);
+            globe ? GlobeVisualFrame(globeNow) : 0,
+            globe ? _boardSession.Revision : 0);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
@@ -228,7 +231,8 @@ public sealed partial class SceneCompositor
             else if (globe)
             {
                 DrawGlobeBoard(surface, _boardSession.GetGlobeSnapshot(globeNow), _boardSession.Buttons,
-                    handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback, PaintBoardAspect());
+                    handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback, PaintBoardAspect(),
+                    drawerOpen: _boardSession.GlobeDrawerOpen, drawerProgress: GlobeDrawerProgress(globeNow));
             }
             else if (_boardSession.Screen == BoardScreen.Menu)
             {

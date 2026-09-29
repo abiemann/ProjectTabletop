@@ -253,7 +253,12 @@ public sealed partial class MainWindow
                 case BoardScreen.Menu: scene.ShowBoardMenu(); break;
                 case BoardScreen.HandTracking: scene.ShowHandTrackingTest(); break;
                 case BoardScreen.PhotoCopy: scene.ShowPhotoCopy(); break;
-                case BoardScreen.Paint: scene.ShowPaint(); break;
+                case BoardScreen.Paint:
+                    scene.ShowPaint();
+                    // Compare one fixed asymmetric mark across camera rolls;
+                    // each visit's intentionally random introduction is separate.
+                    scene.ResetPaint();
+                    break;
                 case BoardScreen.Blackjack: scene.ShowBlackjack(); break;
                 case BoardScreen.Monopoly:
                     // Keep the completed barrier behind real camera timestamps;

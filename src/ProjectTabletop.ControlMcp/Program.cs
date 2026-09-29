@@ -62,7 +62,7 @@ static async Task RunMcpAsync()
             new McpServerToolCreateOptions
             {
                 Name = "globe_action",
-                Description = "Activate a Globe control: globe-zoom-in, globe-zoom-out, globe-rotate-left, globe-rotate-right or globe-exit."
+                Description = "Open Globe controls with globe-drawer-open, close with globe-drawer-close, or activate visible globe-zoom-in, globe-zoom-out or globe-exit controls."
             });
     var options = new McpServerOptions
     {

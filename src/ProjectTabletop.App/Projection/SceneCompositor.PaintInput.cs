@@ -149,6 +149,9 @@ public sealed partial class SceneCompositor
             if (!PaintInputReady || now < _paintInputReadyAfter || requested.Revision != _paintReferenceRevision ||
                 frameTime < _paintInputReadyAfter || frameTime > now ||
                 now - frameTime > TimeSpan.FromMilliseconds(350)) return 0;
+            if (result.ReferenceReady && result.ConfirmedCandidateCount > 0 &&
+                result.ForegroundBoardArea >= PaintDisturbanceTracker.MinimumBoardArea)
+                NotePaintUserActivity();
             int accepted = 0;
             foreach (var drop in result.Drops.Take(2))
             {

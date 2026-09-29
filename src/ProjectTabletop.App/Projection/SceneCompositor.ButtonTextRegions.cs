@@ -13,6 +13,8 @@ public sealed partial class SceneCompositor
         if (_boardSession.Screen == BoardScreen.Paint) return PaintButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Globe)
         {
+            if (IsGlobeDrawerHandle(button))
+                return ButtonInkRegion(button, GlobeDrawerArrowInk(button, PaintBoardAspect()), 0, 0);
             var rectangle = GlobeButtonTextRectangle(button);
             using var format = GlobeButtonTextFormat(button);
             using var layout = new CanvasTextLayout(device, button.Label, format,

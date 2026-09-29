@@ -23,7 +23,7 @@ public sealed partial class MainWindow
         _scene.ShowGlobe();
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
-        SetStatus("Globe ready. Zoom into Earth or rotate left and right. Aim with four fingers together, then move your index sideways to select. Laptop clicks also work.");
+        SetStatus("Globe ready. Open the left drawer for Exit and zoom controls. Laptop clicks also work.");
     }
 
     private async Task<string> SaveGlobePreviewAsync()
