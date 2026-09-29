@@ -2,7 +2,7 @@ namespace ProjectTabletop.Interaction;
 
 /// <summary>A time-derived globe presentation. Zoom already includes the entrance animation.</summary>
 public sealed record GlobeSnapshot(double TargetZoom, double Zoom, double RotationDegrees,
-    double IntroProgress, double ElapsedSeconds, long Revision);
+    double IntroProgress, double ElapsedSeconds, long Revision, double ViewLatitudeDegrees = 0);
 
 /// <summary>
 /// Keeps globe controls separate from its continuously animated presentation. Sampling a frame
@@ -16,6 +16,8 @@ public sealed class GlobeState
     public const double ZoomStep = 1.25;
     public const double RotationStepDegrees = 20;
     public const double RotationDegreesPerSecond = 1;
+    // Keep a polar home from turning Earth into a view of the ice cap.
+    public const double MaximumViewLatitude = 60;
     public static readonly TimeSpan EntranceDuration = TimeSpan.FromSeconds(3);
     public static readonly TimeSpan ControlTransitionDuration = TimeSpan.FromMilliseconds(350);
 
@@ -29,13 +31,19 @@ public sealed class GlobeState
     private double _targetRotation;
     public long Revision { get; private set; }
     public double HomeRotationDegrees => _homeRotation;
+    /// <summary>Latitude held at the disk's centre; north positive.</summary>
+    public double HomeLatitudeDegrees { get; }
 
     /// <param name="homeLongitudeDegrees">Longitude facing the viewer at each launch, east positive.
     /// The surface shader centres longitude -rotation, so it starts at the opposite rotation.</param>
-    public GlobeState(double homeLongitudeDegrees = 0)
+    /// <param name="homeLatitudeDegrees">Latitude tilted to the disk's centre, limited to
+    /// ±<see cref="MaximumViewLatitude"/>; spin continues about Earth's axis.</param>
+    public GlobeState(double homeLongitudeDegrees = 0, double homeLatitudeDegrees = 0)
     {
         if (!double.IsFinite(homeLongitudeDegrees)) throw new ArgumentOutOfRangeException(nameof(homeLongitudeDegrees));
+        if (!double.IsFinite(homeLatitudeDegrees)) throw new ArgumentOutOfRangeException(nameof(homeLatitudeDegrees));
         _homeRotation = ((-homeLongitudeDegrees) % 360 + 360) % 360;
+        HomeLatitudeDegrees = Math.Clamp(homeLatitudeDegrees, -MaximumViewLatitude, MaximumViewLatitude);
     }
 
     public void Start(DateTimeOffset now)
@@ -57,7 +65,7 @@ public sealed class GlobeState
         double zoom = Lerp(_zoomFrom, _targetZoom, progress) * entranceScale;
         double rotation = Lerp(_rotationFrom, _targetRotation, progress) + elapsed * RotationDegreesPerSecond;
         rotation = (rotation % 360 + 360) % 360;
-        return new(_targetZoom, zoom, rotation, intro, elapsed, Revision);
+        return new(_targetZoom, zoom, rotation, intro, elapsed, Revision, HomeLatitudeDegrees);
     }
 
     public bool CanHandleAction(string id) => _startedAt is not null && (id switch

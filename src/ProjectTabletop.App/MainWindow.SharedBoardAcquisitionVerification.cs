@@ -343,7 +343,7 @@ public sealed partial class MainWindow
                 }
                 scene.CompleteHandAcquisition(context, presence.Hints, [], now);
                 var lit = scene.GetHandAcquisitionContext(now)!;
-                if (button.HoldToRepeat)
+                if (button.IsHold)
                     // Hold buttons act on caption evidence alone; a light would erase it.
                     Require(lit.IlluminatedHint is null && CountWhite(Draw(), center) <= CountWhite(empty, center) + 50,
                         label + "/" + button.Label + " lit a hold-to-repeat button.");

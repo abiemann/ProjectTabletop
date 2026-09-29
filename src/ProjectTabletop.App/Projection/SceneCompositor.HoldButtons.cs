@@ -35,7 +35,7 @@ public sealed partial class SceneCompositor
         {
             var now = HoldClock();
             var buttons = _boardSession.Buttons;
-            if (!AcquisitionBoardReady || !buttons.Any(button => button.HoldToRepeat && button.Enabled) ||
+            if (!AcquisitionBoardReady || !buttons.Any(button => button.IsHold && button.Enabled) ||
                 HasGlobeDrawerAnimation(_globeClock()) || frameTime > now ||
                 now - frameTime > TimeSpan.FromMilliseconds(350)) return null;
             var key = new HoldSceneKey(_boardSession.Screen,
@@ -75,7 +75,7 @@ public sealed partial class SceneCompositor
     {
         if (_boardCameraMap is null || _boardSurfaceMap is null) return false;
         var board = _boardSurfaceMap.InverseTransform(_boardCameraMap.Transform(new(camera.X, camera.Y)));
-        return _boardSession.Buttons.Any(button => button.HoldToRepeat && button.Bounds.Contains(board.X, board.Y));
+        return _boardSession.Buttons.Any(button => button.IsHold && button.Bounds.Contains(board.X, board.Y));
     }
 
     // Projected light over a hold button would erase its caption from the
@@ -83,7 +83,7 @@ public sealed partial class SceneCompositor
     private CanvasGeometry? HoldButtonLightClip(CanvasDrawingSession ds, Rect output)
     {
         if (_boardSurfaceMap is null) return null;
-        var holds = _boardSession.Buttons.Where(button => button.HoldToRepeat).ToArray();
+        var holds = _boardSession.Buttons.Where(button => button.IsHold).ToArray();
         if (holds.Length == 0) return null;
         var area = CanvasGeometry.CreateRectangle(ds.Device, output);
         foreach (var button in holds)

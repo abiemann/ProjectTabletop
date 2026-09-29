@@ -58,6 +58,12 @@ if (args is ["--boards"])
     CheckProjectedCornerMarkers();
     CheckCalibrationSpot();
     AmbientBoardEdgeSupportRegression.Run();
+    BoardCrossCheckRegression.Run();
+    return;
+}
+if (args is ["--board-cross-check"])
+{
+    BoardCrossCheckRegression.Run();
     return;
 }
 if (args is ["--ambient-edges"])

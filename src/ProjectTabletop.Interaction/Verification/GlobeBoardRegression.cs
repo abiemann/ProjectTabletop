@@ -9,9 +9,10 @@ internal static class GlobeBoardRegression
         CheckNavigationAndPinches();
         CheckFourFingerSelection();
         CheckHoldToRepeat();
+        CheckLongPressHandle();
         Console.WriteLine("Globe verification passed: pure entrance/spin frames, bounded smooth zoom, hidden rotation " +
-            "controls, timed drawer targets, pinch and four-finger selection, held-action suppression and reset barriers, " +
-            "hold-to-repeat zoom timing, gaps, stale frames and gesture exclusion.");
+            "controls, timed drawer targets, pinch and four-finger gestures ignored by every hold control, reset barriers, " +
+            "hold-to-repeat zoom timing, gaps and stale frames, long-press drawer handle with release, long-press Exit.");
     }
 
     private static void CheckHoldToRepeat()
@@ -22,9 +23,11 @@ internal static class GlobeBoardRegression
             "A hidden hold button accepted evidence while the drawer was closed.");
         Require(board.ActivateButton("globe-drawer-open", Time(3000)) && board.TickGlobe(Time(3300)),
             "The hold fixture could not open the drawer.");
-        Require(Button(board, "globe-zoom-in").HoldToRepeat && Button(board, "globe-zoom-out").HoldToRepeat &&
-            !Button(board, "globe-exit").HoldToRepeat && !Button(board, "globe-drawer-close").HoldToRepeat,
-            "Only Globe's zoom buttons should be hold-to-repeat.");
+        Require(Button(board, "globe-zoom-in").Hold == BoardButtonHold.Repeat &&
+            Button(board, "globe-zoom-out").Hold == BoardButtonHold.Repeat &&
+            Button(board, "globe-exit").Hold == BoardButtonHold.Once &&
+            Button(board, "globe-drawer-close").Hold == BoardButtonHold.Once,
+            "Globe's zooms should repeat, and its handle and Exit act once per long press.");
         IReadOnlyList<string> Hold(string[] ids, int time) => board.ObserveHeldButtons(ids, Time(time), Time(time + 40));
         for (int time = 4000; time < 5000; time += 100)
             Require(Hold(zoomIn, time).Count == 0, "A hold activated before a full second of caption evidence.");
@@ -41,7 +44,7 @@ internal static class GlobeBoardRegression
             Hold(zoomIn, 7500).SequenceEqual(zoomIn),
             "A gap over 350 ms did not restart the one-second hold.");
         Require(Hold(["globe-exit", "globe-drawer-close"], 7600).Count == 0 && board.GlobeDrawerOpen &&
-            board.Screen == BoardScreen.Globe, "Evidence over gesture buttons activated them.");
+            board.Screen == BoardScreen.Globe, "One frame of evidence activated Exit or toggled the handle.");
         Require(board.ObserveHeldButtons(zoomIn, Time(8500), Time(9000)).Count == 0,
             "Stale hold evidence activated a button.");
         string[] zoomOut = ["globe-zoom-out"];
@@ -50,6 +53,36 @@ internal static class GlobeBoardRegression
         board.ShowMenu(Time(11100)); board.ShowGlobe(Time(11200));
         Require(board.ObserveHeldButtons(zoomIn, Time(12500), Time(12500)).Count == 0,
             "Leaving Globe retained a hold or its drawer.");
+    }
+
+    private static void CheckLongPressHandle()
+    {
+        var board = new BoardSession(); board.ShowGlobe(Time(0));
+        IReadOnlyList<string> Hold(string id, int time) => board.ObserveHeldButtons([id], Time(time), Time(time + 40));
+        IReadOnlyList<string> Lift(int time) => board.ObserveHeldButtons([], Time(time), Time(time + 40));
+        Require(Button(board, "globe-drawer-open").Hold == BoardButtonHold.Once, "The drawer handle is not a long-press.");
+        for (int time = 4000; time < 5000; time += 100)
+            Require(Hold("globe-drawer-open", time).Count == 0 && !board.GlobeDrawerOpen,
+                "The handle toggled before a full second.");
+        Require(Hold("globe-drawer-open", 5000).SequenceEqual(["globe-drawer-open"]) && board.GlobeDrawerOpen,
+            "A one-second hold did not open the drawer.");
+        // Fingers still resting on the handle, now "v", must not close it again.
+        board.TickGlobe(Time(5300));
+        for (int time = 5400; time <= 8000; time += 100)
+            Require(Hold("globe-drawer-close", time).Count == 0 && board.GlobeDrawerOpen,
+                "A continued hold toggled the drawer again.");
+        Require(Lift(8100).Count == 0 && Lift(8300).Count == 0 && Hold("globe-drawer-close", 8400).Count == 0 &&
+            Hold("globe-drawer-close", 9500).Count == 0 && board.GlobeDrawerOpen,
+            "A lift under 350 ms of observed frames re-armed the spent handle.");
+        Require(Lift(9600).Count == 0 && Lift(9800).Count == 0 && Lift(9950).Count == 0, "Lifting activated a button.");
+        for (int time = 10000; time < 11000; time += 100)
+            Require(Hold("globe-drawer-close", time).Count == 0, "The re-armed handle closed before a full second.");
+        Require(Hold("globe-drawer-close", 11000).SequenceEqual(["globe-drawer-close"]) && !board.GlobeDrawerOpen,
+            "A fresh one-second hold after lifting did not close the drawer.");
+        board.ShowMenu(Time(11100)); board.ShowGlobe(Time(11200));
+        Require(Hold("globe-drawer-open", 11300).Count == 0 &&
+            Hold("globe-drawer-open", 12300).SequenceEqual(["globe-drawer-open"]),
+            "Leaving Globe kept the handle spent.");
     }
 
     private static void CheckEntranceAndRotation()
@@ -92,6 +125,31 @@ internal static class GlobeBoardRegression
             "Relaunching lost the home longitude, or an unstarted Globe rotated.");
         var east = new GlobeState(150); east.Start(Time(0));
         Require(Near(east.GetSnapshot(Time(0)).RotationDegrees, 210), "An eastern home longitude opened at the wrong rotation.");
+
+        // The home latitude stays centred while Earth spins; polar homes are limited.
+        var north = new BoardSession(globe: new GlobeState(-118, 34));
+        north.ShowGlobe(Time(0));
+        Require(Near(north.GetGlobeSnapshot(Time(0)).ViewLatitudeDegrees, 34) &&
+            Near(north.GetGlobeSnapshot(Time(60000)).ViewLatitudeDegrees, 34) && Near(north.GlobeHomeLatitudeDegrees, 34) &&
+            Near(new GlobeState(0, 78).HomeLatitudeDegrees, GlobeState.MaximumViewLatitude) &&
+            Near(new GlobeState(0, -89).HomeLatitudeDegrees, -GlobeState.MaximumViewLatitude) &&
+            Near(new GlobeState().GetSnapshot(Time(0)).ViewLatitudeDegrees, 0),
+            "The Globe did not hold its bounded home latitude at the centre.");
+        bool rejected = false;
+        try { _ = new GlobeState(0, double.NaN); } catch (ArgumentOutOfRangeException) { rejected = true; }
+        Require(rejected, "A non-finite home latitude was accepted.");
+
+        // Time zones resolve to tz reference cities, refined by the Windows region.
+        static bool City((double Latitude, double Longitude)? city, double latitude, double longitude) =>
+            city is { } value && Math.Abs(value.Latitude - latitude) < .01 && Math.Abs(value.Longitude - longitude) < .01;
+        var pacific = TimeZoneInfo.FindSystemTimeZoneById("Pacific Standard Time");
+        Require(City(GlobeHome.ReferenceCity(pacific, "US"), 34.0522, -118.2428) &&
+            City(GlobeHome.ReferenceCity(pacific, "CA"), 49.2667, -123.1167) &&
+            City(GlobeHome.ReferenceCity(pacific), 34.0522, -118.2428) &&
+            City(GlobeHome.ReferenceCity(TimeZoneInfo.FindSystemTimeZoneById("India Standard Time")), 22.5333, 88.3667) &&
+            City(GlobeHome.ReferenceCity(TimeZoneInfo.FindSystemTimeZoneById("AUS Eastern Standard Time")), -33.8667, 151.2167) &&
+            GlobeHome.ReferenceCity(TimeZoneInfo.FindSystemTimeZoneById("UTC-11")) is null,
+            "Time zones did not resolve to their tz reference cities.");
     }
 
     private static void CheckDrawerAndSmoothControls()
@@ -181,82 +239,70 @@ internal static class GlobeBoardRegression
         var board = new BoardSession(); BoardButton globe = Button(board, "globe");
         Require(At(board, 100, Pinch(globe, 1, 100)) is { Previous: BoardScreen.Menu, Current: BoardScreen.Globe,
             ButtonId: "globe", Gesture: BoardSelectionGesture.Pinch } && board.Title == "Globe", "A menu pinch did not launch Globe.");
+        // Every Globe control is a hold button: pinches, held or fresh, never select or hover them.
         BoardButton handle = Button(board, "globe-drawer-open");
-        Require(At(board, 140, Pinch(handle, 1, 100)) is null && !board.GlobeDrawerOpen,
-            "A held launch pinch also opened the drawer.");
-        Require(At(board, 180, Pinch(handle, 2, 180)) is { Previous: BoardScreen.Globe, Current: BoardScreen.Globe,
-            ButtonId: "globe-drawer-open" }, "A fresh pinch failed to open the drawer.");
-        BoardButton zoom = Button(board, "globe-zoom-in"), exit = Button(board, "globe-exit");
-        Require(At(board, 220, Pinch(exit, 3, 220)) is null && board.Screen == BoardScreen.Globe,
-            "A pinch selected a moving drawer control.");
-        Require(board.Update([Pinch(exit, 4, 300)], Time(450), Time(500)) is null &&
-            At(board, 520, Pinch(exit, 5, 300)) is null &&
-            At(board, 540, Pinch(exit, 6, 540) with { SelectionFrameTime = Time(300) }) is null &&
-            board.Screen == BoardScreen.Globe,
-            "A delayed frame, old pinch origin or retained aim crossed the drawer's completion barrier.");
-        // Zoom buttons are hold-to-repeat: a pinch, fresh or held, never selects them.
-        Require(At(board, 580, Pinch(zoom, 7, 580)) is null && At(board, 620, Pinch(zoom, 7, 580)) is null &&
-            board.HoveredButtonIds.Count == 0 && Near(board.GetGlobeSnapshot(Time(700)).TargetZoom, 1.5),
-            "A pinch selected or hovered a hold-to-repeat zoom button.");
-        Require(At(board, 740, Pinch(Button(board, "globe-drawer-close"), 8, 740)) is { ButtonId: "globe-drawer-close" } &&
-            At(board, 780, Pinch(handle, 8, 740)) is null && !board.GlobeDrawerOpen,
-            "Closing the drawer left controls exposed or a held pinch reopened it.");
-        Require(At(board, 820, Pinch(handle, 9, 820)) is { ButtonId: "globe-drawer-open" },
-            "The drawer could not reopen with a new pinch.");
-        Require(At(board, 1180, Pinch(Button(board, "globe-exit"), 10, 1180)) is
-            { Previous: BoardScreen.Globe, Current: BoardScreen.Menu, ButtonId: "globe-exit" } &&
-            At(board, 1220, Pinch(globe, 10, 1180)) is null,
-            "Drawer Exit did not leave the board once or a held pulse reentered it.");
-        board.ShowGlobe(Time(1260));
-        Require(At(board, 1300, Pinch(handle, 11, 1240)) is null &&
-            At(board, 1340, Pinch(handle, 12, 1340)) is not null,
-            "Direct navigation retained an old execution or blocked a fresh drawer gesture.");
-        board.ResetInput(Time(1380));
+        Require(At(board, 140, Pinch(handle, 1, 100)) is null && At(board, 160, Pinch(handle, 2, 160)) is null &&
+            !board.GlobeDrawerOpen && board.HoveredButtonIds.Count == 0,
+            "A pinch toggled or hovered the long-press drawer handle.");
+        Require(board.ActivateButton("globe-drawer-open", Time(180)), "The drawer could not open.");
+        // Evidence while the drawer is still moving cannot start Exit's timer.
+        Require(board.ObserveHeldButtons(["globe-exit"], Time(200), Time(200)).Count == 0 &&
+            board.ObserveHeldButtons(["globe-exit"], Time(400), Time(400)).Count == 0 && board.TickGlobe(Time(480)),
+            "Exit accepted hold evidence during the drawer's entrance.");
+        long eventId = 3;
+        foreach (string id in new[] { "globe-exit", "globe-zoom-in", "globe-zoom-out", "globe-drawer-close" })
+        {
+            int time = 500 + (int)eventId * 40;
+            BoardButton control = Button(board, id);
+            Require(At(board, time, Pinch(control, eventId, time)) is null &&
+                At(board, time + 20, Pinch(control, eventId, time)) is null && board.HoveredButtonIds.Count == 0,
+                $"A pinch selected or hovered the hold button {id}.");
+            eventId++;
+        }
+        Require(board.Screen == BoardScreen.Globe && board.GlobeDrawerOpen &&
+            Near(board.GetGlobeSnapshot(Time(800)).TargetZoom, 1.5), "A pinch changed the Globe.");
+        // Exit acts after one second of caption evidence, once.
+        for (int time = 1000; time < 2000; time += 100)
+            Require(board.ObserveHeldButtons(["globe-exit"], Time(time), Time(time)).Count == 0 &&
+                board.Screen == BoardScreen.Globe, "Exit left before a full second of hold evidence.");
+        Require(board.ObserveHeldButtons(["globe-exit"], Time(2000), Time(2000)).SequenceEqual(["globe-exit"]) &&
+            board.Screen == BoardScreen.Menu, "A one-second hold did not leave Globe through Exit.");
+        Require(At(board, 2040, Pinch(globe, 1, 100)) is null && board.Screen == BoardScreen.Menu,
+            "An old launch pinch reentered Globe after Exit.");
+        board.ShowGlobe(Time(2100));
+        Require(board.ActivateButton("globe-drawer-open", Time(2120)), "The drawer could not reopen.");
+        board.ResetInput(Time(2160));
         Require(!board.GlobeDrawerOpen && board.Buttons.Single().Id == "globe-drawer-open" &&
-            At(board, 1420, Pinch(handle, 13, 1360)) is null &&
-            At(board, 1460, Pinch(handle, 14, 1460)) is not null &&
-            At(board, 1820, Pinch(exit, 15, 1820)) is not null,
-            "Input reset failed to close the drawer, reject stale executions or accept fresh controls.");
+            board.ObserveHeldButtons(["globe-exit"], Time(2200), Time(2200)).Count == 0,
+            "Input reset failed to close the drawer or left Exit active.");
     }
 
     private static void CheckFourFingerSelection()
     {
         var board = new BoardSession(); board.ShowGlobe(Time(0));
-        BoardHandSample together = Together(Button(board, "globe-drawer-open"));
-        long revision = board.Revision;
-        for (int time = 100; time <= 1100; time += 100)
-            Require(At(board, time, together) is null, "Holding grouped fingers automatically opened the drawer.");
-        Require(board.FingerSelectionFeedback.Single() is { Stage: BoardFingerSelectionStage.Armed },
-            "Grouped fingers did not arm the drawer handle.");
-        _ = board.GetGlobeSnapshot(Time(1150));
-        Require(board.Revision == revision, "The spinning Earth invalidated an armed selection.");
-        BoardHandSample apart = Apart(together);
-        Require(At(board, 1200, apart) is null && At(board, 1280, apart) is
-            { ButtonId: "globe-drawer-open", Current: BoardScreen.Globe, TrackingId: 11,
-                Gesture: BoardSelectionGesture.IndexSeparation }, "Sideways index movement did not open the drawer.");
-        Require(At(board, 1380, apart) is null && At(board, 1460, apart) is null && board.GlobeDrawerOpen,
-            "Keeping the index separated immediately closed the drawer.");
-        // Zoom buttons are hold-to-repeat: grouped fingers cannot arm, hover or select them.
-        BoardHandSample zoom = Together(Button(board, "globe-zoom-in"));
-        for (int time = 1500; time <= 2400; time += 100)
-            Require(At(board, time, time % 200 == 0 ? zoom : Apart(zoom)) is null &&
-                board.FingerSelectionFeedback.Count == 0 && board.HoveredButtonIds.Count == 0,
-                "Finger gestures armed, hovered or selected a hold-to-repeat zoom button.");
-        Require(Near(board.GetGlobeSnapshot(Time(2500)).TargetZoom, 1.5), "A finger gesture zoomed Earth.");
-        Require(Select(board, Together(Button(board, "globe-drawer-close")), 2800)?.ButtonId == "globe-drawer-close" &&
-            !board.GlobeDrawerOpen && Select(board, Together(Button(board, "globe-drawer-open")), 3200)?.ButtonId == "globe-drawer-open",
-            "The shared finger gesture could not close and reopen the drawer.");
-        Require(Select(board, Together(Button(board, "globe-exit")), 3900) is
-            { Current: BoardScreen.Menu, ButtonId: "globe-exit", Gesture: BoardSelectionGesture.IndexSeparation },
-            "The shared four-finger gesture failed to leave Globe through the settled drawer.");
+        // No Globe control answers the finger gesture: grouped fingers cannot
+        // arm, hover or select the handle, Exit or the zooms.
+        BoardHandSample handle = Together(Button(board, "globe-drawer-open"));
+        for (int time = 100; time <= 1300; time += 100)
+            Require(At(board, time, time < 1200 ? handle : Apart(handle)) is null &&
+                board.FingerSelectionFeedback.Count == 0 && board.HoveredButtonIds.Count == 0 && !board.GlobeDrawerOpen,
+                "Finger gestures armed, hovered or toggled the long-press drawer handle.");
+        Require(board.ActivateButton("globe-drawer-open", Time(1300)) && board.TickGlobe(Time(1600)),
+            "The drawer could not open.");
+        int start = 1700;
+        foreach (string id in new[] { "globe-exit", "globe-zoom-in", "globe-zoom-out", "globe-drawer-close" })
+        {
+            BoardHandSample fingers = Together(Button(board, id));
+            for (int time = start; time <= start + 1300; time += 100)
+                Require(At(board, time, time < start + 1200 ? fingers : Apart(fingers)) is null &&
+                    board.FingerSelectionFeedback.Count == 0 && board.HoveredButtonIds.Count == 0,
+                    $"Finger gestures armed, hovered or selected the hold button {id}.");
+            start += 1500;
+        }
+        Require(board.Screen == BoardScreen.Globe && board.GlobeDrawerOpen &&
+            Near(board.GetGlobeSnapshot(Time(start)).TargetZoom, 1.5), "A finger gesture changed the Globe.");
     }
 
-    private static BoardNavigation? Select(BoardSession board, BoardHandSample hand, int time)
-    {
-        Require(At(board, time, hand) is null && At(board, time + 100, hand) is null &&
-            At(board, time + 200, Apart(hand)) is null, "A Globe gesture executed without separate confirmation.");
-        return At(board, time + 280, Apart(hand));
-    }
     private static BoardHandSample Together(BoardButton button) => new(double.NaN, double.NaN,
         DateTimeOffset.MinValue, 0) { TrackingId = 11, FourFingersExtended = true, FingersTogether = true, FingerAim = Center(button) };
     private static BoardHandSample Apart(BoardHandSample hand) => hand with { FingersTogether = false, IndexFingerSeparated = true };

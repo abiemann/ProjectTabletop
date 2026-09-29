@@ -16,8 +16,7 @@ public sealed partial class MainWindow : Window
 {
     // Globe opens on the central meridian of this PC's standard time zone
     // (15 degrees per hour), unaffected by daylight saving.
-    private readonly SceneCompositor _scene = new(globe: new ProjectTabletop.Interaction.GlobeState(
-        Math.Clamp(TimeZoneInfo.Local.BaseUtcOffset.TotalHours * 15, -180, 180)));
+    private readonly SceneCompositor _scene = new(globe: CreateHomeGlobe());
     private readonly CameraCaptureService _camera = new();
     private readonly object _visionGate = new();
     private VisionEngine _vision = new();
@@ -58,6 +57,16 @@ public sealed partial class MainWindow : Window
         return string.IsNullOrWhiteSpace(configured)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ProjectTabletop")
             : Path.GetFullPath(configured);
+    }
+
+    // Earth starts facing the local time zone's tz reference city; zones without
+    // one fall back to their UTC offset's longitude on the equator.
+    private static ProjectTabletop.Interaction.GlobeState CreateHomeGlobe()
+    {
+        var city = ProjectTabletop.Interaction.GlobeHome.ReferenceCity(TimeZoneInfo.Local,
+            System.Globalization.RegionInfo.CurrentRegion.TwoLetterISORegionName);
+        return city is { } home ? new(home.Longitude, home.Latitude)
+            : new(Math.Clamp(TimeZoneInfo.Local.BaseUtcOffset.TotalHours * 15, -180, 180));
     }
 
     public MainWindow()

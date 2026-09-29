@@ -67,12 +67,24 @@ static void CheckMenuAndNavigation()
         }
         else if (button.Destination == BoardScreen.Globe)
         {
-            Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is
-                { Current: BoardScreen.Globe, ButtonId: "globe-drawer-open" } && session.GlobeDrawerOpen,
-                "The Globe chevron did not open its drawer.");
+            // The drawer handle is a long-press: a pinch leaves it closed, a one-second hold opens it.
+            Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is null &&
+                !session.GlobeDrawerOpen, "A pinch toggled the Globe's long-press drawer handle.");
+            for (int held = 30; held < 1030; held += 250)
+                Require(session.ObserveHeldButtons(["globe-drawer-open"], Time(time + held), Time(time + held)).Count == 0,
+                    "The Globe handle opened before a full second of hold evidence.");
+            Require(session.ObserveHeldButtons(["globe-drawer-open"], Time(time + 1030), Time(time + 1030))
+                    .SequenceEqual(["globe-drawer-open"]) && session.GlobeDrawerOpen,
+                "A one-second hold did not open the Globe drawer.");
+            // Exit is a long-press too, once the drawer has settled.
             var exit = session.Buttons.Single(item => item.Id == "globe-exit");
-            Require(Update(session, time + 321, Over(exit, ++eventId, time + 321))?.Current == BoardScreen.Menu,
-                "The Globe drawer's Exit target did not return to the launcher.");
+            Require(Update(session, time + 1400, Over(exit, ++eventId, time + 1400)) is null &&
+                session.Screen == BoardScreen.Globe, "A pinch selected the Globe's long-press Exit.");
+            for (int held = 1400; held < 2400; held += 250)
+                session.ObserveHeldButtons(["globe-exit"], Time(time + held), Time(time + held));
+            Require(session.ObserveHeldButtons(["globe-exit"], Time(time + 2400), Time(time + 2400))
+                    .SequenceEqual(["globe-exit"]) && session.Screen == BoardScreen.Menu,
+                "The Globe drawer's long-press Exit did not return to the launcher.");
         }
         else
             Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20))?.Current == BoardScreen.Menu,

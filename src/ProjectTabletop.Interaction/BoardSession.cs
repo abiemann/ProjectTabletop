@@ -10,10 +10,24 @@ public readonly record struct BoardRect(double X, double Y, double Width, double
         u >= X && u <= X + Width && v >= Y && v <= Y + Height;
 }
 
-/// <param name="HoldToRepeat">Activated by holding fingers over its caption rather than by a
-/// gesture: once after a second of camera evidence, then again each further second.</param>
+/// <summary>How a hold button answers fingers resting on its caption.</summary>
+public enum BoardButtonHold
+{
+    /// <summary>An ordinary button, selected by a gesture.</summary>
+    None,
+    /// <summary>Once after a second of camera evidence, then again each further second.</summary>
+    Repeat,
+    /// <summary>Once after a second; the fingers must lift before it can act again.</summary>
+    Once
+}
+
+/// <param name="Hold">Activated by holding fingers over its caption rather than by a gesture,
+/// from camera evidence alone. Hold buttons are never lit and ignore selection gestures.</param>
 public sealed record BoardButton(string Id, string Label, BoardRect Bounds, BoardScreen Destination, bool Enabled = true,
-    bool HoldToRepeat = false);
+    BoardButtonHold Hold = BoardButtonHold.None)
+{
+    public bool IsHold => Hold != BoardButtonHold.None;
+}
 
 /// <summary>
 /// A hand selection position mapped to board coordinates. SelectionFrameTime
@@ -144,7 +158,7 @@ public sealed partial class BoardSession
         _lastFrameTime = frameTime;
 
         // Hold-to-repeat buttons respond only to held caption evidence.
-        var buttons = Buttons.Where(button => !button.HoldToRepeat).ToArray();
+        var buttons = Buttons.Where(button => !button.IsHold).ToArray();
         var fingerTargets = FingerTargets(buttons);
         FingerSelectionCandidate? fingerSelection = UpdateFingerSelection(hands, fingerTargets, frameTime);
         HoveredButtonIds = fingerTargets.Where(button => button.Enabled && hands.Any(hand =>

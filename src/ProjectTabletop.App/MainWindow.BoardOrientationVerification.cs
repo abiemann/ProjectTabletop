@@ -296,6 +296,19 @@ public sealed partial class MainWindow
             var point = CameraPoint(map, surface, button);
             var time = DateTimeOffset.UtcNow;
             scene.SetHandCursors([new HandCursor(new(point.X, point.Y), DateTimeOffset.MinValue)], time);
+            if (button.IsHold)
+            {
+                // Hold buttons ignore fingertip cursors; their camera evidence uses
+                // the hold detector's own camera-to-board mapping instead.
+                var hold = scene.GetHoldButtonContext(scene.CurrentBoardScreen == BoardScreen.Globe ? globeNow : now);
+                var matrix = hold?.ExpectedScene.CameraToBoard;
+                double divisor = matrix is null ? double.NaN : matrix[6] * point.X + matrix[7] * point.Y + matrix[8];
+                Require(scene.HoveredBoardButtons.Count == 0 && matrix is not null &&
+                    button.Bounds.Contains((matrix[0] * point.X + matrix[1] * point.Y + matrix[2]) / divisor,
+                        (matrix[3] * point.X + matrix[4] * point.Y + matrix[5]) / divisor),
+                    $"The camera-to-board mapping missed {scene.CurrentBoardScreen}/{button.Label} after changing orientation.");
+                return;
+            }
             Require(scene.HoveredBoardButtons.SequenceEqual([button.Id]),
                 $"The camera-to-board mapping missed {scene.CurrentBoardScreen}/{button.Label} after changing orientation.");
         }

@@ -16,7 +16,7 @@ namespace ProjectTabletop.App.Projection.GlobeRendering;
 [D2DGeneratedPixelShaderDescriptor]
 internal readonly partial struct EarthSurfaceShader(
     Float2 daySize, Float2 cloudSize, Float2 center, Float2 radii,
-    float rotationRadians, float edgeWidth) : ID2D1PixelShader
+    float rotationRadians, float edgeWidth, float viewLatitudeRadians) : ID2D1PixelShader
 {
     public Float4 Execute()
     {
@@ -40,8 +40,13 @@ internal readonly partial struct EarthSurfaceShader(
         // Positive rotation moves the surface eastward across the visible disk.
         float tiltCos = 0.9177546f, tiltSin = 0.3971479f;
         float geographicX = normal.X * tiltCos + normal.Y * tiltSin;
-        float geographicY = -normal.X * tiltSin + normal.Y * tiltCos;
-        float longitude = Hlsl.Atan2(geographicX, normal.Z) - rotationRadians;
+        float tiltedY = -normal.X * tiltSin + normal.Y * tiltCos;
+        // Pitch about the inclined east-west axis so the home latitude faces
+        // the viewer at the disk's centre. Screen-space lighting is unchanged.
+        float pitchCos = Hlsl.Cos(viewLatitudeRadians), pitchSin = Hlsl.Sin(viewLatitudeRadians);
+        float geographicY = tiltedY * pitchCos + normal.Z * pitchSin;
+        float geographicZ = normal.Z * pitchCos - tiltedY * pitchSin;
+        float longitude = Hlsl.Atan2(geographicX, geographicZ) - rotationRadians;
         float latitude = Hlsl.Asin(Hlsl.Clamp(geographicY, -1, 1));
         Float2 uv = new Float2(Hlsl.Frac(longitude / 6.283185307f + 0.5f),
             0.5f - latitude / 3.141592654f);

@@ -58,7 +58,7 @@ public sealed partial class SceneCompositor
         bool drawerOpen = false, float drawerProgress = 1)
     {
         var renderer = GetGlobeRenderer(ds.Device);
-        if (!renderer.Draw(ds, (float)state.Zoom, (float)state.RotationDegrees, boardAspect))
+        if (!renderer.Draw(ds, (float)state.Zoom, (float)state.RotationDegrees, boardAspect, (float)state.ViewLatitudeDegrees))
         {
             ds.Clear(ThemeColor(2, 5, 11));
             GlobeText(ds, renderer.Error is null ? "Loading Earth imagery…" : "Earth imagery could not load",

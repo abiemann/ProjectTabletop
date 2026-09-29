@@ -48,6 +48,7 @@ public sealed partial class MainWindow
     private string? _boardSetupDiagnostic;
     private double? _boardRegistrationError;
     private double? _boardCrossCheckErrorPixels;
+    private int _boardCornersAtLightEdge;
     private float? _boardGridInset;
     private string? _boardProjectionWarning;
 
@@ -225,6 +226,7 @@ public sealed partial class MainWindow
         _boardSetupDiagnostic = null;
         _boardRegistrationError = null;
         _boardCrossCheckErrorPixels = null;
+        _boardCornersAtLightEdge = 0;
         _boardGridInset = null;
         _boardProjectionWarning = null;
         Interlocked.Exchange(ref _lastBoardDetectTick, 0);
@@ -437,9 +439,14 @@ public sealed partial class MainWindow
         {
             if (board is not null)
             {
-                _boardCrossCheckErrorPixels = Enumerable.Range(0, 4)
-                    .Max(index => Distance(_ambientBoard.Corners[index], board.Corners[index]));
-                if (_boardCrossCheckErrorPixels > PhysicalCornerTolerance(frame.Width, frame.Height))
+                // The physical corners come from the ambient scan. Where the
+                // cardboard nearly fills the light, its white-lit edge merges
+                // with the light's edge, so those corners are compared only
+                // along that edge (movement there is still caught).
+                double tolerance = PhysicalCornerTolerance(frame.Width, frame.Height);
+                _boardCrossCheckErrorPixels = BoardDetector.CrossCheckError(_ambientBoard, board, field,
+                    tolerance * 2, out _boardCornersAtLightEdge);
+                if (_boardCrossCheckErrorPixels > tolerance)
                 {
                     Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.Failed);
                     _boardSetupDiagnostic = $"Black and white cardboard edges differ by " +
@@ -480,7 +487,11 @@ public sealed partial class MainWindow
             ? "White edge unavailable; using trusted ambient cardboard corners. " +
               "Aligning projector, spot 1 of 5. Keep the cardboard still."
             : $"{(_ambientRecoveredFromPrior ? "Three-edge recovery" : "Four-edge ambient scan")} " +
-              $"and white board edges agree within {_boardCrossCheckErrorPixels:F1} px. " +
+              $"and white board edges agree within {_boardCrossCheckErrorPixels:F1} px" +
+              (_boardCornersAtLightEdge > 0
+                  ? $" ({_boardCornersAtLightEdge} corner{(_boardCornersAtLightEdge == 1 ? "" : "s")} at the light's edge " +
+                    "checked from the black scan). "
+                  : ". ") +
               "Aligning projector, spot 1 of 5. Keep the cardboard still.";
         if (_frozenFrame is null) CameraCanvas.Invalidate();
     }

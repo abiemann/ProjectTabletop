@@ -227,7 +227,7 @@ public sealed partial class SceneCompositor
             if (!double.IsFinite(hint.RadiusPixels) || hint.RadiusPixels <= 0) return;
             var anchor = _boardCameraMap!.Transform(new(hint.Center.X, hint.Center.Y));
             var board = _boardSurfaceMap!.InverseTransform(anchor);
-            if (!_boardSession.Buttons.Any(button => !button.HoldToRepeat && button.Bounds.Contains(board.X, board.Y))) return;
+            if (!_boardSession.Buttons.Any(button => !button.IsHold && button.Bounds.Contains(board.X, board.Y))) return;
             if (hint.ValidatedCandidateBounds is null && ExpectedReachingHand(hint, board) is { } expected) hint = expected;
             var nativeCenter = hint.IlluminationCenter;
             double nativeRadius = hint.IlluminationRadiusPixels;

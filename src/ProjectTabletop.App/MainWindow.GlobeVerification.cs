@@ -321,12 +321,14 @@ public sealed partial class MainWindow
                 }
                 long revision = scene.GlobeState.Revision;
                 scene.CompleteHandAcquisition(ready, [measured with { ControlCoverage = .07, ControlTriggerCoverage = .07 }], [], now);
-                if (button.HoldToRepeat)
+                if (button.IsHold)
                 {
                     Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && scene.GlobeState.Revision == revision,
-                        "Qualified obstruction lit or immediately activated the hold-to-repeat " + button.Label + " button.");
-                    CheckHoldToRepeat(button, occupied, empty);
-                    // Its zooms changed the Globe; let acquisition settle again.
+                        "Qualified obstruction lit or immediately activated the hold " + button.Label + " button.");
+                    if (button.Hold == BoardButtonHold.Repeat) CheckHoldToRepeat(button, occupied, empty);
+                    else if (button.Id == "globe-exit") CheckExitHoldEvidence(button, occupied);
+                    else CheckLongPress(button, occupied);
+                    // Its zooms or drawer toggles changed the Globe; let acquisition settle again.
                     Draw(); scene.GetHandAcquisitionContext(now);
                     now += TimeSpan.FromSeconds(1);
                     tested.Add(button.Label);
@@ -344,6 +346,83 @@ public sealed partial class MainWindow
                 now += TimeSpan.FromSeconds(1);
                 tested.Add(button.Label);
                 await Task.Yield();
+            }
+        }
+        void CheckExitHoldEvidence(BoardButton button, byte[] occupied)
+        {
+            // Exit's timing and navigation are covered by the interaction suite;
+            // here the real detector must report its covered caption, unlit,
+            // and lifting before a second must leave the board where it was.
+            var hold = scene.GetHoldButtonContext(now);
+            Require(hold is not null && hold.ButtonIds.Contains(button.Id),
+                "Globe did not provide a hold context for Exit.");
+            var tracker = new HandAcquisitionPresenceTracker();
+            int evidence = 0;
+            for (int frame = 0; frame < 6; frame++)
+            {
+                var held = hold!.HeldButtons(tracker.Update(width, height, width * 4, occupied,
+                    hold.SearchPolygon, hold.ExpectedScene, now, now));
+                if (held.Contains(button.Id)) evidence++;
+                Require(scene.ObserveHoldButtons(hold, held, now).Count == 0 &&
+                        scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
+                    "Half a second over Exit activated it or switched on a light.");
+                now += TimeSpan.FromMilliseconds(100);
+            }
+            Require(evidence >= 5, $"The detector reported Exit's covered caption in only {evidence} of 6 frames.");
+            byte[] clear = Draw();
+            for (int frame = 0; frame < 5; frame++)
+            {
+                var held = hold!.HeldButtons(tracker.Update(width, height, width * 4, clear,
+                    hold.SearchPolygon, hold.ExpectedScene, now, now));
+                Require(scene.ObserveHoldButtons(hold, held, now).Count == 0, "Lifting from Exit activated it.");
+                now += TimeSpan.FromMilliseconds(100);
+            }
+            Require(scene.CurrentBoardScreen == BoardScreen.Globe && scene.GlobeDrawerOpen,
+                "An interrupted Exit hold left Globe or closed its drawer.");
+        }
+        void CheckLongPress(BoardButton button, byte[] occupied)
+        {
+            // Fingers resting on the drawer handle toggle it once after a second,
+            // through the actual detector and scene timing, without any light.
+            bool wasOpen = scene.GlobeDrawerOpen;
+            var hold = scene.GetHoldButtonContext(now);
+            Require(hold is not null && hold.ButtonIds.Contains(button.Id),
+                "Globe did not provide a hold context for its " + button.Label + " handle.");
+            var tracker = new HandAcquisitionPresenceTracker();
+            var started = now;
+            var activations = new List<double>();
+            for (int frame = 0; frame <= 12; frame++)
+            {
+                double at = (now - started).TotalMilliseconds;
+                var held = hold!.HeldButtons(tracker.Update(width, height, width * 4, occupied,
+                    hold.SearchPolygon, hold.ExpectedScene, now, now));
+                Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
+                    "A held drawer handle switched on a search light.");
+                if (scene.ObserveHoldButtons(hold, held, now).Contains(button.Id)) activations.Add(at);
+                now += TimeSpan.FromMilliseconds(100);
+            }
+            Require(activations.SequenceEqual([1000d]) && scene.GlobeDrawerOpen != wasOpen &&
+                    scene.CurrentBoardScreen == BoardScreen.Globe,
+                $"Holding the {button.Label} handle did not toggle the drawer exactly once at one second: " +
+                string.Join(", ", activations) + ".");
+            // Restore the drawer state the remaining controls expect.
+            Require(scene.ActivateGlobeButton(wasOpen ? "globe-drawer-open" : "globe-drawer-close"),
+                "The handle fixture could not restore its drawer.");
+            now += TimeSpan.FromMilliseconds(400);
+            scene.TickGlobe(now);
+            Require(scene.GlobeDrawerOpen == wasOpen, "The handle fixture left the drawer in the wrong state.");
+            // The spent handle re-arms only once the camera sees the fingers lifted.
+            var lifted = scene.GetHoldButtonContext(now);
+            Require(lifted is not null, "Globe did not provide a hold context after restoring its drawer.");
+            var liftTracker = new HandAcquisitionPresenceTracker();
+            byte[] clear = Draw();
+            for (int frame = 0; frame < 5; frame++)
+            {
+                var held = lifted!.HeldButtons(liftTracker.Update(width, height, width * 4, clear,
+                    lifted.SearchPolygon, lifted.ExpectedScene, now, now));
+                Require(held.Count == 0 && scene.ObserveHoldButtons(lifted, held, now).Count == 0,
+                    "An uncovered Globe handle reported hold evidence.");
+                now += TimeSpan.FromMilliseconds(100);
             }
         }
         void CheckHoldToRepeat(BoardButton button, byte[] occupied, byte[] empty)

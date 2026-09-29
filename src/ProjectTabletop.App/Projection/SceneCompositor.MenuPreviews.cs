@@ -301,7 +301,11 @@ public sealed partial class SceneCompositor
         var previous = ds.Transform;
         ds.Transform = Matrix3x2.CreateTranslation(-500, -500) * Matrix3x2.CreateScale(scale) *
             Matrix3x2.CreateTranslation(center) * previous;
-        try { GetGlobeRenderer(ds.Device).Draw(ds, zoom, (float)_boardSession.GlobeHomeRotationDegrees, 1); }
+        try
+        {
+            GetGlobeRenderer(ds.Device).Draw(ds, zoom, (float)_boardSession.GlobeHomeRotationDegrees, 1,
+                (float)_boardSession.GlobeHomeLatitudeDegrees);
+        }
         finally { ds.Transform = previous; }
     }
 }

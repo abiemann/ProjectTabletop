@@ -12,16 +12,20 @@ public sealed partial class BoardSession
     // bottom-right credit. The wide, tall handle keeps opposite glass margins
     // for the camera's colour fit and clears Earth's settled 1.5× limb on
     // rectangular boards; a square board's limb reaches its upper-right corner.
+    // Fingers on this edge row leave the wrist outside the camera view, so hand
+    // tracking kept dropping mid-gesture. Every control here is a hold button:
+    // the handle and Exit act once per long press, the zooms repeat.
     private static readonly BoardRect GlobeDrawerHandleBounds = new(.01, .87, .18, .12);
     private static readonly IReadOnlyList<BoardButton> GlobeDrawerButtons = Array.AsReadOnly(new[]
     {
-        new BoardButton("globe-exit", "Exit", new(.20, .87, .155, .12), BoardScreen.Menu),
-        new BoardButton("globe-zoom-out", "Zoom -", new(.365, .87, .155, .12), BoardScreen.Globe, HoldToRepeat: true),
-        new BoardButton("globe-zoom-in", "Zoom +", new(.53, .87, .155, .12), BoardScreen.Globe, HoldToRepeat: true)
+        new BoardButton("globe-exit", "Exit", new(.20, .87, .155, .12), BoardScreen.Menu, Hold: BoardButtonHold.Once),
+        new BoardButton("globe-zoom-out", "Zoom -", new(.365, .87, .155, .12), BoardScreen.Globe, Hold: BoardButtonHold.Repeat),
+        new BoardButton("globe-zoom-in", "Zoom +", new(.53, .87, .155, .12), BoardScreen.Globe, Hold: BoardButtonHold.Repeat)
     });
     public bool GlobeDrawerOpen => Screen == BoardScreen.Globe && _globeDrawerOpen;
     public DateTimeOffset? GlobeDrawerOpenedAt => GlobeDrawerOpen ? _globeDrawerOpenedAt : null;
     public double GlobeHomeRotationDegrees => _globe.HomeRotationDegrees;
+    public double GlobeHomeLatitudeDegrees => _globe.HomeLatitudeDegrees;
 
     public void ShowGlobe(DateTimeOffset? now = null) => Show(BoardScreen.Globe, now ?? DateTimeOffset.UtcNow);
 
@@ -40,11 +44,11 @@ public sealed partial class BoardSession
     {
         if (!GlobeDrawerOpen) return Array.AsReadOnly(new[]
         {
-            new BoardButton("globe-drawer-open", "^", GlobeDrawerHandleBounds, BoardScreen.Globe)
+            new BoardButton("globe-drawer-open", "^", GlobeDrawerHandleBounds, BoardScreen.Globe, Hold: BoardButtonHold.Once)
         });
         var buttons = new List<BoardButton>
         {
-            new("globe-drawer-close", "v", GlobeDrawerHandleBounds, BoardScreen.Globe)
+            new("globe-drawer-close", "v", GlobeDrawerHandleBounds, BoardScreen.Globe, Hold: BoardButtonHold.Once)
         };
         buttons.AddRange(GlobeDrawerButtons.Select(button => button with
         {
