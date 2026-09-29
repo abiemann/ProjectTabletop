@@ -1,5 +1,8 @@
 namespace ProjectTabletop.Interaction;
 
+/// <summary>How far a held long-press button is toward acting, from 0 to 1.</summary>
+public readonly record struct BoardHoldProgress(string ButtonId, double Progress);
+
 public sealed partial class BoardSession
 {
     // Placed along the viewer's edge, hold buttons answer quick repeated
@@ -83,6 +86,17 @@ public sealed partial class BoardSession
         }
         return activated;
     }
+
+    /// <summary>
+    /// Each held button's progress toward its next activation, 0 to 1, for on-board
+    /// feedback. Holds without camera evidence for <see cref="HoldEvidenceGap"/> are omitted.
+    /// </summary>
+    public IReadOnlyList<BoardHoldProgress> HoldProgress(DateTimeOffset now) => _holds
+        .Where(pair => now >= pair.Value.LastSeen && now - pair.Value.LastSeen <= HoldEvidenceGap)
+        .Select(pair => new BoardHoldProgress(pair.Key, Math.Clamp(
+            (now - pair.Value.Started) / HoldActivationInterval - pair.Value.Activations, 0, 1)))
+        .Where(progress => progress.Progress > 0)
+        .ToArray();
 
     private static bool Overlaps(BoardRect first, BoardRect second) =>
         first.X < second.X + second.Width && second.X < first.X + first.Width &&

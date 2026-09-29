@@ -11,6 +11,7 @@ internal static class GlobeBoardRegression
         CheckHoldToRepeat();
         CheckLongPressHandle();
         CheckSimultaneousHolds();
+        CheckHoldProgress();
         Console.WriteLine("Globe verification passed: pure entrance/spin frames, bounded smooth zoom, hidden rotation " +
             "controls, timed drawer targets, pinch and four-finger gestures ignored by every hold control, reset barriers, " +
             "hold-to-repeat zoom timing, gaps and stale frames, long-press drawer handle with release, long-press Exit.");
@@ -54,6 +55,26 @@ internal static class GlobeBoardRegression
         board.ShowMenu(Time(11100)); board.ShowGlobe(Time(11200));
         Require(board.ObserveHeldButtons(zoomIn, Time(12500), Time(12500)).Count == 0,
             "Leaving Globe retained a hold or its drawer.");
+    }
+
+    // On-board feedback: how far each held button is toward acting.
+    private static void CheckHoldProgress()
+    {
+        var board = new BoardSession(); board.ShowGlobe(Time(0));
+        Require(board.ActivateButton("globe-drawer-open", Time(100)) && board.TickGlobe(Time(400)),
+            "The hold-progress fixture could not open the drawer.");
+        IReadOnlyList<string> Hold(string[] ids, int time) => board.ObserveHeldButtons(ids, Time(time), Time(time));
+        Require(board.HoldProgress(Time(1000)).Count == 0, "Progress appeared before any hold.");
+        for (int time = 1000; time <= 1500; time += 100) Hold(["globe-zoom-in"], time);
+        Require(board.HoldProgress(Time(1500)) is [{ ButtonId: "globe-zoom-in", Progress: > .45 and < .55 }],
+            "Half a second of holding did not show half progress.");
+        for (int time = 1600; time <= 2000; time += 100) Hold(["globe-zoom-in"], time);
+        Require(board.HoldProgress(Time(2200)) is [{ ButtonId: "globe-zoom-in", Progress: > .15 and < .25 }],
+            "A repeating hold did not restart its progress after acting.");
+        Require(board.HoldProgress(Time(2400)).Count == 0, "Progress outlived the hold's camera evidence.");
+        Hold(["globe-zoom-in"], 2500); Hold(["globe-zoom-in"], 2800);
+        Hold(["globe-zoom-in", "globe-exit"], 2900);
+        Require(board.HoldProgress(Time(2900)).Count == 0, "An ambiguous two-caption frame kept hold progress.");
     }
 
     // Safety: two covered captions at once are ambiguous, so nothing acts.

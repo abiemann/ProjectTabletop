@@ -1,6 +1,7 @@
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Geometry;
+using Microsoft.UI;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
 using ProjectTabletop.Vision;
@@ -67,6 +68,75 @@ public sealed partial class SceneCompositor
             if (activated.Count > 0) SyncPhotoCopySession();
             return activated;
         }
+    }
+
+    // A held long-press button's outside rim warms from amber to hot orange-red
+    // as its second fills. It is drawn well outside the button (see HoldRimGap):
+    // a first version 1-7 pixels out bled onto the button's glass in the real
+    // camera image and kept "Deal again" from confirming.
+    private CanvasRenderTarget? _holdFeedbackTarget;
+    private string? _holdFeedbackKey;
+    private static readonly Windows.UI.Color HoldRimCool = Windows.UI.Color.FromArgb(255, 255, 214, 120);
+    private static readonly Windows.UI.Color HoldRimHot = Windows.UI.Color.FromArgb(255, 255, 72, 24);
+
+    public IReadOnlyList<BoardHoldProgress> CurrentHoldProgress
+    {
+        get { lock (_gate) return _boardSession.HoldProgress(HoldClock()); }
+    }
+
+    private CanvasRenderTarget? DrawHoldFeedbackLayer(CanvasDevice device)
+    {
+        var progress = _boardSession.HoldProgress(HoldClock());
+        if (progress.Count == 0) return null;
+        if (EnsureBoardRenderTarget(ref _holdFeedbackTarget, device)) _holdFeedbackKey = null;
+        string key = string.Join('|', progress.Select(hold => $"{hold.ButtonId}:{(int)(hold.Progress * 60)}"));
+        if (_holdFeedbackKey != key)
+        {
+            using var drawing = _holdFeedbackTarget!.CreateDrawingSession();
+            drawing.Transform = BoardRasterTransform(_holdFeedbackTarget);
+            drawing.Clear(Colors.Transparent);
+            foreach (var hold in progress)
+            {
+                if (_boardSession.Buttons.FirstOrDefault(button => button.Id == hold.ButtonId) is not { } button) continue;
+                // Projector and camera blur spread a rim onto nearby glass. Keep it
+                // 12 board pixels clear of its own button, whose glass margins are
+                // the camera's reference for the covered caption, and 10 clear of
+                // every other button (on packed rows it shows above and below).
+                var clip = CanvasGeometry.CreateRectangle(drawing.Device, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
+                foreach (var other in _boardSession.Buttons)
+                {
+                    float margin = other.Id == button.Id ? HoldRimGap - 1 : 10;
+                    using var excluded = CanvasGeometry.CreateRectangle(drawing.Device, Pixels(other.Bounds, margin));
+                    var remaining = clip.CombineWith(excluded, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
+                    clip.Dispose();
+                    clip = remaining;
+                }
+                using (clip)
+                using (drawing.CreateLayer(1, clip))
+                {
+                    float heat = (float)hold.Progress;
+                    var color = Windows.UI.Color.FromArgb((byte)(90 + 110 * heat),
+                        (byte)(HoldRimCool.R + (HoldRimHot.R - HoldRimCool.R) * heat),
+                        (byte)(HoldRimCool.G + (HoldRimHot.G - HoldRimCool.G) * heat),
+                        (byte)(HoldRimCool.B + (HoldRimHot.B - HoldRimCool.B) * heat));
+                    drawing.DrawRoundedRectangle(Pixels(button.Bounds, HoldRimGap + 1.5f), 18, 18, color, 3);
+                }
+            }
+            _holdFeedbackKey = key;
+        }
+        return _holdFeedbackTarget;
+    }
+
+    private const float HoldRimGap = 12;
+
+    private static Rect Pixels(BoardRect bounds, float grow) => new(bounds.X * BoardSurfaceSize - grow,
+        bounds.Y * BoardSurfaceSize - grow, bounds.Width * BoardSurfaceSize + 2 * grow, bounds.Height * BoardSurfaceSize + 2 * grow);
+
+    private void DisposeHoldFeedbackLayer()
+    {
+        _holdFeedbackTarget?.Dispose();
+        _holdFeedbackTarget = null;
+        _holdFeedbackKey = null;
     }
 
     private DateTimeOffset HoldClock() => _boardSession.Screen == BoardScreen.Globe ? _globeClock() : _blackjackClock();

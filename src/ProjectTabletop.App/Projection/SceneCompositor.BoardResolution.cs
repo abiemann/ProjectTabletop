@@ -152,6 +152,7 @@ public sealed partial class SceneCompositor
         bool unseenPaintIntroduction = _paintIntroductionStartedAt is null && _paintIntroductionDrops.Count > 0;
         CancelMonopolyDiceAnimation();
         DisposeMonopolyDiceLayer();
+        DisposeHoldFeedbackLayer();
         CancelMonopolyEntrance();
         DisposeMonopolyEntranceLayers();
         _boardRasterPixels = new(1000, 1000);

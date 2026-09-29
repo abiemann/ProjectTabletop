@@ -440,6 +440,7 @@ public sealed partial class MainWindow
             for (int frame = 0; frame <= 21; frame++)
             {
                 double at = (now - started).TotalMilliseconds;
+                if (frame == 5) CheckHoldRim(button, empty, warm: true);
                 if (FeedHold(occupied).Contains(button.Id)) activations.Add(at);
             }
             Require(activations.SequenceEqual([1000d, 2000d]) &&
@@ -447,6 +448,7 @@ public sealed partial class MainWindow
                 $"Holding {button.Label} did not activate exactly at one and two seconds: {string.Join(", ", activations)}.");
             for (int frame = 0; frame < 4; frame++)
                 Require(FeedHold(empty).Count == 0, "An uncovered hold button activated.");
+            CheckHoldRim(button, empty, warm: false);
             for (int frame = 0; frame < 9; frame++)
                 Require(FeedHold(occupied).Count == 0, "A hold released for 400 ms kept its earlier timer.");
             Require(Math.Abs(scene.GlobeState.TargetZoom - zoomBefore * step * step) < 1e-9 &&
@@ -460,6 +462,23 @@ public sealed partial class MainWindow
                 var activated = scene.ObserveHoldButtons(hold, held, now);
                 now += TimeSpan.FromMilliseconds(100);
                 return activated;
+            }
+        }
+        // Halfway through a hold, the button's outside rim is warm; its own glass is not.
+        void CheckHoldRim(BoardButton button, byte[] empty, bool warm)
+        {
+            var pixels = Draw();
+            var rim = CameraPoint(button.Bounds.X + button.Bounds.Width / 2, button.Bounds.Y - .0135);
+            var inside = CameraPoint(button.Bounds.X + button.Bounds.Width / 2, button.Bounds.Y + .012);
+            Require(Warmer(pixels, empty, rim) == warm && !Warmer(pixels, empty, inside),
+                warm ? $"Holding {button.Label} did not warm its outside rim, or warmed the button itself."
+                     : $"{button.Label}'s rim stayed warm after the hold was released.");
+            // Red rises clearly, and well beyond blue, against the same scene without a hold.
+            static bool Warmer(byte[] image, byte[] before, PixelPoint point)
+            {
+                int i = ((int)point.Y * width + (int)point.X) * 4;
+                int red = image[i + 2] - before[i + 2], blue = image[i] - before[i];
+                return red > 40 && red > blue + 30;
             }
         }
         void CheckHoldButtonLightClip()

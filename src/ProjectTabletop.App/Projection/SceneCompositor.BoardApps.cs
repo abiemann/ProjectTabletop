@@ -366,6 +366,15 @@ public sealed partial class SceneCompositor
             };
             ds.DrawImage(movingDice);
         }
+        if (DrawHoldFeedbackLayer(ds.Device) is { } holdLayer)
+        {
+            using var heldRims = new Transform3DEffect
+            {
+                Source = holdLayer, TransformMatrix = matrix,
+                InterpolationMode = CanvasImageInterpolation.Linear, BorderMode = EffectBorderMode.Soft
+            };
+            ds.DrawImage(heldRims);
+        }
     }
 
     private void DrawMenuButton(CanvasDrawingSession ds, BoardButton button,

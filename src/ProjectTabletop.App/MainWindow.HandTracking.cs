@@ -277,6 +277,12 @@ public sealed partial class MainWindow
                                 if (holdActivations.Count > 0)
                                     LogHandTrackingEvent("hold_activation", new { frameTime = frame.Timestamp,
                                         buttons = holdActivations, held = heldButtons });
+                                // The hold detector's own view: whether it had its reference
+                                // scene, which captions it saw covered, and the timer progress.
+                                if (_scene.CurrentBoardButtons.Any(button => button.IsHold && button.Enabled))
+                                    LogHandTrackingEvent("hold_frame", new { frameTime = frame.Timestamp,
+                                        context = holdContext is not null, held = heldButtons,
+                                        progress = _scene.CurrentHoldProgress });
                                 DescribeHandAcquisition(frame, acquisitionContext, acquisitionHints, detectorTrace, visibleHands.Length);
                                 LogHandDetection(sequence, requestedInTester, frame, generation, engineReset,
                                     inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, cursors, "accepted");

@@ -348,9 +348,12 @@ public sealed partial class MainWindow
                 scene.CompleteHandAcquisition(context, presence.Hints, [], now);
                 var lit = scene.GetHandAcquisitionContext(now)!;
                 if (button.IsHold)
+                {
                     // Hold buttons act on caption evidence alone; a light would erase it.
                     Require(lit.IlluminatedHint is null && CountWhite(Draw(), center) <= CountWhite(empty, center) + 50,
                         label + "/" + button.Label + " lit a hold-to-repeat button.");
+                    CheckHeldThroughRim(button, empty, occupied);
+                }
                 else
                 {
                     Require(lit.IlluminatedHint is not null && CountWhite(Draw(), center) > CountWhite(empty, center) + 800,
@@ -372,6 +375,73 @@ public sealed partial class MainWindow
         }
         PixelPoint CameraPoint(double u, double v) => new(size * (.035 + .93 * (inset / 2 + u * (1 - inset))),
             size * (.035 + .93 * (inset / 2 + v * (1 - inset))));
+        // Once a hold starts, the camera also sees the warming rim around the
+        // button. The covered caption must keep reading as held through it.
+        void CheckHeldThroughRim(BoardButton button, byte[] empty, byte[] occupied)
+        {
+            var savedGlobe = globeNow;
+            globeNow = now;
+            var hold = scene.GetHoldButtonContext(now);
+            Require(hold is not null && hold.ButtonIds.Contains(button.Id),
+                button.Label + " had no hold context for the rim check.");
+            var tracker = new HandAcquisitionPresenceTracker();
+            IReadOnlyList<string> Feed(byte[] pixels)
+            {
+                globeNow = now;
+                var held = hold!.HeldButtons(tracker.Update(size, size, size * 4, pixels,
+                    hold.SearchPolygon, hold.ExpectedScene, now, now));
+                scene.ObserveHoldButtons(hold, held, now);
+                now += TimeSpan.FromMilliseconds(100);
+                return held;
+            }
+            var arrivals = Enumerable.Range(0, 5).Select(_ => Feed(occupied).Contains(button.Id)).ToArray();
+            globeNow = now;
+            byte[] rimOnly = Draw();
+            // Projector and camera blur spread the rim's light: add its blurred
+            // difference, as a live frame showed it bleeding onto nearby glass.
+            int rimPixels = 0;
+            var difference = new double[3][];
+            for (int channel = 0; channel < 3; channel++)
+            {
+                difference[channel] = new double[size * size];
+                for (int p = 0; p < size * size; p++)
+                    difference[channel][p] = rimOnly[p * 4 + channel] - empty[p * 4 + channel];
+                for (int pass = 0; pass < 2; pass++) difference[channel] = BoxBlur(difference[channel], 5);
+            }
+            for (int p = 0; p < size * size; p++)
+                if (rimOnly[p * 4] != empty[p * 4] || rimOnly[p * 4 + 1] != empty[p * 4 + 1] || rimOnly[p * 4 + 2] != empty[p * 4 + 2])
+                    rimPixels++;
+            var withRim = (byte[])occupied.Clone();
+            for (int p = 0; p < size * size; p++)
+                for (int channel = 0; channel < 3; channel++)
+                    withRim[p * 4 + channel] = (byte)Math.Clamp(Math.Round(withRim[p * 4 + channel] + difference[channel][p]), 0, 255);
+            var throughRim = Enumerable.Range(0, 4).Select(_ => Feed(withRim).Contains(button.Id)).ToArray();
+            Require(rimPixels > 200 && arrivals.Skip(1).All(held => held) && throughRim.All(held => held),
+                $"{button.Label} lost its hold evidence once the warming rim appeared " +
+                $"(rim pixels {rimPixels}; before [{string.Join(",", arrivals)}], with rim [{string.Join(",", throughRim)}]).");
+            now += TimeSpan.FromSeconds(1);
+            globeNow = savedGlobe;
+        }
+        static double[] BoxBlur(double[] values, int radius)
+        {
+            var horizontal = new double[values.Length];
+            var result = new double[values.Length];
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    double sum = 0; int count = 0;
+                    for (int dx = Math.Max(0, x - radius); dx <= Math.Min(size - 1, x + radius); dx++) { sum += values[y * size + dx]; count++; }
+                    horizontal[y * size + x] = sum / count;
+                }
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    double sum = 0; int count = 0;
+                    for (int dy = Math.Max(0, y - radius); dy <= Math.Min(size - 1, y + radius); dy++) { sum += horizontal[dy * size + x]; count++; }
+                    result[y * size + x] = sum / count;
+                }
+            return result;
+        }
         HandAcquisitionQuery Query(byte[] pixels, SceneCompositor.HandAcquisitionContext context) =>
             CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, pixels, now), context,
                 new HandAcquisitionPresenceTracker(), now);
