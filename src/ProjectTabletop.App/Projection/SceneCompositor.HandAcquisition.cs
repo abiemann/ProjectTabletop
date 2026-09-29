@@ -59,7 +59,7 @@ public sealed partial class SceneCompositor
         HandAcquisitionSceneImage? ExpectedScene = null, DateTimeOffset IlluminationStartedAt = default,
         PixelPoint[]? StationarySearchCenters = null, bool RestrictAcquisitionToSearchRegions = true,
         bool AllowsSearchIllumination = true, PixelPoint[]? ContinuousSearchPolygon = null,
-        IReadOnlyList<HandDetection>? LostHands = null);
+        IReadOnlyList<HandDetection>? LostHands = null, IReadOnlyList<PixelPoint[]>? HoldControls = null);
 
     private AcquisitionSceneState CurrentAcquisitionState() => new(_boardSession.Revision,
         _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision :
@@ -132,7 +132,8 @@ public sealed partial class SceneCompositor
                     _acquisitionExpectedScene, _acquisitionLightStarted, centers,
                     RestrictAcquisitionToSearchRegions: _boardSession.Screen != BoardScreen.HandTracking,
                     AllowsSearchIllumination: true,
-                    ContinuousSearchPolygon: capturePolygon, LostHands: LostLitHands());
+                    ContinuousSearchPolygon: capturePolygon, LostHands: LostLitHands(),
+                    HoldControls: HoldControlOutlines());
             }
             if (animating || AcquisitionMustYieldToHandOrExecute(now))
             {
@@ -281,6 +282,19 @@ public sealed partial class SceneCompositor
         var expected = hint with { CandidateBounds = new(left, top, right - left, bottom - top) };
         return expected.ValidatedCandidateBounds is null ? null : expected;
     }
+
+    // Long-press buttons act on covered-caption evidence alone. Fingers on them
+    // must not start a hand-model search, so no spotlight or fingertip marks.
+    private PixelPoint[][] HoldControlOutlines() => _boardSession.Buttons.Where(button => button.IsHold)
+        .Select(button => new[]
+            {
+                new Point2(button.Bounds.X, button.Bounds.Y), new Point2(button.Bounds.X + button.Bounds.Width, button.Bounds.Y),
+                new Point2(button.Bounds.X + button.Bounds.Width, button.Bounds.Y + button.Bounds.Height),
+                new Point2(button.Bounds.X, button.Bounds.Y + button.Bounds.Height)
+            }
+            .Select(point => _boardCameraMap!.InverseTransform(_boardSurfaceMap!.Transform(point)))
+            .Select(point => new PixelPoint(point.X, point.Y)).ToArray())
+        .ToArray();
 
     private bool HasCurrentControlObstruction(HandAcquisitionHint hint, DateTimeOffset frameTime) =>
         hint.ObservedAt == frameTime && hint.ControlCoverage is double coverage &&

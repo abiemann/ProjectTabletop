@@ -18,13 +18,20 @@ internal static class BlackjackBoardRegression
             Button("menu").Bounds == new BoardRect(.06, .055, .18, .09),
             "The chips plaque and Exit do not use their rendered control labels and bounds.");
         long navigationRevision = board.Revision;
+        // Deal is a one-time long-press: pinches, held or fresh, never deal.
         Select("bj-deal", 1, 140, 100);
-        Require(board.BlackjackState.Phase == BlackjackPhase.Betting, "A held menu pinch dealt a round.");
         Select("bj-deal", 2, 200);
-        Require(board.BlackjackState.Phase == BlackjackPhase.PlayerTurn && board.BlackjackState.Bankroll == 975 &&
-            board.BlackjackState.DealerCards[1] is null, "Deal did not debit once and hide the dealer hole card.");
+        Require(board.BlackjackState.Phase == BlackjackPhase.Betting && Button("bj-deal").Hold == BoardButtonHold.Once,
+            "A pinch dealt with the long-press Deal button.");
+        Require(Hold("bj-deal", 300) && board.BlackjackState.Phase == BlackjackPhase.PlayerTurn &&
+            board.BlackjackState.Bankroll == 975 && board.BlackjackState.DealerCards[1] is null,
+            "Deal did not debit once and hide the dealer hole card.");
+        // Split now covers most of Deal's place: resting fingers must lift before it can act.
+        Require(!Hold("bj-split", 1400) && board.BlackjackState.Hands.Count == 1,
+            "Fingers still resting on Deal's place split the new hand.");
+        Lift(2500);
         Require(Button("bj-reset") is { Enabled: false, Label: "Your Chips" } &&
-            Button("bj-reset").Bounds == chips.Bounds && !board.ActivateButton("bj-reset", Time(210)) &&
+            Button("bj-reset").Bounds == chips.Bounds && !board.ActivateButton("bj-reset", Time(2900)) &&
             board.BlackjackState.Bankroll == 975,
             "The chips plaque disappeared or allowed an active-hand bankroll reset.");
         Require(board.Revision == navigationRevision, "A game action changed navigation revision.");
@@ -33,21 +40,21 @@ internal static class BlackjackBoardRegression
             Button("bj-double").Hold == BoardButtonHold.Once && Button("bj-split").Hold == BoardButtonHold.Once &&
             !Button("menu").IsHold && !Button("bj-reset").IsHold,
             "Hit, Stand, Double and Split should be long-press buttons; Exit and Your Chips gestures.");
-        Select("bj-hit", 2, 240, 200);
-        Select("bj-hit", 3, 260);
+        Select("bj-hit", 2, 3000, 2950);
+        Select("bj-hit", 3, 3020);
         Require(board.BlackjackState.Hands[0].Cards.Count == 2 && board.HoveredButtonIds.Count == 0,
             "A pinch hit or hovered the long-press Hit button.");
-        Require(Hold("bj-split", 300) && board.BlackjackState.Hands.Count == 2 && board.BlackjackState.Bankroll == 950,
+        Require(Hold("bj-split", 3100) && board.BlackjackState.Hands.Count == 2 && board.BlackjackState.Bankroll == 950,
             "The split button did not create and stake two hands.");
-        Require(!Button("bj-split").Enabled && !Hold("bj-split", 1400), "A second split was offered or held.");
+        Require(!Button("bj-split").Enabled && !Hold("bj-split", 4200), "A second split was offered or held.");
         Require(board.BlackjackState.Hands[0].Cards.Count == 2, "A disabled action's hold hit.");
-        Require(Hold("bj-hit", 2500) && board.BlackjackState.Hands[0].Cards.Count == 3,
+        Require(Hold("bj-hit", 5300) && board.BlackjackState.Hands[0].Cards.Count == 3,
             "A fresh long-press Hit after a disabled action failed.");
         Require(pinchHits is [{ Sequence: 1, RoundNumber: 1, HandIndex: 0, CardIndex: 2, Card.Rank: 10 }] &&
-            pinchHits[0].StartedAt == Time(3500), "A long-press HIT did not emit exactly one payload for the previous active hand.");
+            pinchHits[0].StartedAt == Time(6300), "A long-press HIT did not emit exactly one payload for the previous active hand.");
         var saved = board.BlackjackState;
-        Select("menu", 6, 3600);
-        Select("blackjack", 7, 3660);
+        Select("menu", 6, 6400);
+        Select("blackjack", 7, 6460);
         Require(board.BlackjackState.Revision == saved.Revision && board.BlackjackState.Bankroll == saved.Bankroll,
             "Returning from the menu reset an active round or refunded its stake.");
 
@@ -65,12 +72,12 @@ internal static class BlackjackBoardRegression
         }
 
         // Pointer actions must invalidate old camera gestures too.
-        board.ResetInput(Time(3700));
+        board.ResetInput(Time(6500));
         var stand = Button("bj-stand");
-        Require(board.Update([Sample(stand, 8, 3690)], Time(3710), Time(3710)) is null,
+        Require(board.Update([Sample(stand, 8, 6490)], Time(6510), Time(6510)) is null,
             "A pre-reset pinch changed a round.");
-        Require(board.ActivateButton("bj-stand", Time(3750)), "A valid laptop button failed.");
-        Require(board.Update([Sample(stand, 9, 3740)], Time(3800), Time(3800)) is null,
+        Require(board.ActivateButton("bj-stand", Time(6550)), "A valid laptop button failed.");
+        Require(board.Update([Sample(stand, 9, 6540)], Time(6600), Time(6600)) is null,
             "An in-flight pre-click pinch applied after a laptop action.");
 
         var settling = new BoardSession(new BlackjackGame(initialShoe: Cards(10, 10, 8, 7)));
@@ -100,27 +107,43 @@ internal static class BlackjackBoardRegression
             settling.BlackjackState is { Bankroll: 1000, SelectedBet: 25, Phase: BlackjackPhase.Betting } &&
             settling.BlackjackState.Hands.Count == 0 && settling.BlackjackState.DealerCards.Count == 0,
             "A fresh Your Chips selection did not restore a clean 1,000-credit betting table.");
-        Require(settling.Update([Sample(nextDeal, 23, 1700)], Time(1700), Time(1700)) is not null &&
-            settling.BlackjackState.RoundNumber == 2, "Settlement barriers blocked a fresh Deal.");
+        Require(HoldOn(settling, "bj-deal", 1700) && settling.BlackjackState.RoundNumber == 2,
+            "Settlement barriers blocked a fresh long-press Deal.");
         CheckHitEvents();
+        CheckSimultaneousCaptions();
         BlackjackDealRegression.Run();
         Console.WriteLine("Blackjack board verification passed: launch, shared targets, held/disabled pinch consumption, " +
             "game/navigation revisions, split, menu continuity, phase-gated Your Chips plaque and reset input barriers; " +
             "HIT event payloads, advancing split hands, unique sequences and non-HIT suppression.");
 
         BoardButton Button(string id) => board.Buttons.Single(b => b.Id == id);
-        bool Hold(string id, int start)
+        bool Hold(string id, int start) => HoldOn(board, id, start);
+        void Lift(int start)
         {
-            IReadOnlyList<string> activated = [];
-            for (int time = start; time <= start + 1000 && activated.Count == 0; time += 100)
-                activated = board.ObserveHeldButtons([id], Time(time), Time(time));
-            return activated.SequenceEqual([id]);
+            for (int time = start; time <= start + 400; time += 100) board.ObserveHeldButtons([], Time(time), Time(time));
         }
         void Select(string id, long eventId, int milliseconds, int? executed = null)
         {
             var button = Button(id);
             board.Update([Sample(button, eventId, executed ?? milliseconds)], Time(milliseconds), Time(milliseconds));
         }
+    }
+
+    // Safety: any second covered caption, even an ordinary button's, stops a long press.
+    private static void CheckSimultaneousCaptions()
+    {
+        var board = new BoardSession(new BlackjackGame(initialShoe: Cards(2, 6, 2, 10, 2, 3)));
+        board.ShowBlackjack(Time(0));
+        Require(board.ActivateButton("bj-deal", Time(100)), "The simultaneous-caption fixture could not deal.");
+        for (int time = 200; time <= 2200; time += 100)
+            Require(board.ObserveHeldButtons(["bj-hit", "menu"], Time(time), Time(time)).Count == 0 &&
+                board.BlackjackState.Hands[0].Cards.Count == 2 && board.Screen == BoardScreen.Blackjack,
+                "Hit acted while Exit's caption was also covered.");
+        for (int time = 2300; time < 3300; time += 100)
+            Require(board.ObserveHeldButtons(["bj-hit"], Time(time), Time(time)).Count == 0,
+                "An ambiguous hold shortened the next long press.");
+        Require(board.ObserveHeldButtons(["bj-hit"], Time(3300), Time(3300)).SequenceEqual(["bj-hit"]) &&
+            board.BlackjackState.Hands[0].Cards.Count == 3, "Hit did not act after its own second alone.");
     }
 
     private static void CheckHitEvents()
@@ -180,6 +203,15 @@ internal static class BlackjackBoardRegression
         Require(split.ActivateButton("bj-double", Time(130)) && split.TickBlackjack(Time(800)) &&
             split.TickBlackjack(Time(1500)) && split.TickBlackjack(Time(2200)) && splitHits.Count == 1,
             "Double or dealer cards emitted player HIT notifications.");
+    }
+
+    // Up to one second of caption evidence over a hold button, stopping at its activation.
+    private static bool HoldOn(BoardSession session, string id, int start)
+    {
+        IReadOnlyList<string> activated = [];
+        for (int time = start; time <= start + 1000 && activated.Count == 0; time += 100)
+            activated = session.ObserveHeldButtons([id], Time(time), Time(time));
+        return activated.SequenceEqual([id]);
     }
 
     private static IReadOnlyList<BoardButton> BettingButtons(this BoardSession board)

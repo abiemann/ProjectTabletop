@@ -276,7 +276,11 @@ public sealed partial class MainWindow
                     double.IsFinite(coverage) && coverage >= .07);
                 Require(pendingQuery.LightingHints.Any(hint => hint.Center == measured.Center),
                     label + "/" + button.Label + " did not pass measured control evidence to illumination.");
-                Require(pendingQuery.SearchRegions.Count is > 0 and <= 2 &&
+                if (button.IsHold)
+                    // Long-press buttons act on caption evidence alone: no hand search, spotlight or fingertips.
+                    Require(pendingQuery.SearchRegions.SequenceEqual(emptyQuery.SearchRegions) && pendingQuery.Hints.Count == 0,
+                        label + "/" + button.Label + " started a hand-model search for a long-press button.");
+                else Require(pendingQuery.SearchRegions.Count is > 0 and <= 2 &&
                         pendingQuery.SearchRegions.Contains(AcquisitionSearchBounds(measured, size, size)) &&
                         pendingQuery.SearchRegions.All(crop => crop.Width == crop.Height && crop.X >= 0 && crop.Y >= 0 &&
                             crop.X + crop.Width <= size && crop.Y + crop.Height <= size) && context.IlluminatedHint is null,

@@ -69,16 +69,24 @@ public sealed partial class MainWindow
         await Arm(chip);
         await Select(chip, "bj-bet-10", () => !ReferenceEquals(chipSelection, scene.GetLastHandBoardSelection()));
 
-        var deal = AtButton("bj-deal");
-        var dealBounds = scene.CurrentBoardButtons.Single(button => button.Id == "bj-deal").Bounds;
-        await Send(deal);
-        var beforeDeal = Draw(casinoImage);
-        await Arm(deal, casinoImage);
-        Require(Differences(beforeDeal, casinoImage.GetPixelBytes(),
-            PointAt(dealBounds.X + dealBounds.Width * .4, dealBounds.Y + dealBounds.Height - .007), 5, false) > 12,
+        // The ready-state indicator, on the 50 chip.
+        var fifty = AtButton("bj-bet-50");
+        var fiftyBounds = scene.CurrentBoardButtons.Single(button => button.Id == "bj-bet-50").Bounds;
+        await Send(fifty);
+        var beforeArm = Draw(casinoImage);
+        await Arm(fifty, casinoImage);
+        Require(Differences(beforeArm, casinoImage.GetPixelBytes(),
+            PointAt(fiftyBounds.X + fiftyBounds.Width * .4, fiftyBounds.Y + fiftyBounds.Height - .007), 5, false) > 12,
             "The ready-state gold indicator did not redraw on the casino table.");
-        await Select(deal, "bj-deal", () => scene.BlackjackState.Phase == BlackjackPhase.PlayerTurn);
+        await Select(fifty, "bj-bet-50", () => scene.BlackjackState.SelectedBet == 50);
         var dealSelection = scene.GetLastHandBoardSelection();
+        // Deal is a one-time long-press: grouped fingers never arm it.
+        var deal = AtButton("bj-deal");
+        for (int i = 0; i < 3; i++) await Send(deal);
+        Require(scene.CurrentFingerSelectionFeedback.Count == 0 && scene.BlackjackState.Phase == BlackjackPhase.Betting,
+            "Grouped fingers armed the long-press Deal button.");
+        Require(scene.ActivateBlackjackButton("bj-deal") && scene.BlackjackState.Phase == BlackjackPhase.PlayerTurn,
+            "The finger fixture could not deal.");
         // Keep source-frame timestamps real while the opening presentation finishes.
         await Task.Delay(1850);
         Draw(casinoImage);
@@ -86,7 +94,7 @@ public sealed partial class MainWindow
         for (int i = 0; i < 4; i++) await Send(Separate(deal));
         Require(scene.BlackjackState.Hands.Count == 1, "Held separation clicked the newly drawn Split control.");
         Require(ReferenceEquals(dealSelection, scene.GetLastHandBoardSelection()),
-            "A held gesture overwrote the successful Deal route.");
+            "A held gesture overwrote the successful wager route.");
 
         // Round actions are long-press buttons: grouped fingers never arm or select Hit.
         var hit = AtButton("bj-hit");

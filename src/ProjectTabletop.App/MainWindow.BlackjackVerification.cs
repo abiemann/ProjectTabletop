@@ -50,16 +50,25 @@ public sealed partial class MainWindow
         scene.ClearHandTips(resetInput: false);
 
         await Task.Delay(2);
+        // Deal is a one-time long-press: a fingertip neither highlights nor pinches it.
         var dealButton = scene.CurrentBoardButtons.Single(button => button.Id == "bj-deal");
         scene.SetHandCursors([new(PointAt(dealButton), DateTimeOffset.MinValue)], DateTimeOffset.UtcNow);
-        Require(scene.HoveredBoardButtons.SequenceEqual(["bj-deal"]),
+        Require(scene.HoveredBoardButtons.Count == 0, "A fingertip highlighted the long-press Deal button.");
+        scene.ClearHandTips(resetInput: false);
+        await Task.Delay(2);
+        var wager = scene.CurrentBoardButtons.Single(button => button.Id == "bj-bet-50");
+        scene.SetHandCursors([new(PointAt(wager), DateTimeOffset.MinValue)], DateTimeOffset.UtcNow);
+        Require(scene.HoveredBoardButtons.SequenceEqual(["bj-bet-50"]),
             "Hover does not follow the shared Blackjack button rectangle.");
         var hovered = DrawPreview(scene);
-        Require(DifferentPixels(betting, hovered, dealButton.Bounds) > 100,
-            "The Deal button has no visible hover feedback.");
+        Require(DifferentPixels(betting, hovered, wager.Bounds) > 100,
+            "The 50 wager has no visible hover feedback.");
         await Save("betting-hover");
+        scene.ClearHandTips(resetInput: false);
 
         await Pinch("bj-deal", 2);
+        Require(scene.BlackjackState.Phase == BlackjackPhase.Betting, "A pinch dealt with the long-press Deal button.");
+        Require(scene.ActivateBlackjackButton("bj-deal"), "Deal did not start the round.");
         var playerState = scene.BlackjackState;
         Require(playerState.Phase == BlackjackPhase.PlayerTurn && playerState.Hands.Single().Total == 15 &&
             playerState.DealerHoleCardHidden && playerState.DealerCards[1] is null && playerState.DealerTotal == 6,

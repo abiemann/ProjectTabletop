@@ -10,6 +10,7 @@ internal static class GlobeBoardRegression
         CheckFourFingerSelection();
         CheckHoldToRepeat();
         CheckLongPressHandle();
+        CheckSimultaneousHolds();
         Console.WriteLine("Globe verification passed: pure entrance/spin frames, bounded smooth zoom, hidden rotation " +
             "controls, timed drawer targets, pinch and four-finger gestures ignored by every hold control, reset barriers, " +
             "hold-to-repeat zoom timing, gaps and stale frames, long-press drawer handle with release, long-press Exit.");
@@ -53,6 +54,23 @@ internal static class GlobeBoardRegression
         board.ShowMenu(Time(11100)); board.ShowGlobe(Time(11200));
         Require(board.ObserveHeldButtons(zoomIn, Time(12500), Time(12500)).Count == 0,
             "Leaving Globe retained a hold or its drawer.");
+    }
+
+    // Safety: two covered captions at once are ambiguous, so nothing acts.
+    private static void CheckSimultaneousHolds()
+    {
+        var board = new BoardSession(); board.ShowGlobe(Time(0));
+        Require(board.ActivateButton("globe-drawer-open", Time(100)) && board.TickGlobe(Time(400)),
+            "The simultaneous-hold fixture could not open the drawer.");
+        IReadOnlyList<string> Hold(string[] ids, int time) => board.ObserveHeldButtons(ids, Time(time), Time(time));
+        for (int time = 1000; time <= 3000; time += 100)
+            Require(Hold(["globe-zoom-in", "globe-exit"], time).Count == 0 && board.Screen == BoardScreen.Globe &&
+                Near(board.GetGlobeSnapshot(Time(time)).TargetZoom, 1.5),
+                "Two covered long-press captions activated a button.");
+        for (int time = 3100; time < 4100; time += 100)
+            Require(Hold(["globe-zoom-in"], time).Count == 0, "An ambiguous hold shortened the next long press.");
+        Require(Hold(["globe-zoom-in"], 4100).SequenceEqual(["globe-zoom-in"]),
+            "A single covered caption did not act after its own second.");
     }
 
     private static void CheckLongPressHandle()

@@ -7,14 +7,16 @@ internal static class BlackjackDealRegression
         CheckEveryDealRoute();
         CheckPresentationInput();
         CheckLifecycleAndDealer();
-        Console.WriteLine("Blackjack DEAL verification passed: committed immutable snapshots, all input routes, " +
+        Console.WriteLine("Blackjack DEAL verification passed: committed immutable snapshots, pointer and long-press routes, " +
             "unique events, presentation locks, delayed gesture barriers, navigation and dealer pause.");
     }
 
     private static void CheckEveryDealRoute()
     {
-        foreach (string route in new[] { "pointer", "pinch", "fingers" })
+        foreach (string route in new[] { "pointer", "hold" })
         {
+            // A long-press deals one second after the fingers arrive at 100 ms.
+            int offset = route == "hold" ? 1000 : 0;
             var board = Board();
             var events = new List<BlackjackDeal>();
             int hitEvents = 0;
@@ -27,27 +29,32 @@ internal static class BlackjackDealRegression
                 events.Add(deal);
             };
             var button = Button(board, "bj-deal");
+            // Deal is a one-time long-press: a pinch or the finger gesture never deals.
+            var hand = Fingers(button);
+            board.Update([hand], Time(10), Time(10));
+            board.Update([hand], Time(40), Time(40));
+            hand = hand with { FingersTogether = false, IndexFingerSeparated = true };
+            Require(board.Update([Pinch(button, 1, 50)], Time(50), Time(50)) is null &&
+                board.Update([hand], Time(60), Time(60)) is null && board.Update([hand], Time(90), Time(90)) is null &&
+                events.Count == 0, "A pinch or finger gesture dealt with the long-press Deal button.");
             if (route == "pointer") Require(board.ActivateButton("bj-deal", Time(100)), "Pointer DEAL failed.");
-            else if (route == "pinch")
-                Require(board.Update([Pinch(button, 1, 100)], Time(100), Time(100))?.ButtonId == "bj-deal", "Pinch DEAL failed.");
             else
             {
-                var hand = Fingers(button);
-                board.Update([hand], Time(10), Time(10));
-                board.Update([hand], Time(110), Time(110));
-                hand = hand with { FingersTogether = false, IndexFingerSeparated = true };
-                board.Update([hand], Time(130), Time(130));
-                Require(board.Update([hand], Time(220), Time(220))?.ButtonId == "bj-deal", "Finger DEAL failed.");
-                Require(board.Update([hand], Time(240), Time(240)) is null, "Held finger selection repeated DEAL.");
+                for (int time = 100; time < 1100; time += 100)
+                    Require(board.ObserveHeldButtons(["bj-deal"], Time(time), Time(time)).Count == 0 && events.Count == 0,
+                        "Deal acted before a full second of hold evidence.");
+                Require(board.ObserveHeldButtons(["bj-deal"], Time(1100), Time(1100)).SequenceEqual(["bj-deal"]),
+                    "Long-press DEAL failed.");
+                Require(board.ObserveHeldButtons(["bj-deal"], Time(1200), Time(1200)).Count == 0, "A continued hold dealt again.");
             }
             Require(events is [{ Sequence: 1, Previous.Phase: BlackjackPhase.Betting, Current.Phase: BlackjackPhase.PlayerTurn }] &&
                 events[0].Previous.Hands.Count == 0 && events[0].Previous.DealerCards.Count == 0 &&
                 events[0].Current.Hands[0].Cards.Count == 2 && events[0].Current.DealerCards[1] is null &&
-                events[0].Current.DealerHoleCardHidden && events[0].StartedAt == Time(route == "fingers" ? 220 : 100) && hitEvents == 0,
+                events[0].Current.DealerHoleCardHidden && events[0].StartedAt == Time(100 + offset) && hitEvents == 0,
                 "DEAL payload exposed a hole card, wrong state/time, or emitted a HIT event.");
-            Require(!board.ActivateButton("bj-deal", Time(300)) && !board.ActivateButton("unknown", Time(310)) &&
+            Require(!board.ActivateButton("bj-deal", Time(300 + offset)) && !board.ActivateButton("unknown", Time(310 + offset)) &&
                 events.Count == 1, "Rejected game action emitted DEAL.");
-            Require(board.ActivateButton("bj-hit", Time(320)) && events[0].Current.Hands[0].Cards.Count == 2 &&
+            Require(board.ActivateButton("bj-hit", Time(320 + offset)) && events[0].Current.Hands[0].Cards.Count == 2 &&
                 events[0].Current.DealerCards[1] is null, "Later gameplay mutated a saved DEAL snapshot.");
         }
 

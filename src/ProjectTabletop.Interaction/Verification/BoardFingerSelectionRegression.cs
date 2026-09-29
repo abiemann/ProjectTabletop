@@ -193,9 +193,11 @@ internal static class BoardFingerSelectionRegression
     {
         var board = new BoardSession(new BlackjackGame(initialShoe: Cards(8, 6, 8, 10, 10, 2, 10, 4)));
         board.ShowBlackjack(Time(0));
-        Require(Select(board, Together(Button(board, "bj-deal")), 100)?.ButtonId == "bj-deal",
-            "Index separation failed to deal blackjack.");
-        Require(board.ActivateButton("bj-split", Time(500)), "The split-hand fixture could not split.");
+        // Deal and the round actions are long-press buttons: the finger gesture never selects them.
+        Require(Select(board, Together(Button(board, "bj-deal")), 100) is null &&
+            board.BlackjackState.Phase == BlackjackPhase.Betting, "The finger gesture dealt with the long-press Deal button.");
+        Require(board.ActivateButton("bj-deal", Time(450)) && board.ActivateButton("bj-split", Time(500)),
+            "The split-hand fixture could not split.");
         // Round actions are long-press buttons: the finger gesture never selects them.
         var hit = Together(Button(board, "bj-hit"));
         Require(Select(board, hit, 600) is null && board.BlackjackState.Hands[0].Cards.Count == 2,
@@ -214,16 +216,17 @@ internal static class BoardFingerSelectionRegression
         Require(Hold(5100).SequenceEqual(["bj-hit"]) && board.BlackjackState.Hands[1].Cards.Count == 3,
             "Lifting and holding again did not rearm HIT for the next split hand.");
 
+        // The 10 chip returns after settlement where the disabled Hit was during the dealer turn.
         board = new BoardSession(new BlackjackGame(initialShoe: Cards(10, 10, 8, 7)));
-        board.ShowBlackjack(Time(0)); var deal = Together(Button(board, "bj-deal"));
+        board.ShowBlackjack(Time(0)); var chip = Together(Button(board, "bj-bet-10"));
         board.ActivateButton("bj-deal", Time(50)); board.ActivateButton("bj-stand", Time(100));
-        At(board, 200, deal); At(board, 300, deal); board.TickBlackjack(Time(750));
-        At(board, 800, deal); At(board, 900, deal); board.TickBlackjack(Time(1400));
+        At(board, 200, chip); At(board, 300, chip); board.TickBlackjack(Time(750));
+        At(board, 800, chip); At(board, 900, chip); board.TickBlackjack(Time(1400));
         Require(board.BlackjackState.Phase == BlackjackPhase.RoundOver, "The dealer fixture did not finish.");
-        Require(At(board, 1500, Apart(deal)) is null && At(board, 1580, Apart(deal)) is null &&
-            board.BlackjackState.RoundNumber == 1, "Fingers grouped over disabled dealer controls armed the next Deal.");
-        Require(Select(board, deal, 1700)?.ButtonId == "bj-deal" && board.BlackjackState.RoundNumber == 2,
-            "A fresh together-to-apart selection could not deal after settlement.");
+        Require(At(board, 1500, Apart(chip)) is null && At(board, 1580, Apart(chip)) is null &&
+            board.BlackjackState.SelectedBet == 25, "Fingers grouped over disabled dealer controls armed the next wager.");
+        Require(Select(board, chip, 1700)?.ButtonId == "bj-bet-10" && board.BlackjackState.SelectedBet == 10,
+            "A fresh together-to-apart selection could not choose a wager after settlement.");
     }
 
     private static BoardSession PhotoCopy()

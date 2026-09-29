@@ -64,7 +64,9 @@ public sealed partial class MainWindow
                 context.IlluminatedHint, context.IlluminationStartedAt) : null;
         IReadOnlyList<HandAcquisitionHint> hints = context.IlluminatedHint is { } illuminated ? [illuminated] :
             presence?.Hints ?? [];
-        hints = hints.Select(hint => hint.ConstrainToFrame(frame.Width, frame.Height)).ToArray();
+        // Fingers on a long-press button feed its hold timer only, never a hand search.
+        hints = hints.Where(hint => context.HoldControls?.Any(outline => InsideQuad(hint.Center, outline)) != true)
+            .Select(hint => hint.ConstrainToFrame(frame.Width, frame.Height)).ToArray();
         var regions = new List<HandTrackingBounds>(2);
         // Qualified presence already requires two fresh observations and at
         // least 7% of both the control and its label. Try the untouched camera
