@@ -7,7 +7,7 @@ internal sealed class HandAcquisitionTextPatterns
     internal sealed record Observation(int Region, bool Clean, bool StrongCorruption, double Correlation,
         IReadOnlyList<PixelPoint> ChangedBoardPixels, double OpticalBlur, int OffsetX, int OffsetY,
         double ScaleX = 1, double ScaleY = 1, IReadOnlyList<double>? SectorCorrelations = null,
-        double LocalDamageCoverage = 0, double ExposureGain = 1, double ExposureBackground = 0);
+        double LocalDamageCoverage = 0, double ExposureGain = 1, double ExposureBackground = 0, bool Clipped = false);
     private sealed record Template(int Region, int Left, int Top, int Width, int Height,
         double[][] HighPass, double[][] Blurred, double Background, int[] Evidence, double InkBackground)
     {
@@ -362,7 +362,7 @@ internal sealed class HandAcquisitionTextPatterns
             }
             observations.Add(new(template.Region, clean, stronglyCorrupted, best, changed,
                 Blurs[bestVariant], bestDx, bestDy, bestScaleX, bestScaleY, sectors, localCoverage,
-                bestExposureGain, bestExposureBackground));
+                bestExposureGain, bestExposureBackground, clipped));
         }
         for (int index = 0; index < observations.Count; index++)
             if (missingContrast.TryGetValue(observations[index].Region, out var missing) &&

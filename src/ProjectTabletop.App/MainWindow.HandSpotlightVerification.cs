@@ -62,6 +62,22 @@ public sealed partial class MainWindow
         Require(WhiteAt(clipped, new(.16, .6)) && BlackAt(clipped, new(.08, .6)),
             "A spotlight failed to reach the board edge or spilled outside the board clip.");
 
+        // A hand missed for one frame stays a search target only while its
+        // held light remains; a tracked hand is never searched twice.
+        scene.ClearHandTips();
+        await Task.Delay(150); // Frames must follow the reset and still be fresh.
+        var seen = DateTimeOffset.UtcNow.AddMilliseconds(-100);
+        scene.SetHandSpotlights([left], seen);
+        Require(scene.ActiveHandSpotlightCount == 1 && scene.GetHandAcquisitionContext(seen)?.LostHands is { Count: 0 },
+            "A currently tracked hand was offered as a lost-hand search.");
+        var missed = DateTimeOffset.UtcNow;
+        scene.SetHandSpotlights([], missed);
+        Require(scene.GetHandAcquisitionContext(missed)?.LostHands is [var lost] && lost == left,
+            "A hand missed for one frame was not searched under its held light.");
+        scene.ClearHandTips();
+        Require(scene.GetHandAcquisitionContext(DateTimeOffset.UtcNow)?.LostHands is { Count: 0 },
+            "A cleared light still requested a lost-hand search.");
+
         scene.ClearHandTips();
         scene.SetHandSpotlights([left], DateTimeOffset.UtcNow);
         var currentTime = DateTimeOffset.UtcNow;
@@ -276,18 +292,22 @@ public sealed partial class MainWindow
         var probeTip = BoardPoint(.5, .65); // Clear of all menu and app controls.
         void CheckPinchRendering(bool showCircle)
         {
-            Draw(); // Warm each screen before sending a time-limited observation.
+            // Warm each screen before sending a time-limited observation. Its
+            // artwork, such as the menu's card and chip previews, may be red;
+            // only pixels the pinch turns red count as a marker.
+            var baseline = Draw();
             var frameTime = DateTimeOffset.UtcNow;
             scene.SetHandCursors([new(probeTip, frameTime.AddSeconds(1), ++gestureEvent)], frameTime);
             var rendered = Draw();
             var redPixels = 0;
             var ringPixels = 0;
+            static bool Red(byte[] pixels, int index) => pixels[index + 2] >= 160 && pixels[index + 1] <= 80 && pixels[index] <= 80;
             for (int y = 0; y < size; y++)
             for (int x = 0; x < size; x++)
             {
                 int index = (y * size + x) * 4;
-                if (rendered[index + 2] < 160 || rendered[index + 1] > 80 || rendered[index] > 80) continue;
-                redPixels++;
+                if (!Red(rendered, index)) continue;
+                if (!Red(baseline, index)) redPixels++;
                 if (Math.Abs(x - probeTip.X * size) < 25 && Math.Abs(y - probeTip.Y * size) < 25)
                     ringPixels++;
             }
@@ -314,7 +334,7 @@ public sealed partial class MainWindow
             sourceFrameOrdering = true, lightingDoesNotGenerateInput = true, resetRejectsOldFrames = true,
             perHandDropoutHold = true, suppressedOtherHandDoesNotCancelHold = true,
             recoveredTrackingIdDoesNotDuplicateLight = true, independentLightExpiry = true,
-            knownSuppressedHandCannotClaimOtherHold = true,
+            knownSuppressedHandCannotClaimOtherHold = true, lostHandSearchUnderHeldLight = true,
             sourceLifetimeMilliseconds = 700, photoCopyIndependentLights = true, photoCopyHandCoversBottomControls = true,
             photoCopyHandBoardClipping = true,
             photoCopyObjectLockLifecycle = true, rotatedRectangularObjectLight = true,

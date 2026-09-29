@@ -946,8 +946,13 @@ public sealed partial class MainWindow
             lightingScene.CompleteHandAcquisition(context, [hint], [], now);
             var searching = lightingScene.GetHandAcquisitionContext(now)!;
             var litPixels = Draw(lightingScene);
+            // The lit search follows the expected reaching hand but keeps the caption core.
+            double litCore = hint.RadiusPixels * .64;
             Require(searching.IlluminatedHint is not null &&
-                    Query(occupied, searching).SearchRegions.Contains(hint.SearchBounds) &&
+                    Query(occupied, searching).SearchRegions is [var litSearch] &&
+                    litSearch.Width >= hint.SearchBounds.Width &&
+                    litSearch.X <= hint.Center.X - litCore && litSearch.X + litSearch.Width >= hint.Center.X + litCore &&
+                    litSearch.Y <= hint.Center.Y - litCore && litSearch.Y + litSearch.Height >= hint.Center.Y + litCore &&
                     ChangedPixels(empty, litPixels, exitBounds) > 300,
                 "Exit text interference did not illuminate its hand region and focus the subsequent model search.");
 

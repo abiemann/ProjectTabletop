@@ -33,7 +33,7 @@ public sealed record HandAcquisitionTextPatternResult(int ControlRegion, bool La
     IReadOnlyList<double>? SectorCorrelations = null, double LocalDamageCoverage = 0,
     double OpticalExposureGain = 1, double OpticalExposureBackground = 0,
     double CaptionReflectanceCoverage = 0, double CaptionReflectanceTriggerCoverage = 0,
-    double CaptionReflectanceInkFraction = 0, bool CaptionReflectanceChanged = false);
+    double CaptionReflectanceInkFraction = 0, bool CaptionReflectanceChanged = false, bool CaptionClipped = false);
 
 /// <summary>Foreground evidence for acquisition, never proof of a hand or a selection.</summary>
 /// <param name="ForegroundFraction">Foreground occupancy among eligible candidate samples.
@@ -41,7 +41,8 @@ public sealed record HandAcquisitionTextPatternResult(int ControlRegion, bool La
 public sealed record HandAcquisitionPresenceResult(IReadOnlyList<HandAcquisitionHint> Hints,
     bool BaselineReady, bool? IlluminatedPresence, double ForegroundFraction, string Reason,
     IReadOnlyList<HandAcquisitionTextPatternResult>? TextPatterns = null,
-    IReadOnlyList<HandAcquisitionLocalFitResult>? LocalFits = null);
+    IReadOnlyList<HandAcquisitionLocalFitResult>? LocalFits = null, double? IlluminatedWhiteLuminance = null,
+    bool? ProjectedWhiteClipped = null);
 
 /// <summary>Current-frame opposite-margin fitting diagnostics for compact controls.</summary>
 public sealed record HandAcquisitionLocalFitResult(int ControlRegion, int TrainingSamples,
@@ -60,6 +61,13 @@ public sealed partial class HandAcquisitionPresenceTracker
     // evidence; empty-table nuisance stayed below 0.36%. Normalize per control,
     // not by camera resolution or the number of buttons on a board.
     public const double MinimumControlCoverage = .07;
+    // Camera frames arriving sooner after a search light starts still show the
+    // unlit table; live logs found lit hands only from about 210 ms onward.
+    public static readonly TimeSpan SearchLightSettling = TimeSpan.FromMilliseconds(220);
+    // A night-exposed camera clipped the lit board to 254-255; lit fingers
+    // clipped with it and the core read as empty white. Evening frames where
+    // lit hands were found showed the lit board near 231 and fingers near 153.
+    public const double SaturatedIlluminatedWhite = 245;
     private PixelPoint[] _polygon = [];
     private PixelPoint[] _locations = [];
     private bool[] _mask = [];
@@ -237,18 +245,19 @@ public sealed partial class HandAcquisitionPresenceTracker
         }
 
         bool? illuminatedPresence = null;
+        double? illuminatedWhite = null;
         double? illuminatedControlCoverage = null;
         double? illuminatedControlTriggerCoverage = null;
         string reason = modelReliable ? usingTemplate ? "rendered-scene-foreground" : "camera-reference-foreground"
             : "photometric-reference-uncertain";
         if (activeLight)
         {
-            if (illuminationStartedAt is null || frameTime - illuminationStartedAt < TimeSpan.FromMilliseconds(220))
+            if (illuminationStartedAt is null || frameTime - illuminationStartedAt < SearchLightSettling)
                 reason = "search-light-settling";
             else
             {
                 illuminatedPresence = CheckIlluminatedCore(current, illuminatedHint!, fit, out string lightReason,
-                    out illuminatedControlCoverage, out illuminatedControlTriggerCoverage);
+                    out illuminatedControlCoverage, out illuminatedControlTriggerCoverage, out illuminatedWhite);
                 reason = lightReason;
             }
         }
@@ -274,6 +283,9 @@ public sealed partial class HandAcquisitionPresenceTracker
                 fraction = Math.Max(fraction, textHint.MotionFraction);
                 if (!activeLight) reason = "text-pattern-foreground";
             }
+        // Freshly qualifying controls awaiting their second frame can still
+        // describe a reaching palm's position; they never start a light.
+        var awaitingConfirmation = new List<HandAcquisitionHint>();
         foreach (var observation in textObservations)
         {
             bool qualifying = (observation.StrongCorruption || reflectedControls.Any(evidence => evidence.Region == observation.Region)) && hints.Any(hint =>
@@ -285,11 +297,19 @@ public sealed partial class HandAcquisitionPresenceTracker
             _textCorruptionTimes[observation.Region] = qualifying ? frameTime : default;
             if (confirmations < 2)
             {
+                if (qualifying)
+                    awaitingConfirmation.AddRange(hints.Where(hint => ControlRegionAt(hint.Center) == observation.Region));
                 hints.RemoveAll(hint => ControlRegionAt(hint.Center) == observation.Region);
                 if (qualifying && !activeLight) reason = observation.StrongCorruption
                     ? "text-corruption-confirming" : "caption-reflectance-confirming";
             }
         }
+        // A hand reaches in from the viewer's edge, the rendered board's bottom.
+        // Across several disturbed controls its fingertips are on the one
+        // farthest from that edge: keep that target first, the palm's next.
+        if (!activeLight && hints.Count > 1 && _scene is not null)
+            hints = hints.OrderBy(hint => BoardPosition(_scene, hint.Center, out _, out double v) ? v : double.PositiveInfinity)
+                .ToList();
         if (illuminatedPresence == true)
         {
             hints.RemoveAll(hint => Distance(hint.Center, illuminatedHint!.Center) < illuminatedHint.RadiusPixels);
@@ -305,6 +325,16 @@ public sealed partial class HandAcquisitionPresenceTracker
             _scene?.AllowsLocalForegroundContext == true)
             for (int index = 0; index < hints.Count; index++)
                 hints[index] = AttachLocalForegroundCandidate(hints[index], bgra, stride, fit, colorOffsets);
+        // The nearest disturbed control behind the target, toward the viewer,
+        // holds the palm. Its evidence may still be awaiting its second frame.
+        if (!activeLight && hints.Count > 0 && hints[0].ValidatedCandidateBounds is null && _scene is not null)
+        {
+            var target = hints[0];
+            if (hints.Skip(1).Concat(awaitingConfirmation)
+                    .OrderBy(hint => BoardPosition(_scene, hint.Center, out _, out double v) ? v : double.PositiveInfinity)
+                    .Select(behind => ReachingHandSpan(target, behind)).FirstOrDefault(span => span is not null) is { } reaching)
+                hints[0] = reaching;
+        }
 
         // Keep a fixed reference instead of gradually absorbing a stationary hand. A new
         // rendered scene explicitly resets it; exposure drift is fitted on every fresh frame.
@@ -327,9 +357,13 @@ public sealed partial class HandAcquisitionPresenceTracker
             captionReflectance.FirstOrDefault(evidence => evidence.Region == observation.Region)?.Coverage ?? 0,
             captionReflectance.FirstOrDefault(evidence => evidence.Region == observation.Region)?.TriggerCoverage ?? 0,
             captionReflectance.FirstOrDefault(evidence => evidence.Region == observation.Region)?.InkFraction ?? 0,
-            reflectedControls.Any(evidence => evidence.Region == observation.Region))).ToArray();
+            reflectedControls.Any(evidence => evidence.Region == observation.Region), observation.Clipped)).ToArray();
         return new(hints, _baseline is not null || _expected is not null, illuminatedPresence, fraction, reason,
-            textDiagnostics.Length == 0 ? null : textDiagnostics, localFits.Count == 0 ? null : localFits);
+            textDiagnostics.Length == 0 ? null : textDiagnostics, localFits.Count == 0 ? null : localFits, illuminatedWhite,
+            // Intact white captions already clipping means a white search light
+            // will clip too; night exposure raised the unlit board by about 38%.
+            textObservations.Any(observation => observation.Clean)
+                ? textObservations.Any(observation => observation.Clean && observation.Clipped) : null);
     }
 
     public void Reset()
@@ -954,16 +988,18 @@ public sealed partial class HandAcquisitionPresenceTracker
     }
 
     private bool? CheckIlluminatedCore(double[] current, HandAcquisitionHint hint, PhotometricFit? fit,
-        out string reason, out double? controlCoverage, out double? controlTriggerCoverage)
+        out string reason, out double? controlCoverage, out double? controlTriggerCoverage, out double? whiteLuminance)
     {
         controlCoverage = null;
         controlTriggerCoverage = null;
+        whiteLuminance = null;
         int[] core = Enumerable.Range(0, _mask.Length).Where(index => _mask[index] &&
             Distance(_locations[index], hint.Center) < hint.RadiusPixels * .64).ToArray();
         if (core.Length < 24) { reason = "insufficient-white-core"; return null; }
         int[] bright = core.OrderBy(index => Luminance(current, index)).Skip((int)(core.Length * .72)).ToArray();
         double[] reference = Enumerable.Range(0, 3).Select(channel => Median(bright.Select(index => current[index * 3 + channel]))).ToArray();
         double referenceLuminance = reference[0] * .114 + reference[1] * .587 + reference[2] * .299;
+        whiteLuminance = referenceLuminance;
         var whiteField = FitPeripheralIlluminatedWhite(current, core, bright, hint);
         bool[] foreground = new bool[_mask.Length];
         int changed = 0;
@@ -1014,6 +1050,13 @@ public sealed partial class HandAcquisitionPresenceTracker
                 colorError += Math.Pow(reference[channel] - prediction, 2);
             }
             plausibleWhite = Math.Sqrt(colorError / 3) <= 32 && referenceLuminance >= 75;
+        }
+        // Clipped white hides pale skin as well as the board. Report it so the
+        // light can be dimmed; it is no evidence that the hand has left.
+        if (plausibleWhite && referenceLuminance >= SaturatedIlluminatedWhite)
+        {
+            reason = "search-light-saturated";
+            return null;
         }
         reason = plausibleWhite ? "empty-search-light" : "white-core-appearance-uncertain";
         return plausibleWhite ? false : null;
@@ -1118,6 +1161,35 @@ public sealed partial class HandAcquisitionPresenceTracker
         for (int region = 0; region < regions.Count; region++)
             if (WithinRegions([regions[region]], u, v)) return region;
         return -1;
+    }
+
+    // An arm reaching past a nearer control overflows the far control's own
+    // connected-foreground window, leaving assistance on the fingertips only.
+    // When the second disturbed control lies wholly on the viewer's side of
+    // the target, span both measured caption cores so the palm is lit too.
+    // Geometry only: coverage, confirmation and gestures are unchanged.
+    private HandAcquisitionHint? ReachingHandSpan(HandAcquisitionHint target, HandAcquisitionHint behind)
+    {
+        if (_scene?.BoardSearchRegions is not { } regions ||
+            target.ControlCoverage is not >= MinimumControlCoverage || target.ControlTriggerCoverage is not >= MinimumControlCoverage ||
+            behind.ControlCoverage is not >= MinimumControlCoverage || behind.ControlTriggerCoverage is not >= MinimumControlCoverage)
+            return null;
+        int targetRegion = ControlRegionAt(target.Center), behindRegion = ControlRegionAt(behind.Center);
+        if (targetRegion < 0 || behindRegion < 0 || targetRegion == behindRegion ||
+            !BoardPosition(_scene, behind.Center, out _, out double behindV) ||
+            behindV < regions[targetRegion].Y + regions[targetRegion].Height) return null;
+        double targetCore = target.RadiusPixels * .64, behindCore = behind.RadiusPixels * .64;
+        double left = Math.Min(target.Center.X - targetCore, behind.Center.X - behindCore);
+        double top = Math.Min(target.Center.Y - targetCore, behind.Center.Y - behindCore);
+        double right = Math.Max(target.Center.X + targetCore, behind.Center.X + behindCore);
+        double bottom = Math.Max(target.Center.Y + targetCore, behind.Center.Y + behindCore);
+        left = Math.Max(0, left); top = Math.Max(0, top);
+        right = Math.Min(_width, right); bottom = Math.Min(_height, bottom);
+        if (right <= left || bottom <= top) return null;
+        // The hint's own size and frame caps reject controls too far apart.
+        var spanned = (target with { CandidateBounds = new(left, top, right - left, bottom - top) })
+            .ConstrainToFrame(_width, _height);
+        return spanned.ValidatedCandidateBounds is null ? null : spanned;
     }
 
     private static bool IsValidLight(HandAcquisitionHint? hint) => hint is not null &&

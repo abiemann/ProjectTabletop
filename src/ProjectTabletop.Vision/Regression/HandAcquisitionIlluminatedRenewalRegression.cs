@@ -17,8 +17,10 @@ internal static class HandAcquisitionIlluminatedRenewalRegression
         StationaryGroupedFingersAndRemoval();
         BroadPeripheralOcclusionCannotTrainWhite();
         PairedAreaFloorsAndFreshFrames();
+        ClippedLightIsNotEmpty();
         Console.WriteLine("Illuminated renewal passed: empty horizontal/diagonal/chromatic shading, prolonged false-light " +
-            "rejection, localized stationary grouped fingers, peripheral occlusion, removal, paired 7% areas and source-time barriers.");
+            "rejection, localized stationary grouped fingers, peripheral occlusion, removal, paired 7% areas, source-time " +
+            "barriers and clipped night-exposure white.");
     }
 
     private static void EmptyGradientsCannotRenew()
@@ -141,6 +143,39 @@ internal static class HandAcquisitionIlluminatedRenewalRegression
         var empty = Feed(tracker, lit, scene, 1100, 100);
         Require(empty.IlluminatedPresence == false && empty.Hints.Count == 0,
             "Fresh unoccluded shading did not clear the previous obstruction");
+    }
+
+    // A night-exposed camera clips the lit board and pale lit fingers to the
+    // same white. That frame cannot show the hand left; it must stay unknown
+    // and report its white level so the light can be dimmed.
+    private static void ClippedLightIsNotEmpty()
+    {
+        var scene = Scene();
+        byte[] clipped = (byte[])scene.Bgra.Clone();
+        for (int y = 0; y < Height; y++)
+        for (int x = 0; x < Width; x++)
+        {
+            double dx = x - Light.Center.X, dy = y - Light.Center.Y;
+            if (dx * dx + dy * dy <= Light.RadiusPixels * Light.RadiusPixels) Patch(clipped, x, y, 1, 1, 254, 255, 255);
+        }
+        var tracker = new HandAcquisitionPresenceTracker();
+        Feed(tracker, scene.Bgra, scene, 0);
+        var result = Feed(tracker, clipped, scene, 350, 100);
+        Require(result.IlluminatedPresence is null && result.Reason == "search-light-saturated" &&
+            result.IlluminatedWhiteLuminance >= HandAcquisitionPresenceTracker.SaturatedIlluminatedWhite,
+            "A clipped white core was reported as an empty search light", result);
+        byte[] fingers = (byte[])clipped.Clone();
+        for (int finger = 0; finger < 4; finger++)
+            Patch(fingers, 278 + finger * 13, 210, 12, 60, 70, 105, 150);
+        var fingerTracker = new HandAcquisitionPresenceTracker();
+        Feed(fingerTracker, scene.Bgra, scene, 0);
+        var visible = Feed(fingerTracker, fingers, scene, 350, 100);
+        Require(visible.IlluminatedPresence == true && visible.Hints.Count == 1,
+            "Fingers still visible in a clipped light were not kept", visible);
+        var shaded = ShadedLight(scene.Bgra, 0);
+        var normal = Feed(tracker, shaded, scene, 450, 100);
+        Require(normal.IlluminatedWhiteLuminance is > 150 and < HandAcquisitionPresenceTracker.SaturatedIlluminatedWhite &&
+            normal.IlluminatedPresence == false, "An unclipped empty light did not report its white level", normal);
     }
 
     private static HandAcquisitionSceneImage Scene()

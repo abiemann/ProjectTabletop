@@ -14,7 +14,10 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow : Window
 {
-    private readonly SceneCompositor _scene = new();
+    // Globe opens on the central meridian of this PC's standard time zone
+    // (15 degrees per hour), unaffected by daylight saving.
+    private readonly SceneCompositor _scene = new(globe: new ProjectTabletop.Interaction.GlobeState(
+        Math.Clamp(TimeZoneInfo.Local.BaseUtcOffset.TotalHours * 15, -180, 180)));
     private readonly CameraCaptureService _camera = new();
     private readonly object _visionGate = new();
     private VisionEngine _vision = new();

@@ -16,11 +16,12 @@ public sealed partial class BoardSession
     private static readonly IReadOnlyList<BoardButton> GlobeDrawerButtons = Array.AsReadOnly(new[]
     {
         new BoardButton("globe-exit", "Exit", new(.20, .87, .155, .12), BoardScreen.Menu),
-        new BoardButton("globe-zoom-out", "Zoom -", new(.365, .87, .155, .12), BoardScreen.Globe),
-        new BoardButton("globe-zoom-in", "Zoom +", new(.53, .87, .155, .12), BoardScreen.Globe)
+        new BoardButton("globe-zoom-out", "Zoom -", new(.365, .87, .155, .12), BoardScreen.Globe, HoldToRepeat: true),
+        new BoardButton("globe-zoom-in", "Zoom +", new(.53, .87, .155, .12), BoardScreen.Globe, HoldToRepeat: true)
     });
     public bool GlobeDrawerOpen => Screen == BoardScreen.Globe && _globeDrawerOpen;
     public DateTimeOffset? GlobeDrawerOpenedAt => GlobeDrawerOpen ? _globeDrawerOpenedAt : null;
+    public double GlobeHomeRotationDegrees => _globe.HomeRotationDegrees;
 
     public void ShowGlobe(DateTimeOffset? now = null) => Show(BoardScreen.Globe, now ?? DateTimeOffset.UtcNow);
 

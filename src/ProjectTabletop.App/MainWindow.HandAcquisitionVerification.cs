@@ -92,6 +92,11 @@ public sealed partial class MainWindow
             "Fresh foreground covering exactly 7% of a control did not get acquisition illumination.");
         var lit = Draw();
         Require(IsWhite(lit, center) && !IsWhite(baseline, center), "The acquisition light did not cover the bottom button.");
+        // Without a measured outline, light the hand reaching in from the viewer's edge too.
+        Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint?.ValidatedCandidateBounds is { } expectedHand &&
+            expectedHand.Y + expectedHand.Height > center.Y + 40 && IsWhite(lit, BoardPoint(.55, .95)) &&
+            !IsWhite(baseline, BoardPoint(.55, .95)),
+            "A caption-only hint did not extend its light over the reaching hand toward the viewer.");
         Require(lit.Take(4).SequenceEqual(new byte[] { 0, 0, 0, 255 }), "Search light escaped the board clip.");
         Require(scene.BlackjackState.Revision == gameRevision && scene.ActiveHandSpotlightCount == 0 &&
             scene.HoveredBoardButtons.Count == 0, "Motion manufactured a hand, hover, or game action.");
@@ -109,6 +114,25 @@ public sealed partial class MainWindow
             Require(illuminated.IlluminatedHint is not null && IsWhite(Draw(), center),
                 "Fresh stationary foreground evidence did not sustain the search light.");
         }
+        // Night exposure clips projected white over the hand. That reading dims
+        // and restarts the light; a later unclipped lit board restores it.
+        now += TimeSpan.FromMilliseconds(100);
+        scene.CompleteHandAcquisition(illuminated, [hint], [], now, illuminatedWhite: 254);
+        var dimmed = scene.GetHandAcquisitionContext(now)!;
+        var dimPixels = Draw();
+        int dimOffset = ((int)center.Y * size + (int)center.X) * 4;
+        Require(dimmed.IlluminatedHint is not null && dimmed.IlluminationStartedAt == now &&
+            scene.SearchLightLevel is > .8 and < .9 && dimPixels[dimOffset] is > 200 and < 230 &&
+            dimPixels[dimOffset + 1] == dimPixels[dimOffset] && dimPixels[dimOffset + 2] == dimPixels[dimOffset],
+            "A clipped lit core did not dim and restart the search light.");
+        scene.CompleteHandAcquisition(illuminated, [hint], [], now, illuminatedWhite: 254);
+        Require(scene.SearchLightLevel is > .8 and < .9, "A reading from the replaced light dimmed it again.");
+        now += TimeSpan.FromMilliseconds(300);
+        hint = hint with { ObservedAt = now };
+        scene.CompleteHandAcquisition(dimmed, [hint], [], now, illuminatedPresence: true, illuminatedWhite: 150);
+        illuminated = scene.GetHandAcquisitionContext(now)!;
+        Require(scene.SearchLightLevel == 1 && illuminated.IlluminatedHint is not null && IsWhite(Draw(), center),
+            "An unclipped lit reading did not restore the full search light.");
         scene.CompleteHandAcquisition(illuminated, [hint], [], now, illuminatedPresence: false);
         Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null } &&
             !IsWhite(Draw(), center), "An empty illuminated area retained its search light.");
@@ -132,8 +156,14 @@ public sealed partial class MainWindow
         now += TimeSpan.FromMilliseconds(450);
         ready = scene.GetHandAcquisitionContext(now)!;
         hint = hint with { ObservedAt = now };
-        scene.CompleteHandAcquisition(ready, [hint], [], now);
+        // Clipped white captions before lighting start a darker gray light.
+        scene.CompleteHandAcquisition(ready, [hint], [], now, projectedWhiteClipped: true);
         illuminated = scene.GetHandAcquisitionContext(now)!;
+        var nightPixels = Draw();
+        int nightOffset = ((int)center.Y * size + (int)center.X) * 4;
+        Require(illuminated.IlluminatedHint is not null && scene.SearchLightLevel == .8 &&
+            nightPixels[nightOffset] is > 195 and < 215 && nightPixels[nightOffset + 2] == nightPixels[nightOffset],
+            "Clipped captions did not start a darker gray search light.");
         now += TimeSpan.FromMilliseconds(500);
         scene.CompleteHandAcquisition(illuminated, [hint], [], now.AddMilliseconds(-450), illuminatedPresence: true);
 
@@ -145,7 +175,9 @@ public sealed partial class MainWindow
         ready = scene.GetHandAcquisitionContext(now)!;
         Require(ready.ObserveMotion, "Motion watching did not resume after illumination settled.");
         hint = hint with { ObservedAt = now };
-        scene.CompleteHandAcquisition(ready, [hint], [], now);
+        scene.CompleteHandAcquisition(ready, [hint], [], now, projectedWhiteClipped: false);
+        Require(scene.SearchLightLevel == 1 && IsWhite(Draw(), center),
+            "Unclipped captions did not return the search light to full white.");
         var inferred = new HandDetection(Enumerable.Repeat(center, 21).ToArray(), .99, .5);
         scene.CompleteHandAcquisition(ready, [hint], [inferred], now);
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
@@ -233,9 +265,33 @@ public sealed partial class MainWindow
             "Connected context lost the palm, control core, or native square camera bounds.");
         Require(scene.BlackjackState.Revision == connectedGameRevision && scene.HoveredBoardButtons.Count == 0,
             "Connected geometry manufactured a button selection.");
+        // Lost hands are searched with the acquisition crop's 60% frame context.
+        var lostHand = new HandDetection(Enumerable.Range(0, 21)
+            .Select(index => new PixelPoint(1000 + index * 5, 500 + index * 7)).ToArray(), .99, .5);
+        Require(LostHandBounds(lostHand, 1920, 1080) is { Width: 324, Height: 324 } lostBounds &&
+            Math.Abs(lostBounds.X + 162 - 1050) <= 1 && Math.Abs(lostBounds.Y + 162 - 570) <= 1,
+            "A lost hand's search crop was not a square around its last landmarks.");
+        var edgeHand = lostHand with { Landmarks = lostHand.Landmarks.Select(point => new PixelPoint(point.X + 850, point.Y - 500)).ToArray() };
+        Require(LostHandBounds(edgeHand, 1920, 1080) is { X: >= 0, Y: >= 0 } edgeBounds &&
+            edgeBounds.X + edgeBounds.Width <= 1920 && edgeBounds.Y + edgeBounds.Height <= 1080,
+            "A lost hand at the camera edge produced a crop outside the frame.");
+        Require(LostHandBounds(lostHand with { Landmarks = [new(double.NaN, double.NaN)] }, 1920, 1080) is null,
+            "A lost hand without finite landmarks produced a search crop.");
+        // A lit search alternates its full crop with rotating closer corners.
+        var litCrop = new HandTrackingBounds(676, 22, 648, 648);
+        var litViews = Enumerable.Range(0, 12).Select(step =>
+            LitSearchView(litCrop, TimeSpan.FromMilliseconds(step * 100 + 50), 1920, 1080)).ToArray();
+        Require(litViews.Where((_, step) => step % 2 == 0).All(view => view is null) &&
+            litViews.Where((_, step) => step % 2 == 1).Take(4).Distinct().Count() == 4 &&
+            litViews.OfType<HandTrackingBounds>().All(view => view.Width == 432 && view.Height == 432 &&
+                view.X >= litCrop.X && view.Y >= litCrop.Y && view.X + 432 <= litCrop.X + 648 && view.Y + 432 <= litCrop.Y + 648),
+            "A lit search did not alternate its crop with four closer corner views.");
+        Require(LitSearchView(new(900, 300, 300, 300), TimeSpan.FromMilliseconds(350), 1920, 1080) is null &&
+            LitSearchView(litCrop, TimeSpan.FromMilliseconds(-150), 1920, 1080) is null,
+            "A small crop or a frame before the light was given a corner view.");
         scene.SetBoardSetup(true);
         Require(scene.GetHandAcquisitionContext(now) is null, "Calibration did not cancel assistance.");
-        return new { passed = true, bottomButtonLit = true, motionCannotSelect = true,
+        return new { passed = true, reachingHandLight = true, lostHandSearchCrop = true, litSearchCornerViews = true, bottomButtonLit = true, motionCannotSelect = true,
             expiresWithoutFeedback = true, handHandover = true, staleAndSceneRejection = true,
             animationQuiet = true, executeSuppressionPreserved = true, boardClip = true,
             generatedUnlitReference = true, stationarySearchCenters = true, acceptedNativeHandSkipsFallbackLight = true,

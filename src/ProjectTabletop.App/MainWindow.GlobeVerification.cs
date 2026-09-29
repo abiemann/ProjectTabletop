@@ -103,12 +103,13 @@ public sealed partial class MainWindow
         byte[] drawerOpenPixels = await Capture("controls-drawer-open");
         CheckDrawerProgress(1);
         CheckOpenDrawer();
-        // The opaque dark glass replaces the Earth and sky that were visible
+        // The opaque glass replaces the Earth and sky that were visible
         // before the drawer rose, apart from pixels coincidentally alike.
         foreach (var button in scene.CurrentBoardButtons.Where(button => button.Id != "globe-drawer-close"))
             Require(ChangedFraction(drawerStartPixels, drawerOpenPixels, button.Bounds) > .75,
                 "Globe's settled bottom row did not visibly render the " + button.Label + " glass button.");
         await CheckAcquisition();
+        CheckHoldButtonLightClip();
 
         var beforeZoom = scene.GlobeState;
         Act("globe-zoom-in"); now += GlobeState.ControlTransitionDuration;
@@ -320,6 +321,18 @@ public sealed partial class MainWindow
                 }
                 long revision = scene.GlobeState.Revision;
                 scene.CompleteHandAcquisition(ready, [measured with { ControlCoverage = .07, ControlTriggerCoverage = .07 }], [], now);
+                if (button.HoldToRepeat)
+                {
+                    Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && scene.GlobeState.Revision == revision,
+                        "Qualified obstruction lit or immediately activated the hold-to-repeat " + button.Label + " button.");
+                    CheckHoldToRepeat(button, occupied, empty);
+                    // Its zooms changed the Globe; let acquisition settle again.
+                    Draw(); scene.GetHandAcquisitionContext(now);
+                    now += TimeSpan.FromSeconds(1);
+                    tested.Add(button.Label);
+                    await Task.Yield();
+                    continue;
+                }
                 var lit = scene.GetHandAcquisitionContext(now)!;
                 Require(lit.IlluminatedHint is not null && scene.GlobeState.Revision == revision &&
                     scene.HoveredBoardButtons.Count == 0 && scene.ActiveHandSpotlightCount == 0 &&
@@ -332,6 +345,66 @@ public sealed partial class MainWindow
                 tested.Add(button.Label);
                 await Task.Yield();
             }
+        }
+        void CheckHoldToRepeat(BoardButton button, byte[] occupied, byte[] empty)
+        {
+            // Fingers held over the caption activate once after a second, then
+            // each further second, through the actual detector and scene timing.
+            var hold = scene.GetHoldButtonContext(now);
+            Require(hold is not null && hold.ButtonIds.Contains(button.Id),
+                "Globe did not provide a hold context for " + button.Label + ".");
+            var tracker = new HandAcquisitionPresenceTracker();
+            var started = now;
+            double zoomBefore = scene.GlobeState.TargetZoom;
+            double step = button.Id == "globe-zoom-in" ? GlobeState.ZoomStep : 1 / GlobeState.ZoomStep;
+            var activations = new List<double>();
+            for (int frame = 0; frame <= 21; frame++)
+            {
+                double at = (now - started).TotalMilliseconds;
+                if (FeedHold(occupied).Contains(button.Id)) activations.Add(at);
+            }
+            Require(activations.SequenceEqual([1000d, 2000d]) &&
+                    Math.Abs(scene.GlobeState.TargetZoom - zoomBefore * step * step) < 1e-9,
+                $"Holding {button.Label} did not activate exactly at one and two seconds: {string.Join(", ", activations)}.");
+            for (int frame = 0; frame < 4; frame++)
+                Require(FeedHold(empty).Count == 0, "An uncovered hold button activated.");
+            for (int frame = 0; frame < 9; frame++)
+                Require(FeedHold(occupied).Count == 0, "A hold released for 400 ms kept its earlier timer.");
+            Require(Math.Abs(scene.GlobeState.TargetZoom - zoomBefore * step * step) < 1e-9 &&
+                    scene.CurrentBoardScreen == BoardScreen.Globe && scene.GlobeDrawerOpen,
+                "Hold evidence changed the Globe beyond its two timed activations.");
+
+            IReadOnlyList<string> FeedHold(byte[] pixels)
+            {
+                var held = hold!.HeldButtons(tracker.Update(width, height, width * 4, pixels,
+                    hold.SearchPolygon, hold.ExpectedScene, now, now));
+                var activated = scene.ObserveHoldButtons(hold, held, now);
+                now += TimeSpan.FromMilliseconds(100);
+                return activated;
+            }
+        }
+        void CheckHoldButtonLightClip()
+        {
+            // A hand spotlight beside a hold button must not paint over it: its
+            // projected caption is the camera's only evidence of a press.
+            var zoom = scene.CurrentBoardButtons.Single(button => button.Id == "globe-zoom-in");
+            var top = CameraPoint(zoom.Bounds.X + zoom.Bounds.Width / 2, zoom.Bounds.Y);
+            byte[] before = Draw();
+            PixelPoint[] shape =
+            [
+                new(0, .09), new(-.03, .06), new(-.055, .035), new(-.07, .015), new(-.09, 0),
+                new(-.035, .015), new(-.04, -.02), new(-.045, -.05), new(-.05, -.08),
+                new(0, 0), new(0, -.04), new(0, -.07), new(0, -.1),
+                new(.03, .015), new(.035, -.02), new(.04, -.045), new(.045, -.07),
+                new(.055, .03), new(.065, .005), new(.075, -.01), new(.08, -.025)
+            ];
+            scene.SetHandSpotlights([new HandDetection(shape.Select(point =>
+                new PixelPoint(top.X + point.X * 1400, top.Y + point.Y * 1400)).ToArray(), .95, .5)], DateTimeOffset.UtcNow);
+            byte[] after = Draw();
+            var above = CameraPoint(zoom.Bounds.X + zoom.Bounds.Width / 2, zoom.Bounds.Y - .03);
+            Require(scene.ActiveHandSpotlightCount == 1 && ChangedFraction(before, after, zoom.Bounds) < .02 &&
+                    WhiteNear(after, above) > WhiteNear(before, above) + 200,
+                "A hand spotlight covered a hold-to-repeat button, or vanished beside it.");
         }
         void CheckIntactChevron(BoardButton button, int index, HandTrackingBounds trigger, byte[] clean,
             SceneCompositor.HandAcquisitionContext context)
@@ -433,10 +506,7 @@ public sealed partial class MainWindow
                         "Skin beside an untouched native-camera chevron generated acquisition evidence. " + Describe(result));
                 }
 
-                // Beside the dark action buttons the open pale handle has no
-                // like-coloured control to confirm a readable arrow on skin; only
-                // fingers that break the arrow's shape are required there.
-                foreach (bool glyphPreserved in open ? new[] { false } : new[] { false, true })
+                foreach (bool glyphPreserved in new[] { false, true })
                 {
                     byte[] occupied = Skin(clean, glyphPreserved, awayFromGlyph: false);
                     string occupiedName = cameraPrefix + (glyphPreserved ? "-readable-on-skin" : "-skin-occlusion");

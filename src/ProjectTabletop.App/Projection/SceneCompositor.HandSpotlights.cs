@@ -62,6 +62,17 @@ public sealed partial class SceneCompositor
         }
     }
 
+    // A tracked hand missed for one frame is usually still under its held
+    // light, and that light blocks the caption evidence that found it. Keep
+    // searching there; live Monopoly attempts otherwise restarted every 1.5 s.
+    private HandDetection[] LostLitHands()
+    {
+        if (_boardSession.Screen == BoardScreen.Paint || MonopolyEntranceActive || HasGlobeDrawerAnimation(_globeClock())) return [];
+        var now = DateTimeOffset.UtcNow;
+        return _handSpotlights.Where(hand => hand.SourceFrameTime < _spotlightObservationFrameTime &&
+            SpotlightOpacity(now, hand.SourceFrameTime) > 0).Select(hand => hand.Hand).ToArray();
+    }
+
     // Illumination has its own short dropout hold. It never supplies landmarks,
     // hover positions, or gestures back to the input path.
     public void SetHandSpotlights(IReadOnlyList<HandDetection> hands, DateTimeOffset frameTime)
@@ -190,9 +201,9 @@ public sealed partial class SceneCompositor
         if (_handSpotlights.Length == 0 || SpotlightOpacity(now) <= 0) return;
         using var brush = new CanvasRadialGradientBrush(ds.Device,
         [
-            new CanvasGradientStop { Position = 0, Color = Colors.White },
-            new CanvasGradientStop { Position = SpotlightCoreFraction, Color = Colors.White },
-            new CanvasGradientStop { Position = 1, Color = Color.FromArgb(0, 255, 255, 255) }
+            new CanvasGradientStop { Position = 0, Color = LightWhite(255) },
+            new CanvasGradientStop { Position = SpotlightCoreFraction, Color = LightWhite(255) },
+            new CanvasGradientStop { Position = 1, Color = LightWhite(0) }
         ]);
         foreach (var hand in _handSpotlights)
         {

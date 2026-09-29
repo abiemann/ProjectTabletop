@@ -26,6 +26,7 @@ internal static class HandAcquisitionPresenceRegression
         HandAcquisitionShortLabelRegression.Run();
         HandAcquisitionCompactControlRegression.Run();
         HandAcquisitionLocalContextRegression.Run();
+        HandAcquisitionReachingRegression.Run();
         HandAcquisitionHintRegression.Run();
         RenderedLocalCaptionLoss();
         BaselineFallbackAndBarriers();
@@ -519,6 +520,8 @@ internal static class HandAcquisitionPresenceRegression
             for (int frame = 1; frame <= 3; frame++)
             {
                 var intact = FeedDirect(clipped,frame*100);
+                Require(intact.ProjectedWhiteClipped == true,
+                    $"Intact clipped lettering did not report clipped projected white (warm={warm}, darkInk={darkInk})");
                 Require(intact.Hints.Count == 0 && intact.TextPatterns!.All(pattern => !pattern.ShapeCorrupted),
                     $"Optically blurred, exposure-clipped intact lettering became hand evidence (warm={warm}, darkInk={darkInk}): " +
                     System.Text.Json.JsonSerializer.Serialize(intact));
@@ -547,6 +550,13 @@ internal static class HandAcquisitionPresenceRegression
                 "A later caption obstruction borrowed confirmation from before a camera gap.");
             Require(FeedDirect(erased,1600).Hints.Count == 1 && FeedDirect(clipped,1700).Hints.Count == 0,
                 "Retained optical registration could not confirm a fresh stationary hand after a camera gap.");
+            // The same letters exposed below clipping must not dim a search light.
+            byte[] unclipped = optical.Select((value, index) => index % 4 == 3 ? value : (byte)(value * .8)).ToArray();
+            var exposed = new HandAcquisitionPresenceTracker().Update(size,size,size*4,unclipped,directPolygon,direct,
+                Epoch.AddMilliseconds(2000),Epoch.AddMilliseconds(2000));
+            Require(exposed.ProjectedWhiteClipped == false,
+                $"Lettering below clipping reported clipped projected white (warm={warm}, darkInk={darkInk}): " +
+                System.Text.Json.JsonSerializer.Serialize(exposed.TextPatterns));
             HandAcquisitionPresenceResult FeedDirect(byte[] pixels,int milliseconds)
             {
                 var at = Epoch.AddMilliseconds(milliseconds);

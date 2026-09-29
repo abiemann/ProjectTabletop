@@ -208,11 +208,24 @@ public sealed partial class SceneCompositor
         var bounds = button.Bounds;
         var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
             bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
-        // Paint's opaque dark glass: Earth details cannot enter the label masks.
-        DrawButtonSurface(ds, rect, hovered);
+        // Pale opaque glass gives the camera a bright, quiet caption background
+        // without pure-white glare. Earth details cannot enter the label masks.
+        // Palm-down fingers over dark glass needed a search light on every live
+        // attempt; over this glass they are found from the unlit camera image.
+        using var glass = new CanvasLinearGradientBrush(ds.Device,
+        [
+            new() { Position = 0, Color = ThemeColor(234, 239, 242) },
+            new() { Position = .49f, Color = ThemeColor(226, 232, 236) },
+            new() { Position = 1, Color = ThemeColor(218, 225, 230) }
+        ]) { StartPoint = new((float)rect.X, (float)rect.Y), EndPoint = new((float)rect.X, (float)rect.Bottom) };
+        ds.FillRoundedRectangle(rect, 15, 15, glass);
+        ds.DrawRoundedRectangle(rect, 15, 15,
+            hovered ? ThemeColor(103, 224, 255) : ThemeColor(117, 151, 173), hovered ? 2.5f : 1.2f);
+        ds.DrawLine((float)rect.X + 17, (float)rect.Y + 2, (float)rect.Right - 17, (float)rect.Y + 2,
+            ThemeColor(255, 255, 255, 160), 1);
         using var format = GlobeButtonTextFormat(button);
-        ds.DrawText(button.Label, GlobeButtonTextRectangle(button),
-            button.Enabled ? AppPalette.ButtonText : AppPalette.MutedText, format);
+        ds.DrawText(button.Label, GlobeButtonTextRectangle(button), button.Enabled
+            ? ThemeColor(50, 55, 59) : ThemeColor(111, 119, 125), format);
     }
 
     private static void GlobeText(CanvasDrawingSession ds, string text, Rect rect, float size,

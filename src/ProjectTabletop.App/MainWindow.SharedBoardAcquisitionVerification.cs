@@ -343,12 +343,19 @@ public sealed partial class MainWindow
                 }
                 scene.CompleteHandAcquisition(context, presence.Hints, [], now);
                 var lit = scene.GetHandAcquisitionContext(now)!;
-                Require(lit.IlluminatedHint is not null && CountWhite(Draw(), center) > CountWhite(empty, center) + 800,
-                    label + "/" + button.Label + " did not illuminate its control.");
-                var focusedQuery = Query(occupied, lit);
-                Require(focusedQuery.SearchRegions.Count is > 0 and <= 2 &&
-                        focusedQuery.SearchRegions.Contains(AcquisitionSearchBounds(lit.IlluminatedHint!, size, size)),
-                    label + "/" + button.Label + " did not focus inference on its illuminated point of interest.");
+                if (button.HoldToRepeat)
+                    // Hold buttons act on caption evidence alone; a light would erase it.
+                    Require(lit.IlluminatedHint is null && CountWhite(Draw(), center) <= CountWhite(empty, center) + 50,
+                        label + "/" + button.Label + " lit a hold-to-repeat button.");
+                else
+                {
+                    Require(lit.IlluminatedHint is not null && CountWhite(Draw(), center) > CountWhite(empty, center) + 800,
+                        label + "/" + button.Label + " did not illuminate its control.");
+                    var focusedQuery = Query(occupied, lit);
+                    Require(focusedQuery.SearchRegions.Count is > 0 and <= 2 &&
+                            focusedQuery.SearchRegions.Contains(AcquisitionSearchBounds(lit.IlluminatedHint!, size, size)),
+                        label + "/" + button.Label + " did not focus inference on its illuminated point of interest.");
+                }
                 Require(scene.CurrentBoardScreen == screen && scene.BlackjackState.Revision == gameRevision &&
                         scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(ids) &&
                         scene.ActiveHandSpotlightCount == 0 && scene.HoveredBoardButtons.Count == 0 &&

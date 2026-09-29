@@ -37,6 +37,23 @@ public sealed partial class MainWindow
         return CreateHandAcquisitionQuery(frame, context, _handAcquisitionPresence, DateTimeOffset.UtcNow);
     }
 
+    // Hold buttons keep their own detector: it must keep watching while a hand
+    // is tracked and must not restart when a hold activation changes the board.
+    private readonly HandAcquisitionPresenceTracker _holdPresence = new();
+    private long _holdContextRevision = -1;
+    private long _holdGeneration = -1;
+
+    private IReadOnlyList<string> FindHeldButtons(CameraFrame frame, SceneCompositor.HoldButtonContext? context,
+        long generation)
+    {
+        if (context is null) return [];
+        if (context.Revision != _holdContextRevision || generation != _holdGeneration) _holdPresence.Reset();
+        _holdContextRevision = context.Revision;
+        _holdGeneration = generation;
+        return context.HeldButtons(_holdPresence.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
+            context.SearchPolygon, context.ExpectedScene, frame.Timestamp, DateTimeOffset.UtcNow));
+    }
+
     private static HandAcquisitionQuery CreateHandAcquisitionQuery(CameraFrame frame,
         SceneCompositor.HandAcquisitionContext? context, HandAcquisitionPresenceTracker tracker, DateTimeOffset now)
     {
@@ -54,6 +71,12 @@ public sealed partial class MainWindow
         // crop first: extra white light can hide an otherwise clear hand pose.
         // A rejected model fit can still request the existing search light.
         regions.AddRange(hints.Take(2).Select(hint => AcquisitionSearchBounds(hint, frame.Width, frame.Height)));
+        // A still hand under an unchanged light gives the model the same crop
+        // every frame, so one miss repeats until the hand moves: a live Monopoly
+        // Exit Game search stayed empty for 5 s. Alternate with closer views.
+        if (context.IlluminatedHint is not null && regions.Count > 0 &&
+            LitSearchView(regions[0], frame.Timestamp - context.IlluminationStartedAt, frame.Width, frame.Height) is { } view)
+            regions[0] = view;
         // Photo Copy's object field is also a point of interest. Keep its
         // separate capture gesture without searching the whole webcam.
         if (context.ContinuousSearchPolygon is { Length: >= 3 } polygon)
@@ -75,7 +98,37 @@ public sealed partial class MainWindow
                 regions.Add(region);
             }
         }
+        foreach (var lost in context.LostHands ?? [])
+        {
+            if (regions.Count == 2) break;
+            if (LostHandBounds(lost, frame.Width, frame.Height) is { } bounds && !regions.Contains(bounds)) regions.Add(bounds);
+        }
         return new(hints, regions, presence, frame.Width, frame.Height);
+    }
+
+    // Every other 100 ms of a lit search, one 2/3-size corner of a large crop.
+    // Smaller crops already get wider context views from the engine.
+    private static HandTrackingBounds? LitSearchView(HandTrackingBounds primary, TimeSpan lit, int width, int height)
+    {
+        int step = (int)Math.Floor(lit.TotalMilliseconds / 100);
+        if (step < 0 || step % 2 == 0 || primary.Width < Math.Min(width, height) * .5) return null;
+        int side = (int)Math.Round(primary.Width * 2 / 3), corner = step / 2 % 4;
+        return new(Math.Clamp(primary.X + (corner % 2 == 0 ? 0 : primary.Width - side), 0, width - side),
+            Math.Clamp(primary.Y + (corner < 2 ? 0 : primary.Height - side), 0, height - side), side, side);
+    }
+
+    // The acquisition crop that found these hands was 60% of the frame; keep
+    // that context around the last landmarks so a partly lit hand is whole.
+    private static HandTrackingBounds? LostHandBounds(HandDetection hand, int width, int height)
+    {
+        var points = hand.Landmarks.Where(point => double.IsFinite(point.X) && double.IsFinite(point.Y)).ToArray();
+        if (points.Length == 0) return null;
+        double left = points.Min(point => point.X), right = points.Max(point => point.X);
+        double top = points.Min(point => point.Y), bottom = points.Max(point => point.Y);
+        int limit = Math.Min(width, height);
+        int side = (int)Math.Ceiling(Math.Clamp(Math.Max(right - left, bottom - top) * 2, limit * .3, limit * .6));
+        return new(Math.Clamp(Math.Round((left + right - side) / 2), 0, width - side),
+            Math.Clamp(Math.Round((top + bottom - side) / 2), 0, height - side), side, side);
     }
 
     private static HandTrackingBounds AcquisitionSearchBounds(HandAcquisitionHint hint, int width, int height)

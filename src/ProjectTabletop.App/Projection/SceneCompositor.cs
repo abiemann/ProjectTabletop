@@ -610,8 +610,12 @@ public sealed partial class SceneCompositor : IDisposable
                 DrawOverlay(ds, output, mediaRect, detection, frame, _topPlaneMap);
             }
         }
-        DrawHandAcquisitionLight(ds, output);
-        DrawHandSpotlights(ds, output);
+        using (var holdClip = HoldButtonLightClip(ds, output))
+        using (holdClip is null ? null : ds.CreateLayer(1, holdClip))
+        {
+            DrawHandAcquisitionLight(ds, output);
+            DrawHandSpotlights(ds, output);
+        }
         if (_boardSession.Screen == BoardScreen.Paint) DrawPaintNavigationCursor(ds, output);
         else DrawHandCursor(ds, output);
     }

@@ -10,7 +10,10 @@ public readonly record struct BoardRect(double X, double Y, double Width, double
         u >= X && u <= X + Width && v >= Y && v <= Y + Height;
 }
 
-public sealed record BoardButton(string Id, string Label, BoardRect Bounds, BoardScreen Destination, bool Enabled = true);
+/// <param name="HoldToRepeat">Activated by holding fingers over its caption rather than by a
+/// gesture: once after a second of camera evidence, then again each further second.</param>
+public sealed record BoardButton(string Id, string Label, BoardRect Bounds, BoardScreen Destination, bool Enabled = true,
+    bool HoldToRepeat = false);
 
 /// <summary>
 /// A hand selection position mapped to board coordinates. SelectionFrameTime
@@ -140,7 +143,8 @@ public sealed partial class BoardSession
         }
         _lastFrameTime = frameTime;
 
-        var buttons = Buttons;
+        // Hold-to-repeat buttons respond only to held caption evidence.
+        var buttons = Buttons.Where(button => !button.HoldToRepeat).ToArray();
         var fingerTargets = FingerTargets(buttons);
         FingerSelectionCandidate? fingerSelection = UpdateFingerSelection(hands, fingerTargets, frameTime);
         HoveredButtonIds = fingerTargets.Where(button => button.Enabled && hands.Any(hand =>
@@ -201,6 +205,7 @@ public sealed partial class BoardSession
         AdvanceMonopolyPresentation(now);
         ClearGlobeDrawerUi();
         AdvanceGlobeDrawer(now);
+        ClearHolds();
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreFramesThrough = Later(_ignoreFramesThrough, now);
@@ -221,6 +226,7 @@ public sealed partial class BoardSession
         ClearGlobeDrawerUi();
         AdvanceGlobeDrawer(now);
         if (screen == BoardScreen.Globe) _globe.Start(now);
+        ClearHolds();
         Screen = screen;
         Revision++;
         HoveredButtonIds = Array.Empty<string>();

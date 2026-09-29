@@ -35,6 +35,22 @@ public sealed partial class SceneCompositor
     private string? _acquisitionReferenceError;
     private string _acquisitionReason = "inactive";
     private long _acquisitionLightCount;
+    // At night the phone camera raises its exposure until projected white
+    // clips, and lit fingers vanish into it. Start darker when intact white
+    // captions already clip, then step both lights down on a clipped lit
+    // reading and back up once the lit board reads well below clipping.
+    // Evening lit boards read near 231; one step changes it about 1.4 times.
+    private const double MinimumLightLevel = .5, NightLightLevel = .8, LightLevelStep = .85, UnclippedLightWhite = 160;
+    private double _lightLevel = 1;
+    private bool? _lightStartClipped;
+
+    public double SearchLightLevel { get { lock (_gate) return _lightLevel; } }
+
+    private Color LightWhite(byte alpha)
+    {
+        byte level = (byte)Math.Round(255 * _lightLevel);
+        return Color.FromArgb(alpha, level, level, level);
+    }
 
     private readonly record struct AcquisitionSceneState(long Navigation, long Game, long Flights, long LightReset,
         long PhotoRevision);
@@ -42,7 +58,8 @@ public sealed partial class SceneCompositor
         PixelPoint[] SearchPolygon, HandAcquisitionHint? IlluminatedHint,
         HandAcquisitionSceneImage? ExpectedScene = null, DateTimeOffset IlluminationStartedAt = default,
         PixelPoint[]? StationarySearchCenters = null, bool RestrictAcquisitionToSearchRegions = true,
-        bool AllowsSearchIllumination = true, PixelPoint[]? ContinuousSearchPolygon = null);
+        bool AllowsSearchIllumination = true, PixelPoint[]? ContinuousSearchPolygon = null,
+        IReadOnlyList<HandDetection>? LostHands = null);
 
     private AcquisitionSceneState CurrentAcquisitionState() => new(_boardSession.Revision,
         _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision :
@@ -115,7 +132,7 @@ public sealed partial class SceneCompositor
                     _acquisitionExpectedScene, _acquisitionLightStarted, centers,
                     RestrictAcquisitionToSearchRegions: _boardSession.Screen != BoardScreen.HandTracking,
                     AllowsSearchIllumination: true,
-                    ContinuousSearchPolygon: capturePolygon);
+                    ContinuousSearchPolygon: capturePolygon, LostHands: LostLitHands());
             }
             if (animating || AcquisitionMustYieldToHandOrExecute(now))
             {
@@ -157,7 +174,7 @@ public sealed partial class SceneCompositor
 
     public void CompleteHandAcquisition(HandAcquisitionContext? requested,
         IReadOnlyList<HandAcquisitionHint> hints, IReadOnlyList<HandDetection> hands, DateTimeOffset frameTime,
-        bool? illuminatedPresence = null)
+        bool? illuminatedPresence = null, double? illuminatedWhite = null, bool? projectedWhiteClipped = null)
     {
         lock (_gate)
         {
@@ -174,6 +191,18 @@ public sealed partial class SceneCompositor
                 current.IlluminationStartedAt == requested.IlluminationStartedAt && frameTime <= now &&
                 now - frameTime <= TimeSpan.FromMilliseconds(350))
             {
+                // A clipped frame cannot show the hand. Restart the dimmer light
+                // so its own camera settling frames are skipped again.
+                if (illuminatedWhite >= HandAcquisitionPresenceTracker.SaturatedIlluminatedWhite &&
+                    _lightLevel > MinimumLightLevel)
+                {
+                    _lightLevel = Math.Max(MinimumLightLevel, _lightLevel * LightLevelStep);
+                    _acquisitionLightStarted = now;
+                    _acquisitionLightUntil = now + AcquisitionLightDuration;
+                    _acquisitionReason = "dimming-saturated-search-light";
+                    return;
+                }
+                if (illuminatedWhite < UnclippedLightWhite) _lightLevel = Math.Min(1, _lightLevel / LightLevelStep);
                 // Keep searching a stationary foreground object using current
                 // camera evidence. The projected white disk alone cannot renew it.
                 if (illuminatedPresence == true && hints.Any(hint =>
@@ -192,12 +221,14 @@ public sealed partial class SceneCompositor
                 return;
             }
             if (!current.ObserveMotion || _acquisitionHint is not null || hints.Count == 0) return;
-            var hint = hints.FirstOrDefault(hint => HasCurrentControlObstruction(hint, frameTime));
+            // Hold buttons act on caption evidence alone and must stay unlit.
+            var hint = hints.FirstOrDefault(hint => HasCurrentControlObstruction(hint, frameTime) && !OnHoldButton(hint.Center));
             if (hint is null) return;
             if (!double.IsFinite(hint.RadiusPixels) || hint.RadiusPixels <= 0) return;
             var anchor = _boardCameraMap!.Transform(new(hint.Center.X, hint.Center.Y));
             var board = _boardSurfaceMap!.InverseTransform(anchor);
-            if (!_boardSession.Buttons.Any(button => button.Bounds.Contains(board.X, board.Y))) return;
+            if (!_boardSession.Buttons.Any(button => !button.HoldToRepeat && button.Bounds.Contains(board.X, board.Y))) return;
+            if (hint.ValidatedCandidateBounds is null && ExpectedReachingHand(hint, board) is { } expected) hint = expected;
             var nativeCenter = hint.IlluminationCenter;
             double nativeRadius = hint.IlluminationRadiusPixels;
             if (!double.IsFinite(nativeRadius) || nativeRadius <= 0) return;
@@ -213,6 +244,12 @@ public sealed partial class SceneCompositor
             }
             if (!double.IsFinite(radius) || radius <= 0 || !double.IsFinite(center.X) || !double.IsFinite(center.Y)) return;
             _acquisitionHint = hint;
+            // A darker gray at night also avoids a large auto-exposure swing.
+            if (projectedWhiteClipped is { } clipped && clipped != _lightStartClipped)
+            {
+                _lightStartClipped = clipped;
+                _lightLevel = clipped ? NightLightLevel : 1;
+            }
             if (_boardSession.Screen == BoardScreen.Paint && frameTime <= now &&
                 now - frameTime <= TimeSpan.FromMilliseconds(350)) NotePaintUserActivity();
             _acquisitionLight = new(new(center.X, center.Y), Math.Min(radius, hint.ValidatedCandidateBounds is null ? .24 : .32));
@@ -222,6 +259,27 @@ public sealed partial class SceneCompositor
             _acquisitionLightCount++;
             _acquisitionReason = "illuminated-search";
         }
+    }
+
+    // Without a measured hand outline the light covered only the caption, and
+    // the back of a palm-down hand beyond it stayed painted with board art:
+    // over Monopoly's property row the model saw no hand for seconds. Hands
+    // reach in from the viewer's edge (board v = 1); assist over where that
+    // hand must be, about 30% of the board long, inside the camera's board view.
+    private HandAcquisitionHint? ExpectedReachingHand(HandAcquisitionHint hint, Point2 board)
+    {
+        Point2 Camera(double u, double v) => _boardCameraMap!.InverseTransform(_boardSurfaceMap!.Transform(new(u, v)));
+        var hand = new[] { Camera(board.X - .11, board.Y - .02), Camera(board.X + .11, board.Y - .02),
+            Camera(board.X - .11, board.Y + .30), Camera(board.X + .11, board.Y + .30) };
+        var view = new[] { Camera(.005, .005), Camera(.995, .005), Camera(.995, .995), Camera(.005, .995) };
+        if (hand.Concat(view).Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y))) return null;
+        double left = Math.Max(Math.Max(0, view.Min(point => point.X)), hand.Min(point => point.X));
+        double top = Math.Max(Math.Max(0, view.Min(point => point.Y)), hand.Min(point => point.Y));
+        double right = Math.Min(view.Max(point => point.X), hand.Max(point => point.X));
+        double bottom = Math.Min(view.Max(point => point.Y), hand.Max(point => point.Y));
+        if (right <= left || bottom <= top) return null;
+        var expected = hint with { CandidateBounds = new(left, top, right - left, bottom - top) };
+        return expected.ValidatedCandidateBounds is null ? null : expected;
     }
 
     private bool HasCurrentControlObstruction(HandAcquisitionHint hint, DateTimeOffset frameTime) =>
@@ -243,7 +301,7 @@ public sealed partial class SceneCompositor
                 continuousSearchPolygon = context?.ContinuousSearchPolygon,
                 observingMotion = context?.ObserveMotion ?? false, searchPolygon = context?.SearchPolygon,
                 searchLightActive = context?.IlluminatedHint is not null, light = _acquisitionLight,
-                lightUntil = _acquisitionLightUntil, lightCount = _acquisitionLightCount,
+                lightUntil = _acquisitionLightUntil, lightCount = _acquisitionLightCount, lightLevel = _lightLevel,
                 expectedSceneReady = _acquisitionExpectedScene is not null,
                 expectedSceneError = _acquisitionReferenceError,
                 hint = context?.IlluminatedHint };
@@ -391,9 +449,9 @@ public sealed partial class SceneCompositor
         float radius = (float)(light.Radius * output.Height);
         using var brush = new CanvasRadialGradientBrush(ds.Device,
         [
-            new() { Position = 0, Color = Colors.White },
-            new() { Position = .82f, Color = Colors.White },
-            new() { Position = 1, Color = Color.FromArgb(0, 255, 255, 255) }
+            new() { Position = 0, Color = LightWhite(255) },
+            new() { Position = .82f, Color = LightWhite(255) },
+            new() { Position = 1, Color = LightWhite(0) }
         ]) { Center = center, RadiusX = radius, RadiusY = radius };
         ds.FillCircle(center, radius, brush);
     }

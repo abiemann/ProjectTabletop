@@ -19,6 +19,7 @@ public sealed class GlobeState
     public static readonly TimeSpan EntranceDuration = TimeSpan.FromSeconds(3);
     public static readonly TimeSpan ControlTransitionDuration = TimeSpan.FromMilliseconds(350);
 
+    private readonly double _homeRotation;
     private DateTimeOffset? _startedAt;
     private DateTimeOffset _transitionAt;
     private DateTimeOffset _lastActionAt;
@@ -27,6 +28,15 @@ public sealed class GlobeState
     private double _rotationFrom;
     private double _targetRotation;
     public long Revision { get; private set; }
+    public double HomeRotationDegrees => _homeRotation;
+
+    /// <param name="homeLongitudeDegrees">Longitude facing the viewer at each launch, east positive.
+    /// The surface shader centres longitude -rotation, so it starts at the opposite rotation.</param>
+    public GlobeState(double homeLongitudeDegrees = 0)
+    {
+        if (!double.IsFinite(homeLongitudeDegrees)) throw new ArgumentOutOfRangeException(nameof(homeLongitudeDegrees));
+        _homeRotation = ((-homeLongitudeDegrees) % 360 + 360) % 360;
+    }
 
     public void Start(DateTimeOffset now)
     {
@@ -34,7 +44,7 @@ public sealed class GlobeState
         _transitionAt = now;
         _lastActionAt = now;
         _zoomFrom = _targetZoom = DefaultZoom;
-        _rotationFrom = _targetRotation = 0;
+        _rotationFrom = _targetRotation = _homeRotation;
         Revision++;
     }
 

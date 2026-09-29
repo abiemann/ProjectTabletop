@@ -177,6 +177,12 @@ public sealed partial class MainWindow
             if (_lastHandDetectionTick != 0 &&
                 Stopwatch.GetElapsedTime(_lastHandDetectionTick, tick) < interval) return;
             var acquisitionContext = _scene.GetHandAcquisitionContext(frame.Timestamp);
+            // These frames cannot show the new search light yet and would only
+            // repeat the failed unlit search, delaying the first lit frame.
+            if (acquisitionContext?.IlluminatedHint is not null &&
+                frame.Timestamp - acquisitionContext.IlluminationStartedAt < HandAcquisitionPresenceTracker.SearchLightSettling)
+                return;
+            var holdContext = _scene.GetHoldButtonContext(frame.Timestamp);
             _lastHandDetectionTick = tick;
             _handDetecting = true;
             var generation = _handGeneration;
@@ -199,6 +205,22 @@ public sealed partial class MainWindow
                     _lastHandEngineFrameTime = frame.Timestamp;
                     var detectionStarted = Stopwatch.GetTimestamp();
                     var acquisitionHints = FindHandAcquisitionHints(frame, acquisitionContext, generation);
+                    var heldButtons = FindHeldButtons(frame, holdContext, generation);
+                    // Start a qualified search light now. The unlit crop search
+                    // below still runs first on these pixels, overlapping the
+                    // camera's delay in seeing the light; a hand found there
+                    // replaces the light with its own spotlight.
+                    if (acquisitionContext is { ObserveMotion: true, IlluminatedHint: null } &&
+                        acquisitionHints.LightingHints.Count > 0)
+                        DispatcherQueue.TryEnqueue(() =>
+                        {
+                            lock (_handGate)
+                                if (!_closing && generation == _handGeneration && _handTrackingEnabled &&
+                                    _cameraWanted && _camera.IsRunning &&
+                                    !Volatile.Read(ref _cameraHealthWarning) && !IsBoardScanMeasuring)
+                                    _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.LightingHints,
+                                        [], frame.Timestamp, projectedWhiteClipped: acquisitionHints.Presence?.ProjectedWhiteClipped);
+                        });
                     var hands = _handEngine.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
                         acquisitionHints.SearchRegions,
                         restrictAcquisitionToSearchRegions: acquisitionContext?.RestrictAcquisitionToSearchRegions == true);
@@ -249,7 +271,12 @@ public sealed partial class MainWindow
                                 _scene.SetHandCursors(cursors, frame.Timestamp, _photoCopyTask is { IsCompleted: false }, visualCursors);
                                 _scene.SetHandSpotlights(visibleHands, frame.Timestamp);
                                 _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.LightingHints, visibleHands, frame.Timestamp,
-                                    acquisitionHints.Presence?.IlluminatedPresence);
+                                    acquisitionHints.Presence?.IlluminatedPresence, acquisitionHints.Presence?.IlluminatedWhiteLuminance,
+                                    acquisitionHints.Presence?.ProjectedWhiteClipped);
+                                var holdActivations = _scene.ObserveHoldButtons(holdContext, heldButtons, frame.Timestamp);
+                                if (holdActivations.Count > 0)
+                                    LogHandTrackingEvent("hold_activation", new { frameTime = frame.Timestamp,
+                                        buttons = holdActivations, held = heldButtons });
                                 DescribeHandAcquisition(frame, acquisitionContext, acquisitionHints, detectorTrace, visibleHands.Length);
                                 LogHandDetection(sequence, requestedInTester, frame, generation, engineReset,
                                     inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, cursors, "accepted");
