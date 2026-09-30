@@ -30,6 +30,7 @@ public sealed partial class SceneCompositor
 
     private void DisposeSlotVfx()
     {
+        DisposeSlotWildFire();
         _slotFire?.Dispose();
         _slotFire = null;
         _slotFireDevice = null;

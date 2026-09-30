@@ -75,6 +75,10 @@ public sealed partial class SceneCompositor
             else DrawSlotBaseGrid(ds, game, now, t, layout);
             if (!game.InRespins && !vault && game.Phase == SlotPhase.LineWins) DrawSlotLineWins(ds, game, t, layout);
         }
+        // Flame tips may spill over the reel frame; the outer effects clip
+        // keeps this foreground pass away from camera-observed controls.
+        if (!game.InRespins && !vault && _slotWildPortraits is not null && _slotWildColossus is not null)
+            foreach (var run in SlotsWildPresentation(game, now)) DrawSlotWildRunFire(ds, run, layout);
         DrawSlotDragons(ds, game, now, layout);
         if (game.Phase == SlotPhase.LineWins) DrawSlotLineWinAward(ds, game, t, layout);
         DrawSlotBanner(ds, game, t, progress, layout);
@@ -96,7 +100,6 @@ public sealed partial class SceneCompositor
                 for (int row = SlotGame.BaseFirstRow; row < SlotGame.BaseFirstRow + SlotGame.BaseRowCount; row++)
                     if (!wilds.Any(run => run.Reel == reel && row >= run.Row && row < run.Row + run.Count))
                         DrawSlotSettledCell(ds, game, reel, row, t, layout);
-                foreach (var run in wilds.Where(run => run.Reel == reel)) DrawSlotWildRun(ds, game, run, layout);
                 continue;
             }
             // A strip of the previous symbols, fillers, then the result, scrolling down.
@@ -132,6 +135,9 @@ public sealed partial class SceneCompositor
                 ds.FillRectangle(column, ThemeColor(255, 230, 160, (byte)(38 * flash)));
             }
         }
+        // Foreground guardians can lean beyond a reel seam. The enclosing
+        // window clip still keeps them inside the machine, above every drum.
+        foreach (var run in wilds) DrawSlotWildRun(ds, game, run, layout);
     }
 
     private static SlotCell SlotStripCell(SlotSnapshot game, int reel, int strip, int fillers)

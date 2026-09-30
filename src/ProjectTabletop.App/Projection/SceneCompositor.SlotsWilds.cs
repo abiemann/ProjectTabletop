@@ -49,79 +49,142 @@ public sealed partial class SceneCompositor
             return;
         }
 
-        // The reference performs a head/roar/fire/body transformation. Preserve
-        // separate heads until the fire actually conceals their shared seams.
-        float merge = (float)Ease(Math.Clamp((run.Age - .85) / .65, 0, 1));
-        if (merge < 1)
+        // Each mouth gets a sustained, distinct breath before the fire joins.
+        // Hide the heads only inside the dense wall, then reveal the guardian
+        // as that wall clears. The spin clock continues across game phases.
+        float coalesce = (float)Ease((run.Age - 1.30) / .32);
+        float headOpacity = (float)(1 - Ease((run.Age - 1.56) / .10));
+        float merge = (float)Ease((run.Age - 1.95) / .52);
+        DrawSlotWildFrame(ds, rect, layout.Aspect, Math.Max(coalesce, merge), coalesce * (1 - merge) + winPulse * merge);
+        if (headOpacity > .001f)
+        {
             for (int offset = 0; offset < run.Count; offset++)
             {
                 var cell = layout.Cell(run.Reel, run.Row + offset, 1, 3);
                 var head = new Rect(cell.X + 3 / layout.Aspect, cell.Y + 2, cell.Width - 6 / layout.Aspect, cell.Height - 4);
-                DrawSlotWildTile(ds, head, layout.Aspect, run.Age, 1 - merge, 0, merging: true);
+                DrawSlotWildFrame(ds, head, layout.Aspect, headOpacity, 0);
             }
-        if (merge > 0)
+            for (int offset = 0; offset < run.Count; offset++)
+            {
+                var cell = layout.Cell(run.Reel, run.Row + offset, 1, 3);
+                var head = new Rect(cell.X + 3 / layout.Aspect, cell.Y + 2, cell.Width - 6 / layout.Aspect, cell.Height - 4);
+                DrawSlotWildTile(ds, head, layout.Aspect, run.Age, headOpacity, 0, merging: true, frame: false);
+            }
+        }
+        if (run.Age >= 1.95)
         {
-            DrawSlotWildFrame(ds, rect, layout.Aspect, merge, winPulse);
             float breathe = MathF.Sin(_slotVfxTime * 2.1f + run.Reel);
             float inset = 3 / layout.Aspect;
-            var art = new Rect(rect.X + inset, rect.Y + 4 + (1 - merge) * 24,
+            var art = new Rect(rect.X + inset, rect.Y + 4,
                 rect.Width - 2 * inset, rect.Height - 29 + breathe * 1.4);
-            float pose = winning ? .6f * winPulse : 0;
-            DrawSlotWildActor(ds, _slotWildColossus, art, layout.Aspect, pose, merge, tall: true);
-            DrawSlotWildLegend(ds, rect, layout.Aspect, merge);
-        }
-        float inferno = (float)(Ease(Math.Clamp((run.Age - .56) / .24, 0, 1))
-            * (1 - Ease(Math.Clamp((run.Age - 1.18) / .42, 0, 1))));
-        if (inferno > .001f)
-        {
-            using var clip = CanvasGeometry.CreateRectangle(ds.Device, rect);
-            using (ds.CreateLayer(1, clip))
-            {
-                DrawSlotFire(ds, new Rect(rect.X - rect.Width * .12, rect.Y - rect.Height * .22,
-                    rect.Width * 1.24, rect.Height * 1.28), _slotVfxTime * 1.8f, run.Reel * 2.3f + 1, inferno);
-                DrawSlotFire(ds, new Rect(rect.X - rect.Width * .10, rect.Y + rect.Height * .20,
-                    rect.Width * 1.20, rect.Height * .9), _slotVfxTime * 1.55f, run.Reel + 6.7f, inferno * .9f);
-                using var flash = new CanvasRadialGradientBrush(ds.Device,
-                    ThemeColor(255, 225, 118, (byte)(inferno * 105)), ThemeColor(255, 64, 5, 0))
-                { Center = Center(rect), RadiusX = (float)rect.Width, RadiusY = (float)rect.Height * .6f };
-                ds.FillRectangle(rect, flash);
-            }
+            float roar = (float)(1 - Ease((run.Age - 2.54) / .28));
+            float pose = Math.Max(roar * 2, winning ? .6f * winPulse : 0);
+            // The actor is opaque underneath the fire. A moving clearance
+            // front reveals its head, chest and feet rather than fading it in.
+            DrawSlotWildActor(ds, _slotWildColossus, art, layout.Aspect, pose, 1, tall: true);
+            DrawSlotWildLegend(ds, rect, layout.Aspect, 1);
         }
         DrawSlotWildCorona(ds, rect, layout.Aspect, run.Reel * 17 + run.Row, merge * (.32f + winPulse * .65f));
     }
 
+    private void DrawSlotWildRunFire(CanvasDrawingSession ds, SlotWildRun run, SlotLayout layout)
+    {
+        if (run.Count < 2) return;
+        var first = layout.Cell(run.Reel, run.Row, 1, 3);
+        var rect = new Rect(first.X + 3 / layout.Aspect, first.Y + 2,
+            first.Width - 6 / layout.Aspect, first.Height * run.Count - 4);
+        float breath = (float)Ease((run.Age - .64) / .21);
+        float swell = (float)Ease((run.Age - 1.08) / .27);
+        float coalesce = (float)Ease((run.Age - 1.30) / .32);
+        float merge = (float)Ease((run.Age - 1.95) / .52);
+        float decayProgress = (float)Math.Clamp((run.Age - 3.8) / 1.4, 0, 1);
+        float edgeDecay = decayProgress * decayProgress * (3 - 2 * decayProgress);
+        if (breath > .001f && edgeDecay < 1)
+        {
+            var head = new Rect(first.X + 3 / layout.Aspect, first.Y + 2, first.Width - 6 / layout.Aspect, first.Height - 4);
+            var visual = SlotWildHeadVisual(head, layout.Aspect, run.Age, merging: true, 0);
+            float mouthY = (float)((visual.Mouth.Y - rect.Y) / first.Height);
+            // Fire is a foreground effect: its crown and side tongues can lick
+            // over the frame without widening the actual WILD or its awards.
+            var fire = new Rect(rect.X - rect.Width * .12, rect.Y - rect.Height * .065,
+                rect.Width * 1.24, rect.Height * 1.09);
+            DrawSlotWildFire(ds, fire, layout.Aspect, (float)run.Age, run.Reel * 2.3f + 1,
+                breath, run.Count, swell, coalesce, mouthY, merge, (float)(first.Height / rect.Height),
+                edgeDecay, rect);
+        }
+        float finalBreath = (float)(Ease((run.Age - 2.10) / .14)
+            * (1 - Ease((run.Age - 2.72) / .16)));
+        if (finalBreath > .001f)
+        {
+            float breathe = MathF.Sin(_slotVfxTime * 2.1f + run.Reel);
+            float inset = 3 / layout.Aspect;
+            var art = new Rect(rect.X + inset, rect.Y + 4, rect.Width - 2 * inset, rect.Height - 29 + breathe * 1.4);
+            var mouth = SlotWildTallMouth(art, layout.Aspect);
+            float mouthY = (float)((mouth.Y - rect.Y) / rect.Height);
+            DrawSlotWildFire(ds, rect, layout.Aspect, (float)run.Age, run.Reel * 2.3f + 1,
+                finalBreath, 1, 0, 0, mouthY, (float)Ease((run.Age - 2.54) / .34));
+        }
+    }
+
     private void DrawSlotWildTile(CanvasDrawingSession ds, Rect rect, float aspect, double age, float opacity,
-        float winPulse = 0, bool merging = false)
+        float winPulse = 0, bool merging = false, bool frame = true)
     {
         if (opacity <= 0) return;
         // Negative age is the quiet cached icon used on a moving reel. No clock
         // dependent decoration may enter the static symbol atlas.
+        var visual = SlotWildHeadVisual(rect, aspect, age, merging, winPulse);
+        if (frame) DrawSlotWildFrame(ds, rect, aspect, opacity, visual.Impact + winPulse * .4f);
+        var previous = ds.Transform;
+        ds.Transform = visual.Transform * previous;
+        try
+        {
+            DrawSlotWildActor(ds, _slotWildPortraits, visual.Art, aspect, visual.Pose, opacity,
+                tall: false, portraitCrop: visual.Crop);
+        }
+        finally { ds.Transform = previous; }
+        DrawSlotWildLegend(ds, rect, aspect, opacity);
+        if (age >= 0) DrawSlotWildCorona(ds, rect, aspect, (int)rect.X, opacity * (.2f + visual.Impact * .8f + winPulse * .5f));
+    }
+
+    private readonly record struct SlotWildHeadGeometry(Rect Art, Matrix3x2 Transform, Vector2 Mouth,
+        float Pose, float Crop, float Impact);
+
+    private static SlotWildHeadGeometry SlotWildHeadVisual(Rect rect, float aspect, double age, bool merging, float winPulse)
+    {
         bool live = age >= 0;
         float impact = live ? (float)(Math.Sin(Math.Clamp((age - .22) / .46, 0, 1) * Math.PI)
             * Math.Exp(-Math.Max(0, age - .22) * .6)) : 0;
-        float roar = live ? (float)(Ease(Math.Clamp((age - .39) / .22, 0, 1))
-            * (1 - Ease(Math.Clamp((age - (merging ? 1.05 : .88)) / .23, 0, 1)))) : 0;
+        float approach = live ? (float)(Ease((age - .30) / .28)
+            * (merging ? 1 : 1 - Ease((age - .92) / .32))) : 0;
+        float roar = live ? (float)(Ease((age - .39) / .22)
+            * (1 - Ease((age - (merging ? 1.56 : .88)) / .23))) : 0;
         float pose = Math.Max(roar * 2, winPulse * .75f);
-        float swell = 1 + impact * .14f + winPulse * .035f;
-        DrawSlotWildFrame(ds, rect, aspect, opacity, impact + winPulse * .4f);
-        var previous = ds.Transform;
-        var pivot = new Vector2((float)(rect.X + rect.Width / 2), (float)(rect.Y + rect.Height * .72));
-        ds.Transform = Matrix3x2.CreateScale(swell, swell, pivot) * previous;
-        try
+        var art = new Rect(rect.X - rect.Width * .01, rect.Y - rect.Height * .03,
+            rect.Width * 1.02, rect.Height * .90);
+        double scale = Math.Min(art.Width * aspect / 600, art.Height / 600);
+        float height = (float)(600 * scale);
+        float top = (float)(art.Y + (art.Height - height) * .5);
+        var pivot = new Vector2((float)(art.X + art.Width / 2), top + height * .82f);
+        float push = 1 + approach * .42f + impact * .055f + winPulse * .035f;
+        var transform = Matrix3x2.CreateScale(push, push, pivot)
+            * Matrix3x2.CreateTranslation(0, height * approach * .10f);
+        var mouth = Vector2.Transform(new Vector2(pivot.X, top + (float)((300 + pose * 15) * scale)), transform);
+        // Discard the lower bust as the face approaches, keeping the registered
+        // horns and jaw in place. The same transform drives the mouth fire.
+        return new(art, transform, mouth, pose, 600 - approach * 135, impact);
+    }
+
+    private static Vector2 SlotWildTallMouth(Rect art, float aspect)
+    {
+        double scale = Math.Min(art.Width * aspect / 570, art.Height / 1240);
+        double height = 1240 * scale;
+        double top = art.Y + (art.Height - height) * .25;
+        if (height < art.Height - 1)
         {
-            var art = new Rect(rect.X - rect.Width * .01, rect.Y - rect.Height * .03,
-                rect.Width * 1.02, rect.Height * .90);
-            DrawSlotWildActor(ds, _slotWildPortraits, art, aspect, pose, opacity, tall: false);
+            double torso = Math.Min(art.Height - 770 * scale, 470 * scale * 1.75);
+            top = art.Y + (art.Height - 770 * scale - torso) / 2;
         }
-        finally { ds.Transform = previous; }
-        if (live && roar > .1f && merging)
-        {
-            var mouth = new Rect(rect.X + rect.Width * .20, rect.Y + rect.Height * .25,
-                rect.Width * .60, rect.Height * .9);
-            DrawSlotFire(ds, mouth, _slotVfxTime * 1.5f, (float)rect.Y * .01f, roar * opacity * .85f);
-        }
-        DrawSlotWildLegend(ds, rect, aspect, opacity);
-        if (live) DrawSlotWildCorona(ds, rect, aspect, (int)rect.X, opacity * (.2f + impact * .8f + winPulse * .5f));
+        return new((float)(art.X + art.Width / 2), (float)(top + 320 * scale));
     }
 
     private static void DrawSlotWildFrame(CanvasDrawingSession ds, Rect box, float aspect, float opacity, float power)
@@ -163,7 +226,7 @@ public sealed partial class SceneCompositor
     }
 
     private void DrawSlotWildActor(CanvasDrawingSession ds, CanvasBitmap? atlas, Rect box, float aspect, float pose,
-        float opacity, bool tall)
+        float opacity, bool tall, float portraitCrop = 600)
     {
         if (atlas is null) return;
         int last = tall ? 1 : 2;
@@ -187,8 +250,9 @@ public sealed partial class SceneCompositor
             // Crops share a registered baseline and silhouette so jaw poses
             // dissolve without moving the horns, wing edges or paws.
             var source = tall ? new Rect(index == 0 ? 56 : 630, 6, 570, 1240)
-                : new Rect(96 + index * 690, 59, 600, 600);
-            double scale = Math.Min(box.Width * aspect / source.Width, box.Height / source.Height);
+                : new Rect(96 + index * 690, 59, 600, portraitCrop);
+            double fittedHeight = tall ? source.Height : 600;
+            double scale = Math.Min(box.Width * aspect / source.Width, box.Height / fittedHeight);
             double width = source.Width * scale / aspect, height = source.Height * scale;
             if (tall && height < box.Height - 1)
             {
@@ -212,9 +276,30 @@ public sealed partial class SceneCompositor
                         new Rect(source.X, source.Y + offset, source.Width, sourceHeight), alpha,
                         CanvasImageInterpolation.HighQualityCubic);
             }
-            drawing.DrawImage(atlas, new Rect(box.X + (box.Width - width) / 2,
-                box.Y + (box.Height - height) * (tall ? .25 : .5), width, height), source, alpha,
-                CanvasImageInterpolation.HighQualityCubic);
+            var destination = new Rect(box.X + (box.Width - width) / 2,
+                box.Y + (box.Height - fittedHeight * scale) * (tall ? .25 : .5), width, height);
+            if (!tall && portraitCrop < 599)
+            {
+                // Recede the lower neck softly as the face leans out; cropping
+                // the bust must not leave a straight cut beneath the jaw.
+                using var actor = new CanvasCommandList(drawing.Device);
+                using (var image = actor.CreateDrawingSession())
+                    image.DrawImage(atlas, destination, source, 1, CanvasImageInterpolation.HighQualityCubic);
+                using var mask = new CanvasCommandList(drawing.Device);
+                using (var masking = mask.CreateDrawingSession())
+                {
+                    float feather = (float)Math.Max(1, Math.Min(height * .14, (600 - portraitCrop) * scale * .38));
+                    using var fade = new CanvasLinearGradientBrush(drawing.Device, ThemeColor(255, 255, 255), ThemeColor(255, 255, 255, 0))
+                    {
+                        StartPoint = new((float)destination.X, (float)destination.Bottom - feather),
+                        EndPoint = new((float)destination.X, (float)destination.Bottom)
+                    };
+                    masking.FillRectangle(destination, fade);
+                }
+                using var faded = new AlphaMaskEffect { Source = actor, AlphaMask = mask };
+                using (drawing.CreateLayer(alpha)) drawing.DrawImage(faded);
+            }
+            else drawing.DrawImage(atlas, destination, source, alpha, CanvasImageInterpolation.HighQualityCubic);
         }
     }
 
