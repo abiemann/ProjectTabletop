@@ -165,12 +165,172 @@ public sealed partial class SceneCompositor
     private static void DrawSlotKeySocket(CanvasDrawingSession ds, Rect rect, float aspect, bool lit)
     {
         var center = new Vector2((float)(rect.X + rect.Width / 2), (float)(rect.Y + rect.Height / 2));
-        ds.FillEllipse(new Vector2(center.X, center.Y + 2), 25 / aspect, 25, ThemeColor(0, 0, 0, 185));
-        using var metal = SlotAntiqueMetal(ds.Device, rect);
-        ds.FillEllipse(center, 25 / aspect, 25, metal);
-        ds.FillEllipse(center, 22 / aspect, 22, lit ? ThemeColor(60, 41, 19) : ThemeColor(12, 15, 23));
-        ds.DrawEllipse(center, 20 / aspect, 20, lit ? SlotGold : ThemeColor(126, 100, 64), .8f);
-        ds.DrawEllipse(center, 25 / aspect, 25, ThemeColor(29, 22, 17), .8f);
+        var previous = ds.Transform;
+        // Work in physical units so the casting, hole and fine bevel strokes
+        // retain their proportions on both wide and portrait boards.
+        ds.Transform = Matrix3x2.CreateScale(1 / aspect, 1) * Matrix3x2.CreateTranslation(center) * previous;
+        try
+        {
+            using var outline = SlotKeyLozenge(ds.Device);
+            using var shadow = outline.Transform(Matrix3x2.CreateTranslation(0, 2));
+            ds.FillGeometry(shadow, ThemeColor(0, 0, 0, 185));
+            using var metal = SlotAntiqueMetal(ds.Device, new Rect(-23, -25, 46, 50));
+            ds.FillGeometry(outline, metal);
+            ds.DrawGeometry(outline, ThemeColor(53, 34, 16), .9f);
+
+            using var rim = outline.Transform(Matrix3x2.CreateScale(.93f));
+            using var bevel = new CanvasLinearGradientBrush(ds.Device,
+                lit ? ThemeColor(255, 234, 164) : ThemeColor(242, 212, 151), ThemeColor(93, 57, 24))
+            { StartPoint = new(-15, -22), EndPoint = new(16, 22) };
+            ds.DrawGeometry(rim, bevel, 1.2f);
+            using var face = outline.Transform(Matrix3x2.CreateScale(.84f));
+            using var brass = new CanvasLinearGradientBrush(ds.Device,
+            [
+                new() { Position = 0, Color = lit ? ThemeColor(238, 195, 101) : ThemeColor(185, 145, 77) },
+                new() { Position = .32f, Color = lit ? ThemeColor(213, 161, 69) : ThemeColor(164, 117, 54) },
+                new() { Position = .57f, Color = lit ? ThemeColor(172, 116, 40) : ThemeColor(123, 81, 35) },
+                new() { Position = .84f, Color = lit ? ThemeColor(221, 169, 77) : ThemeColor(177, 130, 63) },
+                new() { Position = 1, Color = lit ? ThemeColor(160, 102, 35) : ThemeColor(115, 73, 30) }
+            ]) { StartPoint = new(-12, -22), EndPoint = new(14, 23) };
+            ds.FillGeometry(face, brass);
+            ds.DrawGeometry(face, ThemeColor(68, 42, 20, 210), .7f);
+            using var fineRim = outline.Transform(Matrix3x2.CreateScale(.79f));
+            ds.DrawGeometry(fineRim, ThemeColor(255, 225, 153, lit ? (byte)130 : (byte)85), .45f);
+
+            // Paired chased scrolls and short chisel cuts give the plate a
+            // cast, engraved surface without competing with the key opening.
+            foreach (int side in new[] { -1, 1 })
+            {
+                using var scrollPath = new CanvasPathBuilder(ds.Device);
+                scrollPath.BeginFigure(new(side * 10, -7));
+                scrollPath.AddCubicBezier(new(side * 14, -9), new(side * 17, -5), new(side * 14, -2));
+                scrollPath.AddCubicBezier(new(side * 11, 0), new(side * 10, 3), new(side * 12, 6));
+                scrollPath.EndFigure(CanvasFigureLoop.Open);
+                using var scroll = CanvasGeometry.CreatePath(scrollPath);
+                using var lip = scroll.Transform(Matrix3x2.CreateTranslation(0, .6f));
+                ds.DrawGeometry(lip, ThemeColor(255, 218, 134, lit ? (byte)150 : (byte)105), .6f);
+                ds.DrawGeometry(scroll, ThemeColor(70, 43, 19, 190), .75f);
+                for (int cut = 0; cut < 3; cut++)
+                {
+                    float y = -15 + cut * 2.5f;
+                    float x = side * (5.8f + cut * 1.9f);
+                    ds.DrawLine(x, y, x + side * 1.6f, y + 1.9f, ThemeColor(79, 50, 24, 150), .5f);
+                }
+            }
+
+            // One continuous silhouette: circular head, straight narrow neck,
+            // then a flared foot. No circle/polygon overlap seam can read as a pawn.
+            using var openingPath = new CanvasPathBuilder(ds.Device);
+            openingPath.BeginFigure(new(-2.6f, -.1f));
+            openingPath.AddCubicBezier(new(-4.6f, -1), new(-6, -3), new(-6, -5.5f));
+            openingPath.AddCubicBezier(new(-6, -8.82f), new(-3.31f, -11.5f), new(0, -11.5f));
+            openingPath.AddCubicBezier(new(3.31f, -11.5f), new(6, -8.82f), new(6, -5.5f));
+            openingPath.AddCubicBezier(new(6, -3), new(4.6f, -1), new(2.6f, -.1f));
+            openingPath.AddLine(new(2.6f, 4));
+            openingPath.AddLine(new(5.7f, 12.8f));
+            openingPath.AddLine(new(-5.7f, 12.8f));
+            openingPath.AddLine(new(-2.6f, 4));
+            openingPath.EndFigure(CanvasFigureLoop.Closed);
+            using var opening = CanvasGeometry.CreatePath(openingPath);
+            using var lowerLip = opening.Transform(Matrix3x2.CreateTranslation(0, .8f));
+            ds.DrawGeometry(lowerLip, lit ? ThemeColor(255, 224, 142) : ThemeColor(231, 192, 114), 1.25f);
+            ds.FillGeometry(opening, ThemeColor(5, 7, 10));
+            ds.DrawGeometry(opening, ThemeColor(48, 31, 17), .6f);
+        }
+        finally
+        {
+            ds.Transform = previous;
+        }
+    }
+
+    private static CanvasGeometry SlotKeyLozenge(CanvasDevice device)
+    {
+        using var path = new CanvasPathBuilder(device);
+        path.BeginFigure(new(0, -25));
+        path.AddCubicBezier(new(3, -25), new(7, -19), new(14, -12));
+        path.AddCubicBezier(new(19, -7), new(23, -4), new(23, 0));
+        path.AddCubicBezier(new(23, 4), new(19, 7), new(14, 12));
+        path.AddCubicBezier(new(7, 19), new(3, 25), new(0, 25));
+        path.AddCubicBezier(new(-3, 25), new(-7, 19), new(-14, 12));
+        path.AddCubicBezier(new(-19, 7), new(-23, 4), new(-23, 0));
+        path.AddCubicBezier(new(-23, -4), new(-19, -7), new(-14, -12));
+        path.AddCubicBezier(new(-7, -19), new(-3, -25), new(0, -25));
+        path.EndFigure(CanvasFigureLoop.Closed);
+        return CanvasGeometry.CreatePath(path);
+    }
+
+    private static void DrawSlotKeyRail(CanvasDrawingSession ds, SlotLayout layout)
+    {
+        float width = (layout.Width + 24) * layout.Aspect;
+        float reelWidth = layout.CellWidth * layout.Aspect;
+        var previous = ds.Transform;
+        ds.Transform = Matrix3x2.CreateScale(1 / layout.Aspect, 1)
+            * Matrix3x2.CreateTranslation((layout.Left + layout.Right) / 2, 660) * previous;
+        try
+        {
+            var bounds = new Rect(-width / 2, -19, width, 38);
+            using var shape = SlotCutPanel(ds.Device, bounds, 5);
+            using var shadow = shape.Transform(Matrix3x2.CreateTranslation(0, 2));
+            ds.FillGeometry(shadow, ThemeColor(0, 0, 0, 180));
+            using var steel = new CanvasLinearGradientBrush(ds.Device,
+            [
+                new() { Position = 0, Color = ThemeColor(30, 36, 41) },
+                new() { Position = .10f, Color = ThemeColor(111, 119, 120) },
+                new() { Position = .19f, Color = ThemeColor(49, 62, 70) },
+                new() { Position = .46f, Color = ThemeColor(65, 77, 84) },
+                new() { Position = .54f, Color = ThemeColor(24, 33, 43) },
+                new() { Position = .87f, Color = ThemeColor(35, 42, 49) },
+                new() { Position = 1, Color = ThemeColor(88, 90, 87) }
+            ]) { StartPoint = new(0, -19), EndPoint = new(0, 19) };
+            ds.FillGeometry(shape, steel);
+            ds.DrawGeometry(shape, ThemeColor(23, 22, 21), 1.2f);
+            ds.DrawLine(-width / 2 + 6, -18, width / 2 - 6, -18, ThemeColor(219, 207, 173), .8f);
+            ds.DrawLine(-width / 2 + 6, 18, width / 2 - 6, 18, ThemeColor(162, 151, 123), .65f);
+            foreach (float y in new[] { -14f, 14f })
+            {
+                ds.DrawLine(-width / 2 + 5, y, width / 2 - 5, y, ThemeColor(8, 14, 21, 190), .9f);
+                ds.DrawLine(-width / 2 + 5, y + .65f, width / 2 - 5, y + .65f, ThemeColor(155, 171, 174, 85), .5f);
+            }
+            for (int grain = 0; grain < 8; grain++)
+            {
+                float y = -11.5f + grain * 3.2f;
+                ds.DrawLine(-width / 2 + 7, y, width / 2 - 7, y, ThemeColor(155, 172, 179, 12), .35f);
+            }
+
+            for (int seam = 0; seam <= SlotGame.Reels; seam++)
+            {
+                float x = (seam - SlotGame.Reels / 2f) * reelWidth;
+                ds.DrawLine(x, -13, x, 13, ThemeColor(10, 17, 24, 175), 1.05f);
+                ds.DrawLine(x + .9f, -13, x + .9f, 13, ThemeColor(153, 158, 150, 125), .55f);
+                foreach (float y in new[] { -10.5f, 10.5f })
+                {
+                    ds.FillCircle(x, y + .65f, 2, ThemeColor(8, 11, 16, 195));
+                    ds.FillCircle(x, y, 1.55f, ThemeColor(150, 144, 119));
+                    ds.FillCircle(x - .3f, y - .45f, .65f, ThemeColor(223, 210, 168));
+                    ds.DrawLine(x - .75f, y + .15f, x + .65f, y + .15f, ThemeColor(56, 57, 50), .5f);
+                }
+                if (seam == 0 || seam == SlotGame.Reels) continue;
+                float span = Math.Clamp((reelWidth - 50) * .42f, 4, 22);
+                foreach (int side in new[] { -1, 1 })
+                {
+                    using var bridgePath = new CanvasPathBuilder(ds.Device);
+                    bridgePath.BeginFigure(new(x + side * 2.5f, -4));
+                    bridgePath.AddCubicBezier(new(x + side * span * .55f, -7),
+                        new(x + side * span, -5), new(x + side * span, 0));
+                    bridgePath.AddCubicBezier(new(x + side * span, 5),
+                        new(x + side * span * .55f, 7), new(x + side * 2.5f, 4));
+                    bridgePath.EndFigure(CanvasFigureLoop.Open);
+                    using var bridge = CanvasGeometry.CreatePath(bridgePath);
+                    using var lip = bridge.Transform(Matrix3x2.CreateTranslation(0, .65f));
+                    ds.DrawGeometry(lip, ThemeColor(186, 173, 136, 140), .55f);
+                    ds.DrawGeometry(bridge, ThemeColor(11, 20, 28, 220), .8f);
+                }
+            }
+        }
+        finally
+        {
+            ds.Transform = previous;
+        }
     }
 
     private static void DrawSlotStatusRail(CanvasDrawingSession ds)

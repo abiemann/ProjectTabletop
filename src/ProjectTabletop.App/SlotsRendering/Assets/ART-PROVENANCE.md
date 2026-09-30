@@ -28,6 +28,8 @@ Safe source crops in atlas pixels; columns are x, y, width, height:
 
 The crop rectangles preserve complete silhouettes and avoid adjacent icons. The renderer can trim low-opacity padding within each rectangle and scale the resulting bounds uniformly, preserving the artwork's aspect ratio.
 
+The five vault-key sockets below the reels are engraved antique-gold lozenges with dark keyhole cuts on a decorative steel-blue rail. Procedural vector drawing preserves their physical proportions across board aspects. Collected sockets use brighter metal and the existing earned-key sprite; the key count is unchanged. This cosmetic treatment adds no assets and does not modify the source PNGs.
+
 Moving symbols now use strong vertical blur whose strength follows reel speed, blending cached sprite tiers with transparent padding for their trails. Normal and free-spin reels ease through acceleration and braking, then use sharp sprites for the landing bounce; unheld respin silhouettes use the same blur treatment. Held prizes, landed WILD guardians, live flames and the cabinet remain crisp. This is a rendering change with no new assets or edits to the source PNGs. The zero-warning/error Debug x64 build and native `verify_slots` / `verify_slots_wilds` checks pass, including the existing rules, control and flame assertions. A 2.5-second, 60-frame preview, ten-frame contact sheet and native 4K cruise/braking captures were visually reviewed. Physical projector/phone acceptance remains pending.
 
 Supplemental treasure atlas safe source crops in pixels:

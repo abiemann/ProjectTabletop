@@ -180,6 +180,7 @@ public sealed partial class SceneCompositor
 
     private void DrawSlotKeys(CanvasDrawingSession ds, SlotSnapshot game, SlotLayout layout)
     {
+        DrawSlotKeyRail(ds, layout);
         for (int reel = 0; reel < SlotGame.Reels; reel++)
         {
             var center = new Vector2(layout.ReelCenter(reel), 660);
@@ -187,16 +188,6 @@ public sealed partial class SceneCompositor
             bool lit = game.Keys[reel];
             DrawSlotKeySocket(ds, box, layout.Aspect, lit);
             if (lit) DrawSlotArt(ds, SlotSymbol.Key, layout.Square(center, 44), 1);
-            else
-            {
-                ds.FillEllipse(new Vector2(center.X, center.Y - 5), 6 / layout.Aspect, 6, ThemeColor(8, 4, 6));
-                using var slot = CanvasGeometry.CreatePolygon(ds.Device,
-                [
-                    new(center.X - 3 / layout.Aspect, center.Y - 3), new(center.X + 3 / layout.Aspect, center.Y - 3),
-                    new(center.X + 6 / layout.Aspect, center.Y + 13), new(center.X - 6 / layout.Aspect, center.Y + 13)
-                ]);
-                ds.FillGeometry(slot, ThemeColor(8, 4, 6));
-            }
         }
         SlotText(ds, $"VAULT KEYS  {game.Keys.Count(lit => lit)} / 5", new Rect(layout.Left - 60, 686, layout.Width + 120, 18),
             13, SlotMuted, layout.Aspect);
