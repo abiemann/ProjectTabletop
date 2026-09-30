@@ -120,12 +120,16 @@ public sealed partial class SceneCompositor
                 position = travel + (bounce < 1 ? .14 * Math.Sin(Math.PI * bounce) * Math.Exp(-1.8 * bounce) : 0);
                 speed = 0;
             }
-            bool blurred = speed > 3;
             int first = (int)Math.Floor(position) - 1;
             for (int strip = first; strip <= first + 5; strip++)
             {
                 float rowPosition = (float)(2 - (strip - position));
-                DrawSlotCell(ds, SlotStripCell(game, reel, strip, fillers), layout.Cell(reel, rowPosition, 0, 3), layout, blurred);
+                var cell = SlotStripCell(game, reel, strip, fillers);
+                var rect = layout.Cell(reel, rowPosition, 0, 3);
+                if (speed > .001)
+                    DrawSlotMotionSprite(ds, cell.Symbol, layout.SymbolBox(rect), (float)speed);
+                else
+                    DrawSlotCell(ds, cell, rect, layout, false);
             }
             DrawSlotReelVelocity(ds, layout, reel, t, (float)speed);
             if (t >= stop && t < stop + .35)
@@ -287,8 +291,7 @@ public sealed partial class SceneCompositor
             var symbol = SlotFillerSymbols[(int)((seed + (long)position + index) % 10)];
             using var clip = CanvasGeometry.CreateRectangle(ds.Device, rect);
             using (ds.CreateLayer(.25f, clip))
-                ds.DrawImage(SlotSprite(ds.Device, symbol, true), layout.SymbolBox(cellRect, .7f),
-                    new Rect(0, 0, SlotSpritePixels, SlotSpritePixels));
+                DrawSlotMotionSprite(ds, symbol, layout.SymbolBox(cellRect, .7f), 9);
         }
     }
 

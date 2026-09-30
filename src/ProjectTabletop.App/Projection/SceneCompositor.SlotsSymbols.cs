@@ -58,6 +58,7 @@ public sealed partial class SceneCompositor
 
     private void DisposeSlotSprites()
     {
+        DisposeSlotMotionSprites();
         foreach (var sprite in _slotSprites.Values) sprite.Dispose();
         _slotSprites.Clear();
         _slotSpriteDevice = null;
