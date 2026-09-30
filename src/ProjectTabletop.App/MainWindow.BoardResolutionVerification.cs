@@ -301,8 +301,9 @@ public sealed partial class MainWindow
         // and orientation, unlike counting only fully coloured pixels.
         static Point2 MarkerCentroid(byte[] pixels, Homography map)
         {
-            // The caption's logical box, clear of the backdrop's border lines.
-            var box = new[] { new Point2(.765, .050), new Point2(.915, .050), new Point2(.915, .088), new Point2(.765, .088) }
+            // The caption's logical box, clear of the backdrop's border lines
+            // and of the Settings cog to its right.
+            var box = new[] { new Point2(.465, .050), new Point2(.615, .050), new Point2(.615, .088), new Point2(.465, .088) }
                 .Select(point => map.Transform(point)).ToArray();
             int left = Math.Max(0, (int)(box.Min(point => point.X) * width));
             int right = Math.Min(width - 1, (int)Math.Ceiling(box.Max(point => point.X) * width));

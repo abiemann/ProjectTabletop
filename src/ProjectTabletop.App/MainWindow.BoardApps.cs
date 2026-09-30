@@ -43,14 +43,17 @@ public sealed partial class MainWindow
         bool blackjack = _scene.CurrentBoardScreen == BoardScreen.Blackjack;
         bool monopoly = _scene.CurrentBoardScreen == BoardScreen.Monopoly;
         bool globe = _scene.CurrentBoardScreen == BoardScreen.Globe;
-        bool boardGame = blackjack || monopoly || globe;
-        BoardGamePreviewTitle.Text = globe ? "GLOBE  ·  zoom and rotate Earth" : monopoly ? "MONOPOLY  ·  click the table to play" :
+        bool slots = _scene.CurrentBoardScreen == BoardScreen.Slots;
+        bool boardGame = blackjack || monopoly || globe || slots;
+        BoardGamePreviewTitle.Text = slots ? "DRAGON SLOTS  ·  click a button to play  ·  virtual credits" :
+            globe ? "GLOBE  ·  zoom and rotate Earth" : monopoly ? "MONOPOLY  ·  click the table to play" :
             "BLACKJACK  ·  click the table to play  ·  virtual chips";
         BlackjackPreviewPanel.Visibility = boardGame ? Visibility.Visible : Visibility.Collapsed;
         CameraPreviewPanel.Visibility = ProjectionPreviewPanel.Visibility = boardGame ? Visibility.Collapsed : Visibility.Visible;
         BoardAppStatusText.Text = _scene.CurrentBoardTitle + ". " +
             (IsBoardScanMeasuring ? "Board alignment is in progress." :
              blackjack ? _scene.BlackjackState.Status :
+             slots ? _scene.SlotsState.Status :
              monopoly ? _scene.MonopolyState.Status :
              globe ? "Earth spins slowly. Use Zoom +, Zoom -, < Rotate and Rotate > to explore; Exit returns to the menu." :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :

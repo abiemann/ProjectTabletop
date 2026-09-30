@@ -89,11 +89,11 @@ public sealed partial class MainWindow
         Require(scene.ActiveHandSpotlightCount == 1 && WhiteAt(ordered, new(.3, .6)) && !WhiteAt(ordered, new(.7, .6)),
             "An old, stale or future camera frame moved the current spotlight.");
 
-        PixelPoint pointingTip = BoardPoint(.25, .35); // Hand-Tracking button.
+        PixelPoint pointingTip = BoardPoint(.25, .35); // Dragon Slots button.
         var observationTime = DateTimeOffset.UtcNow;
         scene.SetHandCursors([new(pointingTip, DateTimeOffset.MinValue)], observationTime);
-        Require(scene.HoveredBoardButtons.SequenceEqual(["hand-tracking"]),
-            "The isolated input fixture did not point at Hand-Tracking.");
+        Require(scene.HoveredBoardButtons.SequenceEqual(["slots"]),
+            "The isolated input fixture did not point at Dragon Slots.");
         scene.SetHandSpotlights([left], observationTime);
         scene.SetHandSpotlights([], DateTimeOffset.UtcNow);
         scene.SetHandCursors([], DateTimeOffset.UtcNow);

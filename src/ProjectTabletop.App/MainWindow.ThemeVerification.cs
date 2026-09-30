@@ -36,8 +36,8 @@ public sealed partial class MainWindow
         await Save("main-menu");
         var hoverTime = DateTimeOffset.UtcNow;
         scene.SetHandCursors([new(BoardPoint(.28, .33), DateTimeOffset.MinValue)], hoverTime);
-        if (!scene.HoveredBoardButtons.SequenceEqual(["hand-tracking"]))
-            throw new InvalidOperationException("The theme hover fixture did not select Hand-Tracking.");
+        if (!scene.HoveredBoardButtons.SequenceEqual(["slots"]))
+            throw new InvalidOperationException("The theme hover fixture did not select Dragon Slots.");
         await Save("main-menu-hover");
 
         scene.ClearHandTips(resetInput: false);
@@ -55,7 +55,8 @@ public sealed partial class MainWindow
         }
 
         long eventId = 0;
-        foreach (BoardScreen screen in new[] { BoardScreen.Blackjack, BoardScreen.Paint, BoardScreen.Monopoly, BoardScreen.Globe })
+        foreach (BoardScreen screen in new[] { BoardScreen.Slots, BoardScreen.Blackjack, BoardScreen.Paint, BoardScreen.Monopoly,
+            BoardScreen.Globe, BoardScreen.Settings })
         {
             scene.ShowBoardMenu();
             await Task.Delay(2); // A new selection must follow external navigation.

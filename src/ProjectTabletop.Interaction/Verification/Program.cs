@@ -1,5 +1,7 @@
 using ProjectTabletop.Interaction;
 
+SlotRegression.Run();
+SlotBoardRegression.Run();
 BoardOpenedRegression.Run();
 MonopolyRegression.Run();
 MonopolyBoardRegression.Run();
@@ -31,21 +33,26 @@ static void CheckMenuAndNavigation()
 {
     var session = new BoardSession();
     Require(session.Screen == BoardScreen.Menu, "The board did not start at the menu.");
-    string[] names = ["Hand-Tracking", "Photo Copy", "Blackjack", "Paint", "Monopoly", "Globe"];
+    string[] names = ["Dragon Slots", "Photo Copy", "Blackjack", "Paint", "Monopoly", "Globe", "Settings"];
     Require(session.Buttons.Select(button => button.Label).SequenceEqual(names), "Menu order or labels differ from the requested menu.");
+    Require(session.Buttons[^1] is { Id: "settings", Destination: BoardScreen.Settings } &&
+        session.Buttons.All(button => button.Destination != BoardScreen.HandTracking),
+        "Hand-Tracking is still a menu tile, or the Settings cog is missing.");
     BoardButton[] buttons = session.Buttons.ToArray();
     long eventId = 0;
     for (int index = 0; index < buttons.Length; index++)
     {
         var button = buttons[index];
         var bounds = button.Bounds;
-        Require(bounds.Width >= .35 && bounds.Height >= .15, "A menu target is too small for the board.");
+        bool cog = button.Id == "settings";
+        Require(cog ? bounds.Width >= .18 && bounds.Height >= .12 : bounds.Width >= .35 && bounds.Height >= .15,
+            "A menu target is too small for the board.");
         Require(bounds.X > 0 && bounds.Y > 0 && bounds.X + bounds.Width < 1 && bounds.Y + bounds.Height < 1,
             "A menu target reaches outside the board.");
         Require(buttons.Count(other => other.Bounds.Contains(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2)) == 1,
             "Menu targets overlap at a button's center.");
 
-        int time = 100 + index * 1000;
+        int time = 100 + index * 4000;
         Require(Update(session, time, Over(button)) is null, "Hover alone selected an application.");
         Require(session.HoveredButtonIds.SequenceEqual([button.Id]), "Hover did not use the shared target rectangle.");
         BoardNavigation? navigation = Update(session, time + 10, Over(button, ++eventId, time + 10));
@@ -86,11 +93,41 @@ static void CheckMenuAndNavigation()
                     .SequenceEqual(["globe-exit"]) && session.Screen == BoardScreen.Menu,
                 "The Globe drawer's long-press Exit did not return to the launcher.");
         }
+        else if (button.Destination == BoardScreen.Slots)
+        {
+            // Every slot control is a long-press on the viewer's edge row.
+            Require(session.Buttons.All(item => item.Hold == BoardButtonHold.Once) && session.Buttons[0].Id == "slot-exit",
+                "The slot machine's controls are not long-press buttons led by Exit.");
+            Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is null &&
+                session.Screen == BoardScreen.Slots, "A pinch selected the slot machine's long-press Exit.");
+            for (int held = 30; held < 1030; held += 250)
+                Require(session.ObserveHeldButtons(["slot-exit"], Time(time + held), Time(time + held)).Count == 0,
+                    "The slot machine's Exit acted before a full second.");
+            Require(session.ObserveHeldButtons(["slot-exit"], Time(time + 1030), Time(time + 1030))
+                    .SequenceEqual(["slot-exit"]) && session.Screen == BoardScreen.Menu,
+                "A one-second hold on the slot machine's Exit did not return to the launcher.");
+        }
+        else if (button.Destination == BoardScreen.Settings)
+        {
+            var tester = session.Buttons.Single(item => item.Id == "hand-tracking");
+            Require(tester is { Label: "Hand-Tracking", Destination: BoardScreen.HandTracking, Hold: BoardButtonHold.None } &&
+                tester.Bounds.Width >= .35 && tester.Bounds.Height >= .15, "Settings lacks the Hand-Tracking tester tile.");
+            Require(Update(session, time + 20, Over(tester, ++eventId, time + 20))?.Current == BoardScreen.HandTracking &&
+                session.Title == "Hand-Tracking", "The Settings tile did not open the Hand-Tracking tester.");
+            Require(session.Buttons.Single() is { Id: "menu", Destination: BoardScreen.Settings } &&
+                Update(session, time + 40, Over(session.Buttons[0], ++eventId, time + 40))?.Current == BoardScreen.Settings,
+                "The tester's back button did not return to Settings.");
+            Require(Update(session, time + 60, Over(session.Buttons[0], ++eventId, time + 60))?.Current == BoardScreen.Menu,
+                "Settings' back button did not return to the launcher.");
+        }
         else
             Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20))?.Current == BoardScreen.Menu,
                 "The back-to-menu target did not return to the launcher.");
     }
 }
+
+// Settings' simple back-button screen stands in for any launched board.
+static BoardButton Cog(BoardSession session) => session.Buttons.Single(button => button.Id == "settings");
 
 static void CheckOffTargetAndBounds()
 {
@@ -98,23 +135,23 @@ static void CheckOffTargetAndBounds()
         (.5, .5), (double.NaN, .3), (.2, double.PositiveInfinity) })
     {
         var session = new BoardSession();
-        var button = session.Buttons[0];
+        var button = Cog(session);
         Require(Update(session, 100, new BoardHandSample(u, v, Time(1100), 1)) is null, "An off-target pinch navigated.");
         Require(session.HoveredButtonIds.Count == 0, "An invalid/off-target position hovered a button.");
         Require(Update(session, 140, Over(button, 1, 100)) is null,
             "Moving an existing off-target pinch onto a button activated it.");
-        Require(Update(session, 180, Over(button, 2, 180))?.Current == BoardScreen.HandTracking,
+        Require(Update(session, 180, Over(button, 2, 180))?.Current == BoardScreen.Settings,
             "A new pinch after an off-target pinch could not activate a button.");
     }
     var duplicate = new BoardSession();
-    Require(Update(duplicate, 100, new(double.NaN, 0, Time(1100), 1), Over(duplicate.Buttons[0], 1, 100)) is null,
+    Require(Update(duplicate, 100, new(double.NaN, 0, Time(1100), 1), Over(Cog(duplicate), 1, 100)) is null,
         "Duplicating an off-target event at a button activated it.");
 }
 
 static void CheckHeldPinchAndDropout()
 {
     var session = new BoardSession();
-    Update(session, 100, Over(session.Buttons[0], 1, 100));
+    Update(session, 100, Over(Cog(session), 1, 100));
     BoardButton back = session.Buttons[0];
     Require(Update(session, 140, Over(back, 1, 100)) is null, "A held pinch crossed from launch to back.");
     Require(Update(session, 180) is null && session.HoveredButtonIds.Count == 0, "A missing hand retained hover.");
@@ -127,11 +164,11 @@ static void CheckHeldPinchAndDropout()
 static void CheckIndependentHands()
 {
     var session = new BoardSession();
-    BoardButton first = session.Buttons[0];
+    BoardButton first = Cog(session);
     // Both events share a pulse deadline, but only the first hand is off-target.
     Require(Update(session, 100, new BoardHandSample(double.NaN, double.NaN, Time(1100), 1) { TrackingId = 11 },
         Over(first, 2, 100) with { TrackingId = 22 }) is
-        { Current: BoardScreen.HandTracking, TrackingId: 22, Gesture: BoardSelectionGesture.Pinch },
+        { Current: BoardScreen.Settings, TrackingId: 22, Gesture: BoardSelectionGesture.Pinch },
         "One hand's off-target pinch consumed or inherited the identity of the other hand's simultaneous pinch.");
     Require(Update(session, 140, Over(session.Buttons[0], 2, 100), Over(session.Buttons[0], 1, 100)) is null,
         "Reordering two hands replayed one of their pinches.");
@@ -141,7 +178,7 @@ static void CheckIndependentHands()
         "A held pinch prevented the other hand from executing independently or reported the wrong hand.");
 
     session = new BoardSession();
-    Require(Update(session, 100, Over(session.Buttons[0], 1, 100), Over(session.Buttons[1], 2, 100))?.Current == BoardScreen.HandTracking,
+    Require(Update(session, 100, Over(Cog(session), 1, 100), Over(session.Buttons[1], 2, 100))?.Current == BoardScreen.Settings,
         "Simultaneous targets did not deterministically select one screen.");
     Require(Update(session, 140, Over(session.Buttons[0], 2, 100)) is null,
         "The unused simultaneous event activated a button on the new screen.");
@@ -150,10 +187,10 @@ static void CheckIndependentHands()
 static void CheckFreshness()
 {
     var session = new BoardSession();
-    BoardHandSample pinch = Over(session.Buttons[0], 1, 0);
+    BoardHandSample pinch = Over(Cog(session), 1, 0);
     Require(session.Update([pinch], Time(0), Time(351)) is null, "A stale frame navigated.");
     Require(session.Update([pinch], Time(500), Time(400)) is null, "A future frame navigated.");
-    Require(session.Update([pinch], Time(410), Time(410))?.Current == BoardScreen.HandTracking,
+    Require(session.Update([pinch], Time(410), Time(410))?.Current == BoardScreen.Settings,
         "Rejected frames prevented a subsequent valid observation.");
     BoardHandSample back = Over(session.Buttons[0], 2, 420);
     Require(session.Update([back], Time(410), Time(420)) is null, "A duplicate frame navigated.");
@@ -171,7 +208,7 @@ static void CheckFreshness()
 static void CheckResetAndExternalNavigation()
 {
     var session = new BoardSession();
-    Update(session, 100, Over(session.Buttons[0], 1, 100));
+    Update(session, 100, Over(Cog(session), 1, 100));
     session.ResetInput(Time(120));
     Require(session.HoveredButtonIds.Count == 0, "Reset retained hover.");
     Require(session.Update([Over(session.Buttons[0], 2, 100)], Time(110), Time(130)) is null,
@@ -191,8 +228,8 @@ static void CheckResetAndExternalNavigation()
     Require(session.Screen == BoardScreen.Media && session.Buttons.Count == 0, "Media did not leave the launcher overlay.");
     Require(Update(session, 440, new BoardHandSample(.2, .3, Time(1440), 5)) is null, "Media unexpectedly had an interactive target.");
     session.ShowMenu(Time(480));
-    Require(Update(session, 520, Over(session.Buttons[0], 5, 440)) is null, "Returning from media replayed a pulse.");
-    Require(Update(session, 560, Over(session.Buttons[0], 6, 560))?.Current == BoardScreen.HandTracking,
+    Require(Update(session, 520, Over(Cog(session), 5, 440)) is null, "Returning from media replayed a pulse.");
+    Require(Update(session, 560, Over(Cog(session), 6, 560))?.Current == BoardScreen.Settings,
         "Returning from media prevented a new pinch.");
 }
 

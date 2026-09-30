@@ -20,7 +20,7 @@ if (args.Length == 0)
 
 if (args.Length < 2 || args[0] != "--once" || args.Length > 3)
 {
-    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|show_monopoly|show_globe|show_paint|blackjack_action|monopoly_action|globe_action|capture_blackjack_preview|capture_monopoly_preview|capture_globe_preview|shutdown> [JSON object]");
+    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|show_monopoly|show_globe|show_slots|show_settings|show_paint|blackjack_action|monopoly_action|globe_action|slots_action|slots_demo|capture_blackjack_preview|capture_monopoly_preview|capture_globe_preview|capture_slots_preview|shutdown> [JSON object]");
     return 2;
 }
 
@@ -64,6 +64,20 @@ static async Task RunMcpAsync()
                 Name = "globe_action",
                 Description = "Open Globe controls with globe-drawer-open, close with globe-drawer-close, or activate visible globe-zoom-in, globe-zoom-out or globe-exit controls."
             });
+    static McpServerTool SlotsActionTool() =>
+        McpServerTool.Create((Func<string, Task<string>>)SlotsActionAsync,
+            new McpServerToolCreateOptions
+            {
+                Name = "slots_action",
+                Description = "Activate an enabled Dragon Slots control by id: slot-spin, slot-bet-up, slot-bet-down, slot-buy, slot-refill or slot-exit. Uses virtual credits only."
+            });
+    static McpServerTool SlotsDemoTool() =>
+        McpServerTool.Create((Func<string, Task<string>>)SlotsDemoAsync,
+            new McpServerToolCreateOptions
+            {
+                Name = "slots_demo",
+                Description = "Make the next Dragon Slots spin land a feature: Respins, FreeSpins or Vault."
+            });
     var options = new McpServerOptions
     {
         ServerInfo = new Implementation { Name = "ProjectTabletop.ControlMcp", Version = "0.1.0" },
@@ -91,6 +105,11 @@ static async Task RunMcpAsync()
             MonopolyActionTool(),
             Tool("show_globe", "Open the high-resolution Earth globe with a distant arrival, slow spin and clickable zoom/rotate controls, without starting camera or projector."),
             GlobeActionTool(),
+            Tool("show_slots", "Open Dragon Slots: a five-reel, 40-line dragon slot machine with long-press controls, Dragonfire Respins, free spins and the Treasure Vault, with a clickable laptop preview."),
+            SlotsActionTool(),
+            SlotsDemoTool(),
+            Tool("capture_slots_preview", "Save the current Dragon Slots machine as an unmapped laptop-preview PNG."),
+            Tool("show_settings", "Open the Settings board, which holds the Hand-Tracking tester."),
             Tool("capture_globe_preview", "Save the current Globe view as a 3840 × 2160 unmapped laptop-preview PNG."),
             Tool("capture_monopoly_preview", "Save the current Monopoly board as an unmapped laptop-preview PNG."),
             Tool("capture_blackjack_preview", "Save the current Blackjack table as an unmapped laptop-preview PNG."),
@@ -113,6 +132,12 @@ static Task<string> BlackjackActionAsync(string id) =>
 
 static Task<string> MonopolyActionAsync(string id) =>
     CallToolAsync("monopoly_action", JsonSerializer.SerializeToElement(new { id }));
+
+static Task<string> SlotsActionAsync(string id) =>
+    CallToolAsync("slots_action", JsonSerializer.SerializeToElement(new { id }));
+
+static Task<string> SlotsDemoAsync(string feature) =>
+    CallToolAsync("slots_demo", JsonSerializer.SerializeToElement(new { feature }));
 
 static Task<string> GlobeActionAsync(string id) =>
     CallToolAsync("globe_action", JsonSerializer.SerializeToElement(new { id }));

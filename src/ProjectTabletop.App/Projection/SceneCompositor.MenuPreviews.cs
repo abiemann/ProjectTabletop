@@ -74,7 +74,7 @@ public sealed partial class SceneCompositor
             return null;
         }
         if (screen is not (BoardScreen.HandTracking or BoardScreen.PhotoCopy or BoardScreen.Blackjack or
-            BoardScreen.Paint or BoardScreen.Monopoly or BoardScreen.Globe)) return null;
+            BoardScreen.Paint or BoardScreen.Monopoly or BoardScreen.Globe or BoardScreen.Slots)) return null;
         var image = new CanvasRenderTarget(ds.Device, width, height, 96);
         PaintFluidSimulation? fluid = null;
         try
@@ -92,6 +92,7 @@ public sealed partial class SceneCompositor
                     case BoardScreen.Paint: fluid = DrawPaintPreview(drawing, span); break;
                     case BoardScreen.Monopoly: DrawMonopolyPreview(drawing, span); break;
                     case BoardScreen.Globe: DrawGlobePreview(drawing, span); break;
+                    case BoardScreen.Slots: DrawSlotsMenuPreview(drawing, span); break;
                 }
             }
         }

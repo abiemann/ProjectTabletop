@@ -46,9 +46,14 @@ public sealed partial class BoardSession
         AdvanceBlackjackPresentation(now);
         AdvanceMonopolyPresentation(now);
         AdvanceGlobeDrawer(now);
+        AdvanceSlots(now);
         var holdButtons = Buttons.Where(button => button.IsHold && button.Enabled)
             .ToDictionary(button => button.Id);
-        var heldPlaces = heldIds.Where(holdButtons.ContainsKey).Select(id => holdButtons[id].Bounds).ToArray();
+        // Fingers still resting on a place keep it spent while its button is
+        // disabled (a slot spin, dealing cards), so it cannot act again once
+        // re-enabled under the same fingers.
+        var everyHold = Buttons.Where(button => button.IsHold).ToDictionary(button => button.Id);
+        var heldPlaces = heldIds.Where(everyHold.ContainsKey).Select(id => everyHold[id].Bounds).ToArray();
         foreach (var (place, spent) in _spentHolds.ToArray())
         {
             if (heldPlaces.Any(held => Overlaps(held, place))) spent.AbsentSince = null;

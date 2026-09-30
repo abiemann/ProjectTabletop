@@ -102,10 +102,13 @@
                         <Border Height="1" Background="{StaticResource TabletopPanelBorderBrush}" Margin="0,2" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Content="Board menu" Click="BoardMenu_Click" />
+                            <Button Content="Settings" Click="Settings_Click" />
                             <Button Content="Hand-Tracking test" Click="HandTrackingTest_Click" />
                         </StackPanel>
                         <TextBlock x:Name="BoardAppStatusText" Text="Board menu. Complete board setup to project it." TextWrapping="Wrap" />
                         <TextBlock Text="Bring your four fingers together and aim with the middle fingertip. When the button says Ready, move your index finger sideways to select. Bring it back to select again. Point and pinch also works." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <Button Content="Dragon Slots" Click="Slots_Click" />
+                        <TextBlock Text="Spin a five-reel, 40-line dragon slot machine with virtual credits. Every control is a long press: rest your fingers on SPIN for a second. Coins with a power egg start Dragonfire Respins, three elixirs start free spins, and five keys open the Treasure Vault. Laptop clicks also work." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Photo Copy" Click="PhotoCopy_Click" />
                         <TextBlock Text="Place an object on grey above the bottom controls, then lift your hands to lock its light. Select Swirl to fill the board or Copy to save a PNG with a photocopier sound. Swirl becomes Clear while copies are displayed. Bring four fingers together until Ready, then move your index sideways. Saved images go to Pictures / Project Tabletop." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Blackjack" Click="Blackjack_Click" />

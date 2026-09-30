@@ -883,6 +883,7 @@ public sealed partial class SceneCompositor : IDisposable
             _monopolyPreviewTarget = null;
             DisposeMonopolyDiceLayer();
             DisposeHoldFeedbackLayer();
+            DisposeSlotsLayers();
             DisposeMonopolyEntranceLayers();
             _globePreviewTarget?.Dispose();
             _globePreviewTarget = null;

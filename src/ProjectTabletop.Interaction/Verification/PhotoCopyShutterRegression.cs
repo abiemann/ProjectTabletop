@@ -209,7 +209,7 @@ internal static class PhotoCopyShutterRegression
             Require(layout.Count(other => other.Bounds.Contains(button.Bounds.X + button.Bounds.Width / 2,
                 button.Bounds.Y + button.Bounds.Height / 2)) == 1, "Photo Copy bottom controls overlap.");
         var otherBoard = new BoardSession(); otherBoard.ShowHandTrackingTest(Time(0));
-        Require(otherBoard.Buttons.Single() is { Label: "Back to menu" } otherExit &&
+        Require(otherBoard.Buttons.Single() is { Label: "Back to settings" } otherExit &&
             otherExit.Bounds == new BoardRect(.06, .055, .30, .105),
             "The Photo Copy Exit button changed other boards' navigation targets.");
 

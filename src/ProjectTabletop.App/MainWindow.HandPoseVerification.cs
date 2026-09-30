@@ -97,7 +97,7 @@ public sealed partial class MainWindow
         scene.SetHandCursors([new(BoardPoint(.25, .33), DateTimeOffset.MinValue) { IsSpreadOut = true }],
             DateTimeOffset.UtcNow);
         Require(scene.CurrentBoardScreen == BoardScreen.Menu && scene.HandTrackingTestStatus == string.Empty &&
-            scene.HoveredBoardButtons.SequenceEqual(["hand-tracking"]),
+            scene.HoveredBoardButtons.SequenceEqual(["slots"]),
             "A spread hand executed a menu command or exposed tester status on the menu.");
         Require(CaptionDifference(menu, Draw()) == 0, "Spread-hand feedback appeared above the menu buttons.");
 

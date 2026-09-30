@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, Monopoly, Globe, Media }
+public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, Monopoly, Globe, Media, Slots, Settings }
 
 /// <summary>A rectangle in the board's normalized, perspective-corrected coordinate system.</summary>
 public readonly record struct BoardRect(double X, double Y, double Width, double Height)
@@ -72,18 +72,32 @@ public sealed partial class BoardSession
     private static readonly TimeSpan ObservationLifetime = TimeSpan.FromMilliseconds(350);
     private static readonly TimeSpan SelectionLifetime = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan ExecuteDuration = TimeSpan.FromSeconds(1);
+    /// <summary>The cog in the menu's upper-right corner opens Settings.</summary>
+    public static readonly BoardRect SettingsCogBounds = new(.70, .045, .24, .13);
     private static readonly IReadOnlyList<BoardButton> MenuButtons = Array.AsReadOnly(new[]
     {
-        new BoardButton("hand-tracking", "Hand-Tracking", new(.08, .25, .40, .16), BoardScreen.HandTracking),
+        new BoardButton("slots", "Dragon Slots", new(.08, .25, .40, .16), BoardScreen.Slots),
         new BoardButton("photo-copy", "Photo Copy", new(.52, .25, .40, .16), BoardScreen.PhotoCopy),
         new BoardButton("blackjack", "Blackjack", new(.08, .45, .40, .16), BoardScreen.Blackjack),
         new BoardButton("paint", "Paint", new(.52, .45, .40, .16), BoardScreen.Paint),
         new BoardButton("monopoly", "Monopoly", new(.08, .65, .40, .16), BoardScreen.Monopoly),
-        new BoardButton("globe", "Globe", new(.52, .65, .40, .16), BoardScreen.Globe)
+        new BoardButton("globe", "Globe", new(.52, .65, .40, .16), BoardScreen.Globe),
+        new BoardButton("settings", "Settings", SettingsCogBounds, BoardScreen.Settings)
     });
     private static readonly IReadOnlyList<BoardButton> AppButtons = Array.AsReadOnly(new[]
     {
         new BoardButton("menu", "Back to menu", new(.06, .055, .30, .105), BoardScreen.Menu)
+    });
+    // A short caption: resting fingers cover more of it for the camera.
+    private static readonly IReadOnlyList<BoardButton> SettingsButtons = Array.AsReadOnly(new[]
+    {
+        new BoardButton("menu", "Back", new(.06, .055, .30, .105), BoardScreen.Menu),
+        new BoardButton("hand-tracking", "Hand-Tracking", new(.08, .25, .40, .16), BoardScreen.HandTracking)
+    });
+    // The tester is reached from Settings, so its back button returns there.
+    private static readonly IReadOnlyList<BoardButton> HandTrackingButtons = Array.AsReadOnly(new[]
+    {
+        new BoardButton("menu", "Back to settings", new(.06, .055, .30, .105), BoardScreen.Settings)
     });
     private static readonly IReadOnlyList<BoardButton> PhotoCopyButtons = Array.AsReadOnly(new[]
     {
@@ -118,6 +132,8 @@ public sealed partial class BoardSession
         BoardScreen.Monopoly => "Monopoly",
         BoardScreen.Globe => "Globe",
         BoardScreen.Media => "Media",
+        BoardScreen.Slots => "Dragon Slots",
+        BoardScreen.Settings => "Settings",
         _ => throw new InvalidOperationException("Unknown board screen.")
     };
     public IReadOnlyList<BoardButton> Buttons => Screen switch
@@ -129,6 +145,9 @@ public sealed partial class BoardSession
         BoardScreen.Monopoly => MonopolyButtons(),
         BoardScreen.Globe => CurrentGlobeButtons(),
         BoardScreen.Media => Array.Empty<BoardButton>(),
+        BoardScreen.Slots => SlotsButtons(),
+        BoardScreen.Settings => SettingsButtons,
+        BoardScreen.HandTracking => HandTrackingButtons,
         _ => AppButtons
     };
     public IReadOnlyList<string> HoveredButtonIds { get; private set; } = Array.Empty<string>();
@@ -148,6 +167,7 @@ public sealed partial class BoardSession
         AdvanceBlackjackPresentation(now);
         AdvanceMonopolyPresentation(now);
         AdvanceGlobeDrawer(now);
+        AdvanceSlots(now);
         if (frameTime > now || now - frameTime > ObservationLifetime ||
             frameTime <= _ignoreFramesThrough ||
             (_lastFrameTime is { } previousFrame && frameTime <= previousFrame))
@@ -208,6 +228,7 @@ public sealed partial class BoardSession
     public void ShowPaint(DateTimeOffset? now = null) => Show(BoardScreen.Paint, now ?? DateTimeOffset.UtcNow);
     public void ShowBlackjack(DateTimeOffset? now = null) => Show(BoardScreen.Blackjack, now ?? DateTimeOffset.UtcNow);
     public void ShowMedia(DateTimeOffset? now = null) => Show(BoardScreen.Media, now ?? DateTimeOffset.UtcNow);
+    public void ShowSettings(DateTimeOffset? now = null) => Show(BoardScreen.Settings, now ?? DateTimeOffset.UtcNow);
 
     /// <summary>Clear hover and reject observations/pulses that predate a camera or calibration reset.</summary>
     public void ResetInput(DateTimeOffset now)

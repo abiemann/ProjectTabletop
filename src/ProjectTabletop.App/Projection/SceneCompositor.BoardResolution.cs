@@ -153,6 +153,7 @@ public sealed partial class SceneCompositor
         CancelMonopolyDiceAnimation();
         DisposeMonopolyDiceLayer();
         DisposeHoldFeedbackLayer();
+        DisposeSlotsLayers();
         CancelMonopolyEntrance();
         DisposeMonopolyEntranceLayers();
         _boardRasterPixels = new(1000, 1000);

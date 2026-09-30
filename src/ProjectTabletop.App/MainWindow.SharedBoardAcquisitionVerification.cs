@@ -45,6 +45,8 @@ public sealed partial class MainWindow
         var tested = new List<string>();
         scene.ShowBoardMenu(); VerifyButtons("Menu");
         scene.ShowHandTrackingTest(); VerifyButtons("Hand-Tracking");
+        scene.ShowSettings(); VerifyButtons("Settings");
+        scene.ShowSlots(); VerifyButtons("Dragon Slots");
         scene.ShowPhotoCopy(); VerifyButtons("Photo Copy");
         foreach (var (id, title) in new[] { ("paint", "Paint"), ("monopoly", "Monopoly"), ("globe", "Globe") })
         {
@@ -352,7 +354,8 @@ public sealed partial class MainWindow
                     // Hold buttons act on caption evidence alone; a light would erase it.
                     Require(lit.IlluminatedHint is null && CountWhite(Draw(), center) <= CountWhite(empty, center) + 50,
                         label + "/" + button.Label + " lit a hold-to-repeat button.");
-                    CheckHeldThroughRim(button, empty, occupied);
+                    // A disabled long-press (Bet - at the minimum bet) cannot start a hold or show a rim.
+                    if (button.Enabled) CheckHeldThroughRim(button, empty, occupied);
                 }
                 else
                 {

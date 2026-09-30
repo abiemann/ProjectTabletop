@@ -32,6 +32,10 @@ public sealed partial class MainWindow
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
         using var preview = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), 800, 800, 96);
         using var scene = NewScene();
+        // In the app, board setup lasts long enough for Earth's textures to
+        // load before the menu first appears; its Globe tile is then kept. Load
+        // them first here too, or the race leaves the fixture's tile empty.
+        await scene.EnsureGlobeResourcesAsync(target.Device);
         byte[] finalDot = Draw(scene);
         Require(White(finalDot, 0, 0) && Black(finalDot, width / 2, height / 2),
             "The reveal fixture did not begin on the last white-field center dot.");
@@ -102,8 +106,16 @@ public sealed partial class MainWindow
             await Task.WhenAll(scene.EnsureGlobeResourcesAsync(target.Device), baseline.EnsureGlobeResourcesAsync(target.Device));
             Draw(scene); Draw(baseline);
             final = Draw(scene);
-            Require(final.SequenceEqual(Draw(baseline)),
-                "The reveal's final frame changed the normal calibrated board geometry or content.");
+            byte[] expected = Draw(baseline);
+            if (!final.SequenceEqual(expected))
+            {
+                // Keep both frames for diagnosis.
+                await Save(target, "final-baseline");
+                Draw(scene);
+                await Save(target, "final-after-reveal");
+            }
+            Require(final.SequenceEqual(expected),
+                "The reveal's final frame changed the normal calibrated board geometry or content. Frames: " + directory);
         }
         Draw(scene);
         await Save(target, "05-complete-menu");
@@ -174,7 +186,7 @@ public sealed partial class MainWindow
             frame = DateTimeOffset.UtcNow;
             inputScene.SetHandCursors([new(new(aim.X, aim.Y), frame.AddSeconds(1), 91002)
                 { TrackingId = 82001 }], frame);
-            Require(inputScene.CurrentBoardScreen == BoardScreen.HandTracking,
+            Require(inputScene.CurrentBoardScreen == BoardScreen.Slots,
                 "The reveal permanently blocked a fresh deliberate selection.");
         }
 

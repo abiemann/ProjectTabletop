@@ -53,13 +53,13 @@ public sealed partial class MainWindow
         var pointing = new HandCursor(inputPoint, DateTimeOffset.MinValue) { TrackingId = 402 };
         var displayed = pointing with { Position = wrongVisualPoint };
         scene.SetHandCursors([pointing], DateTimeOffset.UtcNow, visualCursors: [displayed]);
-        Require(scene.HoveredBoardButtons.SequenceEqual(["hand-tracking"]),
+        Require(scene.HoveredBoardButtons.SequenceEqual(["slots"]),
             "Visual damping changed button aiming to the displayed Photo Copy position.");
         await Task.Delay(5);
         time = DateTimeOffset.UtcNow;
         scene.SetHandCursors([pointing with { ExecuteEventId = 101, ExecuteUntil = time.AddSeconds(1) }],
             time, visualCursors: [displayed]);
-        Require(scene.CurrentBoardScreen == BoardScreen.HandTracking,
+        Require(scene.CurrentBoardScreen == BoardScreen.Slots,
             "A filtered display position changed the pinch's selected board.");
 
         scene.ClearHandTips();

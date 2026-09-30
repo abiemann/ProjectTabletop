@@ -107,6 +107,14 @@ public sealed partial class MainWindow
                 return await VerifyMonopolyEntranceAsync();
             case "verify_globe":
                 return await VerifyGlobeAsync();
+            case "verify_slots":
+                return await VerifySlotsAsync();
+            case "verify_slots_motion":
+                return await VerifySlotsMotionAsync();
+            case "verify_slots_hatching":
+                return await VerifySlotsHatchingAsync();
+            case "verify_slots_wilds":
+                return await VerifySlotsWildsAsync();
             case "verify_blackjack_animation":
                 return await VerifyBlackjackAnimationAsync();
             case "verify_board_reveal":
@@ -201,6 +209,7 @@ public sealed partial class MainWindow
                     blackjack = _scene.BlackjackState,
                     monopoly = _scene.MonopolyState,
                     globe = _scene.GlobeState,
+                    slots = SlotsStatus(),
                     globeDrawer = _scene.GetGlobeDrawerDiagnostics(DateTimeOffset.UtcNow),
                     monopolySavePath = MonopolySavePath,
                     monopolySaveError = _monopolySaveError,
@@ -308,6 +317,27 @@ public sealed partial class MainWindow
                     drawer = _scene.GetGlobeDrawerDiagnostics(DateTimeOffset.UtcNow) };
             case "capture_globe_preview":
                 return new { path = await SaveGlobePreviewAsync() };
+            case "show_slots":
+                ShowSlots();
+                return new { boardApp = _scene.CurrentBoardScreen.ToString(), slots = SlotsStatus() };
+            case "show_settings":
+                ShowSettings();
+                return new { boardApp = _scene.CurrentBoardScreen.ToString(),
+                    boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
+            case "slots_action":
+                if (!parameters.TryGetProperty("id", out var slotsAction) || slotsAction.ValueKind != JsonValueKind.String)
+                    throw new ArgumentException("Provide a slot machine button id.");
+                bool slotsAccepted = _scene.ActivateSlotsButton(slotsAction.GetString()!);
+                UpdateBoardAppStatus();
+                return new { accepted = slotsAccepted, slots = SlotsStatus() };
+            case "slots_demo":
+                if (!parameters.TryGetProperty("feature", out var feature) || feature.ValueKind != JsonValueKind.String ||
+                    !Enum.TryParse<ProjectTabletop.Interaction.SlotDemo>(feature.GetString(), true, out var demo))
+                    throw new ArgumentException("Provide feature: Respins, FreeSpins or Vault.");
+                _scene.DemonstrateSlots(demo);
+                return new { next = demo.ToString(), slots = SlotsStatus() };
+            case "capture_slots_preview":
+                return new { path = await SaveSlotsPreviewAsync() };
             case "capture_raw_frame":
                 return new { path = await SaveRawSnapshotAsync() };
             case "start_camera":

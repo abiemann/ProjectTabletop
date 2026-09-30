@@ -11,6 +11,8 @@ public sealed partial class SceneCompositor
     private HandTrackingBounds BoardButtonTextRegion(CanvasDevice device, BoardButton button)
     {
         if (_boardSession.Screen == BoardScreen.Paint) return PaintButtonTextRegion(device, button);
+        if (_boardSession.Screen == BoardScreen.Slots) return SlotButtonTextRegion(device, button);
+        if (_boardSession.Screen == BoardScreen.Menu && button.Id == "settings") return SettingsCogTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Globe)
         {
             if (IsGlobeDrawerHandle(button))
@@ -48,7 +50,8 @@ public sealed partial class SceneCompositor
             return ButtonInkRegion(button, layout.DrawBounds, rectangle.X, rectangle.Y);
         }
         using var label = BoardButtonTextFormat();
-        bool menu = _boardSession.Screen == BoardScreen.Menu;
+        bool menu = _boardSession.Screen == BoardScreen.Menu ||
+            _boardSession.Screen == BoardScreen.Settings && button.Destination == BoardScreen.HandTracking;
         double x = button.Bounds.X * BoardSurfaceSize + (menu ? 32 : 33);
         double y = button.Bounds.Y * BoardSurfaceSize + (menu ? 52 : 27);
         using var textLayout = new CanvasTextLayout(device, button.Label, label,

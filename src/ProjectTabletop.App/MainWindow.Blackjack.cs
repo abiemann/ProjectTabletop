@@ -21,7 +21,9 @@ public sealed partial class MainWindow
 
     private void BlackjackPreview_Draw(ICanvasAnimatedControl sender, CanvasAnimatedDrawEventArgs args)
     {
-        if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Globe)
+        if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Slots)
+            _scene.DrawSlotsPreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
+        else if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Globe)
             _scene.DrawGlobePreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
         else if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Monopoly)
             _scene.DrawMonopolyPreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
@@ -35,12 +37,15 @@ public sealed partial class MainWindow
         double width = BlackjackPreview.ActualWidth, height = BlackjackPreview.ActualHeight;
         bool monopoly = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Monopoly;
         bool globe = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Globe;
-        double aspect = globe ? _scene.GlobePreviewAspect : monopoly ? _scene.MonopolyPreviewAspect : 1;
+        bool slots = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Slots;
+        double aspect = slots ? _scene.SlotsPreviewAspect : globe ? _scene.GlobePreviewAspect :
+            monopoly ? _scene.MonopolyPreviewAspect : 1;
         double drawWidth = Math.Min(width, height * aspect), drawHeight = drawWidth / aspect;
         if (drawWidth <= 0 || drawHeight <= 0) return;
         double u = (point.Position.X - (width - drawWidth) / 2) / drawWidth;
         double v = (point.Position.Y - (height - drawHeight) / 2) / drawHeight;
-        if (globe ? _scene.ActivateGlobeAt(u, v) : monopoly ? _scene.ActivateMonopolyAt(u, v) : _scene.ActivateBlackjackAt(u, v))
+        if (slots ? _scene.ActivateSlotsAt(u, v) : globe ? _scene.ActivateGlobeAt(u, v) :
+            monopoly ? _scene.ActivateMonopolyAt(u, v) : _scene.ActivateBlackjackAt(u, v))
         {
             if (monopoly) QueueMonopolySave();
             UpdateBoardAppStatus();

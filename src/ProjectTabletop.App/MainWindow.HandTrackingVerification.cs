@@ -23,13 +23,13 @@ public sealed partial class MainWindow
             if (scene.GetLastHandBoardSelection() is not null)
                 throw new InvalidOperationException("An idle scene invented a successful hand selection.");
             var sourceTime = DateTimeOffset.UtcNow;
-            var tip = new PixelPoint(.25, .35); // Inside Hand-Tracking's menu target.
+            var tip = new PixelPoint(.25, .35); // Inside Dragon Slots' menu target.
             scene.SetHandCursors([new(tip, DateTimeOffset.MinValue)], sourceTime);
             scene.ClearHandTips(resetInput);
             // Source frame predates the clear but is still fresh on completion.
             var selectingFrame = sourceTime.AddTicks(1);
             scene.SetHandCursors([new HandCursor(tip, DateTimeOffset.UtcNow.AddSeconds(1), 1) { TrackingId = 711 }], selectingFrame);
-            var expected = resetInput ? BoardScreen.Menu : BoardScreen.HandTracking;
+            var expected = resetInput ? BoardScreen.Menu : BoardScreen.Slots;
             if (scene.CurrentBoardScreen != expected)
                 throw new InvalidOperationException(resetInput
                     ? "A camera reset accepted an old gesture frame."
@@ -40,8 +40,8 @@ public sealed partial class MainWindow
                     throw new InvalidOperationException("A rejected pre-reset pinch fabricated selection diagnostics.");
             }
             else
-                AssertHandSelectionDiagnostic(scene, BoardScreen.Menu, BoardScreen.HandTracking,
-                    "hand-tracking", "Pinch", 711, selectingFrame);
+                AssertHandSelectionDiagnostic(scene, BoardScreen.Menu, BoardScreen.Slots,
+                    "slots", "Pinch", 711, selectingFrame);
         }
         foreach (var actualTip in new[] { new PixelPoint(.7, .5), new PixelPoint(1.03, .5) })
         {

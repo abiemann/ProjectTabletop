@@ -102,7 +102,7 @@ public sealed partial class MainWindow
         await Send((selecting, separated));
         Require(!Suppressed(273), "The first unconfirmed separation suppressed its light.");
         await Send((selecting, separated));
-        Require(scene.CurrentBoardScreen == BoardScreen.HandTracking && Suppressed(273) &&
+        Require(scene.CurrentBoardScreen == BoardScreen.Slots && Suppressed(273) &&
             scene.ActiveHandSpotlightCount == 0 && !WhiteAt(Draw(), middle),
             "An accepted four-finger selection did not extinguish its hand light.");
 

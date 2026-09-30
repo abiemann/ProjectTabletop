@@ -336,6 +336,7 @@ public sealed partial class SceneCompositor
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
         var paint = _boardSession.Screen == BoardScreen.Paint;
         var globe = _boardSession.Screen == BoardScreen.Globe;
+        var slots = _boardSession.Screen == BoardScreen.Slots;
         if (_boardApplicationTarget is null || _renderedBoardState is not { } rendered ||
             rendered.Screen != _boardSession.Screen) return null;
         if (!photoCopy && !globe && (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
@@ -348,6 +349,7 @@ public sealed partial class SceneCompositor
             rendered.MonopolyDiceRevision != MonopolyDicePresentationRevision ||
             rendered.MonopolySessionRevision != _boardSession.Revision ||
             MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()))) return null;
+        if (slots && rendered.SlotsRevision != _boardSession.SlotsState.Revision) return null;
         if (globe && (rendered.GlobeRevision != _boardSession.GetGlobeSnapshot(_globeClock()).Revision ||
             rendered.GlobeSessionRevision != _boardSession.Revision || HasGlobeDrawerAnimation(_globeClock()))) return null;
         var cameraToProjector = _boardCameraMap!.ToMatrix();
@@ -374,7 +376,13 @@ public sealed partial class SceneCompositor
             var sourceSize = _boardApplicationTarget.SizeInPixels;
             using (var drawing = _acquisitionReferenceTarget.CreateDrawingSession())
             {
-                if (globe)
+                if (slots)
+                {
+                    // Reels animate beside the controls; only the fixed, opaque
+                    // buttons may explain camera interference, as on Globe.
+                    DrawSlotControlsReference(drawing);
+                }
+                else if (globe)
                 {
                     // The sphere rotates independently. Only fixed, opaque controls
                     // may explain camera interference or suggest hand illumination.
@@ -414,10 +422,12 @@ public sealed partial class SceneCompositor
             IReadOnlyList<HandTrackingBounds>? referenceRegions = _boardSession.Screen switch
             {
                 BoardScreen.HandTracking => [new(.40, .065, .53, .04)],
+                BoardScreen.Settings => [new(.40, .065, .53, .04), .. regions],
                 // The plain Paint title and surrounding artwork have no opaque
                 // panel. Use the generated button interiors as lighting anchors.
                 BoardScreen.Paint => regions,
                 BoardScreen.Globe => regions,
+                BoardScreen.Slots => regions,
                 // Fixed ivory spaces and gold trim constrain the camera response
                 // when a hand covers the only gold action panel. These bands
                 // calibrate colour only; searches remain inside the controls.
@@ -430,7 +440,7 @@ public sealed partial class SceneCompositor
                 BoardSearchRegions: regions, BoardReferenceRegions: referenceRegions,
                 BoardTriggerRegions: _boardSession.Buttons
                     .Select(button => BoardButtonTextRegion(_acquisitionReferenceTarget.Device, button)).ToArray(),
-                AllowsLocalForegroundContext: _boardSession.Screen is BoardScreen.Menu or
+                AllowsLocalForegroundContext: _boardSession.Screen is BoardScreen.Menu or BoardScreen.Settings or
                     BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.Monopoly);
         }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or
