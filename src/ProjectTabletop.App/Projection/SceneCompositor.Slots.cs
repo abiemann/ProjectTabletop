@@ -195,14 +195,13 @@ public sealed partial class SceneCompositor
 
     private void DrawSlotKeys(CanvasDrawingSession ds, SlotSnapshot game, SlotLayout layout)
     {
-        DrawSlotKeyRail(ds, layout);
         for (int reel = 0; reel < SlotGame.Reels; reel++)
         {
             bool lit = game.Keys[reel];
             var box = SlotKeyChestBox(layout, reel);
             if (!DrawSlotKeyChestArtwork(ds, box, open: lit, layout.Aspect))
             {
-                var center = new Vector2(layout.ReelCenter(reel), 660);
+                var center = new Vector2(layout.ReelCenter(reel), (float)(box.Y + box.Height / 2));
                 DrawSlotKeySocket(ds, layout.Square(center, 50), layout.Aspect, lit);
             }
             if (lit) DrawSlotKeyArtwork(ds, SlotEarnedKeyBox(layout, reel), layout.Aspect);

@@ -15,6 +15,7 @@ public sealed partial class SceneCompositor
     private CanvasBitmap? _slotMenuDragonArtwork;
     private CanvasBitmap? _slotCoinPileArtwork;
     private CanvasBitmap? _slotVaultChestArtwork;
+    private CanvasBitmap? _slotVaultChestFrontArtwork;
     private CanvasBitmap? _slotVaultKeyArtwork;
     private CanvasDevice? _slotArtworkDevice;
     private bool _slotArtworkAttempted;
@@ -52,7 +53,7 @@ public sealed partial class SceneCompositor
         && _slotWildPortraits is not null && _slotWildColossus is not null && SlotsCabinetArtworkReady;
     internal string? SlotsArtworkError => _slotArtworkError ?? _slotCabinetArtworkError;
     internal bool SlotsCabinetArtworkReady => _slotCoinPileArtwork is not null
-        && _slotVaultChestArtwork is not null && _slotVaultKeyArtwork is not null;
+        && _slotVaultChestArtwork is not null && _slotVaultChestFrontArtwork is not null && _slotVaultKeyArtwork is not null;
     internal bool SlotsMenuArtworkReady => _slotMenuDragonArtwork is not null;
     internal string? SlotsMenuArtworkError => _slotMenuArtworkError;
 
@@ -131,6 +132,19 @@ public sealed partial class SceneCompositor
         {
             _slotCabinetArtworkError = error.Message;
             AppLog.Write("Dragon Slots treasure artwork", error);
+        }
+        // The rail has its own straight-on camera artwork. Keep a missing
+        // front asset independent of the successfully loaded full chests.
+        try
+        {
+            _slotVaultChestFrontArtwork = CanvasBitmap.LoadAsync(device,
+                Path.Combine(AppContext.BaseDirectory, "SlotsRendering", "Assets", "slot-vault-chest-fronts.png"), 96)
+                .AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception error) when (!device.IsDeviceLost(error.HResult))
+        {
+            _slotCabinetArtworkError ??= error.Message;
+            AppLog.Write("Dragon Slots chest front artwork", error);
         }
     }
 
@@ -231,12 +245,14 @@ public sealed partial class SceneCompositor
         _slotWildPortraits?.Dispose(); _slotWildColossus?.Dispose();
         _slotMenuDragonArtwork?.Dispose();
         _slotCoinPileArtwork?.Dispose(); _slotVaultChestArtwork?.Dispose(); _slotVaultKeyArtwork?.Dispose();
+        _slotVaultChestFrontArtwork?.Dispose();
         _slotArtwork = _slotBackdrop = null;
         _slotTreasureArtwork = null;
         _slotDragonArtwork = null;
         _slotWildPortraits = _slotWildColossus = null;
         _slotMenuDragonArtwork = null;
         _slotCoinPileArtwork = _slotVaultChestArtwork = _slotVaultKeyArtwork = null;
+        _slotVaultChestFrontArtwork = null;
         _slotArtworkDevice = null;
         _slotArtworkAttempted = false;
         _slotArtworkError = null;

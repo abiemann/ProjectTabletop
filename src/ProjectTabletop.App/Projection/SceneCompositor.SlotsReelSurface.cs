@@ -108,14 +108,18 @@ public sealed partial class SceneCompositor
                 ds.Transform = Matrix3x2.CreateScale(1 / layout.Aspect, 1, center) * prior;
                 try
                 {
-                    // Small cabochons and symmetric curls decorate the metal
+                    // Inset gemstones and symmetric curls decorate the metal
                     // rail; all detail remains inside the existing frame band.
                     ds.FillEllipse(center + new Vector2(0, .8f), 6.8f, 5.2f, ThemeColor(31, 15, 8));
                     ds.FillEllipse(center, 6.2f, 4.6f, ThemeColor(239, 194, 101));
-                    ds.FillEllipse(center, 4.5f, 3.1f, jewel);
-                    ds.DrawEllipse(center, 4.7f, 3.25f, ThemeColor(102, 56, 18), .65f);
-                    ds.DrawLine(center + new Vector2(-2.9f, -1.5f), center + new Vector2(.9f, -1.8f),
-                        ThemeColor(255, 246, 197, 210), .75f);
+                    if (ruby)
+                    {
+                        ds.FillEllipse(center, 4.5f, 3.1f, jewel);
+                        ds.DrawEllipse(center, 4.7f, 3.25f, ThemeColor(102, 56, 18), .65f);
+                        ds.DrawLine(center + new Vector2(-2.9f, -1.5f), center + new Vector2(.9f, -1.8f),
+                            ThemeColor(255, 246, 197, 210), .75f);
+                    }
+                    else DrawSlotFrameSapphire(ds, center);
                     foreach (int side in new[] { -1, 1 })
                     {
                         using var curl = new CanvasPathBuilder(ds.Device);
@@ -132,6 +136,65 @@ public sealed partial class SceneCompositor
                 }
                 finally { ds.Transform = prior; }
             }
+    }
+
+    private static readonly Color[] SlotSapphireCrown =
+    [
+        ThemeColor(53, 122, 217), ThemeColor(5, 28, 102), ThemeColor(12, 58, 158), ThemeColor(6, 17, 68),
+        ThemeColor(16, 64, 162), ThemeColor(66, 167, 235), ThemeColor(135, 218, 255), ThemeColor(38, 97, 189)
+    ];
+    private static readonly Color[] SlotSapphireReflections =
+    [
+        ThemeColor(16, 67, 171), ThemeColor(29, 113, 211), ThemeColor(7, 21, 67), ThemeColor(41, 88, 189),
+        ThemeColor(4, 19, 73), ThemeColor(15, 51, 145), ThemeColor(64, 155, 224), ThemeColor(192, 237, 255)
+    ];
+    private static readonly Color[] SlotSapphireTable =
+    [
+        ThemeColor(11, 48, 122), ThemeColor(29, 97, 194), ThemeColor(10, 34, 93), ThemeColor(4, 13, 47),
+        ThemeColor(29, 91, 183), ThemeColor(67, 178, 234), ThemeColor(21, 82, 175), ThemeColor(6, 24, 83)
+    ];
+
+    private static void DrawSlotFrameSapphire(CanvasDrawingSession ds, Vector2 center)
+    {
+        // A brilliant oval cut: sixteen girdle edges meet eight table corners,
+        // with split crown facets reflecting light through the dark blue core.
+        // The caller already supplies physical coordinates; the gold setting
+        // and this static detail stay inside the original frame footprint.
+        Span<Vector2> girdle = stackalloc Vector2[16];
+        Span<Vector2> table = stackalloc Vector2[8];
+        var tableCenter = center + new Vector2(-.2f, -.12f);
+        for (int edge = 0; edge < girdle.Length; edge++)
+        {
+            float angle = -MathF.PI / 2 + edge * MathF.Tau / girdle.Length;
+            girdle[edge] = center + new Vector2(4.65f * MathF.Cos(angle), 3.2f * MathF.Sin(angle));
+        }
+        for (int corner = 0; corner < table.Length; corner++)
+        {
+            float angle = -MathF.PI / 2 + corner * MathF.Tau / table.Length;
+            table[corner] = tableCenter + new Vector2(2.25f * MathF.Cos(angle), 1.55f * MathF.Sin(angle));
+        }
+        ds.FillEllipse(center, 4.8f, 3.35f, ThemeColor(4, 13, 39));
+        for (int sector = 0; sector < table.Length; sector++)
+        {
+            int next = (sector + 1) % table.Length;
+            var start = girdle[sector * 2];
+            var middle = girdle[sector * 2 + 1];
+            var end = girdle[(sector * 2 + 2) % girdle.Length];
+            using var crownA = CanvasGeometry.CreatePolygon(ds.Device, [start, middle, table[sector]]);
+            using var crownB = CanvasGeometry.CreatePolygon(ds.Device, [middle, end, table[next]]);
+            using var reflection = CanvasGeometry.CreatePolygon(ds.Device, [middle, table[next], table[sector]]);
+            using var core = CanvasGeometry.CreatePolygon(ds.Device, [tableCenter, table[sector], table[next]]);
+            ds.FillGeometry(crownA, SlotSapphireCrown[sector]);
+            ds.FillGeometry(crownB, SlotSapphireCrown[next]);
+            ds.FillGeometry(reflection, SlotSapphireReflections[sector]);
+            ds.FillGeometry(core, SlotSapphireTable[sector]);
+        }
+        ds.DrawEllipse(center, 4.85f, 3.4f, ThemeColor(102, 56, 18), .6f);
+        ds.DrawLine(center + new Vector2(-3.25f, -1.6f), center + new Vector2(-1.8f, -2.75f),
+            ThemeColor(212, 244, 255, 220), .45f);
+        var glint = center + new Vector2(-2.6f, -1.85f);
+        ds.DrawLine(glint - new Vector2(.65f, 0), glint + new Vector2(.65f, 0), ThemeColor(245, 253, 255), .45f);
+        ds.DrawLine(glint - new Vector2(0, .55f), glint + new Vector2(0, .55f), ThemeColor(245, 253, 255), .45f);
     }
 
     // A held prize sits in an engraved gold bezel rather than a rounded tile.

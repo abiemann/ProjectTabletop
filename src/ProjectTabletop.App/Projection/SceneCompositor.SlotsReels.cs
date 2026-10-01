@@ -75,23 +75,27 @@ public sealed partial class SceneCompositor
         // Even an expanding feature or a large win cannot illuminate the
         // control captions used as stationary acquisition references.
         using var effectsClip = CanvasGeometry.CreateRectangle(ds.Device, new Rect(0, 88, 1000, 612));
-        using var effectsLayer = ds.CreateLayer(1, effectsClip);
-        DrawSlotAmbient(ds, layout, _slotVfxTime);
-        using (var clip = CanvasGeometry.CreateRectangle(ds.Device, layout.Window))
-        using (ds.CreateLayer(1, clip))
+        using (ds.CreateLayer(1, effectsClip))
         {
-            if (vault) DrawSlotVault(ds, game, t, layout);
-            else if (game.InRespins) DrawSlotRespinGrid(ds, game, t, progress, layout);
-            else DrawSlotBaseGrid(ds, game, now, t, layout);
-            if (!game.InRespins && !vault && game.Phase == SlotPhase.LineWins) DrawSlotLineWins(ds, game, t, layout);
+            DrawSlotAmbient(ds, layout, _slotVfxTime);
+            using (var clip = CanvasGeometry.CreateRectangle(ds.Device, layout.Window))
+            using (ds.CreateLayer(1, clip))
+            {
+                if (vault) DrawSlotVault(ds, game, t, layout);
+                else if (game.InRespins) DrawSlotRespinGrid(ds, game, t, progress, layout);
+                else DrawSlotBaseGrid(ds, game, now, t, layout);
+                if (!game.InRespins && !vault && game.Phase == SlotPhase.LineWins) DrawSlotLineWins(ds, game, t, layout);
+            }
+            // Flame tips may spill over the reel frame; the outer effects clip
+            // keeps this foreground pass away from camera-observed controls.
+            if (!game.InRespins && !vault && _slotWildPortraits is not null && _slotWildColossus is not null)
+                foreach (var run in SlotsWildPresentation(game, now)) DrawSlotWildRunFire(ds, run, layout);
+            DrawSlotDragons(ds, game, now, layout);
+            DrawSlotBanner(ds, game, t, progress, layout);
         }
-        // Flame tips may spill over the reel frame; the outer effects clip
-        // keeps this foreground pass away from camera-observed controls.
-        if (!game.InRespins && !vault && _slotWildPortraits is not null && _slotWildColossus is not null)
-            foreach (var run in SlotsWildPresentation(game, now)) DrawSlotWildRunFire(ds, run, layout);
-        DrawSlotDragons(ds, game, now, layout);
+        // Lowered chest fronts keep their own pane clips below the reel
+        // effects' y700 cutoff and above the independently clipped win rail.
         DrawSlotKeyChestLight(ds, game, layout);
-        DrawSlotBanner(ds, game, t, progress, layout);
     }
 
     private void DrawSlotBaseGrid(CanvasDrawingSession ds, SlotSnapshot game, DateTimeOffset now, double t, SlotLayout layout)

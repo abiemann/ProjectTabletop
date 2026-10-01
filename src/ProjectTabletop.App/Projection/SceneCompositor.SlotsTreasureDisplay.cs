@@ -36,18 +36,18 @@ public sealed partial class SceneCompositor
     private bool DrawSlotKeyChestArtwork(CanvasDrawingSession ds, Rect box, bool open, float aspect = 1)
     {
         EnsureSlotArtwork(ds.Device);
-        if (_slotVaultChestArtwork is null) return false;
-        // Look straight into the original front panel at a fixed camera zoom.
+        if (_slotVaultChestFrontArtwork is null) return false;
+        // A dedicated orthographic front retains level lid and chain details.
         // Crop the chain at the reel edges instead of fitting a small chest
         // inside the rail. Both states retain the same registered view.
-        double sx = _slotVaultChestArtwork.Size.Width / 1536;
-        double sy = _slotVaultChestArtwork.Size.Height / 1024;
+        double sx = _slotVaultChestFrontArtwork.Size.Width / 1536;
+        double sy = _slotVaultChestFrontArtwork.Size.Height / 1024;
         var crop = SlotKeyChestSource(box, open, aspect);
         var source = new Rect(crop.X * sx, crop.Y * sy, crop.Width * sx, crop.Height * sy);
         using var window = CanvasGeometry.CreateRoundedRectangle(ds.Device, box, 1 / aspect, 1);
         ds.FillGeometry(window, ThemeColor(21, 12, 8));
         using (ds.CreateLayer(1, window))
-            ds.DrawImage(_slotVaultChestArtwork, box, source, 1, CanvasImageInterpolation.HighQualityCubic);
+            ds.DrawImage(_slotVaultChestFrontArtwork, box, source, 1, CanvasImageInterpolation.HighQualityCubic);
         ds.DrawGeometry(window, ThemeColor(48, 29, 13), 1.2f);
         ds.DrawGeometry(window, ThemeColor(191, 145, 65, 190), .55f);
         return true;
@@ -55,14 +55,13 @@ public sealed partial class SceneCompositor
 
     private static Rect SlotKeyChestSource(Rect box, bool open, float aspect)
     {
-        // The closed padlock is centered at master x355. A fixed vertical zoom
+        // Both padlocks are centered at master x768. A fixed vertical zoom
         // keeps its size across board shapes; narrower reels expose less of
         // the front instead of shrinking or stretching the lock and links.
         // This band also contains the released lock's tip and the gold seam.
-        const double height = 224;
+        const double height = 400;
         double width = box.Width * aspect * height / box.Height;
-        double center = 355 + (open ? 768 : 0);
-        return new(center - width / 2, 419, width, height);
+        return new(768 - width / 2, 56 + (open ? 512 : 0), width, height);
     }
 
     private static void DrawSlotTreasureSprite(CanvasDrawingSession ds, CanvasBitmap bitmap,
@@ -77,7 +76,9 @@ public sealed partial class SceneCompositor
     private static Rect SlotKeyChestBox(SlotLayout layout, int reel)
     {
         double width = layout.CellWidth - 2 / layout.Aspect;
-        return new(layout.ReelCenter(reel) - width / 2, 633, width, 56);
+        const double height = 56;
+        // Leave the gold reel frame clear and stop just above the win rail.
+        return new(layout.ReelCenter(reel) - width / 2, SlotWinMessageBounds.Y - height - 2, width, height);
     }
 
     private static Rect SlotEarnedKeyBox(SlotLayout layout, int reel)
@@ -97,13 +98,13 @@ public sealed partial class SceneCompositor
             var box = SlotKeyChestBox(layout, reel);
             float breathe = .72f + .18f * MathF.Sin(_slotVfxTime * 1.8f + reel * 1.7f)
                 + .1f * MathF.Sin(_slotVfxTime * 4.1f + reel);
-            // Master (1148,460) is the exposed gold seam in the ajar frame.
+            if (!DrawSlotKeyChestArtwork(ds, box, open: true, layout.Aspect)) continue;
+            // Master (768,675) is the exposed gold seam in the ajar frame.
             // Map the light through the same camera window as its artwork.
             var source = SlotKeyChestSource(box, open: true, layout.Aspect);
             float fit = (float)(box.Height / source.Height);
-            var origin = new Vector2((float)(box.X + (1148 - source.X) * fit / layout.Aspect),
-                (float)(box.Y + (460 - source.Y) * fit));
-            DrawSlotKeyChestArtwork(ds, box, open: true, layout.Aspect);
+            var origin = new Vector2((float)(box.X + (768 - source.X) * fit / layout.Aspect),
+                (float)(box.Y + (675 - source.Y) * fit));
             using var window = CanvasGeometry.CreateRoundedRectangle(ds.Device,
                 new Rect(box.X + 1 / layout.Aspect, box.Y + 1, box.Width - 2 / layout.Aspect, box.Height - 2),
                 1 / layout.Aspect, 1);
