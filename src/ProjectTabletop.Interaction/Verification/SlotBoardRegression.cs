@@ -7,18 +7,20 @@ internal static class SlotBoardRegression
     public static void Run()
     {
         CheckLayout();
+        CheckPointerPressPresentation();
         CheckLongPressSpin();
         CheckExitDuringFeature();
         CheckSafetyAndGestures();
         Console.WriteLine("Slot board verification passed: bottom-row long-press controls with clear gaps, a one-second Spin, " +
             "controls locked while reels turn, fingers left on Spin never re-spin, Exit during features, bets, Buy, " +
-            "the one-caption safety rule and ignored pinches.");
+            "the one-caption safety rule, ignored pinches and accepted-press presentation records.");
     }
 
     private static void CheckLayout()
     {
         var board = new BoardSession(slots: new SlotGame(1));
         board.ShowSlots(Origin);
+        Require(board.SlotsLastButtonPress is null, "Opening Slots invented a player press.");
         var buttons = board.Buttons;
         Require(buttons.Select(button => button.Id).SequenceEqual(["slot-exit", "slot-bet-down", "slot-bet-up", "slot-buy", "slot-spin"]),
             "The slot controls are not Exit, Bet -, Bet +, Buy and Spin in order.");
@@ -34,6 +36,46 @@ internal static class SlotBoardRegression
             "Bet - or Bet + was offered wrongly at the minimum bet.");
     }
 
+    private static void CheckPointerPressPresentation()
+    {
+        var game = new SlotGame(15);
+        var board = new BoardSession(slots: game);
+        board.ShowSlots(Origin);
+        Require(!board.ActivateButton("slot-bet-down", Origin.AddMilliseconds(100)) && board.SlotsLastButtonPress is null,
+            "A disabled pointer action invented a press.");
+        var now = Origin.AddMilliseconds(200);
+        Require(board.ActivateButton("slot-bet-up", now), "The pointer could not raise the bet.");
+        var first = RequirePress(board, "slot-bet-up", BoardSession.SlotBetUpBounds, now, 1);
+        Require(!board.ActivateButton("slot-bet-down", now.AddMilliseconds(-1)) && ReferenceEquals(board.SlotsLastButtonPress, first),
+            "A rejected stale action replaced the last accepted press.");
+        now = now.AddMilliseconds(100);
+        Require(board.ActivateButton("slot-bet-down", now), "The pointer could not lower the bet.");
+        var second = RequirePress(board, "slot-bet-down", BoardSession.SlotBetDownBounds, now, 2);
+        Require(first.ButtonId == "slot-bet-up" && first.StartedAt == Origin.AddMilliseconds(200) && first.Sequence == 1,
+            "A subsequent press mutated an earlier presentation record.");
+        now = now.AddMilliseconds(100);
+        Require(board.ActivateButton("slot-exit", now) && ReferenceEquals(board.SlotsLastButtonPress, second),
+            "Exit replaced the last gameplay-button press.");
+        now = now.AddMilliseconds(100);
+        board.ShowSlots(now);
+        Require(ReferenceEquals(board.SlotsLastButtonPress, second), "Reopening Slots reset its press sequence.");
+        now = now.AddMilliseconds(100);
+        Require(board.ActivateButton("slot-buy", now), "The pointer could not buy the feature.");
+        var bought = RequirePress(board, "slot-buy", BoardSession.SlotBuyBounds, now, 3);
+        Require(!board.ActivateButton("slot-spin", now.AddMilliseconds(100)) && ReferenceEquals(board.SlotsLastButtonPress, bought),
+            "A disabled Spin replaced the Buy press.");
+        now = RunToIdle(board, game, now.AddMilliseconds(100));
+        Require(ReferenceEquals(board.SlotsLastButtonPress, bought), "Feature phase changes invented another button press.");
+        board.DemonstrateSlots(SlotDemo.FreeSpins);
+        now = now.AddMilliseconds(100);
+        Require(board.ActivateButton("slot-spin", now), "The pointer could not start the free-spin demonstration.");
+        var spin = RequirePress(board, "slot-spin", BoardSession.SlotSpinBounds, now, 4);
+        long spinNumber = game.Snapshot.SpinNumber;
+        RunToIdle(board, game, now);
+        Require(game.Snapshot.SpinNumber > spinNumber && ReferenceEquals(board.SlotsLastButtonPress, spin),
+            "Automatic free spins replaced the player's last press.");
+    }
+
     private static void CheckLongPressSpin()
     {
         var game = new SlotGame(4);
@@ -41,10 +83,12 @@ internal static class SlotBoardRegression
         board.ShowSlots(Origin);
         var now = Origin;
         for (int held = 0; held < 1000; held += 100)
-            Require(Hold(board, "slot-spin", now.AddMilliseconds(held)).Count == 0, "Spin acted before a full second.");
+            Require(Hold(board, "slot-spin", now.AddMilliseconds(held)).Count == 0 && board.SlotsLastButtonPress is null,
+                "Spin or its press presentation acted before a full second.");
         now = now.AddMilliseconds(1000);
         Require(Hold(board, "slot-spin", now).SequenceEqual(["slot-spin"]) && game.Phase == SlotPhase.Spinning &&
             game.Balance == SlotGame.StartingBalance - 20, "A one-second hold did not spin once for the bet.");
+        var firstPress = RequirePress(board, "slot-spin", BoardSession.SlotSpinBounds, now, 1);
         Require(board.Buttons.Where(button => button.Id != "slot-exit").All(button => !button.Enabled) &&
             board.Buttons.Single(button => button.Id == "slot-exit").Enabled,
             "Controls other than Exit stayed enabled while the reels turned.");
@@ -57,7 +101,8 @@ internal static class SlotBoardRegression
             Hold(board, "slot-spin", now);
         }
         for (int held = 0; held < 2500; held += 100)
-            Require(Hold(board, "slot-spin", now.AddMilliseconds(held)).Count == 0 && game.Snapshot.SpinNumber == spins,
+            Require(Hold(board, "slot-spin", now.AddMilliseconds(held)).Count == 0 && game.Snapshot.SpinNumber == spins &&
+                ReferenceEquals(board.SlotsLastButtonPress, firstPress),
                 "Fingers left resting on Spin started another spin.");
         now = now.AddMilliseconds(2500);
         // Lifting for more than 350 ms re-arms it; another full second spins again.
@@ -66,17 +111,21 @@ internal static class SlotBoardRegression
         for (int held = 0; held < 1000; held += 100) Hold(board, "slot-spin", now.AddMilliseconds(held));
         Require(Hold(board, "slot-spin", now.AddMilliseconds(1000)).SequenceEqual(["slot-spin"]) &&
             game.Snapshot.SpinNumber == spins + 1, "Lifting and holding Spin again did not spin.");
+        RequirePress(board, "slot-spin", BoardSession.SlotSpinBounds, now.AddMilliseconds(1000), 2);
         now = RunToIdle(board, game, now.AddMilliseconds(1000));
 
         // Bet + and Buy act once each through their own long press.
         now = LongPress(board, "slot-bet-up", now);
         Require(game.Bet == 40, "Bet + did not raise the bet.");
+        RequirePress(board, "slot-bet-up", BoardSession.SlotBetUpBounds, now, 3);
         now = LongPress(board, "slot-bet-down", now);
         Require(game.Bet == 20, "Bet - did not lower the bet.");
+        RequirePress(board, "slot-bet-down", BoardSession.SlotBetDownBounds, now, 4);
         decimal before = game.Balance;
         now = LongPress(board, "slot-buy", now);
         Require(game.Balance == before - 20 * SlotGame.BuyMultiplier && game.Phase == SlotPhase.Spinning,
             "Buy did not charge its price and start the feature.");
+        RequirePress(board, "slot-buy", BoardSession.SlotBuyBounds, now, 5);
         RunToIdle(board, game, now);
     }
 
@@ -108,7 +157,8 @@ internal static class SlotBoardRegression
         var now = Origin;
         // A hand covering two captions activates nothing and restarts the hold.
         for (int held = 0; held <= 1500; held += 100)
-            Require(board.ObserveHeldButtons(["slot-spin", "slot-buy"], now.AddMilliseconds(held), now.AddMilliseconds(held)).Count == 0,
+            Require(board.ObserveHeldButtons(["slot-spin", "slot-buy"], now.AddMilliseconds(held), now.AddMilliseconds(held)).Count == 0 &&
+                board.SlotsLastButtonPress is null,
                 "Two covered captions activated a slot control.");
         now = now.AddMilliseconds(1600);
         for (int held = 0; held < 1000; held += 100)
@@ -120,11 +170,20 @@ internal static class SlotBoardRegression
 
         // Pinches and four-finger gestures never press a long-press slot control.
         var spin = board.Buttons.Single(button => button.Id == "slot-spin");
+        var lastPress = board.SlotsLastButtonPress;
         long spins = game.Snapshot.SpinNumber;
         var sample = new BoardHandSample(spin.Bounds.X + spin.Bounds.Width / 2, spin.Bounds.Y + spin.Bounds.Height / 2,
             now.AddMilliseconds(1100), 99);
         Require(board.Update([sample], now.AddMilliseconds(100), now.AddMilliseconds(100)) is null &&
-            game.Snapshot.SpinNumber == spins, "A pinch pressed the long-press Spin.");
+            game.Snapshot.SpinNumber == spins && ReferenceEquals(board.SlotsLastButtonPress, lastPress),
+            "A pinch pressed the long-press Spin.");
+    }
+
+    private static SlotButtonPress RequirePress(BoardSession board, string id, BoardRect bounds, DateTimeOffset now, long sequence)
+    {
+        Require(board.SlotsLastButtonPress is { } press && press.ButtonId == id && press.Bounds == bounds &&
+            press.StartedAt == now && press.Sequence == sequence, $"{id}: the accepted press has incorrect identity, bounds, time or sequence.");
+        return board.SlotsLastButtonPress!;
     }
 
     private static IReadOnlyList<string> Hold(BoardSession board, string id, DateTimeOffset now, string[]? held = null) =>

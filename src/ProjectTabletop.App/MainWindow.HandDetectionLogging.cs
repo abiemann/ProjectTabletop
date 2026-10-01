@@ -12,7 +12,8 @@ public sealed partial class MainWindow
     private long _handDetectionSequence;
     private DateTimeOffset _lastHandLogStatusRefresh;
     private DateTimeOffset _handVideoNotBefore;
-    private volatile bool _boardHandDiagnosticLogging;
+    // Extra logging outside the tester is opt-in through the Debug control.
+    private volatile bool _boardHandDiagnosticLogging = false;
 
     private bool IsHandTrackingTester => _scene.CurrentBoardScreen == BoardScreen.HandTracking;
     private string? ActiveHandRecordingId => _handVideoRecorder?.Status is { IsRecording: true } video

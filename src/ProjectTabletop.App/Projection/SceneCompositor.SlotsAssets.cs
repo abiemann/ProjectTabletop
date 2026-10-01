@@ -12,9 +12,15 @@ public sealed partial class SceneCompositor
     private CanvasBitmap? _slotDragonArtwork;
     private CanvasBitmap? _slotWildPortraits;
     private CanvasBitmap? _slotWildColossus;
+    private CanvasBitmap? _slotMenuDragonArtwork;
+    private CanvasBitmap? _slotCoinPileArtwork;
+    private CanvasBitmap? _slotVaultChestArtwork;
+    private CanvasBitmap? _slotVaultKeyArtwork;
     private CanvasDevice? _slotArtworkDevice;
     private bool _slotArtworkAttempted;
     private string? _slotArtworkError;
+    private string? _slotMenuArtworkError;
+    private string? _slotCabinetArtworkError;
     private readonly Dictionary<SlotSymbol, Rect> _slotArtworkBounds = [];
 
     // Original illustrated art in twelve nominal grid cells. Typography is
@@ -43,8 +49,12 @@ public sealed partial class SceneCompositor
 
     internal bool SlotsArtworkReady => _slotArtwork is not null && _slotBackdrop is not null
         && _slotTreasureArtwork is not null && _slotDragonArtwork is not null
-        && _slotWildPortraits is not null && _slotWildColossus is not null;
-    internal string? SlotsArtworkError => _slotArtworkError;
+        && _slotWildPortraits is not null && _slotWildColossus is not null && SlotsCabinetArtworkReady;
+    internal string? SlotsArtworkError => _slotArtworkError ?? _slotCabinetArtworkError;
+    internal bool SlotsCabinetArtworkReady => _slotCoinPileArtwork is not null
+        && _slotVaultChestArtwork is not null && _slotVaultKeyArtwork is not null;
+    internal bool SlotsMenuArtworkReady => _slotMenuDragonArtwork is not null;
+    internal string? SlotsMenuArtworkError => _slotMenuArtworkError;
 
     private void EnsureSlotArtwork(CanvasDevice device)
     {
@@ -90,6 +100,38 @@ public sealed partial class SceneCompositor
             _slotArtworkBounds.Clear();
             AppLog.Write("Dragon Slots artwork", error);
         }
+        // The menu illustration is optional and independent of game artwork:
+        // a missing thumbnail must not discard the reels' successfully loaded
+        // atlases. Resolve it before caching the tile, never midway through an
+        // unchanged menu's camera reference.
+        try
+        {
+            _slotMenuDragonArtwork = CanvasBitmap.LoadAsync(device,
+                Path.Combine(AppContext.BaseDirectory, "SlotsRendering", "Assets", "slot-menu-dragon.png"), 96)
+                .AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception error) when (!device.IsDeviceLost(error.HResult))
+        {
+            _slotMenuArtworkError = error.Message;
+            AppLog.Write("Dragon Slots menu artwork", error);
+        }
+        // These sprites have their own load boundary: a missing new cabinet
+        // asset must not discard the already decoded dragons and reel atlases.
+        try
+        {
+            string directory = Path.Combine(AppContext.BaseDirectory, "SlotsRendering", "Assets");
+            _slotCoinPileArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-coin-pile.png"), 96)
+                .AsTask().GetAwaiter().GetResult();
+            _slotVaultChestArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-vault-chests.png"), 96)
+                .AsTask().GetAwaiter().GetResult();
+            _slotVaultKeyArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-vault-key.png"), 96)
+                .AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception error) when (!device.IsDeviceLost(error.HResult))
+        {
+            _slotCabinetArtworkError = error.Message;
+            AppLog.Write("Dragon Slots treasure artwork", error);
+        }
     }
 
     private void SetSlotArtworkBounds()
@@ -112,6 +154,8 @@ public sealed partial class SceneCompositor
             DrawSlotWildTile(ds, new Rect(3, 3, 94, 94), 1, -1, 1);
             return true;
         }
+        if (symbol == SlotSymbol.Chest && DrawSlotChestArtwork(ds, new Rect(4, 4, 92, 92), open: true)) return true;
+        if (symbol == SlotSymbol.Key && DrawSlotKeyArtwork(ds, new Rect(4, 4, 92, 92))) return true;
         if (symbol == SlotSymbol.Chest && DrawSlotTreasure(ds, 0, new Rect(4, 4, 92, 92))) return true;
         if (_slotArtwork is null || !_slotArtworkBounds.TryGetValue(symbol, out var source)) return false;
         double scale = 92 / Math.Max(source.Width, source.Height);
@@ -148,6 +192,7 @@ public sealed partial class SceneCompositor
     private void DrawSlotOpenChest(CanvasDrawingSession ds, Rect box)
     {
         EnsureSlotArtwork(ds.Device);
+        if (DrawSlotChestArtwork(ds, box, open: true, (float)PaintBoardAspect())) return;
         if (_slotArtwork is null || !_slotArtworkBounds.TryGetValue(SlotSymbol.Chest, out var source))
         {
             DrawSlotArt(ds, SlotSymbol.Chest, box, 1);
@@ -166,26 +211,37 @@ public sealed partial class SceneCompositor
         if (_slotBackdrop is null) return false;
         // Cover without distortion at the physical board aspect. The cavern's
         // quiet center leaves the machine's contrast and typography intact.
-        double aspect = PaintBoardAspect();
-        double width = _slotBackdrop.Size.Width, height = _slotBackdrop.Size.Height;
-        double cropWidth = Math.Min(width, height * aspect), cropHeight = cropWidth / aspect;
+        var source = SlotBackdropSource(PaintBoardAspect());
         ds.DrawImage(_slotBackdrop, new Rect(0, 0, 1000, 1000),
-            new Rect((width - cropWidth) / 2, (height - cropHeight) / 2, cropWidth, cropHeight),
+            source,
             1, CanvasImageInterpolation.HighQualityCubic);
         return true;
+    }
+
+    private Rect SlotBackdropSource(double aspect)
+    {
+        double width = _slotBackdrop!.Size.Width, height = _slotBackdrop.Size.Height;
+        double cropWidth = Math.Min(width, height * aspect), cropHeight = cropWidth / aspect;
+        return new((width - cropWidth) / 2, (height - cropHeight) / 2, cropWidth, cropHeight);
     }
 
     private void DisposeSlotArtwork()
     {
         _slotArtwork?.Dispose(); _slotBackdrop?.Dispose(); _slotTreasureArtwork?.Dispose(); _slotDragonArtwork?.Dispose();
         _slotWildPortraits?.Dispose(); _slotWildColossus?.Dispose();
+        _slotMenuDragonArtwork?.Dispose();
+        _slotCoinPileArtwork?.Dispose(); _slotVaultChestArtwork?.Dispose(); _slotVaultKeyArtwork?.Dispose();
         _slotArtwork = _slotBackdrop = null;
         _slotTreasureArtwork = null;
         _slotDragonArtwork = null;
         _slotWildPortraits = _slotWildColossus = null;
+        _slotMenuDragonArtwork = null;
+        _slotCoinPileArtwork = _slotVaultChestArtwork = _slotVaultKeyArtwork = null;
         _slotArtworkDevice = null;
         _slotArtworkAttempted = false;
         _slotArtworkError = null;
+        _slotMenuArtworkError = null;
+        _slotCabinetArtworkError = null;
         _slotArtworkBounds.Clear();
     }
 }

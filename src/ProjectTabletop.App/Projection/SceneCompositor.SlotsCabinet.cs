@@ -10,8 +10,8 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
-    // All cabinet ornament is static. The pale hold buttons and their generated
-    // caption reference remain separate, with no decorative strokes on the glass.
+    // Cabinet ornament is static; the marquee's fire and heat are a live pass.
+    // Pale hold buttons and their generated caption reference stay separate.
     private static Rect SlotInset(Rect rect, double inset) => new(rect.X + inset, rect.Y + inset,
         rect.Width - 2 * inset, rect.Height - 2 * inset);
 
@@ -37,7 +37,7 @@ public sealed partial class SceneCompositor
         new() { Position = 1, Color = ThemeColor(90, 57, 29) }
     ]) { StartPoint = new((float)rect.X, (float)rect.Y), EndPoint = new((float)rect.Right, (float)rect.Bottom) };
 
-    private static void DrawSlotCabinetEdge(CanvasDrawingSession ds)
+    private static void DrawSlotCabinetEdge(CanvasDrawingSession ds, double boardAspect)
     {
         var border = new Rect(10, 10, 980, 980);
         using var outline = SlotCutPanel(ds.Device, border, 25);
@@ -46,6 +46,11 @@ public sealed partial class SceneCompositor
         ds.DrawGeometry(outline, metal, 2);
         using var inner = SlotCutPanel(ds.Device, SlotInset(border, 7), 22);
         ds.DrawGeometry(inner, ThemeColor(219, 174, 91, 70), .7f);
+        // Keep each base on the bevel, but place its tip on the physical
+        // perpendicular bisector. Equal logical sides stretch on wide boards.
+        // The raw aspect also covers portraits narrower than the reel layout.
+        float aspect = (float)(double.IsFinite(boardAspect) ? Math.Clamp(boardAspect, .2, 5) : 1);
+        float tipOffset = 22 / (1 + aspect * aspect);
         foreach (var (x, y, sx, sy) in new (float, float, float, float)[]
         {
             (23, 23, 1, 1), (977, 23, -1, 1), (23, 977, 1, -1), (977, 977, -1, -1)
@@ -54,29 +59,43 @@ public sealed partial class SceneCompositor
             ds.DrawLine(x + sx * 9, y, x + sx * 52, y, ThemeColor(225, 184, 109, 170), 1.4f);
             ds.DrawLine(x, y + sy * 9, x, y + sy * 44, ThemeColor(225, 184, 109, 170), 1.4f);
             using var tip = CanvasGeometry.CreatePolygon(ds.Device,
-            [new(x, y + sy * 6), new(x + sx * 6, y), new(x + sx * 14, y + sy * 14)]);
+            [new(x, y + sy * 6), new(x + sx * 6, y),
+                new(x + sx * (3 + tipOffset), y + sy * (3 + aspect * aspect * tipOffset))]);
             ds.FillGeometry(tip, ThemeColor(211, 165, 84));
         }
     }
 
-    private static void DrawSlotMarquee(CanvasDrawingSession ds, float aspect)
+    private void DrawSlotMarquee(CanvasDrawingSession ds, float aspect)
     {
-        // The name is the only large serif line; the smaller legends belong to
-        // the instruments below, keeping the cabinet readable at projection size.
+        // A scorched forge bed, not a gold sign: the live layer kindles its
+        // charcoal behind the iron letter faces across the whole marquee.
         var plaque = new Rect(193, 15, 614, 78);
         using var shape = SlotCutPanel(ds.Device, plaque, 17);
-        using var fill = new CanvasLinearGradientBrush(ds.Device, ThemeColor(12, 13, 21, 230), ThemeColor(16, 10, 17, 205))
+        using var fill = new CanvasLinearGradientBrush(ds.Device,
+        [
+            new() { Position = 0, Color = ThemeColor(11, 12, 15, 225) },
+            new() { Position = .44f, Color = ThemeColor(27, 16, 16, 238) },
+            new() { Position = .72f, Color = ThemeColor(55, 17, 12, 238) },
+            new() { Position = 1, Color = ThemeColor(10, 10, 13, 245) }
+        ])
         { StartPoint = new(0, 15), EndPoint = new(0, 93) };
         ds.FillGeometry(shape, fill);
-        ds.DrawGeometry(shape, ThemeColor(213, 168, 91, 95), .8f);
-        ds.DrawLine(225, 19, 775, 19, ThemeColor(250, 218, 147, 175), .8f);
-        ds.DrawLine(243, 91, 757, 91, ThemeColor(166, 115, 57, 170), 1);
-        SlotText(ds, "DRAGON'S HOARD", new Rect(172, 26, 660, 46), 42,
-            ThemeColor(0, 0, 0, 235), aspect, "Georgia");
-        SlotText(ds, "DRAGON'S HOARD", new Rect(170, 23, 660, 46), 42,
-            ThemeColor(250, 222, 160), aspect, "Georgia");
-        SlotText(ds, "40 LINES  ·  HOLD A BUTTON FOR ONE SECOND", new Rect(205, 72, 590, 17), 11.5f,
-            ThemeColor(224, 204, 168), aspect);
+        ds.DrawGeometry(shape, ThemeColor(118, 64, 36, 155), 1);
+        using var rim = SlotCutPanel(ds.Device, SlotInset(plaque, 2.5), 15);
+        ds.DrawGeometry(rim, ThemeColor(191, 118, 61, 65), .7f);
+        for (int coal = 0; coal < 58; coal++)
+        {
+            float x = 216 + SlotRandom(coal * 23 + 17) * 568;
+            float y = 24 + SlotRandom(coal * 31 + 71) * 60;
+            float size = 3 + SlotRandom(coal * 19 + 47) * 6;
+            using var shard = CanvasGeometry.CreatePolygon(ds.Device,
+            [new(x - size / aspect, y), new(x - size * .38f / aspect, y - size * .55f),
+                new(x + size * .68f / aspect, y - size * .32f), new(x + size / aspect, y + size * .3f),
+                new(x - size * .3f / aspect, y + size * .55f)]);
+            ds.FillGeometry(shard, coal % 4 == 0 ? ThemeColor(39, 24, 22) : ThemeColor(13, 14, 17));
+            ds.DrawGeometry(shard, coal % 3 == 0 ? ThemeColor(173, 57, 19, 135) : ThemeColor(63, 39, 30, 110), .55f);
+        }
+        DrawSlotMarqueeIron(ds, aspect, 0);
         foreach (int side in new[] { -1, 1 })
         {
             float start = side < 0 ? 48 : 830, end = side < 0 ? 170 : 952;

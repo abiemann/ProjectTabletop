@@ -88,37 +88,4 @@ public sealed partial class SceneCompositor
         DrawSlotArt(ds, symbol, layout.SymbolBox(rect, .76f), Math.Min(.28f, opacity));
     }
 
-    // Static panel title and bottom label are supplied by DrawSlotSidePanel.
-    // Keep the changing amount between them and away from acquisition controls.
-    private static void DrawSlotLineWinAward(CanvasDrawingSession ds, SlotSnapshot game, double t, SlotLayout layout)
-    {
-        if (game.Phase != SlotPhase.LineWins || game.InRespins || game.LineWins.Count == 0) return;
-        float left = layout.Right + 26, right = 966;
-        if (right - left < 90) return;
-        double elapsed = double.IsFinite(t) ? Math.Max(0, t) : 0;
-        double duration = game.PhaseDuration.TotalSeconds;
-        double progress = duration > 0 ? Math.Clamp(elapsed / duration / .78, 0, 1) : 1;
-        decimal total = Math.Max(0, game.LineWins.Sum(line => line.Amount));
-        decimal amount = progress >= 1 ? total : Math.Floor(total * (decimal)Ease(progress) * 100) / 100;
-        var bounds = new Rect(left + 10, 450, right - left - 20, 118);
-        using var clip = CanvasGeometry.CreateRectangle(ds.Device, bounds);
-        using var layer = ds.CreateLayer(1, clip);
-        var center = Center(bounds);
-        using (var glow = new CanvasRadialGradientBrush(ds.Device,
-            ThemeColor(255, 174, 52, (byte)(28 + 10 * Math.Sin(elapsed * 4))), ThemeColor(255, 117, 24, 0))
-        { Center = center, RadiusX = (float)bounds.Width * .65f, RadiusY = 51 })
-            ds.FillRectangle(bounds, glow);
-        float size = Math.Min(52, (float)bounds.Width * layout.Aspect * .28f);
-        SlotText(ds, SlotGame.Format(amount), new Rect(bounds.X, 463, bounds.Width, 78), size,
-            ThemeColor(255, 232, 149), layout.Aspect, "Georgia", true, fire: true);
-        float span = Math.Min(36 / layout.Aspect, (float)bounds.Width * .25f);
-        ds.DrawLine(center.X - span, 550, center.X + span, 550, ThemeColor(238, 185, 88, 95), .7f);
-        float travel = (float)Math.Clamp(progress, 0, 1);
-        var glint = new Vector2(center.X - span + 2 * span * travel, 550);
-        float fade = progress >= 1 ? (float)(.55 + .15 * Math.Sin(elapsed * 3)) : .9f;
-        ds.DrawLine(glint - new Vector2(2.6f / layout.Aspect, 0), glint + new Vector2(2.6f / layout.Aspect, 0),
-            ThemeColor(255, 237, 173, (byte)(fade * 220)), .8f);
-        ds.DrawLine(glint - new Vector2(0, 2.6f), glint + new Vector2(0, 2.6f),
-            ThemeColor(255, 237, 173, (byte)(fade * 220)), .8f / layout.Aspect);
-    }
 }

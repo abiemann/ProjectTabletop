@@ -11,10 +11,10 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
-    // Fire and suspended embers keep the reel window alive while idle; the
+    // Fire and floating gold dust keep the reel window alive while idle; the
     // cabinet and camera-observed controls stay in the cached board image.
     private CanvasRenderTarget? _slotsReelTarget;
-    private (long Revision, long Frame, double Aspect)? _slotsReelKey;
+    private (long Revision, long Frame, double Aspect, long EyePress)? _slotsReelKey;
     private static readonly SlotSymbol[] SlotFillerSymbols =
     [
         SlotSymbol.Ten, SlotSymbol.Jack, SlotSymbol.Queen, SlotSymbol.King, SlotSymbol.Ace, SlotSymbol.Ten,
@@ -27,7 +27,7 @@ public sealed partial class SceneCompositor
         if (_boardSession.Screen != BoardScreen.Slots) return null;
         var game = _boardSession.SlotsState;
         if (EnsureBoardRenderTarget(ref _slotsReelTarget, device)) _slotsReelKey = null;
-        var key = (game.Revision, GlobeVisualFrame(now), aspect);
+        var key = (game.Revision, GlobeVisualFrame(now), aspect, _boardSession.SlotsLastButtonPress?.Sequence ?? 0);
         if (_slotsReelKey != key)
         {
             using var drawing = _slotsReelTarget!.CreateDrawingSession();
@@ -46,6 +46,10 @@ public sealed partial class SceneCompositor
         _slotsReelKey = null;
         _slotVfxEpoch = null;
         DisposeSlotVfx();
+        DisposeSlotDragonEye();
+        DisposeSlotDragonLava();
+        DisposeSlotCavernLava();
+        DisposeSlotMarquee();
         DisposeSlotSprites();
         _slotsPreviewTarget?.Dispose();
         _slotsPreviewTarget = null;
@@ -61,12 +65,18 @@ public sealed partial class SceneCompositor
         double t = Math.Max(0, (now - game.PhaseStartedAt).TotalSeconds);
         double progress = game.PhaseDuration > TimeSpan.Zero ? Math.Clamp(t / game.PhaseDuration.TotalSeconds, 0, 1) : 1;
         bool vault = game.Phase is SlotPhase.VaultIntro or SlotPhase.VaultPicking or SlotPhase.VaultOutro;
+        DrawSlotDragonEye(ds, now, PaintBoardAspect());
+        DrawSlotDragonLava(ds, now, PaintBoardAspect(), layout);
+        DrawSlotCavernLava(ds, now, PaintBoardAspect(), layout);
+        DrawSlotMarqueeLive(ds, layout);
+        // This independently clipped message sits below the reel effects.
+        // Draw it before their y700 cutoff, above the static empty status rail.
+        DrawSlotWinMessage(ds, game, now, layout.Aspect);
         // Even an expanding feature or a large win cannot illuminate the
         // control captions used as stationary acquisition references.
         using var effectsClip = CanvasGeometry.CreateRectangle(ds.Device, new Rect(0, 88, 1000, 612));
         using var effectsLayer = ds.CreateLayer(1, effectsClip);
         DrawSlotAmbient(ds, layout, _slotVfxTime);
-        if (!game.InRespins && game.Phase != SlotPhase.LineWins) DrawSlotPanelFire(ds, layout);
         using (var clip = CanvasGeometry.CreateRectangle(ds.Device, layout.Window))
         using (ds.CreateLayer(1, clip))
         {
@@ -80,7 +90,7 @@ public sealed partial class SceneCompositor
         if (!game.InRespins && !vault && _slotWildPortraits is not null && _slotWildColossus is not null)
             foreach (var run in SlotsWildPresentation(game, now)) DrawSlotWildRunFire(ds, run, layout);
         DrawSlotDragons(ds, game, now, layout);
-        if (game.Phase == SlotPhase.LineWins) DrawSlotLineWinAward(ds, game, t, layout);
+        DrawSlotKeyChestLight(ds, game, layout);
         DrawSlotBanner(ds, game, t, progress, layout);
     }
 
@@ -411,7 +421,8 @@ public sealed partial class SceneCompositor
             bool winning = chest is not null && game.Phase == SlotPhase.VaultOutro && chest.Gem == game.VaultAward;
             if (chest is null)
             {
-                DrawSlotArt(ds, SlotSymbol.Chest, box, 1);
+                if (!DrawSlotChestArtwork(ds, box, open: false, layout.Aspect))
+                    DrawSlotArt(ds, SlotSymbol.Chest, box, 1);
                 continue;
             }
             float pop = index == newest ? (float)Math.Min(1, t / .3) : 1;

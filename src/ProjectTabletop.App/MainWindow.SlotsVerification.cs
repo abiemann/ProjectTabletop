@@ -129,7 +129,7 @@ public sealed partial class MainWindow
         // Search only the pure game state, rendering at most the missing effects.
         await CaptureMissingEffects();
 
-        // A square board keeps symbols physically square and its side columns.
+        // A square board keeps symbols in their physical proportions.
         await CheckAspect(2160, 2160, "square-board");
         await CheckAspect(2160, 3840, "portrait-board");
         await CheckAspect(2777, 2160, "measured-board-72x56");
@@ -512,13 +512,16 @@ public sealed partial class MainWindow
                     int column = sample.Power switch { SlotEffect.Expand => -1, SlotEffect.Collect => 0, _ => 1 };
                     double center = 500 + column * 150 / aspect;
                     int changed = ChangedRegion(beginning.Pixels, pixels, width, height, boardMap,
-                        center - 71 / aspect, 99, 142 / aspect, 116);
+                        center - 71 / aspect, 136, 142 / aspect, 100);
                     RequireHatching(changed > 100, $"{sample.Power}: the egg did not visibly become a dragon in its own portrait.");
                     headerChanges.Add(sample.Power.ToString(), changed);
-                    RequireSameRegion(beginning.Pixels, pixels, width, height, boardMap, 0, 217, 1000, 16,
-                        $"{sample.Power}: hatching intruded into the static power labels.");
-                    RequireSameRegion(beginning.Pixels, pixels, width, height, boardMap, 0, 92, 1000, 3,
-                        $"{sample.Power}: hatching escaped above the header into the title's guard band.");
+                    for (int header = 0; header < 3; header++)
+                    {
+                        double headerCenter = 500 + (header - 1) * 150 / aspect;
+                        RequireSameRegion(beginning.Pixels, pixels, width, height, boardMap,
+                            headerCenter - 70 / aspect, 96, 140 / aspect, 37,
+                            $"{sample.Power}: hatching intruded into the static jackpot headers.");
+                    }
                     RequireSameRegion(beginning.Pixels, pixels, width, height, boardMap, 0, 830, 1000, 170,
                         $"{sample.Power}: hatching changed the camera-observed bottom controls.");
                 }
@@ -587,7 +590,7 @@ public sealed partial class MainWindow
         {
             passed = true, directory, images, seed, headerChanges,
             hatchEvents = hatches.Select(hatch => new { power = hatch.Power.ToString(), hatch.HatchedAt }).ToArray(),
-            sameClockPixelsIdentical = true, labelsAndControlsUnchanged = true, outputMarginsBlack = true,
+            sameClockPixelsIdentical = true, jackpotHeadersAndControlsUnchanged = true, outputMarginsBlack = true,
             dragonsPersistThroughIdle = true, nextSpinResetsEggs = true,
             motion = new
             {

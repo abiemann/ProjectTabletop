@@ -72,8 +72,8 @@ public sealed partial class BoardSession
     private static readonly TimeSpan ObservationLifetime = TimeSpan.FromMilliseconds(350);
     private static readonly TimeSpan SelectionLifetime = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan ExecuteDuration = TimeSpan.FromSeconds(1);
-    /// <summary>The cog in the menu's upper-right corner opens Settings.</summary>
-    public static readonly BoardRect SettingsCogBounds = new(.70, .045, .24, .13);
+    /// <summary>The header cog opens Settings, aligned with the menu's right column.</summary>
+    public static readonly BoardRect SettingsCogBounds = new(.68, .075, .24, .13);
     private static readonly IReadOnlyList<BoardButton> MenuButtons = Array.AsReadOnly(new[]
     {
         new BoardButton("slots", "Dragon Slots", new(.08, .25, .40, .16), BoardScreen.Slots),

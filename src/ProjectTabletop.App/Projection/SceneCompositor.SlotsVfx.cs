@@ -1,6 +1,7 @@
 using System.Numerics;
 using ComputeSharp.D2D1.WinUI;
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Brushes;
 using Microsoft.Graphics.Canvas.Geometry;
 using ProjectTabletop.App.Projection.SlotsRendering;
 using ProjectTabletop.Interaction;
@@ -44,44 +45,88 @@ public sealed partial class SceneCompositor
         return (value & 0xffffff) / 16777216f;
     }
 
-    private void DrawSlotPanelFire(CanvasDrawingSession ds, SlotLayout layout)
-    {
-        float left = layout.Right + 26, right = 966;
-        var center = new Vector2((left + right) / 2, 542);
-        // The art and flame are bounded between the two static text captions.
-        // Nothing here participates in the lower control/acquisition surface.
-        using var clip = CanvasGeometry.CreateRectangle(ds.Device, new Rect(left + 8, 500, right - left - 16, 78));
-        using (ds.CreateLayer(1, clip))
-        {
-            var fire = layout.Square(new Vector2(center.X, center.Y - 9), 91);
-            DrawSlotFire(ds, fire, _slotVfxTime, 3.7f, .95f);
-            DrawSlotArt(ds, SlotSymbol.Coin, layout.Square(center, 70), 1);
-        }
-    }
 
     private static void DrawSlotAmbient(CanvasDrawingSession ds, SlotLayout layout, float time)
     {
-        // Strictly above the opaque camera-observed controls. The sparse field
-        // gives the idle cabinet life without flashing its titles or captions.
-        float top = layout.Top - 17;
-        var bounds = new Rect(layout.Left - 38, top, layout.Width + 76, Math.Min(685, layout.Bottom + 36) - top);
+        // Fine suspended gold sits behind the prizes, inside the blue reel
+        // window. Clip the whole grain, halo and glint below the gold frame.
+        // A grain picks a new path only at its invisible birth, using the
+        // injected presentation clock rather than game randomness.
+        var bounds = layout.Window;
         using var clip = CanvasGeometry.CreateRectangle(ds.Device, bounds);
         using (ds.CreateLayer(1, clip))
-            for (int index = 0; index < 24; index++)
+        {
+            // Work in physical coordinates so grains, halos and glints stay
+            // round on both the tabletop and a widescreen preview.
+            var transform = ds.Transform;
+            var physicalTransform = Matrix3x2.CreateScale(1 / layout.Aspect, 1) * transform;
+            using var halo = new CanvasRadialGradientBrush(ds.Device,
+            [
+                new() { Position = 0, Color = ThemeColor(255, 224, 141, 100) },
+                new() { Position = .18f, Color = ThemeColor(255, 210, 105, 48) },
+                new() { Position = .52f, Color = ThemeColor(255, 191, 71, 12) },
+                new() { Position = 1, Color = ThemeColor(255, 191, 71, 0) }
+            ]);
+            using var glint = CanvasGeometry.CreatePolygon(ds.Device,
+            [
+                new(0, -1), new(.13f, -.13f), new(.68f, 0), new(.13f, .13f),
+                new(0, 1), new(-.13f, .13f), new(-.68f, 0), new(-.13f, -.13f)
+            ]);
+            try
             {
-                float random = SlotRandom(index * 23 + 41);
-                float phase = (time * (.025f + random * .023f) + SlotRandom(index + 209)) % 1;
-                float x = (float)bounds.X + SlotRandom(index * 17 + 83) * (float)bounds.Width
-                    + MathF.Sin(phase * 8 + random * 9) * 12 / layout.Aspect;
-                float y = (float)bounds.Bottom - phase * (float)bounds.Height;
-                float alpha = MathF.Sin(phase * MathF.PI) * (.25f + random * .35f);
-                float length = 1.8f + random * 4;
-                var point = new Vector2(x, y);
-                ds.DrawLine(point, point + new Vector2(-.8f / layout.Aspect, length),
-                    ThemeColor(255, 138, 36, (byte)(alpha * 130)), 3 / MathF.Sqrt(layout.Aspect));
-                ds.DrawLine(point, point + new Vector2(0, length * .5f),
-                    ThemeColor(255, 226, 148, (byte)(alpha * 245)), .9f / MathF.Sqrt(layout.Aspect));
+                ds.Transform = physicalTransform;
+                for (int index = 0; index < 120; index++)
+                {
+                    float lifetime = 18 + SlotRandom(index * 23 + 41) * 22;
+                    float age = time / lifetime + SlotRandom(index + 209);
+                    int cycle = (int)MathF.Floor(age);
+                    float phase = age - cycle;
+                    int seed = unchecked(index * 197 + cycle * 1301 + 83);
+                    float random = SlotRandom(seed);
+                    float drift = 3 + SlotRandom(seed + 19) * 9;
+                    float x = (float)bounds.X * layout.Aspect
+                        + SlotRandom(seed + 17) * (float)bounds.Width * layout.Aspect
+                        + MathF.Sin(phase * 6.3f + random * MathF.Tau) * drift
+                        + MathF.Sin(phase * 13.7f + SlotRandom(seed + 37) * MathF.Tau) * drift * .28f;
+                    float y = (float)bounds.Bottom - phase * (float)bounds.Height;
+                    float birth = Math.Clamp(phase / .075f, 0, 1);
+                    float death = Math.Clamp((1 - phase) / .16f, 0, 1);
+                    float envelope = birth * birth * (3 - 2 * birth) * death * death * (3 - 2 * death);
+                    float shimmer = .62f + .38f * MathF.Sin(time * (1.6f + random * 1.1f) + random * 17);
+                    float radius = .28f + MathF.Pow(SlotRandom(seed + 53), 2) * .66f;
+                    float opacity = envelope * (.28f + random * .46f) * shimmer;
+                    var point = new Vector2(x, y);
+
+                    // Most grains remain pin-fine. Just a few catch the light
+                    // with a soft optical bloom and a short pointed glint.
+                    float twinkle = index % 6 == 0
+                        ? MathF.Pow(Math.Max(0, MathF.Sin(time * (1.35f + random * .8f)
+                            + SlotRandom(seed + 71) * MathF.Tau)), 18) * envelope : 0;
+                    if (index % 4 == 0 || twinkle > .02f)
+                    {
+                        float glowRadius = 2.1f + radius * 1.7f + twinkle * 1.8f;
+                        halo.Center = point;
+                        halo.RadiusX = halo.RadiusY = glowRadius;
+                        halo.Opacity = Math.Min(1, opacity * .75f + twinkle * .75f);
+                        ds.FillCircle(point, glowRadius, halo);
+                    }
+                    ds.FillCircle(point, radius,
+                        ThemeColor(255, (byte)(207 + random * 35), (byte)(111 + random * 73), (byte)(opacity * 220)));
+                    if (twinkle > .025f)
+                    {
+                        float ray = 1.25f + twinkle * 2.1f;
+                        ds.Transform = Matrix3x2.CreateScale(ray)
+                            * Matrix3x2.CreateRotation(random * .8f - .4f)
+                            * Matrix3x2.CreateTranslation(point) * physicalTransform;
+                        ds.FillGeometry(glint, ThemeColor(255, 244, 202, (byte)(twinkle * 200)));
+                        ds.Transform = physicalTransform;
+                        ds.FillCircle(point, .34f + twinkle * .22f,
+                            ThemeColor(255, 255, 236, (byte)(twinkle * 245)));
+                    }
+                }
             }
+            finally { ds.Transform = transform; }
+        }
     }
 
     private void DrawSlotSymbolEnergy(CanvasDrawingSession ds, SlotSymbol symbol, Rect box, SlotLayout layout, float opacity)

@@ -1,9 +1,13 @@
 namespace ProjectTabletop.Interaction;
 
+/// <summary>An accepted player press for presentation, independent of slot rules and snapshots.</summary>
+public sealed record SlotButtonPress(string ButtonId, BoardRect Bounds, DateTimeOffset StartedAt, long Sequence);
+
 public sealed partial class BoardSession
 {
     private readonly SlotGame _slots;
     private long _slotsObservedRevision;
+    private long _slotsButtonPressSequence;
 
     // Every slot control sits on the viewer's edge row, where the wrist leaves
     // the camera view, so each is a long-press hold button acting once per press.
@@ -15,6 +19,8 @@ public sealed partial class BoardSession
     public static readonly BoardRect SlotSpinBounds = new(.74, .855, .23, .115);
 
     public SlotSnapshot SlotsState => _slots.Snapshot;
+    /// <summary>The last accepted Bet, Buy or Spin press, retained across navigation.</summary>
+    public SlotButtonPress? SlotsLastButtonPress { get; private set; }
 
     public void ShowSlots(DateTimeOffset? now = null) => Show(BoardScreen.Slots, now ?? DateTimeOffset.UtcNow);
 
@@ -68,6 +74,8 @@ public sealed partial class BoardSession
             return true;
         }
         if (!_slots.HandleAction(button.Id, now)) return false;
+        if (button.Id is "slot-bet-down" or "slot-bet-up" or "slot-buy" or "slot-spin")
+            SlotsLastButtonPress = new(button.Id, button.Bounds, now, ++_slotsButtonPressSequence);
         _slotsObservedRevision = _slots.Revision;
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

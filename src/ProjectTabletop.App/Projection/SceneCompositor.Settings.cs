@@ -19,7 +19,9 @@ public sealed partial class SceneCompositor
     {
         var rect = new Rect(button.Bounds.X * BoardSurfaceSize, button.Bounds.Y * BoardSurfaceSize,
             button.Bounds.Width * BoardSurfaceSize, button.Bounds.Height * BoardSurfaceSize);
-        DrawButtonSurface(ds, rect, hovered);
+        // A quiet secondary control: no status bar, bevel, sheen or shadow.
+        ds.DrawRoundedRectangle(rect, 19, 19,
+            hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 1.25f);
         var center = new Vector2((float)rect.X + 58, (float)(rect.Y + rect.Height / 2));
         float aspect = (float)PaintBoardAspect();
         var previous = ds.Transform;
@@ -77,8 +79,30 @@ public sealed partial class SceneCompositor
         return ButtonInkRegion(button, layout.DrawBounds, rect.X, rect.Y);
     }
 
-    // The slot machine's menu tile: its gold-framed reels in the dragon's cave.
+    // A transparent dragon fills the tile height with its head on the right,
+    // breathing left into the existing diagonal fade beneath the caption.
     private void DrawSlotsMenuPreview(CanvasDrawingSession ds, float span)
+    {
+        EnsureSlotArtwork(ds.Device);
+        ds.Clear(Microsoft.UI.Colors.Transparent);
+        if (_slotMenuDragonArtwork is not { } dragon)
+        {
+            DrawSlotsMenuFallback(ds, span);
+            return;
+        }
+        // Menu previews already use physically square units at native raster
+        // density. Fit by height without stretching or reflecting the artwork;
+        // the shared tile clip trims only the fading flame on narrow boards.
+        const float height = MenuPreviewUnits - 6;
+        double width = height * dragon.Size.Width / dragon.Size.Height;
+        var destination = new Rect(span - width - 4, 3, width, height);
+        ds.DrawImage(dragon, destination, new Rect(0, 0, dragon.Size.Width, dragon.Size.Height),
+            1, CanvasImageInterpolation.HighQualityCubic);
+    }
+
+    // Retain the established illustrated reel preview if the optional menu
+    // asset cannot load; the tile still identifies its destination clearly.
+    private void DrawSlotsMenuFallback(CanvasDrawingSession ds, float span)
     {
         using var cave = new CanvasRadialGradientBrush(ds.Device, ThemeColor(96, 26, 30), ThemeColor(14, 6, 12))
         { Center = new(span - 90, 80), RadiusX = 220, RadiusY = 170 };

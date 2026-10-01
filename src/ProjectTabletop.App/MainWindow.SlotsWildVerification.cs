@@ -591,14 +591,20 @@ public sealed partial class MainWindow
 
         static void CheckCameraSafe(byte[] before, byte[] after, int pixelWidth, int pixelHeight, Homography map, string context)
         {
-            foreach (var (top, extent) in new[] { (0.0, 84.0), (830.0, 170.0) })
+            // Only the three jackpot plaques are static in the header band;
+            // the surrounding illustrated eye and marquee can animate.
+            double aspect = Math.Clamp(pixelWidth / (double)pixelHeight, .6, 2.5);
+            var regions = new List<(double X, double Y, double Width, double Height)> { (0, 830, 1000, 170) };
+            for (int header = 0; header < 3; header++)
+                regions.Add((500 + (header - 1) * 150 / aspect - 70 / aspect, 96, 140 / aspect, 37));
+            foreach (var bounds in regions)
             {
-                var region = PixelRegion(pixelWidth, pixelHeight, map, 0, top, 1000, extent);
+                var region = PixelRegion(pixelWidth, pixelHeight, map, bounds.X, bounds.Y, bounds.Width, bounds.Height);
                 for (int row = region.Top; row < region.Bottom; row++)
                 {
                     int offset = (row * pixelWidth + region.Left) * 4, length = (region.Right - region.Left) * 4;
                     RequireWild(before.AsSpan(offset, length).SequenceEqual(after.AsSpan(offset, length)),
-                        $"{context}: reel effects changed the static title or camera-observed controls within one game phase.");
+                        $"{context}: effects changed the static jackpot headers or camera-observed controls within one game phase.");
                 }
             }
         }

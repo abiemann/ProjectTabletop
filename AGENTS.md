@@ -14,3 +14,15 @@ hand and fingernails. Acquire naturally grouped fingers directly; do not require
 users to spread their fingers first or turn their palm toward the camera.
 Keep the deliberate sideways-index selection gesture. A palm-facing-camera
 Properties gesture is only a possible future feature, not a current requirement.
+
+# Natural graphics and effect boundaries
+
+The user prefers mature, high-quality graphics with natural silhouettes and
+motion. Do not disguise decorative effects with broad rectangular opacity fades
+or blurred edges simply to fit a layout box. Shape the effect itself: for example,
+title flames should begin as small, irregular tongues at the sides and build
+rapidly toward the lettering. Allow suitable wisps or plasma to rise beyond a
+decorative title plaque rather than squeezing the fire into its rectangle.
+Keep intentional physical containers and interaction references protected:
+reel pixie dust stays inside the reel window, and effects must not obscure
+stationary control captions or jackpot values.

@@ -11,16 +11,16 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
-    private static readonly (SlotEffect Power, SlotSymbol Egg, string Label, Color Color)[] SlotDragonPowers =
+    private static readonly (SlotEffect Power, SlotSymbol Egg, Color Color)[] SlotDragonPowers =
     [
-        (SlotEffect.Expand, SlotSymbol.EggGreen, "EXPAND", ThemeColor(140, 240, 120)),
-        (SlotEffect.Collect, SlotSymbol.EggRed, "COLLECT", ThemeColor(255, 140, 80)),
-        (SlotEffect.Boost, SlotSymbol.EggBlue, "BOOST", ThemeColor(130, 200, 255))
+        (SlotEffect.Expand, SlotSymbol.EggGreen, ThemeColor(140, 240, 120)),
+        (SlotEffect.Collect, SlotSymbol.EggRed, ThemeColor(255, 110, 72)),
+        (SlotEffect.Boost, SlotSymbol.EggBlue, ThemeColor(130, 200, 255))
     ];
 
     // Physical spacing keeps wings apart even on tall boards. The extra room
     // above the reels is shared by the dormant egg and its emerged dragon.
-    private static Vector2 SlotDragonCenter(int index, float aspect) => new(500 + (index - 1) * 150 / aspect, 173);
+    private static Vector2 SlotDragonCenter(int index, float aspect) => new(500 + (index - 1) * 150 / aspect, 184);
 
     private void DrawSlotDragons(CanvasDrawingSession ds, SlotSnapshot game, DateTimeOffset now, SlotLayout layout)
     {
@@ -43,22 +43,25 @@ public sealed partial class SceneCompositor
         if (game.Phase == SlotPhase.RespinIntro)
             DrawSlotHatchCharge(ds, visible, phaseTime, layout);
 
-        using var clip = CanvasGeometry.CreateRectangle(ds.Device, new Rect(0, 96, 1000, 119));
+        using var clip = CanvasGeometry.CreateRectangle(ds.Device, new Rect(0, 134, 1000, 114));
         using var layer = ds.CreateLayer(1, clip);
         for (int index = 0; index < SlotDragonPowers.Length; index++)
         {
-            var (power, egg, _, color) = SlotDragonPowers[index];
+            var (power, egg, color) = SlotDragonPowers[index];
             var center = SlotDragonCenter(index, layout.Aspect);
             var hatch = game.DragonHatches.FirstOrDefault(item => item.Power == power && item.HatchedAt <= now);
             bool eggPresent = visible.Any(item => item.Cell.Symbol == egg || item.Cell.Symbol == SlotSymbol.EggRainbow);
             bool ready = game.InRespins && eggPresent;
             float age = hatch is null ? -1 : (float)(now - hatch.HatchedAt).TotalSeconds;
             bool acting = game.Phase == SlotPhase.RespinEffect && game.Effect == power;
+            float emergence = age >= .3f ? (float)Ease(Math.Clamp((age - .3f) / .8f, 0, 1)) : 0;
             float pulse = .5f + .5f * MathF.Sin(_slotVfxTime * 3.5f + index * 2);
-            float strength = hatch is not null ? .62f : ready ? .35f + .22f * pulse : .07f + coins * .035f;
-            using (var aura = new CanvasRadialGradientBrush(ds.Device, WithAlpha(color, (byte)(strength * 180)), WithAlpha(color, 0))
-            { Center = center - new Vector2(0, 12), RadiusX = 68 / layout.Aspect, RadiusY = 70 })
-                ds.FillEllipse(center.X, center.Y - 12, 68 / layout.Aspect, 70, aura);
+            float strength = hatch is not null ? .9f : ready ? .84f + .12f * pulse : .68f + coins * .045f;
+            var seatedCenter = center + new Vector2(0, 11);
+            DrawSlotEggSurroundings(ds, Vector2.Lerp(seatedCenter, center, emergence),
+                layout.Aspect, color, index, strength);
+            DrawSlotHeaderCoinPile(ds, center, layout.Aspect, index);
+            DrawSlotNestContact(ds, center, layout.Aspect);
 
             if (age < .65f)
             {
@@ -66,14 +69,13 @@ public sealed partial class SceneCompositor
                     : ready ? Math.Clamp((float)phaseTime / 2, 0, .55f) : 0;
                 float shake = ready || age >= 0 ? MathF.Sin(_slotVfxTime * 51 + index) * (age >= 0 ? 2.4f : .9f) : 0;
                 float alpha = age < 0 ? 1 : 1 - Math.Clamp((age - .3f) / .35f, 0, 1);
-                var eggCenter = center + new Vector2(shake / layout.Aspect, -.7f * pulse);
+                var eggCenter = seatedCenter + new Vector2(shake / layout.Aspect, -.7f * pulse);
                 DrawSlotArt(ds, egg, layout.Square(eggCenter, 76), alpha);
                 if (crack > 0) DrawSlotEggCracks(ds, eggCenter, layout.Aspect, color, crack * alpha);
             }
 
             if (age >= .3f)
             {
-                float emergence = (float)Ease(Math.Clamp((age - .3f) / .8f, 0, 1));
                 float roar = acting ? (float)(Ease(Math.Clamp((phaseTime - .43) / .13, 0, 1))
                     * (1 - Ease(Math.Clamp((phaseTime - 1.08) / .16, 0, 1)))) : 0;
                 DrawSlotDragonPortrait(ds, index, center, layout.Aspect, emergence, roar);
@@ -83,26 +85,30 @@ public sealed partial class SceneCompositor
                     // A short, live flame plume accompanies the red dragon's
                     // roar. The shader animates continuously, not as a glow.
                     var transform = ds.Transform;
-                    var mouth = new Vector2(center.X + 20 / layout.Aspect, 133 + (1 - emergence) * 34);
+                    const float portraitScale = 96f / 113;
+                    var mouth = new Vector2(center.X + 20 * portraitScale / layout.Aspect,
+                        234 - (214 - 133) * portraitScale + (1 - emergence) * 34);
                     ds.Transform = Matrix3x2.CreateRotation(1.0f) * Matrix3x2.CreateScale(1 / layout.Aspect, 1)
                         * Matrix3x2.CreateTranslation(mouth) * transform;
-                    try { DrawSlotFire(ds, new Rect(-10, -25, 20, 36), _slotVfxTime * 1.3f, 8.6f, roar * emergence * .9f); }
+                    try { DrawSlotFire(ds, new Rect(-10 * portraitScale, -25 * portraitScale,
+                        20 * portraitScale, 36 * portraitScale), _slotVfxTime * 1.3f, 8.6f, roar * emergence * .9f); }
                     finally { ds.Transform = transform; }
                 }
             }
+            DrawSlotHeaderCoinFront(ds, center, layout.Aspect, index);
             if (age is >= .3f and < 1.4f)
-                DrawSlotHatchBurst(ds, center, layout.Aspect, color, index, age - .3f);
+                DrawSlotHatchBurst(ds, seatedCenter, layout.Aspect, color, index, age - .3f);
 
             // Three fire-coin jewels show the existing qualifying threshold.
             // These are per-spin progress, never an invented persistent meter.
             if (hatch is null)
                 for (int pip = 0; pip < 3; pip++)
                 {
-                    var point = center + new Vector2((pip - 1) * 10 / layout.Aspect, 38);
-                    ds.FillEllipse(point, 2.8f / layout.Aspect, 2.8f, ThemeColor(13, 10, 9));
-                    ds.DrawEllipse(point, 2.8f / layout.Aspect, 2.8f, ThemeColor(174, 127, 64), .7f);
+                    var point = center + new Vector2((pip - 1) * 12 / layout.Aspect, 55);
+                    ds.FillEllipse(point, 3.1f / layout.Aspect, 3.1f, ThemeColor(13, 10, 9, 235));
+                    ds.DrawEllipse(point, 3.1f / layout.Aspect, 3.1f, ThemeColor(227, 181, 91), .7f);
                     if (pip < coins)
-                        ds.FillEllipse(point, 1.9f / layout.Aspect, 1.9f, eggPresent ? color : SlotGold);
+                        ds.FillEllipse(point, 2.1f / layout.Aspect, 2.1f, eggPresent ? color : SlotGold);
                 }
         }
     }
@@ -113,7 +119,7 @@ public sealed partial class SceneCompositor
         var coins = visible.Where(item => item.Cell.Symbol == SlotSymbol.Coin).Take(3).ToArray();
         for (int index = 0; index < SlotDragonPowers.Length; index++)
         {
-            var (_, egg, _, color) = SlotDragonPowers[index];
+            var (_, egg, color) = SlotDragonPowers[index];
             if (!visible.Any(item => item.Cell.Symbol == egg || item.Cell.Symbol == SlotSymbol.EggRainbow)) continue;
             var target = SlotDragonCenter(index, layout.Aspect);
             for (int coin = 0; coin < coins.Length; coin++)
@@ -157,9 +163,9 @@ public sealed partial class SceneCompositor
     private void DrawSlotDragonPortrait(CanvasDrawingSession ds, int index, Vector2 center, float aspect, float emergence, float roar)
     {
         float breathing = MathF.Sin(_slotVfxTime * 2.4f + index * 2.1f);
-        float height = 113 * (1 + .013f * breathing);
-        float width = 140 * (1 - .004f * breathing);
-        float bottom = 214 + (1 - emergence) * 34;
+        float height = 96 * (1 + .013f * breathing);
+        float width = 119 * (1 - .004f * breathing);
+        float bottom = 234 + (1 - emergence) * 34;
         var pivot = new Vector2(center.X, bottom - 7);
         var transform = ds.Transform;
         // Rotate in physical square coordinates so the slight nod is natural
@@ -174,7 +180,7 @@ public sealed partial class SceneCompositor
             {
                 // Device/file failures remain playable, visibly falling back
                 // to the existing dragon emblem instead of a missing image.
-                DrawSlotArt(ds, SlotSymbol.Wild, new Rect(center.X - 44 / aspect, bottom - 90, 88 / aspect, 88), emergence);
+                DrawSlotArt(ds, SlotSymbol.Wild, new Rect(center.X - 37 / aspect, bottom - 76, 74 / aspect, 74), emergence);
             }
         }
         finally { ds.Transform = transform; }
@@ -225,8 +231,8 @@ public sealed partial class SceneCompositor
         for (int index = 0; index < 10; index++)
         {
             float phase = (_slotVfxTime * (.22f + SlotRandom(index + 9) * .12f) + SlotRandom(index + seed * 27)) % 1;
-            float x = (SlotRandom(index * 17 + seed) - .5f) * 117 + MathF.Sin(phase * 7 + index) * 7;
-            float y = 211 - phase * 100;
+            float x = (SlotRandom(index * 17 + seed) - .5f) * 99 + MathF.Sin(phase * 7 + index) * 6;
+            float y = 235 - phase * 95;
             var point = new Vector2(center.X + x / aspect, y);
             float alpha = strength * MathF.Sin(phase * MathF.PI);
             ds.DrawLine(point, point + new Vector2(.8f / aspect, 3.1f), WithAlpha(color, (byte)(alpha * 220)), 1.2f);

@@ -39,8 +39,13 @@ public sealed partial class SceneCompositor
         if (image is null) return;
         var along = Vector2.Normalize(new((float)(-rect.Width * .24), (float)rect.Height));
         var normal = new Vector2(-along.Y, along.X) * -1;
-        var start = new Vector2((float)(rect.X + rect.Width * .40), (float)(rect.Y + rect.Height / 2));
-        float distance = (float)(rect.Width * .24) * normal.X;
+        // The isolated dragon starts farther right than an opaque board scene.
+        // Carry the same diagonal falloff across its plume rather than through
+        // empty alpha, keeping the head and neck clear at the right edge.
+        float startFraction = screen == BoardScreen.Slots ? .50f : .40f;
+        float fadeWidth = screen == BoardScreen.Slots ? .32f : .24f;
+        var start = new Vector2((float)(rect.X + rect.Width * startFraction), (float)(rect.Y + rect.Height / 2));
+        float distance = (float)(rect.Width * fadeWidth) * normal.X;
         using var fade = new CanvasLinearGradientBrush(ds.Device,
         [
             new() { Position = 0, Color = Color.FromArgb(0, 255, 255, 255) },

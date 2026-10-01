@@ -418,7 +418,7 @@ public sealed partial class SceneCompositor
         var description = button.Destination switch
         {
             BoardScreen.HandTracking => "Test gestures",
-            BoardScreen.Slots => "Spin for dragon treasure",
+            BoardScreen.Slots => "Win all the treasure",
             BoardScreen.PhotoCopy => "Copy hands and objects",
             BoardScreen.Blackjack => "Play against the dealer",
             BoardScreen.Paint => "Liquid colour & metallic ink",

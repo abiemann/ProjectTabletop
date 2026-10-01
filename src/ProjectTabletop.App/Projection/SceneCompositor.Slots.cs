@@ -58,28 +58,17 @@ public sealed partial class SceneCompositor
     {
         var layout = SlotsLayout(boardAspect);
         float a = layout.Aspect;
-        DrawSlotsCave(ds);
+        DrawSlotsCave(ds, boardAspect);
 
         DrawSlotMarquee(ds, a);
 
-        // Portraits and eggs are drawn in the live layer. Only their sockets
-        // and nameplates belong in the cached cabinet.
-        for (int index = 0; index < SlotDragonPowers.Length; index++)
-        {
-            var (power, _, label, color) = SlotDragonPowers[index];
-            bool lit = game.DragonHatches.Any(hatch => hatch.Power == power);
-            var center = SlotDragonCenter(index, a);
-            DrawSlotPowerSocket(ds, center, color, a, lit);
-            SlotText(ds, label, new Rect(center.X - 64 / a, 217, 128 / a, 17), 12, lit ? color : SlotMuted, a);
-        }
-
+        // Jackpot headers share the colors and centers of the three dragons.
+        // Eggs, hatched portraits and their hoards belong to the live layer.
         DrawSlotJackpots(ds, game, layout);
         DrawSlotReelFrame(ds, game, layout);
         DrawSlotKeys(ds, game, layout);
-        DrawSlotSidePanel(ds, game, layout);
 
         DrawSlotStatusRail(ds);
-        SlotText(ds, game.Status, new Rect(60, 704, 880, 28), 19, game.Phase == SlotPhase.Idle ? SlotIvory : SlotGold, a);
         DrawSlotPlaque(ds, new Rect(60, 740, 270, 92), "CREDITS", SlotGame.Format(game.Balance), a);
         DrawSlotPlaque(ds, new Rect(365, 740, 270, 92), "BET", SlotGame.Format(game.Bet), a);
         DrawSlotPlaque(ds, new Rect(670, 740, 270, 92), game.InFreeSpins ? "FREE SPINS WIN" : "WIN",
@@ -88,7 +77,32 @@ public sealed partial class SceneCompositor
         foreach (var button in buttons) DrawSlotButton(ds, button, game, a);
     }
 
-    private void DrawSlotsCave(CanvasDrawingSession ds)
+    private const double SlotWinMessageDuration = .65;
+    private static readonly Rect SlotWinMessageBounds = new(60, 704, 880, 28);
+
+    private static void DrawSlotWinMessage(CanvasDrawingSession ds, SlotSnapshot game,
+        DateTimeOffset now, float aspect)
+    {
+        // RoundWin changes only when an award is actually credited. It retains
+        // the paid round's total through free spins and features, and resets
+        // on the next paid SPIN/BUY. Precomputed spinning results stay hidden.
+        if (game.RoundWin <= 0) return;
+        double slide = 0;
+        if (game.Phase is SlotPhase.LineWins or SlotPhase.RespinOutro or SlotPhase.VaultOutro)
+        {
+            double fraction = Math.Clamp((now - game.PhaseStartedAt).TotalSeconds / SlotWinMessageDuration, 0, 1);
+            // Smooth acceleration and arrival; phase timestamps make redraws
+            // independent of frame order and preserve the entrance on resize.
+            slide = SlotWinMessageBounds.Height * (1 - fraction * fraction * (3 - 2 * fraction));
+        }
+        var text = new Rect(SlotWinMessageBounds.X, SlotWinMessageBounds.Y + slide,
+            SlotWinMessageBounds.Width, SlotWinMessageBounds.Height);
+        using var clip = CanvasGeometry.CreateRectangle(ds.Device, SlotWinMessageBounds);
+        using var layer = ds.CreateLayer(1, clip);
+        SlotText(ds, $"YOU WON {SlotGame.Format(game.RoundWin)} CREDITS", text, 19, SlotIvory, aspect);
+    }
+
+    private void DrawSlotsCave(CanvasDrawingSession ds, double boardAspect)
     {
         ds.Clear(ThemeColor(10, 5, 9));
         using var cave = new CanvasRadialGradientBrush(ds.Device,
@@ -109,42 +123,43 @@ public sealed partial class SceneCompositor
             new() { Position = 1, Color = ThemeColor(7, 8, 14, 248) }
         ]) { StartPoint = Vector2.Zero, EndPoint = new(0, 1000) };
         ds.FillRectangle(new Rect(0, 0, 1000, 1000), shade);
-        DrawSlotCabinetEdge(ds);
+        DrawSlotCabinetEdge(ds, boardAspect);
     }
 
     private void DrawSlotJackpots(CanvasDrawingSession ds, SlotSnapshot game, SlotLayout layout)
     {
-        float left = 34, right = layout.Left - 26;
-        if (right - left < 90) return;
-        (SlotJackpot Tier, float Top, float Height)[] rows =
-            [(SlotJackpot.Grand, 212, 104), (SlotJackpot.Major, 330, 88), (SlotJackpot.Minor, 432, 88), (SlotJackpot.Mini, 534, 80)];
+        // Presentation order follows green, red, blue. MINI remains a game
+        // award; it simply has no cabinet meter beside these three guardians.
+        SlotJackpot[] tiers = [SlotJackpot.Major, SlotJackpot.Grand, SlotJackpot.Minor];
         bool vault = game.Phase is SlotPhase.VaultIntro or SlotPhase.VaultPicking or SlotPhase.VaultOutro;
-        foreach (var (tier, top, height) in rows)
+        for (int index = 0; index < tiers.Length; index++)
         {
-            var rect = new Rect(left, top, right - left, height);
+            var tier = tiers[index];
+            var center = SlotDragonCenter(index, layout.Aspect);
+            var rect = new Rect(center.X - 70 / layout.Aspect, 96, 140 / layout.Aspect, 37);
             var (light, dark) = SlotJackpotColors(tier);
             bool won = vault && game.VaultAward == tier;
             DrawSlotInlaidPanel(ds, rect, won ? SlotIvory : light, dark);
-            float size = tier == SlotJackpot.Grand ? 34 : 28;
-            SlotText(ds, SlotGame.JackpotName(tier).ToUpperInvariant(), new Rect(rect.X, rect.Y + 7, rect.Width, 22),
-                14, light, layout.Aspect);
-            ds.DrawLine((float)rect.X + 24, top + 33, (float)rect.Right - 24, top + 33, WithAlpha(light, 85), .7f);
-            SlotText(ds, SlotGame.Format(game.Jackpots[tier]), new Rect(rect.X, rect.Y + 30, rect.Width, size + 12),
-                size, SlotIvory, layout.Aspect, "Georgia");
-            if (vault && tier != SlotJackpot.Mini)
+            float inset = 13 / layout.Aspect;
+            SlotText(ds, SlotGame.JackpotName(tier).ToUpperInvariant(),
+                new Rect(rect.X + inset, 97, rect.Width - inset * 2, 13), 12, light, layout.Aspect);
+            SlotText(ds, SlotGame.Format(game.Jackpots[tier]),
+                new Rect(rect.X + inset, 109, rect.Width - inset * 2, 21), 24,
+                won ? SlotIvory : ThemeColor(255, 239, 200), layout.Aspect, "Georgia");
+            if (vault)
             {
                 int found = game.VaultChests.Count(chest => chest?.Gem == tier);
                 for (int dot = 0; dot < 3; dot++)
                 {
-                    var center = new Vector2((float)(rect.X + rect.Width / 2 + (dot - 1) * 26 / layout.Aspect), (float)rect.Bottom - 14);
+                    var point = new Vector2((float)rect.X + 8 / layout.Aspect, 104 + dot * 10);
                     if (dot < found)
                     {
                         var previous = ds.Transform;
-                        ds.Transform = Matrix3x2.CreateScale(1 / layout.Aspect, 1, center) * previous;
-                        try { DrawSlotGem(ds, center, 9, tier); }
+                        ds.Transform = Matrix3x2.CreateScale(1 / layout.Aspect, 1, point) * previous;
+                        try { DrawSlotGem(ds, point, 3.2f, tier); }
                         finally { ds.Transform = previous; }
                     }
-                    else ds.DrawEllipse(center, 7 / layout.Aspect, 7, WithAlpha(light, 150), 1.5f);
+                    else ds.DrawEllipse(point, 2.4f / layout.Aspect, 2.4f, WithAlpha(light, 120), .65f);
                 }
             }
         }
@@ -183,78 +198,17 @@ public sealed partial class SceneCompositor
         DrawSlotKeyRail(ds, layout);
         for (int reel = 0; reel < SlotGame.Reels; reel++)
         {
-            var center = new Vector2(layout.ReelCenter(reel), 660);
-            var box = layout.Square(center, 50);
             bool lit = game.Keys[reel];
-            DrawSlotKeySocket(ds, box, layout.Aspect, lit);
-            if (lit) DrawSlotArt(ds, SlotSymbol.Key, layout.Square(center, 44), 1);
-        }
-        SlotText(ds, $"VAULT KEYS  {game.Keys.Count(lit => lit)} / 5", new Rect(layout.Left - 60, 686, layout.Width + 120, 18),
-            13, SlotMuted, layout.Aspect);
-    }
-
-    private void DrawSlotSidePanel(CanvasDrawingSession ds, SlotSnapshot game, SlotLayout layout)
-    {
-        float left = layout.Right + 26, right = 966;
-        if (right - left < 90) return;
-        float a = layout.Aspect;
-        var top = new Rect(left, 212, right - left, 176);
-        DrawSlotPanel(ds, top, game.InFreeSpins ? ThemeColor(255, 110, 220) : SlotGold);
-        if (game.InFreeSpins)
-        {
-            SlotText(ds, "FREE SPINS", new Rect(top.X, top.Y + 10, top.Width, 26), 20, ThemeColor(255, 160, 230), a);
-            SlotText(ds, game.FreeSpinsRemaining.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                new Rect(top.X, top.Y + 38, top.Width, 70), 60, SlotIvory, a, fire: true);
-            SlotText(ds, "LEFT", new Rect(top.X, top.Y + 108, top.Width, 22), 16, SlotMuted, a);
-        }
-        else
-        {
-            SlotText(ds, "GUARDIAN'S", new Rect(top.X, top.Y + 14, top.Width, 24), 17, SlotGold, a);
-            SlotText(ds, "FREE SPINS", new Rect(top.X, top.Y + 38, top.Width, 28), 21, SlotIvory, a);
-            SlotText(ds, "3 ELIXIRS ON", new Rect(top.X, top.Y + 76, top.Width, 20), 14, SlotMuted, a);
-            SlotText(ds, "REELS 1 · 3 · 5", new Rect(top.X, top.Y + 96, top.Width, 20), 14, SlotMuted, a);
-        }
-        // Elixir level: each elixir during free spins adds a spin and more power eggs.
-        for (int vial = 0; vial < SlotGame.MaximumElixirLevel; vial++)
-        {
-            float spacing = MathF.Min(30, (float)(top.Width - 24) * a / SlotGame.MaximumElixirLevel);
-            var center = new Vector2((float)(top.X + top.Width / 2 + (vial - 2) * spacing / a), (float)top.Bottom - 26);
-            DrawSlotArt(ds, SlotSymbol.Elixir, layout.Square(center, MathF.Min(30, spacing * .9f)), vial < game.ElixirLevel ? 1 : .38f);
-        }
-
-        var lower = new Rect(left, 402, right - left, 208);
-        DrawSlotPanel(ds, lower, game.InRespins ? SlotEmber : SlotGold);
-        if (game.Phase == SlotPhase.LineWins)
-        {
-            SlotText(ds, "LINE WIN", new Rect(lower.X, lower.Y + 12, lower.Width, 26), 20, SlotGold, a);
-            SlotText(ds, $"{game.LineWins.Count} WINNING " + (game.LineWins.Count == 1 ? "LINE" : "LINES"),
-                new Rect(lower.X, lower.Y + 178, lower.Width, 20), 13, SlotMuted, a);
-        }
-        else if (game.InRespins)
-        {
-            SlotText(ds, "RESPINS", new Rect(lower.X, lower.Y + 12, lower.Width, 26), 20, SlotEmber, a);
-            for (int dot = 0; dot < SlotGame.RespinCount; dot++)
+            var box = SlotKeyChestBox(layout, reel);
+            if (!DrawSlotKeyChestArtwork(ds, box, open: lit, layout.Aspect))
             {
-                float spacing = MathF.Min(34, (float)(lower.Width - 24) * a / SlotGame.RespinCount);
-                float radius = MathF.Min(12, spacing * .35f);
-                var center = new Vector2((float)(lower.X + lower.Width / 2 + (dot - 1) * spacing / a), (float)lower.Y + 64);
-                bool lit = dot < game.RespinsLeft;
-                ds.FillEllipse(center, radius / a, radius, lit ? SlotEmber : ThemeColor(60, 30, 26));
-                ds.DrawEllipse(center, radius / a, radius, SlotGold, 1.5f);
+                var center = new Vector2(layout.ReelCenter(reel), 660);
+                DrawSlotKeySocket(ds, layout.Square(center, 50), layout.Aspect, lit);
             }
-            SlotText(ds, "TOTAL", new Rect(lower.X, lower.Y + 96, lower.Width, 22), 16, SlotMuted, a);
-            SlotText(ds, SlotGame.Format(game.RespinTotal), new Rect(lower.X, lower.Y + 120, lower.Width, 44), 34,
-                SlotIvory, a, fire: true);
-        }
-        else
-        {
-            SlotText(ds, "DRAGONFIRE", new Rect(lower.X, lower.Y + 12, lower.Width, 26), 20, SlotEmber, a);
-            SlotText(ds, "RESPINS", new Rect(lower.X, lower.Y + 38, lower.Width, 26), 20, SlotIvory, a);
-            SlotText(ds, "EGG + 3 COINS", new Rect(lower.X, lower.Y + 76, lower.Width, 20), 14, SlotMuted, a);
-            // The fire orb is drawn by the live layer so its flames never freeze.
-            SlotText(ds, $"BUY {SlotGame.BuyMultiplier}× BET", new Rect(lower.X, lower.Y + 178, lower.Width, 20), 13, SlotMuted, a);
+            if (lit) DrawSlotKeyArtwork(ds, SlotEarnedKeyBox(layout, reel), layout.Aspect);
         }
     }
+
 
     private static void DrawSlotPanel(CanvasDrawingSession ds, Rect rect, Color edge)
     {
