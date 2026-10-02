@@ -531,7 +531,7 @@ public sealed partial class MainWindow
             "The rainbow feature did not hatch all three header dragons.");
 
         // Preserve all three portraits through the actual feature outro and idle,
-        // then prove the next real spin rearms the visual lifecycle.
+        // then prove the next real spin preserves their first hatch records.
         for (int guard = 0; guard < 1000 && scene.SlotsState.Phase != SlotPhase.Idle; guard++)
         {
             var state = scene.SlotsState;
@@ -542,9 +542,9 @@ public sealed partial class MainWindow
         }
         RequireHatching(scene.SlotsState.Phase == SlotPhase.Idle, "The hatch fixture never settled.");
         await SaveCurrent("all-three-idle");
-        RequireHatching(scene.ActivateSlotsButton("slot-spin") && scene.SlotsState.DragonHatches.Count == 0,
-            "The next spin did not reset the three header eggs.");
-        await SaveCurrent("next-spin-eggs-reset");
+        RequireHatching(scene.ActivateSlotsButton("slot-spin") && scene.SlotsState.DragonHatches.SequenceEqual(hatches),
+            "The next spin removed or restarted a hatched header dragon.");
+        await SaveCurrent("next-spin-dragons-retained");
 
         await CheckHatchAspect(2160, 2160, "all-three-square");
         await CheckHatchAspect(2160, 3840, "all-three-portrait");
@@ -591,7 +591,7 @@ public sealed partial class MainWindow
             passed = true, directory, images, seed, headerChanges,
             hatchEvents = hatches.Select(hatch => new { power = hatch.Power.ToString(), hatch.HatchedAt }).ToArray(),
             sameClockPixelsIdentical = true, jackpotHeadersAndControlsUnchanged = true, outputMarginsBlack = true,
-            dragonsPersistThroughIdle = true, nextSpinResetsEggs = true,
+            dragonsPersistThroughIdle = true, dragonsPersistThroughNextSpin = true,
             motion = new
             {
                 directory = motionDirectory, filePattern = "frame-{index:D3}.png", width = motionWidth, height = motionHeight,

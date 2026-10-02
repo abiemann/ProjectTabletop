@@ -8,17 +8,19 @@ internal static class SlotDragonHatchRegression
     {
         CheckPowerTimelineAndRetention();
         CheckInsufficientTriggers();
-        CheckFreeSpinReset();
+        CheckFreeSpinRetention();
         CheckDeterministicClock();
         Console.WriteLine("Dragon hatch verification passed: first-power timestamps, all egg colours, staged rainbow, " +
-            "repeat suppression, immutable history, outro/idle retention, spin/buy/free-spin reset and injected clock.");
+            "repeat suppression, immutable history, outro/idle/spin/buy/free-spin retention, later matching powers and injected clock.");
     }
 
     private static void CheckPowerTimelineAndRetention()
     {
         var colours = new HashSet<SlotSymbol>();
-        bool rainbow = false, repeated = false, spinReset = false, buyReset = false;
-        for (int seed = 0; seed < 128 && (colours.Count < 3 || !rainbow || !repeated || !spinReset || !buyReset); seed++)
+        var laterMatchingPowers = new HashSet<SlotEffect>();
+        bool rainbow = false, repeated = false, spinRetained = false, buyRetained = false;
+        for (int seed = 0; seed < 128 && (colours.Count < 3 || !rainbow || !repeated || !spinRetained || !buyRetained ||
+            laterMatchingPowers.Count < 3); seed++)
         {
             var game = new SlotGame(seed, 1_000_000);
             var now = Origin.AddHours(seed);
@@ -86,12 +88,17 @@ internal static class SlotDragonHatchRegression
             Require(firstHatches.Count > 0, "A successful respin feature never hatched a dragon.");
             var outro = game.Snapshot;
             Require(outro.DragonHatches.SequenceEqual(firstHatches), "Hatches were lost before the respin win presentation.");
-            while (game.Phase != SlotPhase.Idle) now = Advance(game);
-            // A naturally triggered free-spin sequence can start another spin;
-            // that is deliberately covered by the separate reset regression.
-            if (game.Snapshot.SpinNumber != intro.SpinNumber) continue;
-            Require(game.Snapshot.DragonHatches.SequenceEqual(firstHatches), "Hatched dragons disappeared upon returning to idle.");
-            Require(!game.Tick(now.AddMinutes(1)) && game.Snapshot.DragonHatches.SequenceEqual(firstHatches),
+            for (int guard = 0; game.Phase != SlotPhase.Idle; guard++)
+            {
+                Require(guard < 2000, "The fixture never settled after its respin feature.");
+                now = Advance(game);
+            }
+            // Natural free spins may earn another power, but must preserve the
+            // first feature's records and their original order and timestamps.
+            var idleHatches = game.Snapshot.DragonHatches.ToArray();
+            Require(idleHatches.Take(firstHatches.Count).SequenceEqual(firstHatches),
+                "Hatched dragons disappeared or restarted upon returning to idle.");
+            Require(!game.Tick(now.AddMinutes(1)) && game.Snapshot.DragonHatches.SequenceEqual(idleHatches),
                 "Idle wall time cleared or restarted a dragon.");
             var idle = game.Snapshot;
             if (idle.DragonHatches is IList<SlotDragonHatch> list)
@@ -99,17 +106,36 @@ internal static class SlotDragonHatchRegression
                 bool rejected = false;
                 try { list[0] = new(SlotEffect.None, now); }
                 catch (NotSupportedException) { rejected = true; }
-                Require(rejected && game.Snapshot.DragonHatches.SequenceEqual(firstHatches),
+                Require(rejected && game.Snapshot.DragonHatches.SequenceEqual(idleHatches),
                     "A caller could mutate the snapshot's hatch history.");
             }
-            Require(game.HandleAction(seed % 2 == 0 ? "slot-spin" : "slot-buy", now.AddMinutes(1)), "The next spin did not start.");
-            Require(game.Snapshot.DragonHatches.Count == 0 && idle.DragonHatches.SequenceEqual(firstHatches) &&
-                outro.DragonHatches.SequenceEqual(firstHatches), "Spin/Buy failed to reset dragons independently of prior snapshots.");
-            if (seed % 2 == 0) spinReset = true;
-            else buyReset = true;
+            bool paidSpin = seed % 2 == 0;
+            if (paidSpin) game.Demonstrate(SlotDemo.Respins);
+            Require(game.HandleAction(paidSpin ? "slot-spin" : "slot-buy", now.AddMinutes(1)), "The next spin did not start.");
+            Require(game.Snapshot.DragonHatches.SequenceEqual(idleHatches), "Spin/Buy removed or restarted an already hatched dragon.");
+            bool matched = false;
+            for (int guard = 0; game.Phase != SlotPhase.Idle; guard++)
+            {
+                Require(guard < 2000, "The later spin never settled.");
+                now = Advance(game);
+                var current = game.Snapshot;
+                if (current.Phase == SlotPhase.RespinEffect && idleHatches.Any(hatch => hatch.Power == current.Effect))
+                {
+                    matched = true;
+                    laterMatchingPowers.Add(current.Effect);
+                    Require(current.PhaseDuration == SlotGame.RespinEffectDuration,
+                        "An already hatched dragon changed power presentation timing.");
+                }
+            }
+            Require(game.Snapshot.DragonHatches.Take(idleHatches.Length).SequenceEqual(idleHatches) &&
+                idle.DragonHatches.SequenceEqual(idleHatches) && outro.DragonHatches.SequenceEqual(firstHatches),
+                "A later spin changed first hatch records or a previously returned snapshot.");
+            if (paidSpin) spinRetained |= matched;
+            else buyRetained |= matched;
         }
-        Require(colours.SetEquals([SlotSymbol.EggGreen, SlotSymbol.EggBlue, SlotSymbol.EggRed]) && rainbow && repeated && spinReset && buyReset,
-            "The fixtures did not cover all three egg colours, staged rainbow, a repeated power and both reset actions.");
+        Require(colours.SetEquals([SlotSymbol.EggGreen, SlotSymbol.EggBlue, SlotSymbol.EggRed]) && rainbow && repeated && spinRetained && buyRetained &&
+            laterMatchingPowers.SetEquals([SlotEffect.Expand, SlotEffect.Boost, SlotEffect.Collect]),
+            "The fixtures did not cover all egg colours, staged rainbow, repeated powers, and retention through both actions and later matching powers.");
     }
 
     private static void CheckInsufficientTriggers()
@@ -136,27 +162,30 @@ internal static class SlotDragonHatchRegression
         Require(eggWithoutCoins && coinsWithoutEgg, "Insufficient-trigger fixtures did not exercise both missing requirements.");
     }
 
-    private static void CheckFreeSpinReset()
+    private static void CheckFreeSpinRetention()
     {
         for (int seed = 0; seed < 128; seed++)
         {
             var game = new SlotGame(seed, 1_000_000);
             game.Demonstrate(SlotDemo.FreeSpins);
             game.HandleAction("slot-spin", Origin);
-            for (int guard = 0; game.Phase != SlotPhase.Idle && guard < 2000; guard++)
+            bool retained = false;
+            for (int guard = 0; game.Phase != SlotPhase.Idle; guard++)
             {
+                Require(guard < 2000, "The automatic free-spin fixture never settled.");
                 var previous = game.Snapshot;
                 Advance(game);
                 var current = game.Snapshot;
                 if (current.Phase == SlotPhase.Spinning && current.FreeSpin && previous.DragonHatches.Count > 0)
                 {
-                    Require(current.DragonHatches.Count == 0 && previous.DragonHatches.Count > 0,
-                        "An automatic free spin failed to clear the prior spin's dragons.");
-                    return;
+                    Require(current.DragonHatches.SequenceEqual(previous.DragonHatches),
+                        "An automatic free spin removed or restarted the prior spin's dragons.");
+                    retained = true;
                 }
             }
+            if (retained) return;
         }
-        throw new InvalidOperationException("No automatic free-spin reset after a hatch was exercised.");
+        throw new InvalidOperationException("No automatic free spin after a hatch was exercised.");
     }
 
     private static void CheckDeterministicClock()
@@ -164,26 +193,45 @@ internal static class SlotDragonHatchRegression
         var first = new SlotGame(0, 1_000_000);
         var second = new SlotGame(0, 1_000_000);
         var offset = TimeSpan.FromDays(17);
-        first.Demonstrate(SlotDemo.Respins);
-        second.Demonstrate(SlotDemo.Respins);
-        first.HandleAction("slot-spin", Origin);
-        second.HandleAction("slot-spin", Origin + offset);
-        while (first.Phase != SlotPhase.Idle)
+        var now = Origin;
+        for (int operation = 0; operation < 3; operation++)
         {
-            DateTimeOffset now = first.PhaseEndsAt.AddMilliseconds(117);
-            Require(first.Tick(now) && second.Tick(now + offset), "The identical seeded clocks diverged.");
-            var a = first.Snapshot;
-            var b = second.Snapshot;
-            Require(a.Phase == b.Phase && a.Grid.SequenceEqual(b.Grid) && a.Balance == b.Balance &&
-                a.DragonHatches.SequenceEqual(b.DragonHatches.Select(hatch => hatch with { HatchedAt = hatch.HatchedAt - offset })),
-                "Dragon timestamps used wall time, changed game randomness, or depended on the absolute clock date.");
+            if (operation < 2)
+            {
+                first.Demonstrate(SlotDemo.Respins);
+                second.Demonstrate(SlotDemo.Respins);
+            }
+            string action = operation == 2 ? "slot-buy" : "slot-spin";
+            Require(first.HandleAction(action, now) && second.HandleAction(action, now + offset),
+                "The identical seeded action did not start.");
+            for (int guard = 0; first.Phase != SlotPhase.Idle; guard++)
+            {
+                Require(guard < 2000, "The identical seeded clock fixture never settled.");
+                now = first.PhaseEndsAt.AddMilliseconds(117);
+                Require(first.Tick(now) && second.Tick(now + offset), "The identical seeded clocks diverged.");
+                var a = first.Snapshot;
+                var b = second.Snapshot;
+                Require(a.Phase == b.Phase && a.Grid.SequenceEqual(b.Grid) && a.Balance == b.Balance &&
+                    a.DragonHatches.SequenceEqual(b.DragonHatches.Select(hatch => hatch with { HatchedAt = hatch.HatchedAt - offset })),
+                    "Dragon timestamps used wall time, changed game randomness, or depended on the absolute clock date.");
+            }
+            now = now.AddMinutes(1);
         }
     }
 
     private static DateTimeOffset Advance(SlotGame game)
     {
+        var previous = game.Snapshot;
+        var frozen = previous.DragonHatches.ToArray();
         var now = game.PhaseEndsAt;
         Require(game.Tick(now), "The fixture did not advance at its phase deadline.");
+        var current = game.Snapshot;
+        var expected = frozen.ToList();
+        if (current.Phase == SlotPhase.RespinEffect && !expected.Any(hatch => hatch.Power == current.Effect))
+            expected.Add(new(current.Effect, now));
+        Require(current.DragonHatches.SequenceEqual(expected),
+            "A phase transition removed, restarted, duplicated, or prematurely revealed a dragon.");
+        Require(previous.DragonHatches.SequenceEqual(frozen), "A later phase mutated an earlier snapshot's hatch history.");
         return now;
     }
 

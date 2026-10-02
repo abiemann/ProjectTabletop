@@ -92,6 +92,8 @@ public sealed class SlotGame
     private int _respinsLeft;
     private readonly List<SlotPosition> _fresh = [];
     private readonly List<(SlotEffect Effect, SlotPosition Cell)> _effects = [];
+    // First successful hatches belong to this game, not to an individual spin.
+    // Keeping them is presentation history; powers still require qualifying eggs.
     private readonly List<SlotDragonHatch> _dragonHatches = [];
     private SlotEffect _effect;
     private SlotPosition? _effectCell;
@@ -246,7 +248,6 @@ public sealed class SlotGame
     private void StartSpin(DateTimeOffset now, bool free)
     {
         _spinStartedAt = now;
-        _dragonHatches.Clear();
         if (free)
         {
             _freeRemaining--;
@@ -283,7 +284,6 @@ public sealed class SlotGame
     private void Buy(DateTimeOffset now)
     {
         _spinStartedAt = now;
-        _dragonHatches.Clear();
         _balance -= BuyCost;
         _roundWin = 0;
         _previous = _grid;

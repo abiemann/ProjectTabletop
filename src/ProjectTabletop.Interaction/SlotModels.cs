@@ -26,7 +26,7 @@ public enum SlotPhase
 
 public enum SlotEffect { None, Expand, Boost, Collect }
 
-/// <summary>The first successful activation of a dragon's power in this spin.</summary>
+/// <summary>The first successful activation of a dragon's power in this game.</summary>
 public sealed record SlotDragonHatch(SlotEffect Power, DateTimeOffset HatchedAt);
 
 /// <summary>Forces the next spin to land a feature, for demonstrations and verification.</summary>
@@ -71,7 +71,7 @@ public sealed record SlotSnapshot(
     /// <summary>The injected start time of this spin, retained through its later phases; MinValue before the first spin.</summary>
     public DateTimeOffset SpinStartedAt { get; init; }
 
-    /// <summary>Dragons revealed by successfully applied powers, retained until the next spin starts.</summary>
+    /// <summary>Dragons revealed by successfully applied powers, retained for the lifetime of this game.</summary>
     public IReadOnlyList<SlotDragonHatch> DragonHatches { get; init; } = [];
 
     public SlotCell Cell(int reel, int row) => Grid[reel * SlotGame.Rows + row];

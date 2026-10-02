@@ -92,6 +92,7 @@ public sealed partial class SceneCompositor
                 foreach (var run in SlotsWildPresentation(game, now)) DrawSlotWildRunFire(ds, run, layout);
             DrawSlotDragons(ds, game, now, layout);
             DrawSlotBanner(ds, game, t, progress, layout);
+            DrawSlotDragonFireballs(ds, game, now, layout);
         }
         // Lowered chest fronts keep their own pane clips below the reel
         // effects' y700 cutoff and above the independently clipped win rail.

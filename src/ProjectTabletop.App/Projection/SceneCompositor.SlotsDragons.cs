@@ -80,20 +80,6 @@ public sealed partial class SceneCompositor
                     * (1 - Ease(Math.Clamp((phaseTime - 1.08) / .16, 0, 1)))) : 0;
                 DrawSlotDragonPortrait(ds, index, center, layout.Aspect, emergence, roar);
                 DrawSlotDragonMotes(ds, center, layout.Aspect, color, index, acting ? 1 : .4f);
-                if (acting && power == SlotEffect.Collect)
-                {
-                    // A short, live flame plume accompanies the red dragon's
-                    // roar. The shader animates continuously, not as a glow.
-                    var transform = ds.Transform;
-                    const float portraitScale = 96f / 113;
-                    var mouth = new Vector2(center.X + 20 * portraitScale / layout.Aspect,
-                        234 - (214 - 133) * portraitScale + (1 - emergence) * 34);
-                    ds.Transform = Matrix3x2.CreateRotation(1.0f) * Matrix3x2.CreateScale(1 / layout.Aspect, 1)
-                        * Matrix3x2.CreateTranslation(mouth) * transform;
-                    try { DrawSlotFire(ds, new Rect(-10 * portraitScale, -25 * portraitScale,
-                        20 * portraitScale, 36 * portraitScale), _slotVfxTime * 1.3f, 8.6f, roar * emergence * .9f); }
-                    finally { ds.Transform = transform; }
-                }
             }
             DrawSlotHeaderCoinFront(ds, center, layout.Aspect, index);
             if (age is >= .3f and < 1.4f)
