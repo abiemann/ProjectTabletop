@@ -10,6 +10,9 @@ public sealed partial class SceneCompositor
     private CanvasBitmap? _slotBackdrop;
     private CanvasBitmap? _slotTreasureArtwork;
     private CanvasBitmap? _slotDragonArtwork;
+    private CanvasBitmap? _slotDragonBodyArtwork;
+    private CanvasBitmap? _slotDragonHeadArtwork;
+    private CanvasBitmap? _slotDragonSwivelArtwork;
     private CanvasBitmap? _slotWildPortraits;
     private CanvasBitmap? _slotWildColossus;
     private CanvasBitmap? _slotMenuDragonArtwork;
@@ -50,6 +53,8 @@ public sealed partial class SceneCompositor
 
     internal bool SlotsArtworkReady => _slotArtwork is not null && _slotBackdrop is not null
         && _slotTreasureArtwork is not null && _slotDragonArtwork is not null
+        && _slotDragonBodyArtwork is not null && _slotDragonHeadArtwork is not null
+        && _slotDragonSwivelArtwork is not null
         && _slotWildPortraits is not null && _slotWildColossus is not null && SlotsCabinetArtworkReady;
     internal string? SlotsArtworkError => _slotArtworkError ?? _slotCabinetArtworkError;
     internal bool SlotsCabinetArtworkReady => _slotCoinPileArtwork is not null
@@ -100,6 +105,25 @@ public sealed partial class SceneCompositor
             _slotWildPortraits = _slotWildColossus = null;
             _slotArtworkBounds.Clear();
             AppLog.Write("Dragon Slots artwork", error);
+        }
+        // The articulated portraits can fall back to the original atlas if
+        // their files are unavailable, without discarding the reel artwork.
+        try
+        {
+            string directory = Path.Combine(AppContext.BaseDirectory, "SlotsRendering", "Assets");
+            _slotDragonBodyArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-dragon-bodies-front.png"), 96)
+                .AsTask().GetAwaiter().GetResult();
+            _slotDragonHeadArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-dragon-heads-front.png"), 96)
+                .AsTask().GetAwaiter().GetResult();
+            _slotDragonSwivelArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-dragon-heads-swivel.png"), 96)
+                .AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception error) when (!device.IsDeviceLost(error.HResult))
+        {
+            _slotDragonBodyArtwork?.Dispose(); _slotDragonHeadArtwork?.Dispose(); _slotDragonSwivelArtwork?.Dispose();
+            _slotDragonBodyArtwork = _slotDragonHeadArtwork = _slotDragonSwivelArtwork = null;
+            _slotArtworkError ??= error.Message;
+            AppLog.Write("Dragon Slots articulated portraits", error);
         }
         // The menu illustration is optional and independent of game artwork:
         // a missing thumbnail must not discard the reels' successfully loaded
@@ -242,6 +266,7 @@ public sealed partial class SceneCompositor
     private void DisposeSlotArtwork()
     {
         _slotArtwork?.Dispose(); _slotBackdrop?.Dispose(); _slotTreasureArtwork?.Dispose(); _slotDragonArtwork?.Dispose();
+        _slotDragonBodyArtwork?.Dispose(); _slotDragonHeadArtwork?.Dispose(); _slotDragonSwivelArtwork?.Dispose();
         _slotWildPortraits?.Dispose(); _slotWildColossus?.Dispose();
         _slotMenuDragonArtwork?.Dispose();
         _slotCoinPileArtwork?.Dispose(); _slotVaultChestArtwork?.Dispose(); _slotVaultKeyArtwork?.Dispose();
@@ -249,6 +274,7 @@ public sealed partial class SceneCompositor
         _slotArtwork = _slotBackdrop = null;
         _slotTreasureArtwork = null;
         _slotDragonArtwork = null;
+        _slotDragonBodyArtwork = _slotDragonHeadArtwork = _slotDragonSwivelArtwork = null;
         _slotWildPortraits = _slotWildColossus = null;
         _slotMenuDragonArtwork = null;
         _slotCoinPileArtwork = _slotVaultChestArtwork = _slotVaultKeyArtwork = null;

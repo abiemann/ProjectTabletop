@@ -42,6 +42,7 @@ public sealed partial class SceneCompositor
         int coins = Math.Min(3, visible.Count(item => item.Cell.Symbol == SlotSymbol.Coin));
         if (game.Phase == SlotPhase.RespinIntro)
             DrawSlotHatchCharge(ds, visible, phaseTime, layout);
+        SlotDragonAttack? attack = TrySlotDragonAttack(game, now, layout, out var activeAttack) ? activeAttack : null;
 
         using var clip = CanvasGeometry.CreateRectangle(ds.Device, new Rect(0, 134, 1000, 114));
         using var layer = ds.CreateLayer(1, clip);
@@ -76,9 +77,8 @@ public sealed partial class SceneCompositor
 
             if (age >= .3f)
             {
-                float roar = acting ? (float)(Ease(Math.Clamp((phaseTime - .43) / .13, 0, 1))
-                    * (1 - Ease(Math.Clamp((phaseTime - 1.08) / .16, 0, 1)))) : 0;
-                DrawSlotDragonPortrait(ds, index, center, layout.Aspect, emergence, roar);
+                var pose = SlotDragonPoseAt(index, hatch!.HatchedAt, now, _slotVfxTime, layout, attack);
+                DrawSlotDragonPortrait(ds, index, pose, layout.Aspect);
                 DrawSlotDragonMotes(ds, center, layout.Aspect, color, index, acting ? 1 : .4f);
             }
             DrawSlotHeaderCoinFront(ds, center, layout.Aspect, index);
@@ -146,7 +146,79 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private void DrawSlotDragonPortrait(CanvasDrawingSession ds, int index, Vector2 center, float aspect, float emergence, float roar)
+    private void DrawSlotDragonPortrait(CanvasDrawingSession ds, int index, SlotDragonPose pose, float aspect)
+    {
+        if (_slotDragonBodyArtwork is null || _slotDragonHeadArtwork is null)
+        {
+            DrawSlotLegacyDragonPortrait(ds, index, SlotDragonCenter(index, aspect), aspect, pose.Emergence, pose.Roar);
+            return;
+        }
+        var previous = ds.Transform;
+        var physical = Matrix3x2.CreateScale(1 / aspect, 1) * previous;
+        try
+        {
+            // Composite the joined parts before the emergence fade. The torso
+            // stays frontal; only the independently registered head takes aim.
+            using var emergence = ds.CreateLayer(pose.Emergence);
+            ds.Transform = pose.BodyTransform * physical;
+            double sx = _slotDragonBodyArtwork.Size.Width / 2172;
+            double sy = _slotDragonBodyArtwork.Size.Height / 724;
+            DrawSlotTreasureSprite(ds, _slotDragonBodyArtwork,
+                new Rect((index * 724 + 30) * sx, 90 * sy, 664 * sx, 554 * sy), SlotDragonBodyRect, 1);
+            ds.Transform = pose.HeadTransform * physical;
+            DrawSlotDragonHead(ds, index, pose);
+        }
+        finally { ds.Transform = previous; }
+    }
+
+    private void DrawSlotDragonHead(CanvasDrawingSession ds, int index, SlotDragonPose pose)
+    {
+        float roar = pose.Roar;
+        if (roar <= .001f)
+        {
+            DrawSlotDragonFrontHead(ds, index, 0);
+            return;
+        }
+        if (_slotDragonSwivelArtwork is null)
+        {
+            // A missing optional yaw atlas keeps an upright visible portrait.
+            // Its unregistered mouth is not used by the guarded fireball pass.
+            DrawSlotDragonFrontHead(ds, index, 0);
+            return;
+        }
+
+        var frames = SlotDragonYawFrames(pose.Yaw);
+        if (frames.Left == frames.Right && roar >= .999f)
+        {
+            DrawSlotDragonSwivelHead(ds, index, frames.Left);
+            return;
+        }
+        DrawSlotDragonMorphedHead(ds, index, pose);
+    }
+
+    private void DrawSlotDragonFrontHead(CanvasDrawingSession ds, int index, int row)
+    {
+        double cellWidth = _slotDragonHeadArtwork!.Size.Width / 3;
+        double cellHeight = _slotDragonHeadArtwork.Size.Height / 2;
+        var source = new Rect(index * cellWidth, row * cellHeight, cellWidth, cellHeight);
+        var box = SlotDragonHeadRect;
+        // Preserve the already calibrated calm-head position and scale.
+        box.X -= (1 - index) * 32 * box.Width / 512;
+        box.Y += row * 35 * box.Height / 512;
+        ds.DrawImage(_slotDragonHeadArtwork, box, source, 1, CanvasImageInterpolation.HighQualityCubic);
+    }
+
+    private void DrawSlotDragonSwivelHead(CanvasDrawingSession ds, int index, int frame)
+    {
+        var source = SlotDragonSwivelRegistrations[index * 5 + frame].Source;
+        double sx = _slotDragonSwivelArtwork!.Size.Width / 1619;
+        double sy = _slotDragonSwivelArtwork.Size.Height / 971;
+        ds.DrawImage(_slotDragonSwivelArtwork, SlotDragonSwivelBox(index, frame),
+            new Rect(source.X * sx, source.Y * sy, source.Width * sx, source.Height * sy),
+            1, CanvasImageInterpolation.HighQualityCubic);
+    }
+
+    private void DrawSlotLegacyDragonPortrait(CanvasDrawingSession ds, int index, Vector2 center, float aspect, float emergence, float roar)
     {
         float breathing = MathF.Sin(_slotVfxTime * 2.4f + index * 2.1f);
         float height = 96 * (1 + .013f * breathing);

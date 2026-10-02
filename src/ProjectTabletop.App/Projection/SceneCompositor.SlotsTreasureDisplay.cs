@@ -81,15 +81,6 @@ public sealed partial class SceneCompositor
         return new(layout.ReelCenter(reel) - width / 2, SlotWinMessageBounds.Y - height - 2, width, height);
     }
 
-    private static Rect SlotEarnedKeyBox(SlotLayout layout, int reel)
-    {
-        var chest = SlotKeyChestBox(layout, reel);
-        double width = Math.Min(26, chest.Width * layout.Aspect * .22);
-        double height = width * 40 / 26;
-        return new(chest.Right - (width + 4) / layout.Aspect, chest.Y + (chest.Height - height) / 2,
-            width / layout.Aspect, height);
-    }
-
     private void DrawSlotKeyChestLight(CanvasDrawingSession ds, SlotSnapshot game, SlotLayout layout)
     {
         for (int reel = 0; reel < SlotGame.Reels; reel++)
@@ -120,7 +111,6 @@ public sealed partial class SceneCompositor
                     DrawSlotHoardGlint(ds, origin + new Vector2(-8 / layout.Aspect, -1), layout.Aspect,
                         MathF.Pow(MathF.Sin(phase / .13f * MathF.PI), 2) * .72f);
             }
-            DrawSlotKeyArtwork(ds, SlotEarnedKeyBox(layout, reel), layout.Aspect);
         }
     }
 }

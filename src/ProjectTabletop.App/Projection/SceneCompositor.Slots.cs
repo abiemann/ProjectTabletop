@@ -204,7 +204,6 @@ public sealed partial class SceneCompositor
                 var center = new Vector2(layout.ReelCenter(reel), (float)(box.Y + box.Height / 2));
                 DrawSlotKeySocket(ds, layout.Square(center, 50), layout.Aspect, lit);
             }
-            if (lit) DrawSlotKeyArtwork(ds, SlotEarnedKeyBox(layout, reel), layout.Aspect);
         }
     }
 

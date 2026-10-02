@@ -17,24 +17,14 @@ public sealed partial class SceneCompositor
     {
         // This is the presentation of a power already applied by SlotGame.
         // A retained baby never invents a new trigger, target, roll or award.
-        if (game.Phase != SlotPhase.RespinEffect || !game.InRespins || game.EffectCell is not { } cell
-            || cell.Reel is < 0 or >= SlotGame.Reels || cell.Row is < 0 or >= SlotGame.Rows
-            || !game.IsActiveRow(cell.Row)) return;
-        int index = Array.FindIndex(SlotDragonPowers, item => item.Power == game.Effect);
-        if (index < 0) return;
-        var hatch = game.DragonHatches.FirstOrDefault(item => item.Power == game.Effect);
-        if (hatch is null || hatch.HatchedAt > now) return;
-        var symbol = game.Cell(cell.Reel, cell.Row).Symbol;
-        if (symbol != SlotDragonPowers[index].Egg && symbol != SlotSymbol.EggRainbow) return;
-
-        float time = (float)(now - game.PhaseStartedAt).TotalSeconds;
-        bool firstHatch = hatch.HatchedAt == game.PhaseStartedAt;
-        // Let a new baby's face emerge before it spits. Later activations use
-        // its settled portrait, with no new cracks or hatching sequence.
-        float launch = firstHatch ? .82f : .52f;
-        float flight = firstHatch ? .30f : .50f;
-        float impact = launch + flight;
-        if (time < launch - .18f || time >= impact + .28f) return;
+        if (!TrySlotDragonAttack(game, now, layout, out var attack)) return;
+        int index = attack.Index;
+        float time = attack.PhaseTime, launch = attack.Launch, flight = attack.Flight, impact = attack.Impact;
+        if (time < launch - .18f || time >= attack.End) return;
+        EnsureSlotArtwork(ds.Device);
+        // The fallback portrait has a different mouth. Avoid a disconnected
+        // fireball if the independently articulated artwork could not load.
+        if (_slotDragonBodyArtwork is null || _slotDragonHeadArtwork is null || _slotDragonSwivelArtwork is null) return;
 
         using var clip = CanvasGeometry.CreateRectangle(ds.Device, new Rect(0, 134, 1000, layout.Bottom - 134));
         using var layer = ds.CreateLayer(1, clip);
@@ -44,29 +34,17 @@ public sealed partial class SceneCompositor
         ds.Transform = Matrix3x2.CreateScale(1 / layout.Aspect, 1) * transform;
         try
         {
-            var center = SlotDragonCenter(index, layout.Aspect);
-            float ageAtLaunch = (float)(game.PhaseStartedAt - hatch.HatchedAt).TotalSeconds + launch;
-            float emergence = (float)Ease(Math.Clamp((ageAtLaunch - .3f) / .8f, 0, 1));
-            var start = SlotDragonFireballMouth(index, center, layout.Aspect, emergence,
-                _slotVfxTime - (time - launch));
-            float rowCount = game.RowCount, firstRow = game.FirstRow;
-            if (game.Effect == SlotEffect.Expand)
-            {
-                float reveal = (float)Ease(Math.Min(1, impact / SlotGame.RespinEffectDuration.TotalSeconds / .6));
-                rowCount = 3 + 2 * reveal;
-                firstRow = 1 - reveal;
-            }
-            var target = Center(layout.Cell(cell.Reel, cell.Row, firstRow, rowCount));
-            target.X *= layout.Aspect;
-            var control = start + new Vector2(45, Math.Max(55, (target.Y - start.Y) * .38f));
+            var launchPose = SlotDragonPoseAt(index, attack.HatchedAt,
+                attack.PhaseStartedAt.AddSeconds(launch), _slotVfxTime - (time - launch), layout, attack);
+            var start = launchPose.Mouth;
+            var target = attack.Target;
+            var control = start + launchPose.Forward * Math.Max(55, Vector2.Distance(start, target) * .38f);
             float seed = index * 7.3f + (game.Revision % 997) * .013f;
             if (time < launch)
             {
                 float charge = Math.Clamp((time - launch + .18f) / .18f, 0, 1);
-                float age = (float)(now - hatch.HatchedAt).TotalSeconds;
-                var mouth = SlotDragonFireballMouth(index, center, layout.Aspect,
-                    (float)Ease(Math.Clamp((age - .3f) / .8f, 0, 1)), _slotVfxTime);
-                DrawSlotDragonFireball(ds, mouth, control - start, .16f + charge * .21f,
+                var pose = SlotDragonPoseAt(index, attack.HatchedAt, now, _slotVfxTime, layout, attack);
+                DrawSlotDragonFireball(ds, pose.Mouth, pose.Forward, .16f + charge * .21f,
                     seed, charge * .85f, 0, game.Effect);
             }
             else if (time < impact)
@@ -98,16 +76,6 @@ public sealed partial class SceneCompositor
             }
         }
         finally { ds.Transform = transform; }
-    }
-
-    private static Vector2 SlotDragonFireballMouth(int index, Vector2 center, float aspect, float emergence, float clock)
-    {
-        float height = 96 * (1 + .013f * MathF.Sin(clock * 2.4f + index * 2.1f));
-        float scale = height / 113;
-        float bottom = 234 + (1 - emergence) * 34;
-        var mouth = new Vector2(center.X * aspect + 20 * scale, bottom - 81 * scale);
-        var pivot = new Vector2(center.X * aspect, bottom - 7);
-        return Vector2.Transform(mouth, Matrix3x2.CreateRotation(.008f * MathF.Sin(clock * 1.2f + index), pivot));
     }
 
     private void DrawSlotDragonFireball(CanvasDrawingSession ds, Vector2 point, Vector2 direction,
