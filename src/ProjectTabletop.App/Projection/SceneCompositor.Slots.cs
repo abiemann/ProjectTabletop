@@ -226,14 +226,15 @@ public sealed partial class SceneCompositor
     private static void DrawSlotButton(CanvasDrawingSession ds, BoardButton button, SlotSnapshot game, float aspect)
     {
         var rect = SlotButtonRect(button);
+        float radius = BoardButtonCornerRadius(button);
         bool spin = button.Id is "slot-spin" or "slot-refill";
-        ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 6, rect.Width, rect.Height), 18, 18, ThemeColor(0, 0, 0, 140));
+        ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 6, rect.Width, rect.Height), radius, radius, ThemeColor(0, 0, 0, 140));
         Color top = !button.Enabled ? ThemeColor(150, 138, 124) : spin ? ThemeColor(255, 228, 150) : ThemeColor(250, 240, 218);
         Color bottom = !button.Enabled ? ThemeColor(118, 106, 96) : spin ? ThemeColor(240, 170, 80) : ThemeColor(222, 204, 164);
         using var finish = new CanvasLinearGradientBrush(ds.Device, top, bottom)
         { StartPoint = new(0, (float)rect.Y), EndPoint = new(0, (float)rect.Bottom) };
-        ds.FillRoundedRectangle(rect, 18, 18, finish);
-        ds.DrawRoundedRectangle(rect, 18, 18, button.Enabled ? SlotDeepGold : ThemeColor(90, 80, 70), 2);
+        ds.FillRoundedRectangle(rect, radius, radius, finish);
+        ds.DrawRoundedRectangle(rect, radius, radius, button.Enabled ? SlotDeepGold : ThemeColor(90, 80, 70), 2);
         ds.DrawLine((float)rect.X + 20, (float)rect.Y + 3, (float)rect.Right - 20, (float)rect.Y + 3, ThemeColor(255, 255, 255, 170), 1.2f);
         var text = SlotButtonTextSpec(button);
         SlotText(ds, text.Caption, text.Bounds, text.Size, button.Enabled ? ThemeColor(52, 28, 12) : ThemeColor(70, 62, 56), aspect);

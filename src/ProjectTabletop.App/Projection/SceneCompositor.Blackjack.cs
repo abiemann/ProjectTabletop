@@ -206,18 +206,19 @@ public sealed partial class SceneCompositor
         bool selected = bet && decimal.TryParse(button.Id[7..], NumberStyles.Integer,
             CultureInfo.InvariantCulture, out var amount) && amount == selectedBet;
         bool primary = button.Id == "bj-deal";
+        float radius = BoardButtonCornerRadius(button);
         hovered &= enabled;
         Color top = !enabled ? ThemeColor(30, 52, 43) : primary ? ThemeColor(235, 208, 148)
             : hovered ? ThemeColor(51, 99, 77) : ThemeColor(28, 61, 48);
         Color bottom = !enabled ? ThemeColor(21, 40, 32) : primary ? ThemeColor(179, 140, 74)
             : hovered ? ThemeColor(28, 70, 53) : ThemeColor(14, 37, 29);
         ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 5, rect.Width, rect.Height),
-            13, 13, ThemeColor(0, 12, 7, 120));
+            radius, radius, ThemeColor(0, 12, 7, 120));
         using var finish = new CanvasLinearGradientBrush(ds.Device, top, bottom)
         { StartPoint = new((float)rect.X, (float)rect.Y), EndPoint = new((float)rect.X, (float)rect.Bottom) };
-        ds.FillRoundedRectangle(rect, 13, 13, finish);
+        ds.FillRoundedRectangle(rect, radius, radius, finish);
         Color edge = hovered || selected ? CasinoGold : enabled ? ThemeColor(136, 155, 114) : ThemeColor(62, 81, 61);
-        ds.DrawRoundedRectangle(rect, 13, 13, edge, hovered || selected ? 2.5f : 1);
+        ds.DrawRoundedRectangle(rect, radius, radius, edge, hovered || selected ? 2.5f : 1);
         if (hovered)
             ds.DrawRoundedRectangle(new Rect(rect.X - 3, rect.Y - 3, rect.Width + 6, rect.Height + 6),
                 16, 16, ThemeColor(225, 196, 133, 55), 3);

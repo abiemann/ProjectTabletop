@@ -71,9 +71,8 @@ public sealed partial class SceneCompositor
     }
 
     // A held long-press button's outside rim warms from amber to hot orange-red
-    // as its second fills. It is drawn well outside the button (see HoldRimGap):
-    // a first version 1-7 pixels out bled onto the button's glass in the real
-    // camera image and kept "Deal again" from confirming.
+    // as its second fills. Its inner edge follows the actual rounded surface;
+    // the caption and its inset camera-reference interior remain untouched.
     private CanvasRenderTarget? _holdFeedbackTarget;
     private string? _holdFeedbackKey;
     private static readonly Windows.UI.Color HoldRimCool = Windows.UI.Color.FromArgb(255, 255, 214, 120);
@@ -98,36 +97,33 @@ public sealed partial class SceneCompositor
             foreach (var hold in progress)
             {
                 if (_boardSession.Buttons.FirstOrDefault(button => button.Id == hold.ButtonId) is not { } button) continue;
-                // Projector and camera blur spread a rim onto nearby glass. Keep it
-                // 12 board pixels clear of its own button, whose glass margins are
-                // the camera's reference for the covered caption, and 10 clear of
-                // every other button (on packed rows it shows above and below).
-                var clip = CanvasGeometry.CreateRectangle(drawing.Device, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
-                foreach (var other in _boardSession.Buttons)
-                {
-                    float margin = other.Id == button.Id ? HoldRimGap - 1 : 10;
-                    using var excluded = CanvasGeometry.CreateRectangle(drawing.Device, Pixels(other.Bounds, margin));
-                    var remaining = clip.CombineWith(excluded, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
-                    clip.Dispose();
-                    clip = remaining;
-                }
-                using (clip)
-                using (drawing.CreateLayer(1, clip))
-                {
-                    float heat = (float)hold.Progress;
-                    var color = Windows.UI.Color.FromArgb((byte)(90 + 110 * heat),
-                        (byte)(HoldRimCool.R + (HoldRimHot.R - HoldRimCool.R) * heat),
-                        (byte)(HoldRimCool.G + (HoldRimHot.G - HoldRimCool.G) * heat),
-                        (byte)(HoldRimCool.B + (HoldRimHot.B - HoldRimCool.B) * heat));
-                    drawing.DrawRoundedRectangle(Pixels(button.Bounds, HoldRimGap + 1.5f), 18, 18, color, 3);
-                }
+                float heat = (float)hold.Progress;
+                var color = Windows.UI.Color.FromArgb((byte)(90 + 110 * heat),
+                    (byte)(HoldRimCool.R + (HoldRimHot.R - HoldRimCool.R) * heat),
+                    (byte)(HoldRimCool.G + (HoldRimHot.G - HoldRimCool.G) * heat),
+                    (byte)(HoldRimCool.B + (HoldRimHot.B - HoldRimCool.B) * heat));
+                // Offset the stroke's centre by half its width, including the
+                // corner radius. This makes a continuous outside-only contour
+                // touching the button, with no square masks cutting its sides.
+                const float width = 3;
+                float radius = BoardButtonCornerRadius(button) + width / 2;
+                drawing.DrawRoundedRectangle(Pixels(button.Bounds, width / 2), radius, radius, color, width);
             }
             _holdFeedbackKey = key;
         }
         return _holdFeedbackTarget;
     }
 
-    private const float HoldRimGap = 12;
+    // Shared by the actual button surfaces and their hold outline so both
+    // contours keep the same corners on every board and at every raster size.
+    private static float BoardButtonCornerRadius(BoardButton button) => button.Id switch
+    {
+        "globe-drawer-open" or "globe-drawer-close" => 25,
+        _ when button.Id.StartsWith("slot-", StringComparison.Ordinal) => 18,
+        _ when button.Id.StartsWith("bj-", StringComparison.Ordinal) => 13,
+        _ when button.Id.StartsWith("globe-", StringComparison.Ordinal) => 15,
+        _ => 19
+    };
 
     private static Rect Pixels(BoardRect bounds, float grow) => new(bounds.X * BoardSurfaceSize - grow,
         bounds.Y * BoardSurfaceSize - grow, bounds.Width * BoardSurfaceSize + 2 * grow, bounds.Height * BoardSurfaceSize + 2 * grow);

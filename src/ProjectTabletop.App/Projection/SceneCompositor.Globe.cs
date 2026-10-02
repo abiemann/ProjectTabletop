@@ -160,6 +160,7 @@ public sealed partial class SceneCompositor
     private static void DrawGlobeDrawerHandle(CanvasDrawingSession ds, BoardButton button, bool hovered, double aspect)
     {
         var b = button.Bounds;
+        float radius = BoardButtonCornerRadius(button);
         var rectangle = new Rect(b.X * BoardSurfaceSize, b.Y * BoardSurfaceSize,
             b.Width * BoardSurfaceSize, b.Height * BoardSurfaceSize);
         using var glass = new CanvasLinearGradientBrush(ds.Device,
@@ -169,8 +170,8 @@ public sealed partial class SceneCompositor
             new() { Position = 1, Color = ThemeColor(176, 199, 214) }
         ]) { StartPoint = new((float)rectangle.X, (float)rectangle.Y),
             EndPoint = new((float)rectangle.X, (float)rectangle.Bottom) };
-        ds.FillRoundedRectangle(rectangle, 25, 25, glass);
-        ds.DrawRoundedRectangle(rectangle, 25, 25,
+        ds.FillRoundedRectangle(rectangle, radius, radius, glass);
+        ds.DrawRoundedRectangle(rectangle, radius, radius,
             hovered ? ThemeColor(124, 238, 255) : ThemeColor(96, 155, 185), hovered ? 2.5f : 1.25f);
         ds.DrawLine((float)rectangle.X + 25, (float)rectangle.Y + 2,
             (float)rectangle.Right - 25, (float)rectangle.Y + 2, ThemeColor(247, 252, 255, 185), 1);
@@ -206,6 +207,7 @@ public sealed partial class SceneCompositor
     private static void DrawGlobeButton(CanvasDrawingSession ds, BoardButton button, bool hovered)
     {
         var bounds = button.Bounds;
+        float radius = BoardButtonCornerRadius(button);
         var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
             bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
         // Pale opaque glass gives the camera a bright, quiet caption background
@@ -218,8 +220,8 @@ public sealed partial class SceneCompositor
             new() { Position = .49f, Color = ThemeColor(226, 232, 236) },
             new() { Position = 1, Color = ThemeColor(218, 225, 230) }
         ]) { StartPoint = new((float)rect.X, (float)rect.Y), EndPoint = new((float)rect.X, (float)rect.Bottom) };
-        ds.FillRoundedRectangle(rect, 15, 15, glass);
-        ds.DrawRoundedRectangle(rect, 15, 15,
+        ds.FillRoundedRectangle(rect, radius, radius, glass);
+        ds.DrawRoundedRectangle(rect, radius, radius,
             hovered ? ThemeColor(103, 224, 255) : ThemeColor(117, 151, 173), hovered ? 2.5f : 1.2f);
         ds.DrawLine((float)rect.X + 17, (float)rect.Y + 2, (float)rect.Right - 17, (float)rect.Y + 2,
             ThemeColor(255, 255, 255, 160), 1);

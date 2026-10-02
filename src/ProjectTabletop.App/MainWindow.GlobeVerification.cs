@@ -464,14 +464,15 @@ public sealed partial class MainWindow
                 return activated;
             }
         }
-        // Halfway through a hold, the button's outside rim is warm; its own glass is not.
+        // Halfway through a hold, the narrow rim touches the rounded button edge;
+        // its protected glass interior remains unchanged.
         void CheckHoldRim(BoardButton button, byte[] empty, bool warm)
         {
             var pixels = Draw();
-            var rim = CameraPoint(button.Bounds.X + button.Bounds.Width / 2, button.Bounds.Y - .0135);
+            var rim = CameraPoint(button.Bounds.X + button.Bounds.Width / 2, button.Bounds.Y - .0015);
             var inside = CameraPoint(button.Bounds.X + button.Bounds.Width / 2, button.Bounds.Y + .012);
             Require(Warmer(pixels, empty, rim) == warm && !Warmer(pixels, empty, inside),
-                warm ? $"Holding {button.Label} did not warm its outside rim, or warmed the button itself."
+                warm ? $"Holding {button.Label} did not warm its edge-adjacent rim, or warmed the protected button interior."
                      : $"{button.Label}'s rim stayed warm after the hold was released.");
             // Red rises clearly, and well beyond blue, against the same scene without a hold.
             static bool Warmer(byte[] image, byte[] before, PixelPoint point)
