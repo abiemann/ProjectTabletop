@@ -72,11 +72,11 @@ public sealed partial class SceneCompositor
         {
             float heat = .5f + .23f * MathF.Sin(time * 1.7f) + .16f * MathF.Sin(time * 2.91f + 1.3f);
             ds.DrawGeometry(_slotMarqueeLetters!, ThemeColor(204, 47, 9, (byte)(65 + heat * 35)), 5.2f);
-            ds.FillGeometry(_slotMarqueeExtrusion!, ThemeColor(3, 4, 6));
+            ds.FillGeometry(_slotMarqueeExtrusion!, ThemeColor(0, 0, 0));
             ds.DrawGeometry(_slotMarqueeExtrusion!, ThemeColor(61, 30, 20), 1.4f);
             using var heatedEdge = new CanvasLinearGradientBrush(ds.Device,
             [
-                new() { Position = 0, Color = ThemeColor(93, 85, 75) },
+                new() { Position = 0, Color = ThemeColor(96, 36, 8) },
                 new() { Position = .3f, Color = ThemeColor(174, 133, 91) },
                 new() { Position = .55f, Color = ThemeColor(235, 111, 34) },
                 new() { Position = .83f, Color = ThemeColor(255, 176, 60) },
@@ -87,26 +87,8 @@ public sealed partial class SceneCompositor
                 EndPoint = new(0, (float)_slotMarqueeInk.Bottom + 2)
             };
             ds.DrawGeometry(_slotMarqueeLetters!, heatedEdge, 1.8f);
-            using var iron = new CanvasLinearGradientBrush(ds.Device,
-            [
-                new() { Position = 0, Color = ThemeColor(56, 57, 59) },
-                new() { Position = .15f, Color = ThemeColor(24, 26, 30) },
-                new() { Position = .42f, Color = ThemeColor(9, 11, 15) },
-                new() { Position = .63f, Color = ThemeColor(22, 23, 25) },
-                new() { Position = 1, Color = ThemeColor(5, 7, 10) }
-            ]) { StartPoint = new(-10, (float)_slotMarqueeInk.Y), EndPoint = new(10, (float)_slotMarqueeInk.Bottom) };
-            ds.FillGeometry(_slotMarqueeLetters!, iron);
-            // Shallow hammer scars are clipped to the face of the type. No
-            // moving fill or bright interior turns the iron into gold lettering.
-            using var layer = ds.CreateLayer(1, _slotMarqueeLetters!);
-            for (int scar = 0; scar < 27; scar++)
-            {
-                float x = (float)_slotMarqueeInk.X + SlotRandom(scar * 47 + 173) * (float)_slotMarqueeInk.Width;
-                float y = (float)_slotMarqueeInk.Y + SlotRandom(scar * 23 + 43) * (float)_slotMarqueeInk.Height;
-                float length = 1.4f + SlotRandom(scar * 17 + 61) * 4.2f;
-                ds.DrawLine(x, y, x + length, y - .45f, ThemeColor(111, 105, 98, 60), .45f);
-                ds.DrawLine(x, y + .6f, x + length, y + .15f, ThemeColor(0, 0, 0, 150), .5f);
-            }
+            // The face stays pure black; only the narrow fire-heated rim is lit.
+            ds.FillGeometry(_slotMarqueeLetters!, ThemeColor(0, 0, 0));
         }
         finally { ds.Transform = previous; }
     }

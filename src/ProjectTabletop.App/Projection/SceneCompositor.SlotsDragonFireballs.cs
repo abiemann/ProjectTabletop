@@ -67,7 +67,7 @@ public sealed partial class SceneCompositor
                 var mouth = SlotDragonFireballMouth(index, center, layout.Aspect,
                     (float)Ease(Math.Clamp((age - .3f) / .8f, 0, 1)), _slotVfxTime);
                 DrawSlotDragonFireball(ds, mouth, control - start, .16f + charge * .21f,
-                    seed, charge * .85f, 0);
+                    seed, charge * .85f, 0, game.Effect);
             }
             else if (time < impact)
             {
@@ -77,14 +77,14 @@ public sealed partial class SceneCompositor
                 var tangent = 2 * ((1 - along) * (control - start) + along * (target - control));
                 float trail = Math.Clamp(Vector2.Distance(start, point) / 72, 0, 1);
                 DrawSlotDragonFireball(ds, point, tangent, .65f + .23f * MathF.Sin(along * MathF.PI),
-                    seed, 1, trail);
+                    seed, 1, trail, game.Effect);
             }
             else
             {
                 float burst = Math.Clamp((time - impact) / .28f, 0, 1);
                 float fade = (1 - burst) * (1 - burst);
                 DrawSlotDragonFireball(ds, target, Vector2.UnitY, .7f + (float)Ease(burst) * 1.1f,
-                    seed, fade, 0);
+                    seed, fade, 0, game.Effect);
                 var color = SlotDragonPowers[index].Color;
                 for (int spark = 0; spark < 14; spark++)
                 {
@@ -111,7 +111,7 @@ public sealed partial class SceneCompositor
     }
 
     private void DrawSlotDragonFireball(CanvasDrawingSession ds, Vector2 point, Vector2 direction,
-        float size, float seed, float opacity, float trail)
+        float size, float seed, float opacity, float trail, SlotEffect power)
     {
         if (_slotDragonFireballDevice != ds.Device)
         {
@@ -119,7 +119,7 @@ public sealed partial class SceneCompositor
             _slotDragonFireballDevice = ds.Device;
         }
         _slotDragonFireball ??= new PixelShaderEffect<SlotDragonFireballShader>();
-        _slotDragonFireball.ConstantBuffer = new SlotDragonFireballShader(_slotVfxTime, seed, opacity, trail);
+        _slotDragonFireball.ConstantBuffer = new SlotDragonFireballShader(_slotVfxTime, seed, opacity, trail, (int)power);
         var transform = ds.Transform;
         ds.Transform = Matrix3x2.CreateScale(size)
             * Matrix3x2.CreateRotation(MathF.Atan2(direction.Y, direction.X) + MathF.PI / 2)

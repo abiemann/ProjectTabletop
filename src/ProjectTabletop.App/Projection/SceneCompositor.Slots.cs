@@ -239,7 +239,8 @@ public sealed partial class SceneCompositor
         var text = SlotButtonTextSpec(button);
         SlotText(ds, text.Caption, text.Bounds, text.Size, button.Enabled ? ThemeColor(52, 28, 12) : ThemeColor(70, 62, 56), aspect);
         if (button.Id == "slot-buy")
-            SlotText(ds, SlotGame.Format(game.BuyCost), new Rect(rect.X + 8, rect.Bottom - 34, rect.Width - 16, 24), 16,
+            SlotText(ds, SlotGame.Format(game.BuyCost), new Rect(text.Bounds.X,
+                text.Bounds.Y + text.Bounds.Height / 2 + 16, text.Bounds.Width, 24), 16,
                 button.Enabled ? ThemeColor(110, 60, 20) : ThemeColor(80, 70, 62), aspect);
     }
 
@@ -255,8 +256,8 @@ public sealed partial class SceneCompositor
             "slot-buy" => "BUY", "slot-refill" => "REFILL", _ => "SPIN"
         };
         float size = button.Id == "slot-spin" ? 46 : 34;
-        double lift = button.Id == "slot-buy" ? 12 : 0;
-        return (caption, new Rect(rect.X + 8, rect.Y + 4 - lift, rect.Width - 16, rect.Height - 12), size);
+        double topInset = button.Id == "slot-buy" ? 6 : 4;
+        return (caption, new Rect(rect.X + 8, rect.Y + topInset, rect.Width - 16, rect.Height - 12), size);
     }
 
     /// <summary>The camera trigger region: the caption's ink, narrowed exactly as it is drawn.</summary>

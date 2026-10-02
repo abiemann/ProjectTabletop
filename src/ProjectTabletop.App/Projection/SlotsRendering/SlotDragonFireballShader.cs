@@ -9,7 +9,7 @@ namespace ProjectTabletop.App.Projection.SlotsRendering;
 [D2DRequiresScenePosition]
 [D2DShaderProfile(D2D1ShaderProfile.PixelShader50)]
 [D2DGeneratedPixelShaderDescriptor]
-internal readonly partial struct SlotDragonFireballShader(float time, float seed, float opacity, float trail) : ID2D1PixelShader
+internal readonly partial struct SlotDragonFireballShader(float time, float seed, float opacity, float trail, int power) : ID2D1PixelShader
 {
     public Float4 Execute()
     {
@@ -36,10 +36,29 @@ internal readonly partial struct SlotDragonFireballShader(float time, float seed
         float fuel = 1 - (1 - head) * (1 - wake);
         float fold = 1 - Hlsl.SmoothStep(0.015f, 0.12f, Hlsl.Abs(detail - 0.49f + warp.Y * 0.14f));
         float heat = Hlsl.Saturate(body * 1.25f + fold * 0.25f + head * 0.16f);
-        Float3 color = Hlsl.Lerp(new Float3(0.81f, 0.05f, 0.002f),
-            new Float3(1, 0.32f, 0.012f), Hlsl.SmoothStep(0.18f, 0.49f, heat));
-        color = Hlsl.Lerp(color, new Float3(1, 0.77f, 0.18f), Hlsl.SmoothStep(0.46f, 0.78f, heat));
-        color = Hlsl.Lerp(color, new Float3(1, 0.98f, 0.73f), Hlsl.SmoothStep(0.82f, 1, heat) * head);
+        // SlotEffect values, rather than header positions: Expand=1, Boost=2,
+        // Collect=3. The colored volume stays visible around its pale hot core.
+        Float3 dark = new(0.32f, 0.004f, 0.025f);
+        Float3 flame = new(1, 0.055f, 0.11f);
+        Float3 bright = new(1, 0.34f, 0.27f);
+        Float3 core = new(1, 0.89f, 0.78f);
+        if (power == 1)
+        {
+            dark = new Float3(0.002f, 0.19f, 0.025f);
+            flame = new Float3(0.035f, 0.78f, 0.16f);
+            bright = new Float3(0.54f, 1, 0.29f);
+            core = new Float3(0.92f, 1, 0.83f);
+        }
+        else if (power == 2)
+        {
+            dark = new Float3(0.007f, 0.035f, 0.25f);
+            flame = new Float3(0.02f, 0.36f, 1);
+            bright = new Float3(0.20f, 0.79f, 1);
+            core = new Float3(0.83f, 0.95f, 1);
+        }
+        Float3 color = Hlsl.Lerp(dark, flame, Hlsl.SmoothStep(0.18f, 0.49f, heat));
+        color = Hlsl.Lerp(color, bright, Hlsl.SmoothStep(0.46f, 0.78f, heat));
+        color = Hlsl.Lerp(color, core, Hlsl.SmoothStep(0.82f, 1, heat) * head * 0.75f);
         float radiance = (1 - Hlsl.SmoothStep(0.9f, 1.65f, headDistance)) * 0.10f;
         float alpha = Hlsl.Saturate(fuel * (0.74f + detail * 0.24f) + radiance) * Hlsl.Saturate(opacity);
         return new Float4(color * alpha, alpha);
