@@ -13,6 +13,7 @@ public sealed partial class MainWindow
     {
         VerifyPhotoCopyObservationCaptureBoundary();
         VerifyPhotoCopyAcquisitionStability();
+        VerifyPhotoCopyHoldSubjectSelection();
         var liveOutput = _output;
         var liveState = (_camera.IsRunning, _output?.AppWindow.IsVisible,
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip);
@@ -29,6 +30,10 @@ public sealed partial class MainWindow
         Draw();
         await Task.Delay(1100);
         Require(scene.TryGetPhotoCopyCaptureContext(out var grey), "Photo Copy fixture did not settle.");
+        var holds = new PhotoCopyCaptionHoldFixture(scene, Draw, size);
+        var unavailable = await holds.HoldAsync("photo-copy-once", expectActivation: false);
+        Require(!scene.TryTakePhotoCopyCaptureRequest(unavailable, out _),
+            "A caption hold captured without a locked object or two-hand capture permission.");
 
         var fixture = new byte[size * size * 4];
         var objectTopLeft = CameraPoint(.2, .28);
@@ -59,40 +64,41 @@ public sealed partial class MainWindow
             ["menu", "photo-swirl", "photo-copy-once"]),
             "Photo Copy did not expose just Exit, Swirl and Copy.");
         Require(scene.CurrentBoardButtons[0].Label == "Exit" &&
-            scene.CurrentBoardButtons.All(button => button.Bounds.Y == .835) &&
+            scene.CurrentBoardButtons.All(button => button.Bounds.Y == .835 && button.Hold == BoardButtonHold.Once) &&
             scene.CurrentBoardButtons.All(button => button.Bounds.Y >
                 BoardSession.PhotoCopyShutterBounds.Y + BoardSession.PhotoCopyShutterBounds.Height),
             "Photo Copy controls did not sit below the capture area near the bottom edge.");
         foreach (var action in actions)
         {
-            var source = await Pinch(action.Id);
-            Require(scene.TryTakePhotoCopyCaptureRequest(source, out var pinched) && pinched.Action == action.Action &&
-                pinched.Gesture == BoardSelectionGesture.Pinch && pinched.TrackingId == 501 &&
-                pinched.FrameTime == source && pinched.Context.Revision == context.Revision,
-                action.Id + " pinch did not retain its action, source frame, hand or capture context.");
-            Require(!scene.TryTakePhotoCopyCaptureRequest(source, out _), "An action request was consumed twice.");
-            await Task.Delay(5);
-            var heldTime = DateTimeOffset.UtcNow;
-            scene.SetHandCursors([new(CameraPointForButton(action.Id), source.AddSeconds(1), pinchId)
-                { TrackingId = 501 }], heldTime);
-            Require(!scene.TryTakePhotoCopyCaptureRequest(heldTime, out _), "Holding a pinch repeated an explicit action.");
-
+            var pinch = await Pinch(action.Id);
+            Require(!scene.TryTakePhotoCopyCaptureRequest(pinch, out _),
+                action.Id + " accepted a pinch instead of broken-caption evidence.");
             var selected = await FingerGesture(action.Id);
-            Require(scene.TryTakePhotoCopyCaptureRequest(selected.Time, out var request) && request.Action == action.Action &&
-                request.Gesture == BoardSelectionGesture.IndexSeparation && request.TrackingId == selected.TrackingId &&
+            Require(!scene.TryTakePhotoCopyCaptureRequest(selected.Time, out _),
+                action.Id + " accepted index separation over its hold caption.");
+            await holds.CheckReleaseCancelsAsync(action.Id);
+            var source = await holds.HoldAsync(action.Id);
+            Require(scene.TryTakePhotoCopyCaptureRequest(source, out var request) && request.Action == action.Action &&
+                request.CaptionHold && request.TrackingId == 0 && request.FrameTime == source &&
                 request.Context.Revision == context.Revision && ReferenceEquals(request.Context.Target, lockedObject),
-                action.Id + " real index gesture lost its action or reset the object lock.");
-            Require(!scene.TryTakePhotoCopyCaptureRequest(selected.Time, out _) && scene.PhotoCopyCount == 0,
+                action.Id + " caption hold lost its exact frame, action or locked object without tracked hands.");
+            Require(!scene.TryTakePhotoCopyCaptureRequest(source, out _) && scene.PhotoCopyCount == 0,
                 "Routing an explicit action repeated its request or prematurely created Swirl stamps.");
+            var continued = await holds.ContinueHeldAsync(action.Id);
+            Require(!scene.TryTakePhotoCopyCaptureRequest(continued, out _),
+                "A continuously broken caption repeated an explicit action.");
         }
 
-        var wrongSource = await Pinch("photo-copy-once");
+        var wrongSource = await holds.HoldAsync("photo-copy-once");
         Require(!scene.TryTakePhotoCopyCaptureRequest(wrongSource.AddTicks(1), out _) &&
             !scene.TryTakePhotoCopyCaptureRequest(wrongSource, out _),
             "A wrong-frame read preserved a request for replay.");
-        var busySource = await Pinch("photo-copy-once", busy: true);
+        var unprepared = await holds.HoldAsync("photo-copy-once", prepareHeldFrames: false);
+        Require(!scene.TryTakePhotoCopyCaptureRequest(unprepared, out _),
+            "A completed hold reused capture preparation from an earlier camera frame.");
+        var busySource = await holds.HoldAsync("photo-copy-once", busy: true, expectActivation: false);
         Require(!scene.TryTakePhotoCopyCaptureRequest(busySource, out _), "Busy capture queued a timed copy.");
-        var freshSource = await Pinch("photo-copy-once");
+        var freshSource = await holds.HoldAsync("photo-copy-once");
         Require(scene.TryTakePhotoCopyCaptureRequest(freshSource, out var timed) && timed.Action == PhotoCopyAction.Copy,
             "Capture readiness did not recover after busy work.");
 
@@ -152,7 +158,7 @@ public sealed partial class MainWindow
             "Reset fixture could not reacquire the object.");
         Draw(); await Task.Delay(450);
         Require(scene.TryGetPhotoCopyCaptureContext(out var resetContext), "Reset object did not settle.");
-        var pending = await Pinch("photo-copy-once");
+        var pending = await holds.HoldAsync("photo-copy-once");
         Require(scene.BeginPhotoCopyCountdown(resetContext, DateTimeOffset.UtcNow.AddSeconds(3)), "Reset timer fixture failed.");
         scene.ShowPhotoCopy();
         Require(!scene.TryTakePhotoCopyCaptureRequest(pending, out _) && !scene.PhotoCopyStatus.StartsWith("Copy in") &&
@@ -164,7 +170,11 @@ public sealed partial class MainWindow
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "Isolated Photo Copy action verification changed live hardware or navigation.");
-        return new { passed = true, twoActionsRouteByPinchAndRealIndex = true, exactFrameConsumedOnce = true,
+        return new { passed = true, twoActionsRouteByRenderedCaptionHold = true, pinchAndIndexButtonsRejected = true,
+            zeroTrackedCursorsWithLockedObject = true, intactCaptionCancelsPartialHold = true,
+            sameFramePreparationRequired = true, capturePermissionRequired = true, exactFrameConsumedOnce = true,
+            onlyOneInFieldSubjectQualifiesWithoutObjectLock = true,
+            holds.SuccessfulHolds, holds.BrokenCaptionFrames,
             preCaptureObservationCannotCancelCountdown = true,
             acquisitionRequiresStableShapeAreaAndMask = true, acquisitionAnchoredForThreeFramesAnd600ms = true,
             busyAndResetReject = true, timedCopyRequiresFreshPostDeadlineFrame = true, savedFeedbackThreeSeconds = true,
@@ -237,6 +247,38 @@ public sealed partial class MainWindow
             int offset = ((int)Math.Round(point.Y) * size + (int)Math.Round(point.X)) * 4;
             return pixels[offset] > 245 && pixels[offset + 1] > 245 && pixels[offset + 2] > 245;
         }
+        static void Require(bool condition, string message)
+        {
+            if (!condition) throw new InvalidOperationException(message);
+        }
+    }
+
+    private static void VerifyPhotoCopyHoldSubjectSelection()
+    {
+        var context = new SceneCompositor.PhotoCopyCaptureContext(1,
+            [.001, 0, 0, 0, .001, 0, 0, 0, 1], DateTimeOffset.MinValue, null);
+        var subject = Hand(500, 400);
+        var otherSubject = Hand(300, 300);
+        var buttonHand = Hand(500, 890);
+        var outside = Hand(1100, 400);
+        Require(PhotoCopyHoldSubjects([], context).Count == 0 &&
+                PhotoCopyHoldSubjects([buttonHand, outside], context).Count == 0,
+            "A caption hold selected the pressing hand or an off-board hand as its photograph subject.");
+        Require(PhotoCopyHoldSubjects([buttonHand, subject, outside], context).SequenceEqual([subject]),
+            "A caption hold did not retain the one in-field subject independently of the pressing hand.");
+        Require(PhotoCopyHoldSubjects([subject, otherSubject, buttonHand], context).Count == 2,
+            "The subject filter silently selected one of two ambiguous hands inside the capture field.");
+        var malformed = new HandDetection([new(500, 400)], .95, .5);
+        Require(PhotoCopyHoldSubjects([malformed, Hand(double.NaN, 400), Hand(500, double.PositiveInfinity)], context).Count == 0,
+            "Malformed or non-finite hand landmarks qualified as a capture subject.");
+        Require(PhotoCopyHoldSubjects([subject], context with { CameraToBoard = [.001, 0, 0, 0, .001, 0, 0, 0, 0] }).Count == 0,
+            "A hand on a projective horizon qualified as a capture subject.");
+        var rotated = context with { CameraToBoard = [-.001, 0, 1, 0, -.001, 1, 0, 0, 1] };
+        Require(PhotoCopyHoldSubjects([subject, Hand(500, 100)], rotated).SequenceEqual([subject]),
+            "Subject selection ignored the calibrated camera-to-board transform.");
+
+        static HandDetection Hand(double x, double y) => new(
+            Enumerable.Repeat(new PixelPoint(x, y), 21).ToArray(), .95, .5);
         static void Require(bool condition, string message)
         {
             if (!condition) throw new InvalidOperationException(message);

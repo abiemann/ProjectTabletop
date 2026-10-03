@@ -93,19 +93,20 @@ static void CheckMenuAndNavigation()
                     .SequenceEqual(["globe-exit"]) && session.Screen == BoardScreen.Menu,
                 "The Globe drawer's long-press Exit did not return to the launcher.");
         }
-        else if (button.Destination == BoardScreen.Slots)
+        else if (button.Destination is BoardScreen.Slots or BoardScreen.PhotoCopy)
         {
-            // Every slot control is a long-press on the viewer's edge row.
-            Require(session.Buttons.All(item => item.Hold == BoardButtonHold.Once) && session.Buttons[0].Id == "slot-exit",
-                "The slot machine's controls are not long-press buttons led by Exit.");
+            // These boards use single-action holds on the viewer's edge row.
+            string exitId = button.Destination == BoardScreen.Slots ? "slot-exit" : "menu";
+            Require(session.Buttons.All(item => item.Hold == BoardButtonHold.Once) && session.Buttons[0].Id == exitId,
+                "The board's bottom controls are not long-press buttons led by Exit.");
             Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is null &&
-                session.Screen == BoardScreen.Slots, "A pinch selected the slot machine's long-press Exit.");
+                session.Screen == button.Destination, "A pinch selected the board's long-press Exit.");
             for (int held = 30; held < 1030; held += 250)
-                Require(session.ObserveHeldButtons(["slot-exit"], Time(time + held), Time(time + held)).Count == 0,
-                    "The slot machine's Exit acted before a full second.");
-            Require(session.ObserveHeldButtons(["slot-exit"], Time(time + 1030), Time(time + 1030))
-                    .SequenceEqual(["slot-exit"]) && session.Screen == BoardScreen.Menu,
-                "A one-second hold on the slot machine's Exit did not return to the launcher.");
+                Require(session.ObserveHeldButtons([exitId], Time(time + held), Time(time + held)).Count == 0,
+                    "The board's Exit acted before a full second.");
+            Require(session.ObserveHeldButtons([exitId], Time(time + 1030), Time(time + 1030))
+                    .SequenceEqual([exitId]) && session.Screen == BoardScreen.Menu,
+                "A one-second hold on the board's Exit did not return to the launcher.");
         }
         else if (button.Destination == BoardScreen.Settings)
         {
@@ -246,9 +247,10 @@ static void CheckPhotoCopyNavigation()
         "Capture again overlaps Back to menu.");
     Require(Update(session, 140, Over(captureAgain, 1, 100)) is null && session.Revision == 1,
         "A held launch pinch restarted Photo Copy.");
-    Require(Update(session, 180, Over(captureAgain, 2, 180)) is
-        { Previous: BoardScreen.PhotoCopy, Current: BoardScreen.PhotoCopy, ButtonId: "capture-again" } && session.Revision == 2,
-        "A new Capture again pinch did not restart the current Photo Copy session.");
+    Require(Update(session, 180, Over(captureAgain, 2, 180)) is null && session.Revision == 1,
+        "A new pinch selected Photo Copy's long-press Clear control.");
+    Require(session.ActivateButton("capture-again", Time(200)) && session.Revision == 2,
+        "Pointer Clear did not restart the current Photo Copy session.");
     Require(Update(session, 220, Over(captureAgain, 2, 180)) is null && session.Revision == 2,
         "A held Capture again pinch repeatedly restarted Photo Copy.");
     session.ShowPhotoCopy(Time(260));
@@ -321,7 +323,7 @@ static void CheckAnchorFreshnessAndConsumption()
 static void CheckAnchorNavigationAndReset()
 {
     var session = new BoardSession();
-    Update(session, 200, Over(session.Buttons[1], 1, 200) with { SelectionFrameTime = Time(100) });
+    Update(session, 200, Over(Cog(session), 1, 200) with { SelectionFrameTime = Time(100) });
     BoardButton back = session.Buttons[0];
     Require(Update(session, 300, Over(back, 2, 300) with { SelectionFrameTime = Time(150) }) is null &&
         session.HoveredButtonIds.Count == 0,
@@ -339,7 +341,7 @@ static void CheckAnchorNavigationAndReset()
     [
         (board, time) => board.ShowMenu(time),
         (board, time) => board.ShowHandTrackingTest(time),
-        (board, time) => board.ShowPhotoCopy(time),
+        (board, time) => board.ShowSettings(time),
         (board, time) => board.ShowPaint(time),
         (board, time) => { board.ShowMedia(time); board.ShowMenu(time); }
     ];
@@ -356,17 +358,17 @@ static void CheckAnchorNavigationAndReset()
     }
 
     session = new BoardSession();
-    session.ShowPhotoCopy(Time(100));
-    session.PhotoCopyHasSwirl = true;
-    BoardButton captureAgain = session.Buttons.Single(button => button.Id == "capture-again");
-    Require(Update(session, 200, Over(captureAgain, 1, 200) with { SelectionFrameTime = Time(150) }) is
-        { Previous: BoardScreen.PhotoCopy, Current: BoardScreen.PhotoCopy }, "An anchored Capture again failed.");
-    Require(Update(session, 260, Over(captureAgain, 2, 260) with { SelectionFrameTime = Time(180) }) is null,
-        "Capture again retained another hand's anchor across the restart.");
+    session.ShowPaint(Time(100));
+    session.PaintSaveEnabled = true;
+    BoardButton save = session.Buttons.Single(button => button.Id == "paint-save");
+    Require(Update(session, 200, Over(save, 1, 200) with { SelectionFrameTime = Time(150) }) is
+        { Previous: BoardScreen.Paint, Current: BoardScreen.Paint, ButtonId: "paint-save" }, "An anchored Save failed.");
+    Require(Update(session, 260, Over(save, 2, 260) with { SelectionFrameTime = Time(180) }) is null,
+        "Save retained another hand's pre-action selection anchor.");
     session.ResetInput(Time(300));
-    Require(Update(session, 350, Over(captureAgain, 3, 350) with { SelectionFrameTime = Time(280) }) is null &&
+    Require(Update(session, 350, Over(save, 3, 350) with { SelectionFrameTime = Time(280) }) is null &&
         session.HoveredButtonIds.Count == 0, "Camera/calibration reset retained an old selection anchor.");
-    Require(Update(session, 420, Over(captureAgain, 4, 420) with { SelectionFrameTime = Time(380) }) is not null,
+    Require(Update(session, 420, Over(save, 4, 420) with { SelectionFrameTime = Time(380) }) is not null,
         "Camera/calibration reset blocked a fresh selection anchor.");
 }
 

@@ -15,10 +15,11 @@ public sealed partial class MainWindow
     private async Task<object> VerifyPhotoCopyRenderAsync()
     {
         using var scene = new SceneCompositor();
+        scene.SetDisplayAspect(1);
         scene.ShowPhotoCopy();
         scene.SetBoardSetup(true);
         var inset = scene.SetDetectedBoardGrid([new(.1f, .1f), new(.9f, .1f), new(.9f, .9f), new(.1f, .9f)],
-            Homography.FromFourPoints([new(0, 0), new(1, 0), new(1, 1), new(0, 1)],
+            Homography.FromFourPoints([new(0, 0), new(800, 0), new(800, 800), new(0, 800)],
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
         scene.SetBoardSetup(false);
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), 800, 800, 96);
@@ -27,6 +28,11 @@ public sealed partial class MainWindow
             using var drawing = target.CreateDrawingSession();
             scene.Draw(drawing, 800, 800, preview: false, runningSlowly: false);
         }
+        var captionHolds = new PhotoCopyCaptionHoldFixture(scene, () =>
+        {
+            Draw();
+            return target.GetPixelBytes();
+        }, 800);
         Draw();
         var before = target.GetPixelBytes();
         int PixelIndex(double u, double v)
@@ -111,13 +117,17 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException("An obsolete photo failure replaced the current status.");
         }
 
-        // Exercise the actual Clear gesture path, not only the public
+        // Exercise the actual Clear caption hold, not only the public
         // ShowPhotoCopy reset. Its same-screen navigation still needs a revision.
         var restartTime = DateTimeOffset.UtcNow;
         var restart = scene.CurrentBoardButtons.Single(button => button.Id == "capture-again").Bounds;
-        var restartTip = new PixelPoint(.1 + .8 * (inset / 2 + (restart.X + restart.Width / 2) * (1 - inset)),
-            .1 + .8 * (inset / 2 + (restart.Y + restart.Height / 2) * (1 - inset)));
+        var restartTip = new PixelPoint(800 * (.1 + .8 * (inset / 2 + (restart.X + restart.Width / 2) * (1 - inset))),
+            800 * (.1 + .8 * (inset / 2 + (restart.Y + restart.Height / 2) * (1 - inset))));
         scene.SetHandCursors([new(restartTip, restartTime.AddSeconds(1), 1)], restartTime);
+        if (scene.CurrentBoardScreen != BoardScreen.PhotoCopy || scene.PhotoCopyCount != completedCopies ||
+            scene.TryTakePhotoCopyCaptureRequest(restartTime, out _))
+            throw new InvalidOperationException("A pinch bypassed Clear's caption hold.");
+        await captionHolds.HoldAsync("capture-again");
         if (scene.CurrentBoardScreen != BoardScreen.PhotoCopy || scene.PhotoCopyCount != 0 ||
             scene.TryGetPhotoCopyCaptureContext(out _))
             throw new InvalidOperationException("Clear did not clear the photo and require a new grey draw.");
@@ -131,7 +141,9 @@ public sealed partial class MainWindow
             throw new InvalidOperationException("Clear did not create a fresh, settled capture context.");
         RejectObsoleteResult(context.Revision);
 
-        scene.ShowBoardMenu();
+        await captionHolds.HoldAsync("menu");
+        if (scene.CurrentBoardScreen != BoardScreen.Menu)
+            throw new InvalidOperationException("Exit's caption hold did not navigate to the menu.");
         RejectObsoleteResult(restartedContext.Revision);
         scene.ShowPhotoCopy();
         if (scene.TryGetPhotoCopyCaptureContext(out _))
@@ -152,7 +164,9 @@ public sealed partial class MainWindow
 
         return new { passed = true, copies = completedCopies, transparentSource = true,
             fullBoardCoverage = true, buttonsVisible = true, obsoleteCaptureRejected = true,
-            obsoleteFailureRejected = true, resetRequiresSurfaceSettle = true, path };
+            obsoleteFailureRejected = true, resetRequiresSurfaceSettle = true,
+            clearIgnoresPinch = true, clearAndExitByCaptionHold = true,
+            captionHolds.SuccessfulHolds, captionHolds.BrokenCaptionFrames, path };
     }
 }
 #endif

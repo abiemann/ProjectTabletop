@@ -11,8 +11,8 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     // Use the real button renderer and foreground comparison, independently of
-    // the live camera and projector. A stationary occlusion must illuminate the
-    // controls without manufacturing a hand or executing a Photo Copy action.
+    // the live camera and projector. Bottom caption holds must remain unlit and
+    // work independently of hand inference; the object field keeps its search.
     private async Task<object> VerifyPhotoCopyAcquisitionAsync()
     {
         var liveOutput = _output;
@@ -128,14 +128,14 @@ public sealed partial class MainWindow
                     Math.Abs(hint.Center.X - center.X) < 65 && Math.Abs(hint.Center.Y - center.Y) < 65 &&
                     hint.ControlCoverage is double coverage && double.IsFinite(coverage) && coverage >= .07),
                 $"Stationary fingers over {button.Label} produced no useful crop after two fresh frames: {presence.Reason}.");
-            Require(nativeQuery.SearchRegions.Count is > 0 and <= 2 &&
-                    nativeQuery.SearchRegions.Contains(presence.Hints[0].SearchBounds) && ready.IlluminatedHint is null,
-                $"Qualified {button.Label} fingers did not receive native inference before fallback illumination.");
+            Require(button.IsHold && nativeQuery.Hints.Count == 0 && nativeQuery.SearchRegions.Count == 0 &&
+                    ready.IlluminatedHint is null,
+                $"The {button.Label} caption hold incorrectly requested hand inference.");
             scene.CompleteHandAcquisition(ready, presence.Hints, [], now);
             var illuminated = scene.GetHandAcquisitionContext(now)!;
-            Require(illuminated.IlluminatedHint is not null &&
-                    CountWhite(Draw(), center) > CountWhite(empty, center) + 1600,
-                $"Foreground over {button.Label} did not illuminate the actual button and its text.");
+            Require(illuminated.IlluminatedHint is null &&
+                    CountWhite(Draw(), center) == CountWhite(empty, center),
+                $"Foreground over {button.Label} projected a search light onto protected lettering.");
             Require(scene.ActiveHandSpotlightCount == 0 && scene.HoveredBoardButtons.Count == 0 &&
                     scene.CurrentBoardScreen == BoardScreen.PhotoCopy &&
                     scene.CurrentBoardButtons.Select(item => item.Label).SequenceEqual(["Exit", "Clear", "Save"]) &&
@@ -160,7 +160,7 @@ public sealed partial class MainWindow
         var hand = new HandDetection(Enumerable.Repeat(handCenter, 21).ToArray(), .99, .5);
         scene.CompleteHandAcquisition(ready, [hint], [hand], now);
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
-            "A confirmed hand did not take over from preliminary button illumination.");
+            "A confirmed hand illuminated a protected caption hold.");
         now += TimeSpan.FromMilliseconds(600);
         ready = Ready();
         scene.ClearHandTips();
@@ -200,7 +200,7 @@ public sealed partial class MainWindow
             realRenderedButtonReference = true, boundedButtonMasks = true, motionFallbackDisabled = true,
             focusedObjectFieldStopsAfterSwirl = true,
             textChangesRefreshReference = true, swirlStatusObjectAndSearchLightsDoNotRetrigger = true,
-            acquisitionCannotSelect = true, confirmedHandHandover = true,
+            acquisitionCannotSelect = true, captionHoldsNeedNoInferenceOrSearchLight = true,
             staleResetNavigationAndExecuteSuppression = true, liveHardwareUnchanged = true };
 
         SceneCompositor.HandAcquisitionContext Ready()

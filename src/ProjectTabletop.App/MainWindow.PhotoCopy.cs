@@ -39,10 +39,35 @@ public sealed partial class MainWindow
         }
         var now = DateTimeOffset.UtcNow;
         bool explicitRequest = _scene.TryTakePhotoCopyCaptureRequest(frame.Timestamp, out var request);
+        if (explicitRequest && request.CaptionHold)
+        {
+            if (_photoCopyTask is { IsCompleted: false } || !_scene.IsPhotoCopyCaptureCurrent(request.Context) ||
+                frame.Timestamp < request.Context.ReadyAfter || frame.Timestamp > now ||
+                now - frame.Timestamp > HandMarkerLifetime) return;
+            IReadOnlyList<HandDetection> subjects = hands;
+            if (request.Context.Target is null)
+            {
+                // The held bottom caption identifies the command independently
+                // of landmarks. Only the other hand inside the capture field
+                // may become the subject; ambiguous subjects are rejected.
+                subjects = PhotoCopyHoldSubjects(hands, request.Context);
+                if (subjects.Count != 1)
+                {
+                    _scene.SetPhotoCopyStatus("Keep one subject hand inside the photo area, separate from the button.",
+                        request.Context.Revision);
+                    return;
+                }
+            }
+            if (_scene.BeginPhotoCopyCapture(request.Context))
+                _photoCopyTask = CapturePhotoCopyAsync(frame, null, subjects, request.Context, request.Action);
+            return;
+        }
         // An accepted button request wins over the same raw pinch, so Copy cannot also Swirl.
         var shutters = explicitRequest
             ? cursors.Where(cursor => cursor.TrackingId == request.TrackingId).ToArray()
-            : cursors.Where(cursor => cursor.ExecuteEventId > previousEvent && cursor.IsExecuting(now)).ToArray();
+            : cursors.Where(cursor => cursor.ExecuteEventId > previousEvent && cursor.IsExecuting(now) &&
+                !_scene.IsPhotoCopyHoldControl(cursor.Position) &&
+                !_scene.IsPhotoCopyHoldControl(cursor.SelectionPosition ?? cursor.Position)).ToArray();
         if (shutters.Length == 0 || _photoCopyTask is { IsCompleted: false } ||
             !_scene.TryGetPhotoCopyCaptureContext(out var context) ||
             frame.Timestamp < context.ReadyAfter || frame.Timestamp > now ||
@@ -75,6 +100,22 @@ public sealed partial class MainWindow
             _photoCopyTask = CapturePhotoCopyAsync(frame, shutter,
                 hands.Where(hand => !ReferenceEquals(hand, shutter)).ToArray(), context, action);
         }
+    }
+
+    private static IReadOnlyList<HandDetection> PhotoCopyHoldSubjects(IReadOnlyList<HandDetection> hands,
+        SceneCompositor.PhotoCopyCaptureContext context)
+    {
+        var mapping = context.CameraToBoard;
+        return hands.Where(hand =>
+        {
+            if (hand.Landmarks.Count != 21) return false;
+            var tip = hand.IndexTip;
+            double w = mapping[6] * tip.X + mapping[7] * tip.Y + mapping[8];
+            if (!double.IsFinite(w) || Math.Abs(w) < 1e-10) return false;
+            double u = (mapping[0] * tip.X + mapping[1] * tip.Y + mapping[2]) / w;
+            double v = (mapping[3] * tip.X + mapping[4] * tip.Y + mapping[5]) / w;
+            return BoardSession.PhotoCopyShutterBounds.Contains(u, v);
+        }).ToArray();
     }
 
     private async Task SaveStoredPhotoCopyAsync(SceneCompositor.PhotoCopyMemoryImage image)

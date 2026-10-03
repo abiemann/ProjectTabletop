@@ -16,8 +16,8 @@ internal static class BoardFingerSelectionRegression
 
     private static void CheckTransitionAndRearm()
     {
-        var board = PhotoCopy();
-        var hand = Together(Button(board, "capture-again"));
+        var board = Paint();
+        var hand = Together(Button(board, "paint-save"));
         long revision = board.Revision;
         Require(At(board, 100, hand) is null && Feedback(board).Stage == BoardFingerSelectionStage.Arming,
             "Together did not begin target arming.");
@@ -32,22 +32,22 @@ internal static class BoardFingerSelectionRegression
         var apart = Apart(hand);
         Require(At(board, 2200, apart) is null && Feedback(board).Stage == BoardFingerSelectionStage.Separating,
             "One separated observation executed without confirmation.");
-        Require(At(board, 2280, apart)?.ButtonId == "capture-again" && board.Revision == revision + 1,
+        Require(At(board, 2280, apart)?.ButtonId == "paint-save" && board.Revision == revision,
             "Confirmed sideways separation did not select the armed target.");
         for (int at = 2380; at <= 3580; at += 100)
             Require(At(board, at, apart) is null && Feedback(board).Stage == BoardFingerSelectionStage.Selected,
                 "Remaining apart repeated the selected action.");
-        Require(Select(board, hand, 3700)?.ButtonId == "capture-again" && board.Revision == revision + 2,
+        Require(Select(board, hand, 3700)?.ButtonId == "paint-save" && board.Revision == revision,
             "Rejoining and separating did not rearm the same target without folding or moving away.");
         At(board, 4100, hand); // A single erroneous together frame must not rearm.
         Require(At(board, 4180, apart) is null && At(board, 4260, apart) is null,
             "One together-looking estimate rearmed an already selected hand.");
 
-        board = PhotoCopy();
+        board = Paint();
         for (int at = 100; at <= 1600; at += 100)
             Require(At(board, at, apart) is null && board.FingerSelectionFeedback.Count == 0,
                 "A hand first observed separated selected a button without first grouping.");
-        var premature = PhotoCopy();
+        var premature = Paint();
         At(premature, 100, hand);
         Require(At(premature, 150, apart) is null && At(premature, 250, apart) is null,
             "Opening before grouped confirmation selected a button.");
@@ -55,8 +55,8 @@ internal static class BoardFingerSelectionRegression
 
     private static void CheckTargetAnchor()
     {
-        var board = PhotoCopy();
-        var button = Button(board, "capture-again");
+        var board = Paint();
+        var button = Button(board, "paint-save");
         double right = button.Bounds.X + button.Bounds.Width, middle = button.Bounds.Y + button.Bounds.Height / 2;
         var edge = Together(button) with { FingerAim = new(right - .005, middle) };
         At(board, 100, edge); At(board, 200, edge);
@@ -77,7 +77,7 @@ internal static class BoardFingerSelectionRegression
             board.BlackjackState is { Phase: BlackjackPhase.Betting, SelectedBet: 25 },
             "Opening across a neighboring target selected 50 or transferred its anchor to 100.");
 
-        board = PhotoCopy(); var hand = Together(Button(board, "capture-again"));
+        board = Paint(); var hand = Together(Button(board, "paint-save"));
         At(board, 100, hand); At(board, 200, hand);
         var moved = Apart(hand) with { FingerAim = new(hand.FingerAim!.Value.U + .06, hand.FingerAim.Value.V) };
         Require(At(board, 300, moved) is null && At(board, 380, moved) is null,
@@ -92,20 +92,20 @@ internal static class BoardFingerSelectionRegression
 
     private static void CheckMissingAndFreshness()
     {
-        var board = PhotoCopy(); var hand = Together(Button(board, "capture-again")); var apart = Apart(hand);
+        var board = Paint(); var hand = Together(Button(board, "paint-save")); var apart = Apart(hand);
         At(board, 100, hand); At(board, 200, hand); At(board, 300, apart); At(board, 340);
         At(board, 400, apart);
         Require(Feedback(board) is { Stage: BoardFingerSelectionStage.Separating, Progress: 0 },
             "A missing interval counted toward separation confirmation.");
         Require(At(board, 480, apart) is not null, "A short missing interval prevented a fresh confirmed separation.");
 
-        board = PhotoCopy(); hand = Together(Button(board, "capture-again")); apart = Apart(hand);
+        board = Paint(); hand = Together(Button(board, "paint-save")); apart = Apart(hand);
         At(board, 100, hand); At(board, 200, hand);
         At(board, 250, hand with { FingersTogether = false }); // A natural transition between thresholds.
         At(board, 300, apart);
         Require(At(board, 380, apart) is not null, "A brief neutral transition erased a ready target.");
 
-        board = PhotoCopy(); hand = Together(Button(board, "capture-again")); apart = Apart(hand);
+        board = Paint(); hand = Together(Button(board, "paint-save")); apart = Apart(hand);
         At(board, 100, hand); At(board, 200, hand); At(board, 300);
         Require(At(board, 600, apart) is null && At(board, 680, apart) is null,
             "An armed target survived more than 350 ms without observations.");
@@ -116,29 +116,29 @@ internal static class BoardFingerSelectionRegression
 
         foreach ((int source, int now) in new[] { (400, 751), (500, 490), (300, 380), (250, 380), (250, 250) })
         {
-            board = PhotoCopy(); hand = Together(Button(board, "capture-again")); apart = Apart(hand);
+            board = Paint(); hand = Together(Button(board, "paint-save")); apart = Apart(hand);
             At(board, 100, hand); At(board, 200, hand); At(board, 300, apart);
             Require(board.Update([apart], Time(source), Time(now)) is null && board.FingerSelectionFeedback.Count == 0,
                 "Stale, future, duplicate, out-of-order or reversed-clock input completed separation.");
         }
         foreach (var invalid in new BoardAim?[] { null, new(double.NaN, .1), new(.8, double.PositiveInfinity), new(1.1, .1) })
         {
-            board = PhotoCopy(); hand = Together(Button(board, "capture-again")) with { FingerAim = invalid };
+            board = Paint(); hand = Together(Button(board, "paint-save")) with { FingerAim = invalid };
             Require(Select(board, hand, 100) is null, "An invalid middle aim activated a target.");
         }
-        board = PhotoCopy(); hand = Together(Button(board, "capture-again")) with { TrackingId = 0 };
+        board = Paint(); hand = Together(Button(board, "paint-save")) with { TrackingId = 0 };
         Require(Select(board, hand, 100) is null, "A hand without a stable identity activated finger selection.");
     }
 
     private static void CheckIndependentHandsAndPinch()
     {
-        var board = PhotoCopy();
-        var first = Together(Button(board, "capture-again"), 1);
+        var board = Paint();
+        var first = Together(Button(board, "paint-save"), 1);
         var second = Together(Button(board, "menu"), 2);
         At(board, 100, first); At(board, 200, second, first);
         At(board, 300, Apart(first), second);
         Require(At(board, 380, Apart(second), Apart(first)) is
-            { ButtonId: "capture-again", TrackingId: 1, Gesture: BoardSelectionGesture.IndexSeparation },
+            { ButtonId: "paint-save", TrackingId: 1, Gesture: BoardSelectionGesture.IndexSeparation },
             "Hand ordering moved target, confirmation evidence or selected identity to another hand.");
         Require(At(board, 460, Apart(second)) is null && At(board, 540, Apart(second)) is null,
             "Another hand's old armed gesture selected after the first action.");
@@ -146,7 +146,9 @@ internal static class BoardFingerSelectionRegression
             { ButtonId: "menu", TrackingId: 2, Gesture: BoardSelectionGesture.IndexSeparation },
             "The independent hand could not make a fresh selection with its own identity.");
 
-        board = PhotoCopy(); first = Together(Button(board, "capture-again"));
+        // Both candidates navigate, so the revision detects accidental double execution.
+        board = new BoardSession(); board.ShowSettings(Time(0));
+        first = Together(Button(board, "hand-tracking"));
         At(board, 100, first); At(board, 200, first); At(board, 300, Apart(first));
         var back = Center(Button(board, "menu"));
         var pinch = new BoardHandSample(back.U, back.V, Time(1380), 20) { TrackingId = 2 };
@@ -154,9 +156,10 @@ internal static class BoardFingerSelectionRegression
         Require(At(board, 380, Apart(first), pinch) is
             { ButtonId: "menu", TrackingId: 2, Gesture: BoardSelectionGesture.Pinch } && board.Revision == revision + 1,
             "A simultaneous pinch failed to take precedence, reported the other gesture's identity, or performed two actions.");
-        board = PhotoCopy(); first = Together(Button(board, "capture-again"));
+        board = Paint(); first = Together(Button(board, "paint-save"));
+        back = Center(Button(board, "menu"));
         At(board, 100, first); At(board, 200, first); At(board, 300, Apart(first));
-        Require(At(board, 380, Apart(first), new(double.NaN, 0, Time(1380), 30))?.ButtonId == "capture-again",
+        Require(At(board, 380, Apart(first), new(double.NaN, 0, Time(1380), 30))?.ButtonId == "paint-save",
             "An off-target pinch prevented a valid finger selection.");
         Require(At(board, 460, new BoardHandSample(back.U, back.V, Time(1380), 30)) is null,
             "An off-target pinch on the finger-selection frame was not consumed.");
@@ -167,17 +170,17 @@ internal static class BoardFingerSelectionRegression
         foreach (Action<BoardSession> invalidate in new Action<BoardSession>[]
         {
             board => board.ResetInput(Time(250)),
-            board => board.ShowPhotoCopy(Time(250)),
-            board => board.ActivateButton("capture-again", Time(250))
+            board => board.ShowPaint(Time(250)),
+            board => board.ActivateButton("paint-save", Time(250))
         })
         {
-            var board = PhotoCopy(); var hand = Together(Button(board, "capture-again"));
+            var board = Paint(); var hand = Together(Button(board, "paint-save"));
             At(board, 100, hand); At(board, 200, hand); invalidate(board);
             Require(At(board, 300, Apart(hand)) is null && At(board, 380, Apart(hand)) is null,
                 "A pre-reset, pre-navigation or pre-action grouped pose selected afterward.");
             Require(Select(board, hand, 500) is not null, "Invalidation prevented a fresh together-to-apart gesture.");
         }
-        var identityBoard = PhotoCopy(); var oldHand = Together(Button(identityBoard, "capture-again"), 1);
+        var identityBoard = Paint(); var oldHand = Together(Button(identityBoard, "paint-save"), 1);
         At(identityBoard, 100, oldHand); At(identityBoard, 200, oldHand);
         var newHand = oldHand with { TrackingId = 2 };
         Require(At(identityBoard, 300, Apart(newHand)) is null && At(identityBoard, 380, Apart(newHand)) is null,
@@ -229,9 +232,11 @@ internal static class BoardFingerSelectionRegression
             "A fresh together-to-apart selection could not choose a wager after settlement.");
     }
 
-    private static BoardSession PhotoCopy()
+    private static BoardSession Paint()
     {
-        var board = new BoardSession(); board.ShowPhotoCopy(Time(0)); board.PhotoCopyHasSwirl = true; return board;
+        // Save stays gesture-selectable and repeatable without changing screens
+        // or advancing the painting's session revision.
+        var board = new BoardSession(); board.ShowPaint(Time(0)); board.PaintSaveEnabled = true; return board;
     }
     private static BoardNavigation? Select(BoardSession board, BoardHandSample hand, int start)
     {

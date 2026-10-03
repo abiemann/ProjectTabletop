@@ -256,13 +256,14 @@ public sealed partial class MainWindow
         photoButtons.ShowPhotoCopy();
         var backBounds = photoButtons.Buttons.Single(button => button.Id == "menu").Bounds;
         var backCenter = BoardPoint(backBounds.X + backBounds.Width / 2, backBounds.Y + backBounds.Height / 2);
-        // This light reaches over the actual Exit button near the bottom edge,
-        // so both full control coverage and outer clipping matter.
+        // The hand light reaches the bottom row, but all hold captions must stay
+        // unchanged so projected illumination cannot manufacture a hold.
+        var unlitControls = Draw();
         scene.SetHandSpotlights([Hand(backCenter.X, backCenter.Y)], DateTimeOffset.UtcNow);
         var litControls = Draw();
-        Require(WhiteAt(litControls, backCenter) &&
-            WhiteAt(litControls, BoardPoint(backBounds.X + backBounds.Width / 2, backBounds.Y + .02)),
-            "The hand spotlight was cut off over Photo Copy's Exit button.");
+        Require(WhiteAt(litControls, backCenter) == WhiteAt(unlitControls, backCenter) &&
+            !WhiteAt(litControls, BoardPoint(backBounds.X + backBounds.Width / 2, backBounds.Y + .02)),
+            "The hand spotlight altered Photo Copy's protected Exit caption.");
         Require(BlackAt(litControls, new(backCenter.X, .92)),
             "A Photo Copy hand spotlight spilled below the physical board.");
         await Task.Delay(750);

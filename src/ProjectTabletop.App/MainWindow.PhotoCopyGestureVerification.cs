@@ -32,6 +32,11 @@ public sealed partial class MainWindow
         scene.ShowPhotoCopy();
         const int size = 1000;
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96);
+        var captionHolds = new PhotoCopyCaptionHoldFixture(scene, () =>
+        {
+            Draw();
+            return target.GetPixelBytes();
+        }, size);
         var tracker = new HandGestureTracker();
         bool reorder = false;
         var grouped = HandAt(.76, .52, separated: false);
@@ -143,20 +148,29 @@ public sealed partial class MainWindow
         await target.SaveAsync(path, CanvasBitmapFileFormat.Png);
         int initialCopies = scene.PhotoCopyCount;
 
-        // Bottom controls retain navigation/reset semantics, never field shutters.
+        // Visible controls require broken caption lettering. Their former
+        // index gestures must neither reset the image nor become field shutters.
         var restart = scene.CurrentBoardButtons.Single(button => button.Id == "capture-again").Bounds;
-        var restarted = await Gesture(AtControl(restart, false), AtControl(restart, true));
-        Require(!scene.TryTakePhotoCopyGestureShutter(restarted.FrameTime, out _) && scene.PhotoCopyCount == 0 &&
+        var ignoredClear = await Gesture(AtControl(restart, false), AtControl(restart, true));
+        Require(!scene.TryTakePhotoCopyGestureShutter(ignoredClear.FrameTime, out _) &&
+            scene.PhotoCopyCount >= initialCopies && scene.CurrentBoardScreen == BoardScreen.PhotoCopy,
+            "An index gesture bypassed Clear's caption hold.");
+        var restarted = await captionHolds.HoldAsync("capture-again");
+        Require(!scene.TryTakePhotoCopyGestureShutter(restarted, out _) && scene.PhotoCopyCount == 0 &&
             scene.CurrentBoardScreen == BoardScreen.PhotoCopy && !scene.TryGetPhotoCopyCaptureContext(out _),
-            "Clear became a shutter or failed to reset the capture field.");
+            "Clear's caption hold became a shutter or failed to reset the capture field.");
         Require(!scene.SetPhotoCopyCapture(cutout!, selectedContext.Revision, lockedObject), "Clear accepted an obsolete capture.");
         Require(scene.CurrentBoardButtons.Any(button => button.Id == "photo-swirl") &&
             scene.CurrentBoardButtons.All(button => button.Id != "capture-again"),
             "Clearing the Swirl did not restore the Swirl control.");
         var back = scene.CurrentBoardButtons.Single(button => button.Id == "menu").Bounds;
-        var left = await Gesture(AtControl(back, false), AtControl(back, true));
-        Require(!scene.TryTakePhotoCopyGestureShutter(left.FrameTime, out _) && scene.CurrentBoardScreen == BoardScreen.Menu,
-            "Back to menu became a shutter instead of navigating.");
+        var ignoredExit = await Gesture(AtControl(back, false), AtControl(back, true));
+        Require(!scene.TryTakePhotoCopyGestureShutter(ignoredExit.FrameTime, out _) &&
+            scene.CurrentBoardScreen == BoardScreen.PhotoCopy,
+            "An index gesture bypassed Exit's caption hold.");
+        var left = await captionHolds.HoldAsync("menu");
+        Require(!scene.TryTakePhotoCopyGestureShutter(left, out _) && scene.CurrentBoardScreen == BoardScreen.Menu,
+            "Exit's caption hold became a shutter instead of navigating.");
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "The isolated Photo Copy gesture check changed live hardware or navigation.");
@@ -164,7 +178,9 @@ public sealed partial class MainWindow
             actualIndexPose = true, correctShutterIdentity = true, noPinchEvents = true, exactFrameConsumedOnce = true,
             heldGestureDoesNotRepeat = true, sameHandRearms = true, objectLockPreserved = true,
             objectExtractedAndRendered = true, nativeCameraPhoto = true, initialCopies,
-            bottomControlsNavigate = true, liveHardwareUnchanged = true, path };
+            bottomControlsNavigate = true, bottomControlsIgnoreIndexGestures = true,
+            clearAndExitByCaptionHold = true, captionHolds.SuccessfulHolds, captionHolds.BrokenCaptionFrames,
+            liveHardwareUnchanged = true, path };
 
         HandDetection AtControl(BoardRect bounds, bool separated) =>
             HandAt(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2, separated);

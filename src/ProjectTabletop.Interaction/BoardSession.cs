@@ -101,9 +101,9 @@ public sealed partial class BoardSession
     });
     private static readonly IReadOnlyList<BoardButton> PhotoCopyButtons = Array.AsReadOnly(new[]
     {
-        new BoardButton("menu", "Exit", new(.08, .835, .26, .105), BoardScreen.Menu),
-        new BoardButton("photo-swirl", "Swirl", new(.37, .835, .26, .105), BoardScreen.PhotoCopy),
-        new BoardButton("photo-copy-once", "Copy", new(.66, .835, .26, .105), BoardScreen.PhotoCopy)
+        new BoardButton("menu", "Exit", new(.08, .835, .26, .105), BoardScreen.Menu, Hold: BoardButtonHold.Once),
+        new BoardButton("photo-swirl", "Swirl", new(.37, .835, .26, .105), BoardScreen.PhotoCopy, Hold: BoardButtonHold.Once),
+        new BoardButton("photo-copy-once", "Copy", new(.66, .835, .26, .105), BoardScreen.PhotoCopy, Hold: BoardButtonHold.Once)
     });
     private static readonly IReadOnlyList<BoardButton> PaintButtons = Array.AsReadOnly(new[]
     {

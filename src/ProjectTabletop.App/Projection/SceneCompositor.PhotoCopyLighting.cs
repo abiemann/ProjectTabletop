@@ -51,7 +51,7 @@ public sealed partial class SceneCompositor
                 _photoCopyCutout is not null || _photoCopyObjectTarget is not null) return false;
             _photoCopyObjectTarget = target;
             _photoCopyObjectShownAt = DateTimeOffset.MinValue;
-            _photoCopyStatus = "Object ready. Select Swirl to fill the board, or Copy to save an image.";
+            _photoCopyStatus = "Object ready. Hold Swirl to fill the board, or Copy to save an image.";
             _renderedBoardState = null;
             return true;
         }

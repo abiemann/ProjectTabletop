@@ -25,6 +25,10 @@ public sealed partial class BoardSession
             if (_photoCopyHasSwirl == value) return;
             _photoCopyHasSwirl = value;
             ClearPhotoCopyGestureEvidence(includeResultControls: true);
+            // Both identities at a changed place need a fresh clear caption,
+            // even when a result appears and disappears between camera frames.
+            // The shared reset preserves a place already spent by a held press.
+            ResetHoldCaptionEvidence(["photo-swirl", "photo-copy-once", "capture-again", "photo-save"]);
         }
     }
 
@@ -43,8 +47,9 @@ public sealed partial class BoardSession
     /// <summary>
     /// Enables the explicit capture buttons and index-separation shutter in the
     /// object area only when capture is ready. The field shutter is not a rendered
-    /// button or a pinch target. Changing readiness requires fresh gesture evidence
-    /// for capture actions, without interrupting Exit, Clear or Save.
+    /// button or a pinch target. Changing readiness requires fresh gesture and
+    /// clear-caption hold evidence for capture actions, without interrupting Exit,
+    /// Clear or Save. Bottom controls use single-action one-second caption holds.
     /// </summary>
     public bool PhotoCopyShutterEnabled
     {
@@ -54,6 +59,7 @@ public sealed partial class BoardSession
             if (_photoCopyShutterEnabled == value) return;
             _photoCopyShutterEnabled = value;
             ClearPhotoCopyGestureEvidence(includeResultControls: false);
+            ResetHoldCaptionEvidence(["photo-swirl", "photo-copy-once"]);
         }
     }
 

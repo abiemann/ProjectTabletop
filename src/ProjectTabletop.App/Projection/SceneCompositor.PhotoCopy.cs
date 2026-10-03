@@ -19,7 +19,7 @@ public sealed partial class SceneCompositor
     private static readonly TimeSpan PhotoCopySurfaceSettle = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan PhotoCopyRemoveHandDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan PhotoCopyStampInterval = TimeSpan.FromMilliseconds(25);
-    private const string PhotoCopyReadyMessage = "Place an object above the controls and lift your hand. Select Swirl or Copy.";
+    private const string PhotoCopyReadyMessage = "Place an object above the controls and lift your hand. Hold Swirl or Copy for a second.";
     private long _photoCopySessionRevision = -1;
     private long _photoCopyRevision;
     private DateTimeOffset _photoCopySurfaceShownAt;
@@ -75,6 +75,8 @@ public sealed partial class SceneCompositor
             _photoCopySessionRevision = _boardSession.Revision;
             _photoCopyGestureShutter = null;
             _photoCopyMemorySaveRequest = null;
+            _photoCopyInputAllowed = false;
+            _photoCopyReadyContext = null;
             _photoCopyMemorySaveStatus = null;
             _boardSession.PhotoCopyShutterEnabled = false;
             _boardSession.PhotoCopyHasSwirl = false;

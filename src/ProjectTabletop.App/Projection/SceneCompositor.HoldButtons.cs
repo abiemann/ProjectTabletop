@@ -98,7 +98,11 @@ public sealed partial class SceneCompositor
         {
             if (context is null || context.Revision != _holdRevision || !AcquisitionBoardReady) return [];
             var activated = _boardSession.ObserveHeldButtons(heldIds, frameTime, HoldClock(), clearedIds);
-            if (activated.Count > 0) SyncPhotoCopySession();
+            if (activated.Count > 0)
+            {
+                QueuePhotoCopyHoldAction(activated, frameTime);
+                SyncPhotoCopySession();
+            }
             return activated;
         }
     }

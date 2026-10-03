@@ -36,11 +36,13 @@ public sealed partial class MainWindow
         scene.SetBoardSetup(false);
         var tracker = new HandGestureTracker();
         long pinchId = 90000;
+        var holds = new PhotoCopyCaptionHoldFixture(scene, () => { Draw(); return target.GetPixelBytes(); }, size);
         await CaptureFixture();
         Require(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
                 ["menu", "capture-again", "photo-save"]) &&
             scene.CurrentBoardButtons[1] is { Label: "Clear", Enabled: true } &&
-            scene.CurrentBoardButtons[2] is { Label: "Save", Enabled: true },
+            scene.CurrentBoardButtons[2] is { Label: "Save", Enabled: true } &&
+            scene.CurrentBoardButtons.All(button => button.Hold == BoardButtonHold.Once),
             "Swirl did not expose Clear and an enabled Save button.");
         Require(scene.TryGetPhotoCopyMemoryImage(out var retained) && ReferenceEquals(retained.Cutout, cutout) &&
             !scene.TryGetPhotoCopyCaptureContext(out _),
@@ -56,21 +58,35 @@ public sealed partial class MainWindow
             "Rendering the completed export advanced the visible Swirl to its final frame.");
         AssertCompleteArtwork(artwork);
 
-        var pinchTime = await Pinch("photo-save");
-        Require(scene.TryTakePhotoCopyMemorySaveRequest(pinchTime, out var pinchImage) &&
-                ReferenceEquals(pinchImage.Cutout, cutout) && pinchImage.Revision == retained.Revision,
-            "Pinching Save did not select the original memory image without a live object lock.");
-        Require(!scene.TryTakePhotoCopyMemorySaveRequest(pinchTime, out _) &&
-                !scene.TryTakePhotoCopyCaptureRequest(pinchTime, out _),
+        foreach (string id in new[] { "photo-save", "capture-again", "menu" })
+        {
+            var pinch = await Pinch(id);
+            Require(!scene.TryTakePhotoCopyMemorySaveRequest(pinch, out _) &&
+                    !scene.TryTakePhotoCopyCaptureRequest(pinch, out _) &&
+                    scene.CurrentBoardScreen == BoardScreen.PhotoCopy && scene.IsPhotoCopyMemoryImageCurrent(retained),
+                id + " accepted a pinch instead of its caption hold.");
+            var index = await FingerGesture(id);
+            Require(!scene.TryTakePhotoCopyMemorySaveRequest(index, out _) &&
+                    !scene.TryTakePhotoCopyCaptureRequest(index, out _) &&
+                    scene.CurrentBoardScreen == BoardScreen.PhotoCopy && scene.IsPhotoCopyMemoryImageCurrent(retained),
+                id + " accepted index separation instead of its caption hold.");
+        }
+        await holds.CheckReleaseCancelsAsync("photo-save");
+        var saveTime = await holds.HoldAsync("photo-save");
+        Require(scene.TryTakePhotoCopyMemorySaveRequest(saveTime, out var saveImage) &&
+                ReferenceEquals(saveImage.Cutout, cutout) && saveImage.Revision == retained.Revision,
+            "Holding Save's rendered caption did not select the memory image with zero cursors and no object lock.");
+        Require(!scene.TryTakePhotoCopyMemorySaveRequest(saveTime, out _) &&
+                !scene.TryTakePhotoCopyCaptureRequest(saveTime, out _),
             "Save was consumed twice or also requested a webcam capture.");
-        var held = await Pinch("photo-save", repeat: true);
-        Require(!scene.TryTakePhotoCopyMemorySaveRequest(held, out _), "Holding a pinch repeated Save.");
+        var held = await holds.ContinueHeldAsync("photo-save");
+        Require(!scene.TryTakePhotoCopyMemorySaveRequest(held, out _), "A continuously covered caption repeated Save.");
 
         await Task.Delay(1100);
         Draw();
         int copiesBeforeSave = scene.PhotoCopyCount;
         Require(copiesBeforeSave > 0, "The retained photograph did not start its Swirl.");
-        string? first = await SavePhotoCopyMemoryImageAsync(scene, pinchImage, directory);
+        string? first = await SavePhotoCopyMemoryImageAsync(scene, saveImage, directory);
         Require(first is not null && scene.PhotoCopyStatus == "Image Saved", "Memory save did not report a completed PNG.");
         await AssertImage(first!);
         Require(pixels.SequenceEqual(original) && scene.PhotoCopyCount >= copiesBeforeSave &&
@@ -78,26 +94,28 @@ public sealed partial class MainWindow
                 afterSave.Revision == retained.Revision && !scene.TryGetPhotoCopyCaptureContext(out _),
             "Saving changed the photograph, restarted Swirl, or returned to webcam capture.");
 
-        var indexTime = await FingerGesture("photo-save");
-        Require(scene.TryTakePhotoCopyMemorySaveRequest(indexTime, out var indexImage) &&
-                ReferenceEquals(indexImage.Cutout, cutout) && !scene.TryTakePhotoCopyCaptureRequest(indexTime, out _),
-            "Index separation did not route Save to the same retained photo.");
-        var apart = HandAtButton("photo-save", true);
-        var heldIndex = await Send(apart);
-        Require(!scene.TryTakePhotoCopyMemorySaveRequest(heldIndex, out _), "Holding the separated index repeated Save.");
+        var repeatTime = await holds.HoldAsync("photo-save");
+        Require(scene.TryTakePhotoCopyMemorySaveRequest(repeatTime, out var repeatImage) &&
+                ReferenceEquals(repeatImage.Cutout, cutout) && !scene.TryTakePhotoCopyCaptureRequest(repeatTime, out _),
+            "A fresh Save caption hold did not route to the same retained photo.");
         byte[] firstFile = await File.ReadAllBytesAsync(first!);
-        string? second = await SavePhotoCopyMemoryImageAsync(scene, indexImage, directory);
+        string? second = await SavePhotoCopyMemoryImageAsync(scene, repeatImage, directory);
         byte[] firstFileAfterSave = await File.ReadAllBytesAsync(first!);
         Require(second is not null && !string.Equals(first, second, StringComparison.OrdinalIgnoreCase) &&
                 firstFile.SequenceEqual(firstFileAfterSave),
             "Saving again reused the filename or overwrote the previous image.");
         await AssertImage(second!);
 
-        var wrongFrame = await Pinch("photo-save");
+        var wrongFrame = await holds.HoldAsync("photo-save");
         Require(!scene.TryTakePhotoCopyMemorySaveRequest(wrongFrame.AddTicks(1), out _) &&
                 !scene.TryTakePhotoCopyMemorySaveRequest(wrongFrame, out _),
             "A mismatched camera observation left a Save request available for replay.");
-        var externallyBusy = await Pinch("photo-save", busy: true);
+        var unprepared = await holds.HoldAsync("photo-save", prepareHeldFrames: false);
+        Require(!scene.TryTakePhotoCopyMemorySaveRequest(unprepared, out _),
+            "Save reused input preparation from an earlier camera observation.");
+        // Save stays visibly available while a worker is busy; its completed
+        // caption hold must still fail to queue concurrent work.
+        var externallyBusy = await holds.HoldAsync("photo-save", busy: true);
         Require(!scene.TryTakePhotoCopyMemorySaveRequest(externallyBusy, out _),
             "A busy photo worker queued another Save.");
         Require(scene.BeginPhotoCopyMemorySave(retained), "A valid retained image could not begin saving.");
@@ -121,7 +139,7 @@ public sealed partial class MainWindow
                 marker.SequenceEqual(markerAfterFailure) &&
                 scene.TryGetPhotoCopyMemoryImage(out var retryImage) && ReferenceEquals(retryImage.Cutout, cutout),
             "A failed memory save reported success, damaged an existing file or discarded the retained image.");
-        var retryTime = await Pinch("photo-save");
+        var retryTime = await holds.HoldAsync("photo-save");
         Require(scene.TryTakePhotoCopyMemorySaveRequest(retryTime, out var retry),
             "A failed write left Save unable to accept another selection.");
         string? third = await SavePhotoCopyMemoryImageAsync(scene, retry, directory);
@@ -131,8 +149,8 @@ public sealed partial class MainWindow
                 Directory.GetFiles(directory, "*.tmp").Length == 0,
             "A failed memory save published a PNG or left an incomplete temporary file.");
 
-        var pending = await Pinch("photo-save");
-        var clearedAt = await Pinch("capture-again");
+        var pending = await holds.HoldAsync("photo-save");
+        var clearedAt = await holds.HoldAsync("capture-again");
         Require(!scene.TryTakePhotoCopyMemorySaveRequest(pending, out _) &&
                 !scene.TryTakePhotoCopyMemorySaveRequest(clearedAt, out _) &&
                 !scene.IsPhotoCopyMemoryImageCurrent(retained) && !scene.BeginPhotoCopyMemorySave(retained) &&
@@ -145,9 +163,10 @@ public sealed partial class MainWindow
 
         await CaptureFixture();
         Require(scene.TryGetPhotoCopyMemoryImage(out var beforeNavigation), "Navigation fixture lost its photo.");
-        var leavingRequest = await Pinch("photo-save");
-        scene.ShowBoardMenu();
+        var leavingRequest = await holds.HoldAsync("photo-save");
+        await holds.HoldAsync("menu");
         Require(!scene.TryTakePhotoCopyMemorySaveRequest(leavingRequest, out _) &&
+                scene.CurrentBoardScreen == BoardScreen.Menu &&
                 !scene.BeginPhotoCopyMemorySave(beforeNavigation) && !scene.CompletePhotoCopyMemorySave(beforeNavigation) &&
                 !scene.TryGetPhotoCopyMemoryImage(out _),
             "Navigation allowed an old memory save request or completion to act on the new board.");
@@ -155,7 +174,10 @@ public sealed partial class MainWindow
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
                 Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "The isolated memory-save check changed the live camera, output or board.");
-        return new { passed = true, saveEnabledWithoutObjectLock = true, pinchAndIndexRouteToMemory = true,
+        return new { passed = true, saveEnabledWithoutObjectLock = true, renderedCaptionHoldRoutesToMemory = true,
+            pinchAndIndexButtonsRejected = true, zeroTrackedCursors = true, sameFramePreparationRequired = true,
+            intactCaptionCancelsPartialHold = true, clearAndExitUseCaptionHolds = true,
+            holds.SuccessfulHolds, holds.BrokenCaptionFrames,
             noCameraFrameNeeded = true, completeSwirlAtBoardResolution = true, opaqueArtworkWithoutControls = true,
             sourcePixelsUnchanged = true, originalSwirlPreserved = true,
             savedFeedbackThreeSeconds = true, uniqueFiles = true, heldAndBusyDoNotRepeat = true,
