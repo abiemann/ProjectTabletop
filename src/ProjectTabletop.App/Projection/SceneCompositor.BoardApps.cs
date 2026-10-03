@@ -24,14 +24,15 @@ public sealed partial class SceneCompositor
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision,
         long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long MonopolyRevision, long MonopolyDiceRevision,
         long MonopolySessionRevision, int MonopolyDrawerFrame, long MonopolyEntranceRevision, int MonopolyEntranceFrame,
-        long GlobeRevision, long GlobeFrame, long GlobeSessionRevision, long SlotsRevision, double SlotsAspect);
+        long GlobeRevision, long GlobeFrame, long GlobeSessionRevision, long SlotsRevision, double SlotsAspect, int MenuFrame,
+        long RouletteRevision, double RouletteAspect, string? RouletteHover);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
         Func<DateTimeOffset>? boardRevealClock = null, Func<DateTimeOffset>? paintClock = null,
         MonopolyGame? monopoly = null, Func<DateTimeOffset>? monopolyClock = null,
-        GlobeState? globe = null, Func<DateTimeOffset>? globeClock = null, SlotGame? slots = null)
+        GlobeState? globe = null, Func<DateTimeOffset>? globeClock = null, SlotGame? slots = null, RouletteGame? roulette = null)
     {
-        _boardSession = new BoardSession(blackjack, monopoly, globe, slots);
+        _boardSession = new BoardSession(blackjack, monopoly, globe, slots, roulette);
         _blackjackClock = blackjackClock ?? (() => DateTimeOffset.UtcNow);
         _boardRevealClock = boardRevealClock ?? (() => DateTimeOffset.UtcNow);
         _paintClock = paintClock ?? (() => DateTimeOffset.UtcNow);
@@ -93,7 +94,7 @@ public sealed partial class SceneCompositor
         {
             CancelBoardReveal();
             _blackOutput = false;
-            _boardSession.ShowMenu();
+            _boardSession.ShowMenu(_blackjackClock());
             SyncPhotoCopySession();
         }
     }
@@ -131,6 +132,7 @@ public sealed partial class SceneCompositor
 
         var now = DateTimeOffset.UtcNow;
         var blackjackNow = _blackjackClock();
+        _boardSession.TickMenu(blackjackNow);
         TickBlackjackVisuals(blackjackNow);
         var monopolyNow = _monopolyClock();
         var monopolyEntrance = GetMonopolyEntranceFrame(monopolyNow);
@@ -147,6 +149,8 @@ public sealed partial class SceneCompositor
         if (globe) _boardSession.TickGlobe(globeNow);
         var slots = _boardSession.Screen == BoardScreen.Slots;
         if (slots) _boardSession.TickSlots(blackjackNow);
+        bool roulette = _boardSession.Screen == BoardScreen.Roulette;
+        if (roulette) _boardSession.TickRoulette(blackjackNow);
         if (paint) AdvancePaintAutomatic(paintNow);
         _boardSession.PaintSaveEnabled = paint && CanSavePaint;
         if (photoCopy && !preview && PhotoCopyCaptureAllowed)
@@ -177,7 +181,9 @@ public sealed partial class SceneCompositor
             globe ? _boardSession.GetGlobeSnapshot(globeNow).Revision : 0,
             globe ? GlobeVisualFrame(globeNow) : 0,
             globe ? _boardSession.Revision : 0,
-            slots ? _boardSession.SlotsState.Revision : 0, slots ? PaintBoardAspect() : 0);
+            slots ? _boardSession.SlotsState.Revision : 0, slots ? PaintBoardAspect() : 0, MenuVisualFrame(blackjackNow),
+            roulette ? _boardSession.RouletteState.Revision : 0, roulette ? PaintBoardAspect() : 0,
+            roulette && handsFresh ? string.Join('|', _boardSession.HoveredButtonIds) : null);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
@@ -194,7 +200,7 @@ public sealed partial class SceneCompositor
                 DrawPhotoCopyObjectSpotlight(surface);
             }
             else if (_boardSession.Screen is not (BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.Monopoly or
-                BoardScreen.Globe or BoardScreen.Slots))
+                BoardScreen.Globe or BoardScreen.Slots or BoardScreen.Roulette))
                 DrawMetalBackdrop(surface, drawFooterDivider: _boardSession.Screen != BoardScreen.Menu);
             using var heading = new CanvasTextFormat
             {
@@ -234,6 +240,9 @@ public sealed partial class SceneCompositor
             }
             else if (slots)
                 DrawSlotsMachine(surface, _boardSession.SlotsState, _boardSession.Buttons, PaintBoardAspect());
+            else if (roulette)
+                DrawRouletteBoard(surface, _boardSession.RouletteState, _boardSession.Buttons,
+                    handsFresh ? _boardSession.HoveredButtonIds : [], selectionFeedback, PaintBoardAspect());
             else if (globe)
             {
                 DrawGlobeBoard(surface, _boardSession.GetGlobeSnapshot(globeNow), _boardSession.Buttons,
@@ -242,16 +251,7 @@ public sealed partial class SceneCompositor
             }
             else if (_boardSession.Screen == BoardScreen.Menu)
             {
-                surface.DrawText("PROJECT TABLETOP", 80, 51, AppPalette.MutedText, small);
-                surface.DrawText("06  /  BOARDS", 470, 54, AppPalette.AccentSecondary, small);
-                surface.DrawText("Choose a board", 76, 99, AppPalette.Text, heading);
-                foreach (var button in _boardSession.Buttons)
-                {
-                    var hovered = handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id);
-                    if (button.Id == "settings") DrawSettingsCogButton(surface, button, hovered, selectionFeedback);
-                    else DrawMenuButton(surface, button, hovered, label, small, selectionFeedback);
-                }
-                surface.DrawText("Four fingers together. Aim, then move index sideways.", 80, 923, muted, body);
+                DrawMenuSurface(surface, blackjackNow, handsFresh, heading, label, small, selectionFeedback);
             }
             else
             {
@@ -393,6 +393,15 @@ public sealed partial class SceneCompositor
             };
             ds.DrawImage(reels);
         }
+        if (roulette && DrawRouletteMotionLayer(ds.Device, blackjackNow, PaintBoardAspect()) is { } rouletteLayer)
+        {
+            using var moving = new Transform3DEffect
+            {
+                Source = rouletteLayer, TransformMatrix = matrix,
+                InterpolationMode = CanvasImageInterpolation.Linear, BorderMode = EffectBorderMode.Soft
+            };
+            ds.DrawImage(moving);
+        }
         if (DrawHoldFeedbackLayer(ds.Device) is { } holdLayer)
         {
             using var heldRims = new Transform3DEffect
@@ -424,6 +433,7 @@ public sealed partial class SceneCompositor
             BoardScreen.Paint => "Liquid colour & metallic ink",
             BoardScreen.Monopoly => "Play with humans and AI",
             BoardScreen.Globe => "Zoom and rotate Earth",
+            BoardScreen.Roulette => "Place your chips and spin",
             _ => "Coming soon"
         };
         ds.DrawText(description, (float)rect.X + 32, (float)rect.Y + 111, AppPalette.MutedText, small);

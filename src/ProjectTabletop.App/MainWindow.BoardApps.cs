@@ -44,8 +44,10 @@ public sealed partial class MainWindow
         bool monopoly = _scene.CurrentBoardScreen == BoardScreen.Monopoly;
         bool globe = _scene.CurrentBoardScreen == BoardScreen.Globe;
         bool slots = _scene.CurrentBoardScreen == BoardScreen.Slots;
-        bool boardGame = blackjack || monopoly || globe || slots;
-        BoardGamePreviewTitle.Text = slots ? "DRAGON SLOTS  ·  click a button to play  ·  virtual credits" :
+        bool roulette = _scene.CurrentBoardScreen == BoardScreen.Roulette;
+        bool boardGame = blackjack || monopoly || globe || slots || roulette;
+        BoardGamePreviewTitle.Text = roulette ? "VICE ROYALE  ·  ROULETTE  ·  click to place chips  ·  virtual credits" :
+            slots ? "DRAGON SLOTS  ·  click a button to play  ·  virtual credits" :
             globe ? "GLOBE  ·  zoom and rotate Earth" : monopoly ? "MONOPOLY  ·  click the table to play" :
             "BLACKJACK  ·  click the table to play  ·  virtual chips";
         BlackjackPreviewPanel.Visibility = boardGame ? Visibility.Visible : Visibility.Collapsed;
@@ -54,6 +56,7 @@ public sealed partial class MainWindow
             (IsBoardScanMeasuring ? "Board alignment is in progress." :
              blackjack ? _scene.BlackjackState.Status :
              slots ? _scene.SlotsState.Status :
+             roulette ? _scene.RouletteState.Status :
              monopoly ? _scene.MonopolyState.Status :
              globe ? "Earth spins slowly. Use Zoom +, Zoom -, < Rotate and Rotate > to explore; Exit returns to the menu." :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :

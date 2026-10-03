@@ -116,6 +116,10 @@ public sealed partial class MainWindow
                 return await VerifyGlobeAsync();
             case "verify_slots":
                 return await VerifySlotsAsync();
+            case "verify_roulette":
+                return await VerifyRouletteAsync();
+            case "verify_menu_scroll":
+                return await VerifyMenuScrollAsync();
             case "verify_slots_motion":
                 return await VerifySlotsMotionAsync();
             case "verify_slots_hatching":
@@ -217,6 +221,7 @@ public sealed partial class MainWindow
                     monopoly = _scene.MonopolyState,
                     globe = _scene.GlobeState,
                     slots = SlotsStatus(),
+                    roulette = RouletteStatus(),
                     globeDrawer = _scene.GetGlobeDrawerDiagnostics(DateTimeOffset.UtcNow),
                     monopolySavePath = MonopolySavePath,
                     monopolySaveError = _monopolySaveError,
@@ -327,6 +332,17 @@ public sealed partial class MainWindow
             case "show_slots":
                 ShowSlots();
                 return new { boardApp = _scene.CurrentBoardScreen.ToString(), slots = SlotsStatus() };
+            case "show_roulette":
+                ShowRoulette();
+                return new { boardApp = _scene.CurrentBoardScreen.ToString(), roulette = RouletteStatus() };
+            case "roulette_action":
+                if (!parameters.TryGetProperty("id", out var rouletteAction) || rouletteAction.ValueKind != JsonValueKind.String)
+                    throw new ArgumentException("Provide a roulette button id.");
+                bool rouletteAccepted = _scene.ActivateRouletteButton(rouletteAction.GetString()!);
+                UpdateBoardAppStatus();
+                return new { accepted = rouletteAccepted, roulette = RouletteStatus() };
+            case "capture_roulette_preview":
+                return new { path = await SaveRoulettePreviewAsync() };
             case "show_settings":
                 ShowSettings();
                 return new { boardApp = _scene.CurrentBoardScreen.ToString(),

@@ -64,7 +64,8 @@ public sealed partial class SceneCompositor
     private AcquisitionSceneState CurrentAcquisitionState() => new(_boardSession.Revision,
         _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision :
         _boardSession.Screen == BoardScreen.Monopoly ? _boardSession.MonopolyState.Revision :
-        _boardSession.Screen == BoardScreen.Globe ? _boardSession.GetGlobeSnapshot(_globeClock()).Revision : 0,
+        _boardSession.Screen == BoardScreen.Globe ? _boardSession.GetGlobeSnapshot(_globeClock()).Revision :
+        _boardSession.Screen == BoardScreen.Roulette ? _boardSession.RouletteState.Revision : 0,
         _boardSession.Screen == BoardScreen.Blackjack ? _blackjackFlightRevision : 0, _spotlightResetCount,
         _boardSession.Screen == BoardScreen.PhotoCopy ? _photoCopyRevision : 0);
 
@@ -159,7 +160,7 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private bool AcquisitionBoardReady => !_disposed && _boardSession.Buttons.Count > 0 &&
+    private bool AcquisitionBoardReady => !_disposed && !_boardSession.MenuScrolling && _boardSession.Buttons.Count > 0 &&
         !_blackOutput && !_boardSetup && !IsBoardRevealActive && _calibrationTarget < 0 &&
         _boardMediaClip is not null && _boardCameraMap is not null && _boardSurfaceMap is not null;
 
@@ -337,9 +338,10 @@ public sealed partial class SceneCompositor
         var paint = _boardSession.Screen == BoardScreen.Paint;
         var globe = _boardSession.Screen == BoardScreen.Globe;
         var slots = _boardSession.Screen == BoardScreen.Slots;
+        bool roulette = _boardSession.Screen == BoardScreen.Roulette;
         if (_boardApplicationTarget is null || _renderedBoardState is not { } rendered ||
             rendered.Screen != _boardSession.Screen) return null;
-        if (!photoCopy && !globe && (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
+        if (!photoCopy && !globe && !roulette && (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
         if (_boardSession.Screen == BoardScreen.Blackjack &&
             (rendered.BlackjackRevision != _boardSession.BlackjackState.Revision ||
             rendered.BlackjackFlightRevision != _blackjackFlightRevision ||
@@ -350,6 +352,9 @@ public sealed partial class SceneCompositor
             rendered.MonopolySessionRevision != _boardSession.Revision ||
             MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()))) return null;
         if (slots && rendered.SlotsRevision != _boardSession.SlotsState.Revision) return null;
+        if (roulette && rendered.RouletteRevision != _boardSession.RouletteState.Revision) return null;
+        if (_boardSession.Screen == BoardScreen.Menu &&
+            (_boardSession.MenuScrolling || rendered.MenuFrame != MenuVisualFrame(_blackjackClock()))) return null;
         if (globe && (rendered.GlobeRevision != _boardSession.GetGlobeSnapshot(_globeClock()).Revision ||
             rendered.GlobeSessionRevision != _boardSession.Revision || HasGlobeDrawerAnimation(_globeClock()))) return null;
         var cameraToProjector = _boardCameraMap!.ToMatrix();
@@ -376,7 +381,13 @@ public sealed partial class SceneCompositor
             var sourceSize = _boardApplicationTarget.SizeInPixels;
             using (var drawing = _acquisitionReferenceTarget.CreateDrawingSession())
             {
-                if (slots)
+                if (roulette)
+                {
+                    // Circular chips expose the static felt around them. Include
+                    // that exact backing; the animated wheel is a separate layer.
+                    DrawRouletteBoard(drawing, _boardSession.RouletteState, _boardSession.Buttons, [], [], PaintBoardAspect());
+                }
+                else if (slots)
                 {
                     // Reels animate beside the controls; only the fixed, opaque
                     // buttons may explain camera interference, as on Globe.
@@ -414,7 +425,9 @@ public sealed partial class SceneCompositor
             var pixels = _acquisitionReferenceTarget.GetPixelBytes();
             _acquisitionReferenceError = null;
             var regions = _boardSession.Buttons.Select(button =>
-                new HandTrackingBounds(button.Bounds.X + .012, button.Bounds.Y + .012,
+                roulette && button.Id.StartsWith("roulette-chip-", StringComparison.Ordinal)
+                    ? RouletteChipSearchRegion(button)
+                    : new HandTrackingBounds(button.Bounds.X + .012, button.Bounds.Y + .012,
                     button.Bounds.Width - .024, button.Bounds.Height - .024)).ToArray();
             // One Back button is not enough to fit the camera's color response
             // when fingers cover most of it. Include fixed, opaque UI nearby as
@@ -428,6 +441,7 @@ public sealed partial class SceneCompositor
                 BoardScreen.Paint => regions,
                 BoardScreen.Globe => regions,
                 BoardScreen.Slots => regions,
+                BoardScreen.Roulette => regions,
                 // Fixed ivory spaces and gold trim constrain the camera response
                 // when a hand covers the only gold action panel. These bands
                 // calibrate colour only; searches remain inside the controls.

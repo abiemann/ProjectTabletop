@@ -23,10 +23,11 @@ public sealed partial class BoardSession
     public event Action<BlackjackDeal>? BlackjackDealOccurred;
 
     public BoardSession(BlackjackGame? blackjack = null, MonopolyGame? monopoly = null, GlobeState? globe = null,
-        SlotGame? slots = null)
+        SlotGame? slots = null, RouletteGame? roulette = null)
     {
         _blackjack = blackjack ?? new BlackjackGame();
         _slots = slots ?? new SlotGame();
+        _roulette = roulette ?? new RouletteGame();
         _monopoly = monopoly ?? new MonopolyGame();
         _monopoly.RollOccurred += RelayMonopolyRoll;
         _globe = globe ?? new GlobeState();
@@ -72,6 +73,8 @@ public sealed partial class BoardSession
         AdvanceMonopolyPresentation(now);
         AdvanceGlobeDrawer(now);
         AdvanceSlots(now);
+        AdvanceRoulette(now);
+        AdvanceMenuScroll(now);
         var button = Buttons.FirstOrDefault(item => item.Id == id && item.Enabled);
         if (button is null || !SelectButton(button, now, pointerAction: true)) return false;
         // A laptop/touch press consumes the same single-action readiness even
@@ -85,9 +88,14 @@ public sealed partial class BoardSession
         AdvanceBlackjackPresentation(now);
         AdvanceMonopolyPresentation(now);
         AdvanceGlobeDrawer(now);
+        AdvanceMenuScroll(now);
         BlackjackHit? hit = null;
         BlackjackDeal? deal = null;
         bool openedBoard = false;
+        if (Screen == BoardScreen.Menu && button.Id is "menu-scroll-down" or "menu-scroll-up")
+            return SelectMenuScroll(button, now);
+        if (Screen == BoardScreen.Roulette)
+            return SelectRouletteButton(button, now);
         if (Screen == BoardScreen.Monopoly)
         {
             return SelectMonopolyButton(button, now);

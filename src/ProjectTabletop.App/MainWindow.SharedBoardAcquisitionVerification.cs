@@ -48,6 +48,11 @@ public sealed partial class MainWindow
         scene.ShowSettings(); VerifyButtons("Settings");
         scene.ShowSlots(); VerifyButtons("Dragon Slots");
         if (selectedBoard is null or BoardScreen.Slots) CheckHoldReferenceRefresh();
+        scene.ShowRoulette();
+        // Include a real placed stake so the reference contains denomination
+        // chips and the small table chip, with Undo/Clear/Spin enabled.
+        Require(scene.ActivateRouletteButton("roulette-number-17"), "Roulette acquisition fixture could not place its stake.");
+        VerifyButtons("Roulette");
         scene.ShowPhotoCopy(); VerifyButtons("Photo Copy");
         foreach (var (id, title) in new[] { ("paint", "Paint"), ("monopoly", "Monopoly"), ("globe", "Globe") })
         {
@@ -115,6 +120,8 @@ public sealed partial class MainWindow
             blackjackExitAndYourChipsIncluded = true, yourChipsAcquiresHeadingInsteadOfBalance = true,
             mediaAndCalibrationInactive = true,
             globeClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Globe", StringComparison.Ordinal)) == 5,
+            rouletteBetsChipsAndHoldsCovered = selectedBoard is null or BoardScreen.Roulette,
+            menuScrollArrowUsesSharedCaptionEvidence = selectedBoard is null or BoardScreen.Menu,
             intactReflectiveSpinCaptionChecked = selectedBoard is null or BoardScreen.Slots,
             liveHardwareUnchanged = true };
 
@@ -138,6 +145,7 @@ public sealed partial class MainWindow
             Require(context.ExpectedScene!.BoardTriggerRegions?.Count == scene.CurrentBoardButtons.Count,
                 label + " omitted its generated control-label trigger masks.");
             long gameRevision = scene.BlackjackState.Revision;
+            long rouletteRevision = scene.RouletteState.Revision;
             var ids = scene.CurrentBoardButtons.Select(button => button.Id).ToArray();
             for (int index = 0; index < ids.Length; index++)
             {
@@ -223,8 +231,27 @@ public sealed partial class MainWindow
                 // Keep this geometric fixture visibly distinct even from the
                 // gold Deal button. Actual skin/projector contrast is evaluated
                 // in recorded camera captures, not asserted by a painted patch.
-                bool globeArrow = button.Id is "globe-drawer-open" or "globe-drawer-close";
-                if (globeArrow)
+                bool arrow = button.Id is "globe-drawer-open" or "globe-drawer-close" or "menu-scroll-down" or "menu-scroll-up";
+                if (screen == BoardScreen.Roulette && !button.IsHold)
+                {
+                    // Roulette's compact numbers, outside labels and chip values
+                    // can survive between generic four-finger stripe gaps. Place
+                    // contiguous fingertip coverage over the actual glyph with
+                    // enough surrounding control area, bounded by this interior.
+                    var topLeft = CameraPoint(control.X, control.Y);
+                    var bottomRight = CameraPoint(control.X + control.Width, control.Y + control.Height);
+                    double scale = size * .93 * (1 - inset);
+                    int patchWidth = (int)Math.Floor(Math.Min(bottomRight.X - topLeft.X - 2,
+                        Math.Max(trigger.Width * scale + 6, (bottomRight.X - topLeft.X) * .65)));
+                    int patchHeight = (int)Math.Floor(Math.Min(bottomRight.Y - topLeft.Y - 2,
+                        Math.Max(trigger.Height * scale + 6, (bottomRight.Y - topLeft.Y) * .65)));
+                    int patchLeft = (int)Math.Round(Math.Clamp(center.X - patchWidth / 2.0,
+                        topLeft.X + 1, bottomRight.X - patchWidth - 1));
+                    int patchTop = (int)Math.Round(Math.Clamp(center.Y - patchHeight / 2.0,
+                        topLeft.Y + 1, bottomRight.Y - patchHeight - 1));
+                    Fill(occupied, patchLeft, patchTop, patchWidth, patchHeight, 75, 95, 185);
+                }
+                else if (arrow)
                 {
                     // Obstruct the arrow and >7% of its glass while retaining a
                     // clean photometric reference around the simulated fingers.
@@ -369,6 +396,7 @@ public sealed partial class MainWindow
                         label + "/" + button.Label + " did not focus inference on its illuminated point of interest.");
                 }
                 Require(scene.CurrentBoardScreen == screen && scene.BlackjackState.Revision == gameRevision &&
+                        scene.RouletteState.Revision == rouletteRevision &&
                         scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(ids) &&
                         scene.ActiveHandSpotlightCount == 0 && scene.HoveredBoardButtons.Count == 0 &&
                         !scene.TryTakePhotoCopyCaptureRequest(now, out _) && !scene.TryTakePhotoCopyMemorySaveRequest(now, out _),

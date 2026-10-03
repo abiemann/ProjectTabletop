@@ -20,6 +20,7 @@ internal static class HandAcquisitionPresenceRegression
         PointOfInterestSampling();
         CompactReferenceControlOcclusion();
         ControlTriggerRegions();
+        HandAcquisitionManyControlsRegression.Run();
         RenderedCompactControls();
         HandAcquisitionOpticalHistoryRegression.Run();
         HandAcquisitionGoldDealRegression.Run();

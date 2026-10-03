@@ -57,6 +57,9 @@ public sealed record HandAcquisitionLocalFitResult(int ControlRegion, int Traini
 public sealed partial class HandAcquisitionPresenceTracker
 {
     private const int Features = 7;
+    // Dense betting boards need more than 32 independent captions. Keep all
+    // three supplied region collections bounded before allocating templates.
+    private const int MaximumSceneRegions = 64;
     // A live four-finger capture covered 7.2–9.0% of its control with residual
     // evidence; empty-table nuisance stayed below 0.36%. Normalize per control,
     // not by camera resolution or the number of buttons on a board.
@@ -572,7 +575,7 @@ public sealed partial class HandAcquisitionPresenceTracker
     }
 
     private static bool ValidRegions(IReadOnlyList<HandTrackingBounds>? regions) => regions is null ||
-        regions.Count is >= 1 and <= 32 && regions.All(region =>
+        regions.Count is >= 1 and <= MaximumSceneRegions && regions.All(region =>
             double.IsFinite(region.X) && double.IsFinite(region.Y) &&
             double.IsFinite(region.Width) && double.IsFinite(region.Height) &&
             region.X >= 0 && region.Y >= 0 && region.Width > 0 && region.Height > 0 &&

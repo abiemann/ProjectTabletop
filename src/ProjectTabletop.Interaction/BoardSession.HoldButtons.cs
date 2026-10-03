@@ -50,6 +50,8 @@ public sealed partial class BoardSession
     {
         ArgumentNullException.ThrowIfNull(heldIds);
         if (frameTime > now || now - frameTime > ObservationLifetime) return [];
+        AdvanceMenuScroll(now);
+        if (Screen == BoardScreen.Menu && (MenuScrolling || frameTime <= _menuInputReadyAfter)) return [];
         bool strictCaptions = clearedIds is not null;
         if (strictCaptions && frameTime <= _holdCaptionObservedAt) return [];
         _holdCaptionObservedAt = Later(_holdCaptionObservedAt, frameTime);
@@ -64,6 +66,7 @@ public sealed partial class BoardSession
         AdvanceMonopolyPresentation(now);
         AdvanceGlobeDrawer(now);
         AdvanceSlots(now);
+        AdvanceRoulette(now);
         var holdButtons = Buttons.Where(button => button.IsHold && button.Enabled)
             .ToDictionary(button => button.Id);
         foreach (string id in _clearHoldCaptions.Keys.ToArray())

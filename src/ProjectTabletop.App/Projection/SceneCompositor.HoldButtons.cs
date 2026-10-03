@@ -155,7 +155,7 @@ public sealed partial class SceneCompositor
     // contours keep the same corners on every board and at every raster size.
     private static float BoardButtonCornerRadius(BoardButton button) => button.Id switch
     {
-        "globe-drawer-open" or "globe-drawer-close" => 25,
+        "globe-drawer-open" or "globe-drawer-close" or "menu-scroll-down" or "menu-scroll-up" => 25,
         _ when button.Id.StartsWith("slot-", StringComparison.Ordinal) => 18,
         _ when button.Id.StartsWith("bj-", StringComparison.Ordinal) => 13,
         _ when button.Id.StartsWith("globe-", StringComparison.Ordinal) => 15,

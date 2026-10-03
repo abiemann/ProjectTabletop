@@ -10,9 +10,12 @@ public sealed partial class SceneCompositor
 {
     private HandTrackingBounds BoardButtonTextRegion(CanvasDevice device, BoardButton button)
     {
+        if (_boardSession.Screen == BoardScreen.Roulette) return RouletteButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Paint) return PaintButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Slots) return SlotButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Menu && button.Id == "settings") return SettingsCogTextRegion(device, button);
+        if (_boardSession.Screen == BoardScreen.Menu && IsMenuScrollHandle(button))
+            return ButtonInkRegion(button, GlobeDrawerArrowInk(MenuArrowAppearance(button), PaintBoardAspect()), 0, 0);
         if (_boardSession.Screen == BoardScreen.Globe)
         {
             if (IsGlobeDrawerHandle(button))

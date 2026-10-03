@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, Monopoly, Globe, Media, Slots, Settings }
+public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, Monopoly, Globe, Media, Slots, Settings, Roulette }
 
 /// <summary>A rectangle in the board's normalized, perspective-corrected coordinate system.</summary>
 public readonly record struct BoardRect(double X, double Y, double Width, double Height)
@@ -74,16 +74,6 @@ public sealed partial class BoardSession
     private static readonly TimeSpan ExecuteDuration = TimeSpan.FromSeconds(1);
     /// <summary>The header cog opens Settings, aligned with the menu's right column.</summary>
     public static readonly BoardRect SettingsCogBounds = new(.68, .075, .24, .13);
-    private static readonly IReadOnlyList<BoardButton> MenuButtons = Array.AsReadOnly(new[]
-    {
-        new BoardButton("slots", "Dragon Slots", new(.08, .25, .40, .16), BoardScreen.Slots),
-        new BoardButton("photo-copy", "Photo Copy", new(.52, .25, .40, .16), BoardScreen.PhotoCopy),
-        new BoardButton("blackjack", "Blackjack", new(.08, .45, .40, .16), BoardScreen.Blackjack),
-        new BoardButton("paint", "Paint", new(.52, .45, .40, .16), BoardScreen.Paint),
-        new BoardButton("monopoly", "Monopoly", new(.08, .65, .40, .16), BoardScreen.Monopoly),
-        new BoardButton("globe", "Globe", new(.52, .65, .40, .16), BoardScreen.Globe),
-        new BoardButton("settings", "Settings", SettingsCogBounds, BoardScreen.Settings)
-    });
     private static readonly IReadOnlyList<BoardButton> AppButtons = Array.AsReadOnly(new[]
     {
         new BoardButton("menu", "Back to menu", new(.06, .055, .30, .105), BoardScreen.Menu)
@@ -134,11 +124,12 @@ public sealed partial class BoardSession
         BoardScreen.Media => "Media",
         BoardScreen.Slots => "Dragon Slots",
         BoardScreen.Settings => "Settings",
+        BoardScreen.Roulette => "Roulette",
         _ => throw new InvalidOperationException("Unknown board screen.")
     };
     public IReadOnlyList<BoardButton> Buttons => Screen switch
     {
-        BoardScreen.Menu => MenuButtons,
+        BoardScreen.Menu => CurrentMenuButtons(),
         BoardScreen.PhotoCopy => CurrentPhotoCopyButtons(),
         BoardScreen.Paint => CurrentPaintButtons(),
         BoardScreen.Blackjack => BlackjackButtons(),
@@ -146,6 +137,7 @@ public sealed partial class BoardSession
         BoardScreen.Globe => CurrentGlobeButtons(),
         BoardScreen.Media => Array.Empty<BoardButton>(),
         BoardScreen.Slots => SlotsButtons(),
+        BoardScreen.Roulette => RouletteButtons(),
         BoardScreen.Settings => SettingsButtons,
         BoardScreen.HandTracking => HandTrackingButtons,
         _ => AppButtons
@@ -168,6 +160,8 @@ public sealed partial class BoardSession
         AdvanceMonopolyPresentation(now);
         AdvanceGlobeDrawer(now);
         AdvanceSlots(now);
+        AdvanceRoulette(now);
+        AdvanceMenuScroll(now);
         if (frameTime > now || now - frameTime > ObservationLifetime ||
             frameTime <= _ignoreFramesThrough ||
             (_lastFrameTime is { } previousFrame && frameTime <= previousFrame))
@@ -233,6 +227,7 @@ public sealed partial class BoardSession
     /// <summary>Clear hover and reject observations/pulses that predate a camera or calibration reset.</summary>
     public void ResetInput(DateTimeOffset now)
     {
+        ClearMenuScroll(now);
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
         ClearMonopolyPresentationHold();
@@ -253,6 +248,7 @@ public sealed partial class BoardSession
 
     private void Show(BoardScreen screen, DateTimeOffset now)
     {
+        ClearMenuScroll(now);
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
         ClearMonopolyPresentationHold();
