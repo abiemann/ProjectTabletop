@@ -14,19 +14,34 @@ public sealed partial class SceneCompositor
     // Hold buttons activate from covered-caption evidence alone. Their own
     // reference follows only what changes the rendered controls, so activating
     // one (for example, zooming Earth) does not restart the hold.
-    private readonly record struct HoldSceneKey(BoardScreen Screen, string Controls, object? CameraMap, object? SurfaceMap);
+    private readonly record struct HoldSceneKey(BoardScreen Screen, string Controls, double Aspect,
+        decimal ControlValue, object? CameraMap, object? SurfaceMap);
+    private readonly record struct HoldControlAppearance(string Label, bool Enabled, BoardRect Bounds, decimal Value);
     private HoldSceneKey? _holdSceneKey;
+    private Dictionary<string, HoldControlAppearance> _holdControlAppearances = [];
     private HandAcquisitionSceneImage? _holdExpectedScene;
     private long _holdRevision;
 
     /// <param name="ButtonIds">Every current button, index-aligned with the scene's control regions.</param>
     public sealed record HoldButtonContext(long Revision, PixelPoint[] SearchPolygon,
-        HandAcquisitionSceneImage ExpectedScene, IReadOnlyList<string> ButtonIds)
+        HandAcquisitionSceneImage ExpectedScene, IReadOnlyList<string> ButtonIds, IReadOnlySet<string> EnabledHoldIds)
     {
-        // Fresh caption obstruction meeting both 7% floors in this frame.
+        // Golden rule: a long press requires broken lettering. A colour or
+        // reflectance change beneath still-readable letters is never a press.
+        // Confirmation also requires both 7% obstruction coverage floors.
         public IReadOnlyList<string> HeldButtons(HandAcquisitionPresenceResult? result) =>
-            result?.TextPatterns?.Where(pattern => pattern.ConfirmationFrames >= 1 &&
-                    pattern.ControlRegion >= 0 && pattern.ControlRegion < ButtonIds.Count)
+            result?.TextPatterns?.Where(pattern => pattern.ShapeCorrupted && !pattern.LabelIntact &&
+                    pattern.ConfirmationFrames >= 1 &&
+                    pattern.ControlRegion >= 0 && pattern.ControlRegion < ButtonIds.Count &&
+                    EnabledHoldIds.Contains(ButtonIds[pattern.ControlRegion]))
+                .Select(pattern => ButtonIds[pattern.ControlRegion]).ToArray() ?? [];
+
+        // A positively recognized, uncovered caption ends a partial press now.
+        // No observation or an uncertain optical fit is not proof of release.
+        public IReadOnlyList<string> ClearedButtons(HandAcquisitionPresenceResult? result) =>
+            result?.TextPatterns?.Where(pattern => pattern.LabelIntact && !pattern.ShapeCorrupted &&
+                    pattern.ControlRegion >= 0 && pattern.ControlRegion < ButtonIds.Count &&
+                    EnabledHoldIds.Contains(ButtonIds[pattern.ControlRegion]))
                 .Select(pattern => ButtonIds[pattern.ControlRegion]).ToArray() ?? [];
     }
 
@@ -40,11 +55,28 @@ public sealed partial class SceneCompositor
                 HasGlobeDrawerAnimation(_globeClock()) || frameTime > now ||
                 now - frameTime > TimeSpan.FromMilliseconds(350)) return null;
             var key = new HoldSceneKey(_boardSession.Screen,
-                string.Join('|', buttons.Select(button => $"{button.Id}:{button.Enabled}:{button.Bounds}")),
+                string.Join('|', buttons.Select(button => $"{button.Id}:{button.Label}:{button.Enabled}:{button.Bounds}")),
+                PaintBoardAspect(), _boardSession.Screen == BoardScreen.Slots ? _boardSession.SlotsState.BuyCost : 0,
                 _boardCameraMap, _boardSurfaceMap);
             if (_holdSceneKey != key || _holdExpectedScene is null)
             {
                 if (CaptureExpectedAcquisitionScene() is not { } scene) return null;
+                // Disabled artwork, changed captions or resized letters cannot
+                // arm a later enabled control. Verify this exact appearance
+                // uncovered before accepting its next camera-driven press.
+                var appearances = buttons.ToDictionary(button => button.Id, button =>
+                    new HoldControlAppearance(button.Label, button.Enabled, button.Bounds,
+                        button.Id == "slot-buy" ? _boardSession.SlotsState.BuyCost : 0));
+                bool sameGeometry = _holdSceneKey is { } previous && previous.Screen == key.Screen &&
+                    previous.Aspect == key.Aspect && Equals(previous.CameraMap, key.CameraMap) &&
+                    Equals(previous.SurfaceMap, key.SurfaceMap);
+                // A sibling becoming enabled must not interrupt a continuous
+                // Globe zoom hold whose own caption and surface are unchanged.
+                string[]? changedIds = sameGeometry ? appearances.Keys.Union(_holdControlAppearances.Keys)
+                    .Where(id => !appearances.TryGetValue(id, out var current) ||
+                        !_holdControlAppearances.TryGetValue(id, out var prior) || current != prior).ToArray() : null;
+                _boardSession.ResetHoldCaptionEvidence(changedIds);
+                _holdControlAppearances = appearances;
                 _holdSceneKey = key;
                 _holdExpectedScene = scene;
                 _holdRevision++;
@@ -53,18 +85,19 @@ public sealed partial class SceneCompositor
                 new Point2(.995, .995), new Point2(.005, .995) }
                 .Select(point => _boardCameraMap!.InverseTransform(_boardSurfaceMap!.Transform(point)))
                 .Select(point => new PixelPoint(point.X, point.Y)).ToArray();
-            return new(_holdRevision, polygon, _holdExpectedScene, buttons.Select(button => button.Id).ToArray());
+            return new(_holdRevision, polygon, _holdExpectedScene, buttons.Select(button => button.Id).ToArray(),
+                buttons.Where(button => button.IsHold && button.Enabled).Select(button => button.Id).ToHashSet());
         }
     }
 
     /// <summary>Applies one camera frame's hold evidence; returns the buttons it activated.</summary>
     public IReadOnlyList<string> ObserveHoldButtons(HoldButtonContext? context, IReadOnlyList<string> heldIds,
-        DateTimeOffset frameTime)
+        DateTimeOffset frameTime, IReadOnlyCollection<string>? clearedIds = null)
     {
         lock (_gate)
         {
             if (context is null || context.Revision != _holdRevision || !AcquisitionBoardReady) return [];
-            var activated = _boardSession.ObserveHeldButtons(heldIds, frameTime, HoldClock());
+            var activated = _boardSession.ObserveHeldButtons(heldIds, frameTime, HoldClock(), clearedIds);
             if (activated.Count > 0) SyncPhotoCopySession();
             return activated;
         }

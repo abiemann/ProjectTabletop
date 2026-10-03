@@ -73,7 +73,11 @@ public sealed partial class BoardSession
         AdvanceGlobeDrawer(now);
         AdvanceSlots(now);
         var button = Buttons.FirstOrDefault(item => item.Id == id && item.Enabled);
-        return button is not null && SelectButton(button, now, pointerAction: true);
+        if (button is null || !SelectButton(button, now, pointerAction: true)) return false;
+        // A laptop/touch press consumes the same single-action readiness even
+        // if no camera frame arrives while the resulting control is disabled.
+        if (button.Hold == BoardButtonHold.Once) ResetHoldCaptionEvidence([button.Id]);
+        return true;
     }
 
     private bool SelectButton(BoardButton button, DateTimeOffset now, bool pointerAction = false)

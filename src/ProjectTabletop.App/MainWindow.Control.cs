@@ -32,11 +32,18 @@ public sealed partial class MainWindow
                 return SetProjectionSize(parameters);
             case "set_board_facing":
                 return SetBoardFacingForControl(parameters);
-#if DEBUG
             case "set_hand_diagnostic_logging":
-                _boardHandDiagnosticLogging = parameters.GetProperty("enabled").GetBoolean();
+                if (!parameters.TryGetProperty("enabled", out var diagnosticEnabled) ||
+                    diagnosticEnabled.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    throw new ArgumentException("Provide enabled as a JSON boolean.");
+                _boardHandDiagnosticLogging = diagnosticEnabled.GetBoolean();
                 LogHandTrackingEvent("board_diagnostic_logging", new { enabled = _boardHandDiagnosticLogging }, force: true);
                 return new { enabled = _boardHandDiagnosticLogging, status = _handDetectionLog?.Status };
+            case "get_hold_diagnostics":
+                return new { board = _scene.CurrentBoardScreen.ToString(),
+                    lastDetection = _lastHoldButtonDetection, lastActivation = _lastHoldButtonActivation,
+                    progress = _scene.CurrentHoldProgress };
+#if DEBUG
             case "verify_photo_copy_memory_save":
                 return await VerifyPhotoCopyMemorySaveAsync();
             case "verify_board_resolution":

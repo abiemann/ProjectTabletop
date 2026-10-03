@@ -43,15 +43,19 @@ public sealed partial class MainWindow
     private long _holdContextRevision = -1;
     private long _holdGeneration = -1;
 
-    private IReadOnlyList<string> FindHeldButtons(CameraFrame frame, SceneCompositor.HoldButtonContext? context,
+    private sealed record HoldButtonQuery(IReadOnlyList<string> Held, IReadOnlyList<string> Cleared,
+        HandAcquisitionPresenceResult? Presence);
+
+    private HoldButtonQuery FindHeldButtons(CameraFrame frame, SceneCompositor.HoldButtonContext? context,
         long generation)
     {
-        if (context is null) return [];
+        if (context is null) return new([], [], null);
         if (context.Revision != _holdContextRevision || generation != _holdGeneration) _holdPresence.Reset();
         _holdContextRevision = context.Revision;
         _holdGeneration = generation;
-        return context.HeldButtons(_holdPresence.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-            context.SearchPolygon, context.ExpectedScene, frame.Timestamp, DateTimeOffset.UtcNow));
+        var presence = _holdPresence.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
+            context.SearchPolygon, context.ExpectedScene, frame.Timestamp, DateTimeOffset.UtcNow);
+        return new(context.HeldButtons(presence), context.ClearedButtons(presence), presence);
     }
 
     private static HandAcquisitionQuery CreateHandAcquisitionQuery(CameraFrame frame,

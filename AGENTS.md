@@ -15,6 +15,15 @@ users to spread their fingers first or turn their palm toward the camera.
 Keep the deliberate sideways-index selection gesture. A palm-facing-camera
 Properties gesture is only a possible future feature, not a current requirement.
 
+# Long-press detection
+
+Broken lettering is the golden rule for detecting a long-press button. Require
+actual corruption of the stationary caption's letter shapes. Intact lettering
+must cancel partial hold progress and count as clear even when its colour,
+brightness, or underlying surface reflectance changes. Button borders, animation,
+and detected hand landmarks alone must never count as a long press. Apply this
+rule through the shared hold-button code on every board.
+
 # Natural graphics and effect boundaries
 
 The user prefers mature, high-quality graphics with natural silhouettes and

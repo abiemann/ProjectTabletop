@@ -47,6 +47,7 @@ public sealed partial class MainWindow
         scene.ShowHandTrackingTest(); VerifyButtons("Hand-Tracking");
         scene.ShowSettings(); VerifyButtons("Settings");
         scene.ShowSlots(); VerifyButtons("Dragon Slots");
+        if (selectedBoard is null or BoardScreen.Slots) CheckHoldReferenceRefresh();
         scene.ShowPhotoCopy(); VerifyButtons("Photo Copy");
         foreach (var (id, title) in new[] { ("paint", "Paint"), ("monopoly", "Monopoly"), ("globe", "Globe") })
         {
@@ -114,6 +115,7 @@ public sealed partial class MainWindow
             blackjackExitAndYourChipsIncluded = true, yourChipsAcquiresHeadingInsteadOfBalance = true,
             mediaAndCalibrationInactive = true,
             globeClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Globe", StringComparison.Ordinal)) == 5,
+            intactReflectiveSpinCaptionChecked = selectedBoard is null or BoardScreen.Slots,
             liveHardwareUnchanged = true };
 
         void VerifyButtons(string label)
@@ -388,15 +390,20 @@ public sealed partial class MainWindow
             Require(hold is not null && hold.ButtonIds.Contains(button.Id),
                 button.Label + " had no hold context for the rim check.");
             var tracker = new HandAcquisitionPresenceTracker();
+            HandAcquisitionPresenceResult? lastPresence = null;
             IReadOnlyList<string> Feed(byte[] pixels)
             {
                 globeNow = now;
-                var held = hold!.HeldButtons(tracker.Update(size, size, size * 4, pixels,
-                    hold.SearchPolygon, hold.ExpectedScene, now, now));
-                scene.ObserveHoldButtons(hold, held, now);
+                var presence = tracker.Update(size, size, size * 4, pixels,
+                    hold!.SearchPolygon, hold.ExpectedScene, now, now);
+                lastPresence = presence;
+                var held = hold.HeldButtons(presence);
+                Require(scene.ObserveHoldButtons(hold, held, now, hold.ClearedButtons(presence)).Count == 0,
+                    button.Label + " activated without a continuous one-second press.");
                 now += TimeSpan.FromMilliseconds(100);
                 return held;
             }
+            Require(!Feed(empty).Contains(button.Id), button.Label + " was held on the empty reference.");
             var arrivals = Enumerable.Range(0, 5).Select(_ => Feed(occupied).Contains(button.Id)).ToArray();
             globeNow = now;
             byte[] rimOnly = Draw();
@@ -422,8 +429,118 @@ public sealed partial class MainWindow
             Require(rimPixels > 200 && arrivals.Skip(1).All(held => held) && throughRim.All(held => held),
                 $"{button.Label} lost its hold evidence once the warming rim appeared " +
                 $"(rim pixels {rimPixels}; before [{string.Join(",", arrivals)}], with rim [{string.Join(",", throughRim)}]).");
+            if (button.Id == "slot-spin")
+            {
+                int region = hold!.ButtonIds.ToList().IndexOf(button.Id);
+                Require(lastPresence!.TextPatterns!.Single(pattern => pattern.ControlRegion == region) is
+                    { LabelIntact: false, ShapeCorrupted: true, ConfirmationFrames: >= 1 },
+                    "The SPIN obstruction fixture did not actually break its generated letters.");
+                var readable = ReadableCaptionTint(empty, hold.ExpectedScene, region);
+                // The existing partial rim must disappear on the very first
+                // intact frame, even while independent color evidence remains.
+                // Keep that physical appearance for longer than a full press.
+                for (int frame = 0; frame <= 12; frame++)
+                {
+                    Require(!Feed(readable).Contains(button.Id), "Intact reflective SPIN lettering became held evidence.");
+                    var pattern = lastPresence!.TextPatterns!.Single(item => item.ControlRegion == region);
+                    Require(pattern is { LabelIntact: true, ShapeCorrupted: false,
+                            CaptionReflectanceChanged: true, ConfirmationFrames: >= 1 } &&
+                        pattern.CaptionReflectanceCoverage >= .07 && pattern.CaptionReflectanceTriggerCoverage >= .07,
+                        "The readable SPIN fixture did not exercise qualifying reflectance with intact letters: " +
+                        System.Text.Json.JsonSerializer.Serialize(pattern));
+                    Require(hold.ClearedButtons(lastPresence).Contains(button.Id) &&
+                        scene.CurrentHoldProgress.All(progress => progress.ButtonId != button.Id),
+                        "An intact reflective caption failed to cancel partial SPIN progress immediately.");
+                }
+
+                // Use the same rendered pixels and matcher with a separate game
+                // to prove the shape-only rule still permits a real full press.
+                // The acquisition scene and its remaining controls stay idle.
+                var pressGame = new SlotGame(4);
+                var pressBoard = new BoardSession(slots: pressGame);
+                pressBoard.ShowSlots(now);
+                var clear = tracker.Update(size, size, size * 4, empty,
+                    hold.SearchPolygon, hold.ExpectedScene, now, now);
+                Require(pressBoard.ObserveHeldButtons(hold.HeldButtons(clear), now, now,
+                    hold.ClearedButtons(clear)).Count == 0, "An intact rendered caption started the isolated Spin.");
+                now += TimeSpan.FromMilliseconds(100);
+                for (int frame = 0; frame <= 10; frame++)
+                {
+                    var broken = tracker.Update(size, size, size * 4, occupied,
+                        hold.SearchPolygon, hold.ExpectedScene, now, now);
+                    var activated = pressBoard.ObserveHeldButtons(hold.HeldButtons(broken), now, now,
+                        hold.ClearedButtons(broken));
+                    Require(frame < 10 ? activated.Count == 0 : activated.SequenceEqual([button.Id]),
+                        "Broken rendered SPIN lettering did not activate exactly after its own full second.");
+                    now += TimeSpan.FromMilliseconds(100);
+                }
+                Require(pressGame.Snapshot.SpinNumber == 1 && pressGame.Balance == SlotGame.StartingBalance - pressGame.Bet,
+                    "The broken-lettering fixture did not produce exactly one isolated paid spin.");
+            }
+            Feed(empty);
+            Require(scene.CurrentHoldProgress.All(progress => progress.ButtonId != button.Id),
+                button.Label + " retained partial progress after a positively clear caption.");
+            if (button.Id == "slot-spin")
+                for (int press = 0; press < 6; press++)
+                {
+                    Feed(occupied); Feed(occupied); Feed(empty);
+                    Require(scene.CurrentHoldProgress.All(progress => progress.ButtonId != button.Id),
+                        "Short SPIN obstructions accumulated through clear camera frames.");
+                }
             now += TimeSpan.FromSeconds(1);
             globeNow = savedGlobe;
+        }
+        byte[] ReadableCaptionTint(byte[] source, HandAcquisitionSceneImage expected, int region)
+        {
+            var control = expected.BoardSearchRegions![region];
+            var caption = expected.BoardTriggerRegions![region];
+            // Local chroma transfer through the real letters: blue +70 and
+            // green -14 differ by under one luminance level. Opposite margins
+            // retain their original response, so the matcher must distinguish
+            // readable local reflectance from genuine missing/distorted glyphs.
+            double width = Math.Min(control.Width * .72, caption.Width + .012);
+            double height = Math.Min(control.Height * .72, caption.Height + .020);
+            var topLeft = CameraPoint(caption.X + caption.Width / 2 - width / 2,
+                caption.Y + caption.Height / 2 - height / 2);
+            var bottomRight = CameraPoint(caption.X + caption.Width / 2 + width / 2,
+                caption.Y + caption.Height / 2 + height / 2);
+            var result = (byte[])source.Clone();
+            for (int y = Math.Max(0, (int)Math.Ceiling(topLeft.Y)); y < Math.Min(size, bottomRight.Y); y++)
+            for (int x = Math.Max(0, (int)Math.Ceiling(topLeft.X)); x < Math.Min(size, bottomRight.X); x++)
+            {
+                int offset = (y * size + x) * 4;
+                result[offset] = (byte)Math.Min(255, source[offset] + 70);
+                result[offset + 1] = (byte)Math.Max(0, source[offset + 1] - 14);
+            }
+            return result;
+        }
+        void CheckHoldReferenceRefresh()
+        {
+            Require(scene.ActivateSlotsButton("slot-bet-up"), "The reference fixture could not enable BET −.");
+            Draw();
+            var first = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No initial hold reference.");
+            scene.SetDisplayAspect(72d / 56);
+            now += TimeSpan.FromMilliseconds(100);
+            byte[] empty = Draw();
+            var resized = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No resized hold reference.");
+            Require(resized.Revision != first.Revision && !ReferenceEquals(resized.ExpectedScene, first.ExpectedScene),
+                "Changing the physical aspect reused stale caption geometry.");
+            var tracker = new HandAcquisitionPresenceTracker();
+            var presence = tracker.Update(size, size, size * 4, empty,
+                resized.SearchPolygon, resized.ExpectedScene, now, now);
+            Require(resized.HeldButtons(presence).Count == 0,
+                "Uncovered resized controls became hold evidence.");
+            Require(scene.ActivateSlotsButton("slot-bet-up"), "The reference fixture could not change BUY's price.");
+            now += TimeSpan.FromMilliseconds(100);
+            Draw();
+            var repriced = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No repriced hold reference.");
+            Require(repriced.Revision != resized.Revision && !ReferenceEquals(repriced.ExpectedScene, resized.ExpectedScene),
+                "A changed BUY price retained the old control reference.");
+            scene.SetDisplayAspect(1);
+            Require(scene.ActivateSlotsButton("slot-bet-down") && scene.ActivateSlotsButton("slot-bet-down"),
+                "The reference fixture could not restore its bet.");
+            now += TimeSpan.FromMilliseconds(100);
+            Draw();
         }
         static double[] BoxBlur(double[] values, int radius)
         {

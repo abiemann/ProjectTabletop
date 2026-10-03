@@ -9,11 +9,15 @@ internal static class SlotBoardRegression
         CheckLayout();
         CheckPointerPressPresentation();
         CheckLongPressSpin();
+        CheckInterruptedSpinHold();
+        CheckClearedCaptionHolds();
+        CheckHoldCaptionReadiness();
+        CheckPointerConsumesCaptionReadiness();
         CheckExitDuringFeature();
         CheckSafetyAndGestures();
         Console.WriteLine("Slot board verification passed: bottom-row long-press controls with clear gaps, a one-second Spin, " +
             "controls locked while reels turn, fingers left on Spin never re-spin, Exit during features, bets, Buy, " +
-            "the one-caption safety rule, ignored pinches and accepted-press presentation records.");
+            "fresh enabled-caption readiness, the one-caption safety rule, ignored pinches and accepted-press presentation records.");
     }
 
     private static void CheckLayout()
@@ -89,6 +93,8 @@ internal static class SlotBoardRegression
         Require(Hold(board, "slot-spin", now).SequenceEqual(["slot-spin"]) && game.Phase == SlotPhase.Spinning &&
             game.Balance == SlotGame.StartingBalance - 20, "A one-second hold did not spin once for the bet.");
         var firstPress = RequirePress(board, "slot-spin", BoardSession.SlotSpinBounds, now, 1);
+        // Replacing a rendered reference must not lift fingers from a spent place.
+        board.ResetHoldCaptionEvidence();
         Require(board.Buttons.Where(button => button.Id != "slot-exit").All(button => !button.Enabled) &&
             board.Buttons.Single(button => button.Id == "slot-exit").Enabled,
             "Controls other than Exit stayed enabled while the reels turned.");
@@ -177,6 +183,155 @@ internal static class SlotBoardRegression
         Require(board.Update([sample], now.AddMilliseconds(100), now.AddMilliseconds(100)) is null &&
             game.Snapshot.SpinNumber == spins && ReferenceEquals(board.SlotsLastButtonPress, lastPress),
             "A pinch pressed the long-press Spin.");
+    }
+
+    private static void CheckInterruptedSpinHold()
+    {
+        foreach (int gap in new[] { 351, 1500 })
+        {
+            var game = new SlotGame(4);
+            var board = new BoardSession(slots: game);
+            board.ShowSlots(Origin);
+            for (int held = 0; held <= 400; held += 100)
+                Require(Hold(board, "slot-spin", Origin.AddMilliseconds(held)).Count == 0,
+                    "The interrupted Spin fixture activated before its gap.");
+            var returned = Origin.AddMilliseconds(400 + gap);
+            Require(board.HoldProgress(returned).Count == 0,
+                "A Spin rim remained visible after its camera evidence expired.");
+            Require(board.ObserveHeldButtons(["slot-spin"], Origin.AddMilliseconds(400), returned).Count == 0,
+                "A stale positive frame activated Spin during a camera gap.");
+            Require(Hold(board, "slot-spin", returned).Count == 0 && game.Snapshot.SpinNumber == 0 &&
+                board.SlotsLastButtonPress is null && board.HoldProgress(returned).Count == 0,
+                "A returning positive frame revived expired Spin progress or activated immediately.");
+            Require(board.ObserveHeldButtons(["slot-spin"], returned, returned.AddMilliseconds(50)).Count == 0 &&
+                board.ObserveHeldButtons(["slot-spin"], returned.AddMilliseconds(-1), returned.AddMilliseconds(50)).Count == 0,
+                "A repeated or out-of-order frame advanced the restarted Spin hold.");
+            for (int held = 100; held < 1000; held += 100)
+                Require(Hold(board, "slot-spin", returned.AddMilliseconds(held)).Count == 0 &&
+                    game.Snapshot.SpinNumber == 0 && board.SlotsLastButtonPress is null,
+                    "Pre-gap evidence shortened the restarted Spin hold.");
+            var activated = returned.AddMilliseconds(1000);
+            Require(Hold(board, "slot-spin", activated).SequenceEqual(["slot-spin"]) &&
+                game.Snapshot.SpinNumber == 1 && game.Balance == SlotGame.StartingBalance - game.Bet,
+                "A full fresh second after the gap did not spin exactly once.");
+            RequirePress(board, "slot-spin", BoardSession.SlotSpinBounds, activated, 1);
+        }
+    }
+
+    private static void CheckClearedCaptionHolds()
+    {
+        var game = new SlotGame(4);
+        var board = new BoardSession(slots: game);
+        board.ShowSlots(Origin);
+        IReadOnlyList<string> Observe(int time, bool positive, IReadOnlyCollection<string>? cleared = null) =>
+            board.ObserveHeldButtons(positive ? ["slot-spin"] : [], Origin.AddMilliseconds(time),
+                Origin.AddMilliseconds(time), cleared ?? []);
+
+        // Short positive bursts separated by explicitly intact captions cannot
+        // accumulate a wall-clock second, even though every gap is only 100 ms.
+        for (int time = 0; time <= 2000; time += 200)
+        {
+            Require(Observe(time, true).Count == 0 && game.Snapshot.SpinNumber == 0 &&
+                game.Balance == SlotGame.StartingBalance && board.SlotsLastButtonPress is null,
+                "Short positives across clear captions accumulated a Spin activation.");
+            Require(Observe(time + 100, false, ["slot-spin"]).Count == 0 &&
+                board.HoldProgress(Origin.AddMilliseconds(time + 100)).Count == 0,
+                "A freshly clear caption retained partial Spin rim progress.");
+        }
+
+        // Unknown/missing evidence still tolerates a short camera dropout. A
+        // repeated, out-of-order or stale clear cannot erase newer coverage.
+        Require(Observe(2200, true).Count == 0 && Observe(2300, true).Count == 0 &&
+            Observe(2400, false).Count == 0 && Observe(2500, true).Count == 0 &&
+            Observe(2600, false, []).Count == 0 && Observe(2700, true).Count == 0,
+            "A fresh Spin hold activated before a full second.");
+        Require(board.ObserveHeldButtons([], Origin.AddMilliseconds(2700), Origin.AddMilliseconds(2750), ["slot-spin"]).Count == 0 &&
+            board.ObserveHeldButtons([], Origin.AddMilliseconds(2699), Origin.AddMilliseconds(2750), ["slot-spin"]).Count == 0 &&
+            board.HoldProgress(Origin.AddMilliseconds(2750)) is [{ ButtonId: "slot-spin", Progress: > .54 and < .56 }],
+            "Repeated or out-of-order clear evidence released a newer Spin hold.");
+        Require(board.ObserveHeldButtons([], Origin.AddMilliseconds(2400), Origin.AddMilliseconds(2800), ["slot-spin"]).Count == 0,
+            "A stale clear frame activated a control.");
+        for (int time = 2800; time < 3200; time += 100)
+            Require(Observe(time, true).Count == 0 && game.Snapshot.SpinNumber == 0,
+                "A fresh Spin hold acted before its own full second.");
+        Require(Observe(3200, true).SequenceEqual(["slot-spin"]) && game.Snapshot.SpinNumber == 1 &&
+            game.Balance == SlotGame.StartingBalance - game.Bet,
+            "Unknown short gaps or obsolete clear frames prevented a valid one-second Spin.");
+        RequirePress(board, "slot-spin", BoardSession.SlotSpinBounds, Origin.AddMilliseconds(3200), 1);
+    }
+
+    private static void CheckHoldCaptionReadiness()
+    {
+        var game = new SlotGame(4);
+        var board = new BoardSession(slots: game);
+        board.ShowSlots(Origin);
+        IReadOnlyList<string> Observe(int time, bool positive, bool clear = false) =>
+            board.ObserveHeldButtons(positive ? ["slot-spin"] : [], Origin.AddMilliseconds(time),
+                Origin.AddMilliseconds(time), clear ? ["slot-spin"] : []);
+
+        // A persistently corrupted startup reference cannot invent the initial press.
+        for (int time = 0; time <= 1500; time += 100)
+            Require(Observe(time, true).Count == 0 && board.HoldProgress(Origin.AddMilliseconds(time)).Count == 0 &&
+                game.Snapshot.SpinNumber == 0 && game.Balance == SlotGame.StartingBalance && board.SlotsLastButtonPress is null,
+                "An uncleared startup caption accumulated a rim or started Spin.");
+        Require(Observe(1600, false, clear: true).Count == 0, "A clear caption activated Spin.");
+        for (int time = 1700; time < 2700; time += 100)
+            Require(Observe(time, true).Count == 0, "A freshly armed Spin acted before a full second.");
+        Require(Observe(2700, true).SequenceEqual(["slot-spin"]) && game.Snapshot.SpinNumber == 1 &&
+            game.Balance == SlotGame.StartingBalance - game.Bet, "An enabled clear caption did not arm a genuine full Spin hold.");
+        var firstPress = RequirePress(board, "slot-spin", BoardSession.SlotSpinBounds, Origin.AddMilliseconds(2700), 1);
+
+        // Disabled captions can look clear, and unknown frames can release the
+        // spent place, but neither proves the next enabled appearance is clear.
+        int settled = 2700;
+        for (int guard = 0; game.Phase != SlotPhase.Idle; guard++)
+        {
+            Require(guard < 10_000, "The strict-caption spin never settled.");
+            settled += 100;
+            Require(Observe(settled, false, clear: guard % 2 == 0).Count == 0,
+                "Disabled or unknown caption evidence activated a control.");
+        }
+        long spins = game.Snapshot.SpinNumber;
+        decimal balance = game.Balance;
+        for (int offset = 100; offset <= 1600; offset += 100)
+            Require(Observe(settled + offset, true).Count == 0 &&
+                board.HoldProgress(Origin.AddMilliseconds(settled + offset)).Count == 0 &&
+                game.Snapshot.SpinNumber == spins && game.Balance == balance && ReferenceEquals(board.SlotsLastButtonPress, firstPress),
+                "Disabled or unknown observations re-armed automatic Spin after the round.");
+
+        int cleared = settled + 1700;
+        Require(Observe(cleared, false, clear: true).Count == 0, "The next enabled clear caption activated Spin.");
+        for (int offset = 100; offset < 1100; offset += 100)
+            Require(Observe(cleared + offset, true).Count == 0, "A re-armed Spin did not require another complete second.");
+        Require(Observe(cleared + 1100, true).SequenceEqual(["slot-spin"]) &&
+            game.Snapshot.SpinNumber == spins + 1 && game.Balance == balance - game.Bet,
+            "Fresh enabled clearance followed by a full hold failed to start the next spin.");
+        RequirePress(board, "slot-spin", BoardSession.SlotSpinBounds, Origin.AddMilliseconds(cleared + 1100), 2);
+    }
+
+    private static void CheckPointerConsumesCaptionReadiness()
+    {
+        var game = new SlotGame(4);
+        var board = new BoardSession(slots: game);
+        board.ShowSlots(Origin);
+        board.ObserveHeldButtons([], Origin, Origin, ["slot-spin"]);
+        var now = Origin.AddMilliseconds(100);
+        Require(board.ActivateButton("slot-spin", now), "The pointer could not start the readiness fixture.");
+        while (game.Phase != SlotPhase.Idle)
+        {
+            now = game.PhaseEndsAt > now ? game.PhaseEndsAt : now;
+            board.TickSlots(now);
+        }
+        long spins = game.Snapshot.SpinNumber;
+        var press = board.SlotsLastButtonPress;
+        for (int offset = 100; offset <= 1500; offset += 100)
+        {
+            var time = now.AddMilliseconds(offset);
+            Require(board.ObserveHeldButtons(["slot-spin"], time, time, []).Count == 0 &&
+                board.HoldProgress(time).Count == 0 && game.Snapshot.SpinNumber == spins &&
+                ReferenceEquals(press, board.SlotsLastButtonPress),
+                "A pointer press left old caption readiness for an automatic camera-driven repeat.");
+        }
     }
 
     private static SlotButtonPress RequirePress(BoardSession board, string id, BoardRect bounds, DateTimeOffset now, long sequence)

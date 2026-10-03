@@ -10,9 +10,12 @@ public sealed partial class MainWindow
     private HandTrackingVideoRecorder? _handVideoRecorder;
     private BoardScreen? _lastLoggedHandBoard;
     private long _handDetectionSequence;
+    private object? _lastHoldButtonDetection;
+    private object? _lastHoldButtonActivation;
     private DateTimeOffset _lastHandLogStatusRefresh;
     private DateTimeOffset _handVideoNotBefore;
-    // Extra logging outside the tester is opt-in through the Debug control.
+    // Full frame logging outside the tester is opt-in through local control.
+    // Hold activations always retain the caption evidence that caused them.
     private volatile bool _boardHandDiagnosticLogging = false;
 
     private bool IsHandTrackingTester => _scene.CurrentBoardScreen == BoardScreen.HandTracking;

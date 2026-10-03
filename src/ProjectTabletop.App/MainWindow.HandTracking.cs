@@ -205,7 +205,8 @@ public sealed partial class MainWindow
                     _lastHandEngineFrameTime = frame.Timestamp;
                     var detectionStarted = Stopwatch.GetTimestamp();
                     var acquisitionHints = FindHandAcquisitionHints(frame, acquisitionContext, generation);
-                    var heldButtons = FindHeldButtons(frame, holdContext, generation);
+                    var holdQuery = FindHeldButtons(frame, holdContext, generation);
+                    var heldButtons = holdQuery.Held;
                     // Start a qualified search light now. The unlit crop search
                     // below still runs first on these pixels, overlapping the
                     // camera's delay in seeing the light; a hand found there
@@ -273,16 +274,28 @@ public sealed partial class MainWindow
                                 _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.LightingHints, visibleHands, frame.Timestamp,
                                     acquisitionHints.Presence?.IlluminatedPresence, acquisitionHints.Presence?.IlluminatedWhiteLuminance,
                                     acquisitionHints.Presence?.ProjectedWhiteClipped);
-                                var holdActivations = _scene.ObserveHoldButtons(holdContext, heldButtons, frame.Timestamp);
-                                if (holdActivations.Count > 0)
-                                    LogHandTrackingEvent("hold_activation", new { frameTime = frame.Timestamp,
-                                        buttons = holdActivations, held = heldButtons });
+                                var holdBoard = _scene.CurrentBoardScreen;
+                                var holdActivations = _scene.ObserveHoldButtons(holdContext, heldButtons, frame.Timestamp,
+                                    holdQuery.Cleared);
                                 // The hold detector's own view: whether it had its reference
                                 // scene, which captions it saw covered, and the timer progress.
+                                _lastHoldButtonDetection = new { frameTime = frame.Timestamp,
+                                    board = holdBoard.ToString(),
+                                    context = holdContext is not null, held = heldButtons,
+                                    cleared = holdQuery.Cleared, revision = holdContext?.Revision,
+                                    buttonIds = holdContext?.ButtonIds, enabledHoldIds = holdContext?.EnabledHoldIds,
+                                    ageMilliseconds = age.TotalMilliseconds,
+                                    reason = holdQuery.Presence?.Reason, baselineReady = holdQuery.Presence?.BaselineReady,
+                                    textPatterns = holdQuery.Presence?.TextPatterns, localFits = holdQuery.Presence?.LocalFits,
+                                    progress = _scene.CurrentHoldProgress };
+                                if (holdActivations.Count > 0)
+                                {
+                                    _lastHoldButtonActivation = new { buttons = holdActivations,
+                                        evidence = _lastHoldButtonDetection };
+                                    LogHandTrackingEvent("hold_activation", _lastHoldButtonActivation, force: true);
+                                }
                                 if (_scene.CurrentBoardButtons.Any(button => button.IsHold && button.Enabled))
-                                    LogHandTrackingEvent("hold_frame", new { frameTime = frame.Timestamp,
-                                        context = holdContext is not null, held = heldButtons,
-                                        progress = _scene.CurrentHoldProgress });
+                                    LogHandTrackingEvent("hold_frame", _lastHoldButtonDetection);
                                 DescribeHandAcquisition(frame, acquisitionContext, acquisitionHints, detectorTrace, visibleHands.Length);
                                 LogHandDetection(sequence, requestedInTester, frame, generation, engineReset,
                                     inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, cursors, "accepted");
