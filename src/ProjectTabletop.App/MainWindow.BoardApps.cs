@@ -48,7 +48,7 @@ public sealed partial class MainWindow
         bool boardGame = blackjack || monopoly || globe || slots || roulette;
         BoardGamePreviewTitle.Text = roulette ? "VICE ROYALE  ·  ROULETTE  ·  click to place chips  ·  virtual credits" :
             slots ? "DRAGON SLOTS  ·  click a button to play  ·  virtual credits" :
-            globe ? "GLOBE  ·  zoom and rotate Earth" : monopoly ? "MONOPOLY  ·  click the table to play" :
+            globe ? "GLOBE  ·  zoom Earth in and out" : monopoly ? "MONOPOLY  ·  click the table to play" :
             "BLACKJACK  ·  click the table to play  ·  virtual chips";
         BlackjackPreviewPanel.Visibility = boardGame ? Visibility.Visible : Visibility.Collapsed;
         CameraPreviewPanel.Visibility = ProjectionPreviewPanel.Visibility = boardGame ? Visibility.Collapsed : Visibility.Visible;
@@ -58,12 +58,12 @@ public sealed partial class MainWindow
              slots ? _scene.SlotsState.Status :
              roulette ? _scene.RouletteState.Status :
              monopoly ? _scene.MonopolyState.Status :
-             globe ? "Earth spins slowly. Use Zoom +, Zoom -, < Rotate and Rotate > to explore; Exit returns to the menu." :
+             globe ? "Earth spins slowly. Open the ^ drawer for Zoom + and Zoom -; its Exit returns to the menu." :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :
              _scene.CurrentBoardScreen == BoardScreen.PhotoCopy ? _scene.PhotoCopyStatus :
              _scene.CurrentBoardScreen == BoardScreen.Paint ?
-                (_scene.GetPaintSaveStatus(DateTimeOffset.UtcNow) ?? "Paint anywhere around the floating controls. Save keeps the artwork; Exit returns to the menu.") :
+                (_scene.GetPaintSaveStatus(MonotonicClock.UtcNow) ?? "Paint anywhere around the floating controls. Save keeps the artwork; Exit returns to the menu.") :
              "Aim with the middle fingertip and four fingers together, then move the index sideways to select. Pinch also works.");
     }
 

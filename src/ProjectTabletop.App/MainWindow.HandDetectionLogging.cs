@@ -62,7 +62,7 @@ public sealed partial class MainWindow
         if (!force && !IsHandTrackingTester && !_boardHandDiagnosticLogging) return;
         RecordHandDiagnostic(new
         {
-            schemaVersion = 1, type = kind, loggedAt = DateTimeOffset.UtcNow,
+            schemaVersion = 1, type = kind, loggedAt = MonotonicClock.UtcNow,
             generation = _handGeneration, recordingId = ActiveHandRecordingId, details,
             lighting = _scene.GetHandLightingDiagnostics()
         });
@@ -75,7 +75,7 @@ public sealed partial class MainWindow
         IReadOnlyList<HandCursor> cursors, string outcome)
     {
         if (!requestedInTester && !IsHandTrackingTester && !_boardHandDiagnosticLogging) return;
-        var now = DateTimeOffset.UtcNow;
+        var now = MonotonicClock.UtcNow;
         // Do not let a menu inference that navigated into the tester start a clip,
         // or an obsolete/stale inference restart recording after a reset.
         if (requestedInTester && outcome == "accepted" && visibleHands.Count > 0 &&
@@ -129,14 +129,14 @@ public sealed partial class MainWindow
             if (changed)
             {
                 _handVideoNotBefore = board == BoardScreen.HandTracking
-                    ? DateTimeOffset.UtcNow : DateTimeOffset.MaxValue;
+                    ? MonotonicClock.UtcNow : DateTimeOffset.MaxValue;
                 if (board == BoardScreen.HandTracking || _lastLoggedHandBoard == BoardScreen.HandTracking)
                     LogHandTrackingEvent("board_changed", new { from = _lastLoggedHandBoard?.ToString(), to = board.ToString() }, force: true);
                 _lastLoggedHandBoard = board;
             }
-            if (UpdateHandVideoEligibility()) _handVideoRecorder?.Tick(DateTimeOffset.UtcNow);
+            if (UpdateHandVideoEligibility()) _handVideoRecorder?.Tick(MonotonicClock.UtcNow);
         }
-        var now = DateTimeOffset.UtcNow;
+        var now = MonotonicClock.UtcNow;
         if (!changed && now - _lastHandLogStatusRefresh < TimeSpan.FromSeconds(1)) return;
         _lastHandLogStatusRefresh = now;
         var status = _handDetectionLog?.Status;

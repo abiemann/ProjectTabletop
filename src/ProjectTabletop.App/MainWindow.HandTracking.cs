@@ -15,7 +15,9 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     private static readonly TimeSpan HandDetectionInterval = TimeSpan.FromMilliseconds(80);
-    private static readonly TimeSpan TrackedHandInterval = TimeSpan.FromMilliseconds(33);
+    // Half the 33 ms frame period: the camera already averages about 30 fps, and a
+    // full-period gap skipped the on-time frame that follows each late one.
+    private static readonly TimeSpan TrackedHandInterval = TimeSpan.FromMilliseconds(16);
     private static readonly TimeSpan HandMarkerLifetime = TimeSpan.FromMilliseconds(350);
     private readonly object _handGate = new();
     private readonly HandGestureTracker _handGestures = new();
@@ -51,7 +53,7 @@ public sealed partial class MainWindow
         get
         {
             lock (_handGate) return _handPreview is { } preview &&
-                DateTimeOffset.UtcNow - preview.Timestamp <= HandMarkerLifetime ? preview.Cursors.Length : 0;
+                MonotonicClock.UtcNow - preview.Timestamp <= HandMarkerLifetime ? preview.Cursors.Length : 0;
         }
     }
 
@@ -61,7 +63,7 @@ public sealed partial class MainWindow
         {
             lock (_handGate)
             {
-                var now = DateTimeOffset.UtcNow;
+                var now = MonotonicClock.UtcNow;
                 return _handPreview is { } preview && now - preview.Timestamp <= HandMarkerLifetime
                     ? preview.Cursors.Count(cursor => cursor.IsExecuting(now)) : 0;
             }
@@ -74,7 +76,7 @@ public sealed partial class MainWindow
         {
             lock (_handGate)
             {
-                var now = DateTimeOffset.UtcNow;
+                var now = MonotonicClock.UtcNow;
                 return _handPreview is { } preview && preview.Timestamp <= now && now - preview.Timestamp <= HandMarkerLifetime
                     ? preview.Cursors.Count(cursor => cursor.IsSpreadOut) : 0;
             }
@@ -87,7 +89,7 @@ public sealed partial class MainWindow
         {
             lock (_handGate)
             {
-                var now = DateTimeOffset.UtcNow;
+                var now = MonotonicClock.UtcNow;
                 return _handPreview is { } preview && preview.Timestamp <= now && now - preview.Timestamp <= HandMarkerLifetime
                     ? preview.Cursors.Count(cursor => cursor.HasFourExtendedFingers) : 0;
             }
@@ -108,7 +110,7 @@ public sealed partial class MainWindow
             var expired = false;
             lock (_handGate)
             {
-                if (_handPreview is { } preview && DateTimeOffset.UtcNow - preview.Timestamp > HandMarkerLifetime)
+                if (_handPreview is { } preview && MonotonicClock.UtcNow - preview.Timestamp > HandMarkerLifetime)
                 {
                     LogHandTrackingEvent("cursor_expired", new { sourceFrameTime = preview.Timestamp });
                     _handPreview = null;
@@ -156,7 +158,7 @@ public sealed partial class MainWindow
             _scene.ClearHandTips();
             _scene.InvalidatePhotoCopyCapture();
             LogHandTrackingEvent("tracking_reset", new { reason });
-            _handVideoNotBefore = DateTimeOffset.UtcNow;
+            _handVideoNotBefore = MonotonicClock.UtcNow;
             _handVideoRecorder?.Stop("tracking_reset:" + reason);
         }
         if (_initialized && !_closing)
@@ -247,7 +249,7 @@ public sealed partial class MainWindow
                                     Volatile.Read(ref _cameraHealthWarning) ? "camera_unhealthy" : "board_scan");
                                 return;
                             }
-                            var age = DateTimeOffset.UtcNow - frame.Timestamp;
+                            var age = MonotonicClock.UtcNow - frame.Timestamp;
                             _lastHandDetection = new(frame.Timestamp, inferenceMilliseconds,
                                 age.TotalMilliseconds, frameInterval, age > HandMarkerLifetime,
                                 visibleHands.Select(DescribeHandObservation).ToArray());
@@ -265,9 +267,9 @@ public sealed partial class MainWindow
                             {
                                 _handLatencyWarning = null;
                                 var cursors = _handGestures.Update(visibleHands, frame.Timestamp,
-                                    DateTimeOffset.UtcNow).ToArray();
+                                    MonotonicClock.UtcNow).ToArray();
                                 var visualCursors = _handVisuals.Update(cursors, visibleHands,
-                                    frame.Timestamp, DateTimeOffset.UtcNow).ToArray();
+                                    frame.Timestamp, MonotonicClock.UtcNow).ToArray();
                                 _handPreview = new HandPreview(cursors, visualCursors, frame.Width, frame.Height, frame.Timestamp);
                                 _scene.SetHandCursors(cursors, frame.Timestamp, _photoCopyTask is { IsCompleted: false }, visualCursors);
                                 _scene.SetHandSpotlights(visibleHands, frame.Timestamp);
@@ -375,8 +377,8 @@ public sealed partial class MainWindow
         lock (_handGate) preview = _handPreview;
         if (!_handTrackingEnabled || IsBoardScanMeasuring || preview is null ||
             preview.Width != frame.Width || preview.Height != frame.Height ||
-            DateTimeOffset.UtcNow - preview.Timestamp > HandMarkerLifetime) return;
-        var now = DateTimeOffset.UtcNow;
+            MonotonicClock.UtcNow - preview.Timestamp > HandMarkerLifetime) return;
+        var now = MonotonicClock.UtcNow;
         foreach (var cursor in preview.VisualCursors)
         {
             if (cursor.HasFourExtendedFingers && cursor.FingerTips.Count == 4)

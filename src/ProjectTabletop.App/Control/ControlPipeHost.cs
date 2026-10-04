@@ -8,7 +8,9 @@ namespace ProjectTabletop.App.Control;
 internal sealed class ControlPipeHost : IAsyncDisposable
 {
     internal const string PipeName = "ProjectTabletop.Control.v1";
-    private const int MaxLineCharacters = 16_384;
+    private const int MaxRequestCharacters = 16_384;
+    // Status and verification reports grow with each board; get_status outgrew 16 KiB.
+    private const int MaxResponseCharacters = 4 * 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly Func<string, JsonElement, CancellationToken, Task<object?>> _handle;
     private readonly CancellationTokenSource _stop = new();
@@ -69,7 +71,7 @@ internal sealed class ControlPipeHost : IAsyncDisposable
             response = new { ok = false, error = ex.Message };
         }
         var json = JsonSerializer.Serialize(response, JsonOptions);
-        if (json.Length > MaxLineCharacters)
+        if (json.Length > MaxResponseCharacters)
             json = JsonSerializer.Serialize(new { ok = false, error = "Response exceeds size limit." });
         await writer.WriteLineAsync(json.AsMemory(), cancellationToken);
     }
@@ -84,7 +86,7 @@ internal sealed class ControlPipeHost : IAsyncDisposable
                 throw new EndOfStreamException("Control client disconnected.");
             if (buffer[0] == '\n') return line.ToString();
             if (buffer[0] != '\r') line.Append(buffer[0]);
-            if (line.Length > MaxLineCharacters)
+            if (line.Length > MaxRequestCharacters)
                 throw new InvalidDataException("Command exceeds size limit.");
         }
     }

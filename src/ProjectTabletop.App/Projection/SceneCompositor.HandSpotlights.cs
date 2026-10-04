@@ -36,7 +36,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = MonotonicClock.UtcNow;
             return new(_boardSession.Screen.ToString(), _boardMediaClip is not null, _blackOutput,
                 _boardSetup, _calibrationTarget, _spotlightFrameTime,
                 _spotlightFrameTime == DateTimeOffset.MinValue ? null : (now - _spotlightFrameTime).TotalMilliseconds,
@@ -55,7 +55,7 @@ public sealed partial class SceneCompositor
         {
             lock (_gate)
             {
-                var now = DateTimeOffset.UtcNow;
+                var now = MonotonicClock.UtcNow;
                 return _boardSession.Screen == BoardScreen.Paint || MonopolyEntranceActive || HasGlobeDrawerAnimation(_globeClock()) ? 0 :
                     _handSpotlights.Count(hand => SpotlightOpacity(now, hand.SourceFrameTime) > 0);
             }
@@ -68,7 +68,7 @@ public sealed partial class SceneCompositor
     private HandDetection[] LostLitHands()
     {
         if (_boardSession.Screen == BoardScreen.Paint || MonopolyEntranceActive || HasGlobeDrawerAnimation(_globeClock())) return [];
-        var now = DateTimeOffset.UtcNow;
+        var now = MonotonicClock.UtcNow;
         return _handSpotlights.Where(hand => hand.SourceFrameTime < _spotlightObservationFrameTime &&
             SpotlightOpacity(now, hand.SourceFrameTime) > 0).Select(hand => hand.Hand).ToArray();
     }
@@ -79,7 +79,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = MonotonicClock.UtcNow;
             if (frameTime < _spotlightResetTime || frameTime <= _spotlightObservationFrameTime ||
                 frameTime > now || now - frameTime > TimeSpan.FromMilliseconds(350)) return;
             if (_boardCameraMap is null || _boardMediaClip is null || _blackOutput || _boardSetup || IsBoardRevealActive ||
@@ -169,7 +169,7 @@ public sealed partial class SceneCompositor
         _handSpotlights = [];
         _spotlightFrameTime = DateTimeOffset.MinValue;
         _spotlightObservationFrameTime = DateTimeOffset.MinValue;
-        _spotlightResetTime = DateTimeOffset.UtcNow;
+        _spotlightResetTime = MonotonicClock.UtcNow;
         _spotlightResetCount++;
         _suppressedHandLights.Clear();
         _spotlightObservations = [];
@@ -197,7 +197,7 @@ public sealed partial class SceneCompositor
     private void DrawHandSpotlights(CanvasDrawingSession ds, Rect output)
     {
         if (_boardSession.Screen == BoardScreen.Paint || MonopolyEntranceActive || HasGlobeDrawerAnimation(_globeClock())) return;
-        var now = DateTimeOffset.UtcNow;
+        var now = MonotonicClock.UtcNow;
         if (_handSpotlights.Length == 0 || SpotlightOpacity(now) <= 0) return;
         using var brush = new CanvasRadialGradientBrush(ds.Device,
         [

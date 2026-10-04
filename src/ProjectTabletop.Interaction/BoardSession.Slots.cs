@@ -22,7 +22,7 @@ public sealed partial class BoardSession
     /// <summary>The last accepted Bet, Buy or Spin press, retained across navigation.</summary>
     public SlotButtonPress? SlotsLastButtonPress { get; private set; }
 
-    public void ShowSlots(DateTimeOffset? now = null) => Show(BoardScreen.Slots, now ?? DateTimeOffset.UtcNow);
+    public void ShowSlots(DateTimeOffset? now = null) => Show(BoardScreen.Slots, now ?? MonotonicClock.UtcNow);
 
     /// <summary>Makes the next slot spin land a feature (demonstrations and verification).</summary>
     public void DemonstrateSlots(SlotDemo demo) => _slots.Demonstrate(demo);

@@ -178,6 +178,8 @@ catch (Exception ex)
 internal static class ControlPipeClient
 {
     private const string PipeName = "ProjectTabletop.Control.v1";
+    // Matches the app's ControlPipeHost limits.
+    private const int MaxRequestCharacters = 16_384, MaxResponseCharacters = 4 * 1024 * 1024;
 
     internal static async Task<JsonElement> CallAsync(string method, JsonElement parameters,
         CancellationToken cancellationToken = default)
@@ -189,7 +191,7 @@ internal static class ControlPipeClient
         using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true)
             { AutoFlush = true };
         var request = JsonSerializer.Serialize(new { method, @params = parameters });
-        if (request.Length > 16_384) throw new InvalidOperationException("Command exceeds size limit.");
+        if (request.Length > MaxRequestCharacters) throw new InvalidOperationException("Command exceeds size limit.");
         await writer.WriteLineAsync(request.AsMemory(), cancellationToken);
         var line = await ReadBoundedLineAsync(reader, cancellationToken);
         using var response = JsonDocument.Parse(line);
@@ -206,7 +208,7 @@ internal static class ControlPipeClient
                 throw new EndOfStreamException("The app closed the control pipe without a response.");
             if (buffer[0] == '\n') return line.ToString();
             if (buffer[0] != '\r') line.Append(buffer[0]);
-            if (line.Length > 16_384) throw new InvalidDataException("Response exceeds size limit.");
+            if (line.Length > MaxResponseCharacters) throw new InvalidDataException("Response exceeds size limit.");
         }
     }
 }

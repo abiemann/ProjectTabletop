@@ -37,7 +37,7 @@ public sealed partial class MainWindow
                 _photoCopyTask = SaveStoredPhotoCopyAsync(memoryImage);
             return;
         }
-        var now = DateTimeOffset.UtcNow;
+        var now = MonotonicClock.UtcNow;
         bool explicitRequest = _scene.TryTakePhotoCopyCaptureRequest(frame.Timestamp, out var request);
         if (explicitRequest && request.CaptionHold)
         {
@@ -152,7 +152,7 @@ public sealed partial class MainWindow
 
     private async Task CaptureDelayedPhotoCopyAsync(SceneCompositor.PhotoCopyCaptureContext context, long generation)
     {
-        DateTimeOffset due = DateTimeOffset.UtcNow.AddSeconds(3);
+        DateTimeOffset due = MonotonicClock.UtcNow.AddSeconds(3);
         if (!_scene.BeginPhotoCopyCountdown(context, due)) return;
         try
         {
@@ -160,7 +160,7 @@ public sealed partial class MainWindow
             // Poll only while this short operation is pending; camera inference supplies frame + hands together.
             while (!_closing && generation == _handGeneration && _scene.IsPhotoCopyCaptureCurrent(context))
             {
-                var now = DateTimeOffset.UtcNow;
+                var now = MonotonicClock.UtcNow;
                 if (_latestPhotoCopyFrame is { } observation && observation.Generation == generation &&
                     TimedPhotoFrameReady(observation.Frame.Timestamp, due, now))
                 {

@@ -220,7 +220,7 @@ public sealed partial class MainWindow : Window
         else if (_visionError is not null) SetStatus(_visionError);
         UpdateCameraHealth();
         UpdateBoardSetupStatus();
-        _scene.TickMonopoly(DateTimeOffset.UtcNow);
+        _scene.TickMonopoly(ProjectTabletop.Interaction.MonotonicClock.UtcNow);
         QueueMonopolySave();
         UpdateBoardAppStatus();
         UpdateBoardSizeEstimate();

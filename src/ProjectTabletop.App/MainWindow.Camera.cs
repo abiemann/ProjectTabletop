@@ -5,6 +5,7 @@ using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using ProjectTabletop.App.Camera;
+using ProjectTabletop.Interaction;
 using ProjectTabletop.Vision;
 using Windows.Foundation;
 using Windows.Graphics.DirectX;
@@ -66,7 +67,7 @@ public sealed partial class MainWindow
             _cameraOperation.CurrentCount == 0 ||
             SelectedCamera?.Device.Id != _cameraWantedDeviceId) return;
 
-        var now = DateTimeOffset.UtcNow;
+        var now = MonotonicClock.UtcNow;
         if (!_camera.IsRunning || _camera.ActiveDeviceId != _cameraWantedDeviceId)
         {
             SuspendBoardScanForCameraOutage();
@@ -278,7 +279,7 @@ public sealed partial class MainWindow
                 ? $"Live: {choice.Device.DisplayName}"
                 : $"Live: {choice.Device.DisplayName}, {format.Value.Width} × {format.Value.Height} " +
                   $"at {format.Value.FramesPerSecond:F1} fps";
-            _cameraStartedAtUtc = DateTimeOffset.UtcNow;
+            _cameraStartedAtUtc = MonotonicClock.UtcNow;
             CameraStatusText.Text = Volatile.Read(ref _latestCameraFrame) is null
                 ? $"Connected: {choice.Device.DisplayName}. Waiting for video frames…"
                 : _cameraLiveStatus;
@@ -352,7 +353,7 @@ public sealed partial class MainWindow
             _cameraBitmapDevice = null;
             CameraCanvas.Invalidate();
             _cameraRecoveryReason = message;
-            var soon = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(2);
+            var soon = MonotonicClock.UtcNow + TimeSpan.FromSeconds(2);
             if (_nextCameraReconnectAtUtc < soon) _nextCameraReconnectAtUtc = soon;
             _cameraHealthWarning = true;
             CameraStatusText.Text = message + " Reconnecting shortly.";

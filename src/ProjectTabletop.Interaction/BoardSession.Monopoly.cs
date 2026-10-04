@@ -48,7 +48,7 @@ public sealed partial class BoardSession
         if (Screen == BoardScreen.Monopoly) MonopolyInputBarrier(now);
     }
 
-    public void ShowMonopoly(DateTimeOffset? now = null) => Show(BoardScreen.Monopoly, now ?? DateTimeOffset.UtcNow);
+    public void ShowMonopoly(DateTimeOffset? now = null) => Show(BoardScreen.Monopoly, now ?? MonotonicClock.UtcNow);
 
     public bool TickMonopoly(DateTimeOffset now)
     {

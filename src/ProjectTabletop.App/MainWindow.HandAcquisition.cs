@@ -1,5 +1,6 @@
 using ProjectTabletop.App.Camera;
 using ProjectTabletop.App.Projection;
+using ProjectTabletop.Interaction;
 using ProjectTabletop.Vision;
 
 namespace ProjectTabletop.App;
@@ -34,7 +35,7 @@ public sealed partial class MainWindow
             _handAcquisitionPresence.Reset();
         _handAcquisitionGeneration = generation;
         _handAcquisitionContextRevision = context?.Revision ?? -1;
-        return CreateHandAcquisitionQuery(frame, context, _handAcquisitionPresence, DateTimeOffset.UtcNow);
+        return CreateHandAcquisitionQuery(frame, context, _handAcquisitionPresence, MonotonicClock.UtcNow);
     }
 
     // Hold buttons keep their own detector: it must keep watching while a hand
@@ -54,7 +55,7 @@ public sealed partial class MainWindow
         _holdContextRevision = context.Revision;
         _holdGeneration = generation;
         var presence = _holdPresence.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-            context.SearchPolygon, context.ExpectedScene, frame.Timestamp, DateTimeOffset.UtcNow);
+            context.SearchPolygon, context.ExpectedScene, frame.Timestamp, MonotonicClock.UtcNow);
         return new(context.HeldButtons(presence), context.ClearedButtons(presence), presence);
     }
 

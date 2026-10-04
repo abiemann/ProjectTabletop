@@ -11,7 +11,7 @@ public sealed partial class BoardSession
     public static readonly BoardRect RouletteRebetBounds = new(.505, .855, .18, .115);
     public static readonly BoardRect RouletteSpinBounds = new(.705, .855, .26, .115);
 
-    public void ShowRoulette(DateTimeOffset? now = null) => Show(BoardScreen.Roulette, now ?? DateTimeOffset.UtcNow);
+    public void ShowRoulette(DateTimeOffset? now = null) => Show(BoardScreen.Roulette, now ?? MonotonicClock.UtcNow);
     public bool TickRoulette(DateTimeOffset now) => AdvanceRoulette(now);
 
     /// <summary>One shared table layout for rendering and hit testing: zero, 3×12 numbers, columns, dozens, outside bets.</summary>

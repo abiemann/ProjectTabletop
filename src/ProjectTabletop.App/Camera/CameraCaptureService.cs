@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using ProjectTabletop.Interaction;
 using Windows.Graphics.Imaging;
 using Windows.Media.Capture;
 using Windows.Media.Capture.Frames;
@@ -21,7 +22,12 @@ public sealed class CameraCaptureService : IAsyncDisposable
     private CameraFrame? _latestFrame;
     private volatile bool _running;
     private volatile bool _disposed;
-    private long _lastCopyTicks;
+    // About 30 copies per second on average, like the former 32 ms minimum gap.
+    // Up to two copies of allowance carry over, so the on-time frame after a
+    // late one still arrives from a 30 fps webcam.
+    private const double MaximumCopiesPerSecond = 31.25, MaximumCopyAllowance = 2;
+    private double _copyAllowance;
+    private long _copyAllowanceTicks;
     private long _epoch;
 
     public event EventHandler<CameraFrame>? FrameReceived;
@@ -172,10 +178,13 @@ public sealed class CameraCaptureService : IAsyncDisposable
             if (bitmap is null) return;
 
             // A camera frame is copied to CPU memory for analysis; projector video stays on GPU.
-            // The 30 Hz cap bounds allocations when a webcam advertises 60 Hz or more.
+            // The average 30 Hz cap bounds allocations when a webcam advertises 60 Hz or more.
+            // A fixed minimum gap instead dropped the on-time frame after each late one.
             var now = Stopwatch.GetTimestamp();
-            if (_lastCopyTicks != 0 && Stopwatch.GetElapsedTime(_lastCopyTicks, now) < TimeSpan.FromMilliseconds(32))
-                return;
+            _copyAllowance = _copyAllowanceTicks == 0 ? MaximumCopyAllowance : Math.Min(MaximumCopyAllowance,
+                _copyAllowance + Stopwatch.GetElapsedTime(_copyAllowanceTicks, now).TotalSeconds * MaximumCopiesPerSecond);
+            _copyAllowanceTicks = now;
+            if (_copyAllowance < 1) return;
 
             using var converted = bitmap.BitmapPixelFormat == BitmapPixelFormat.Bgra8
                 ? null
@@ -189,11 +198,11 @@ public sealed class CameraCaptureService : IAsyncDisposable
             bgraBitmap.CopyToBuffer(buffer);
             using (var reader = DataReader.FromBuffer(buffer)) reader.ReadBytes(bytes);
 
-            var owned = new CameraFrame(width, height, stride, bytes, DateTimeOffset.UtcNow);
+            var owned = new CameraFrame(width, height, stride, bytes, MonotonicClock.UtcNow);
             if (_running && epoch == Interlocked.Read(ref _epoch) && ReferenceEquals(sender, _reader))
             {
                 Volatile.Write(ref _latestFrame, owned);
-                _lastCopyTicks = now;
+                _copyAllowance--;
                 delivered = owned;
             }
         }
@@ -237,7 +246,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
         Interlocked.Increment(ref _epoch);
         ActiveDeviceId = null;
         NegotiatedFormat = null;
-        _lastCopyTicks = 0;
+        _copyAllowanceTicks = 0;
         var reader = _reader;
         _reader = null;
         if (reader is not null)

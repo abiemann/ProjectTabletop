@@ -33,11 +33,11 @@ public sealed partial class SceneCompositor
         GlobeState? globe = null, Func<DateTimeOffset>? globeClock = null, SlotGame? slots = null, RouletteGame? roulette = null)
     {
         _boardSession = new BoardSession(blackjack, monopoly, globe, slots, roulette);
-        _blackjackClock = blackjackClock ?? (() => DateTimeOffset.UtcNow);
-        _boardRevealClock = boardRevealClock ?? (() => DateTimeOffset.UtcNow);
-        _paintClock = paintClock ?? (() => DateTimeOffset.UtcNow);
-        _monopolyClock = monopolyClock ?? blackjackClock ?? (() => DateTimeOffset.UtcNow);
-        _globeClock = globeClock ?? blackjackClock ?? (() => DateTimeOffset.UtcNow);
+        _blackjackClock = blackjackClock ?? (() => MonotonicClock.UtcNow);
+        _boardRevealClock = boardRevealClock ?? (() => MonotonicClock.UtcNow);
+        _paintClock = paintClock ?? (() => MonotonicClock.UtcNow);
+        _monopolyClock = monopolyClock ?? blackjackClock ?? (() => MonotonicClock.UtcNow);
+        _globeClock = globeClock ?? blackjackClock ?? (() => MonotonicClock.UtcNow);
         _boardSession.BlackjackHitOccurred += OnBlackjackHit;
         _boardSession.BlackjackDealOccurred += OnBlackjackDeal;
         _boardSession.MonopolyRollOccurred += OnMonopolyRoll;
@@ -57,7 +57,7 @@ public sealed partial class SceneCompositor
     public string HandTrackingTestStatus
     {
         get { lock (_gate) return _boardSession.Screen == BoardScreen.HandTracking
-            ? HandTestCaption(HandStatusAt(DateTimeOffset.UtcNow)) : string.Empty; }
+            ? HandTestCaption(HandStatusAt(MonotonicClock.UtcNow)) : string.Empty; }
     }
 
     private int HandStatusAt(DateTimeOffset now)
@@ -83,7 +83,7 @@ public sealed partial class SceneCompositor
         get
         {
             lock (_gate)
-                return DateTimeOffset.UtcNow - _handFrameTime <= TimeSpan.FromMilliseconds(350)
+                return MonotonicClock.UtcNow - _handFrameTime <= TimeSpan.FromMilliseconds(350)
                     ? _boardSession.HoveredButtonIds.ToArray() : Array.Empty<string>();
         }
     }
@@ -130,7 +130,7 @@ public sealed partial class SceneCompositor
         ReserveProjectedBoardPixels(ds, output, preview);
         if (EnsureBoardRenderTarget(ref _boardApplicationTarget, ds.Device)) _renderedBoardState = null;
 
-        var now = DateTimeOffset.UtcNow;
+        var now = MonotonicClock.UtcNow;
         var blackjackNow = _blackjackClock();
         _boardSession.TickMenu(blackjackNow);
         TickBlackjackVisuals(blackjackNow);

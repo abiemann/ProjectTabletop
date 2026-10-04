@@ -253,6 +253,15 @@ internal static class SlotRegression
         Require(game.Phase == SlotPhase.RespinIntro && game.Snapshot.Grid.Count(cell => cell.IsBonus) == 6,
             "A bought feature did not start respins with six held symbols.");
         RunToIdle(game, now);
+        // Buy pays no line wins, so its filler symbols must never show one.
+        for (int seed = 0; seed < 2000; seed++)
+        {
+            var bought = new SlotGame(seed, 1_000_000m);
+            bought.HandleAction("slot-buy", Origin);
+            var grid = bought.Snapshot.Grid;
+            Require(SlotGame.Evaluate(grid, bought.Bet).Count == 0 && grid.Count(cell => cell.IsBonus) == 6,
+                "A bought feature showed an unpaid line win or lost a held symbol.");
+        }
 
         var broke = new SlotGame(9, 30);
         now = Origin;

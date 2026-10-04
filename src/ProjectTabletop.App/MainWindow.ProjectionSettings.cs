@@ -9,7 +9,7 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     private ProjectionSetupSettings _projectionSetup = new();
-    private bool _projectionSetupInitialized, _loadingProjectionProfile;
+    private bool _projectionSetupInitialized, _loadingProjectionProfile, _projectionSettingsBackupRequired;
     private string? _projectionProfileKey;
     private string? _projectionSettingsError;
     private const string SessionOnlyFacingError = "This output has no stable identity; its facing is stored only for this session.";
@@ -17,6 +17,9 @@ public sealed partial class MainWindow
     private readonly Dictionary<string, ProjectionSizeProfile> _sessionProjectionProfiles = new();
     private long _lastProjectionModeCheck;
     private string ProjectionSetupPath => Path.Combine(_appDataDirectory, "projection-setup.json");
+    // The next settings change rewrites ProjectionSetupPath. A file this version
+    // could not fully load is copied here first instead of being silently lost.
+    private string RejectedProjectionSetupPath => Path.Combine(_appDataDirectory, "projection-setup.rejected.json");
 
     private sealed record ProjectionSetupSettings
     {
@@ -26,12 +29,15 @@ public sealed partial class MainWindow
 
     private void InitializeProjectionSettings()
     {
+        string? loadProblem = null;
         try
         {
             if (File.Exists(ProjectionSetupPath))
             {
                 _projectionSetup = ParseProjectionSettings(File.ReadAllText(ProjectionSetupPath),
-                    SelectedDisplay?.Id, SelectedDisplay?.PhysicalMode);
+                    SelectedDisplay?.Id, SelectedDisplay?.PhysicalMode, out int skipped);
+                if (skipped > 0)
+                    loadProblem = $"Skipped {skipped} invalid saved output profile{(skipped == 1 ? "" : "s")}.";
                 foreach (var pair in _projectionSetup.Profiles.Where(pair => pair.Key.StartsWith("session:")).ToArray())
                 {
                     _sessionProjectionProfiles[pair.Key] = pair.Value;
@@ -42,15 +48,43 @@ public sealed partial class MainWindow
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or
             InvalidDataException or KeyNotFoundException or InvalidOperationException or FormatException)
         {
-            ProjectionSettingsStatusText.Text = "Could not load output settings: " + error.Message;
+            loadProblem = "Could not load output settings: " + error.Message;
+        }
+        if (loadProblem is not null)
+        {
+            _projectionSettingsBackupRequired = !TryKeepRejectedProjectionSettings(
+                ProjectionSetupPath, RejectedProjectionSetupPath, out string? backupError);
+            _projectionSettingsError = loadProblem + (backupError ??
+                " The original file was kept as " + RejectedProjectionSetupPath + ".");
+            ProjectionSettingsStatusText.Text = _projectionSettingsError;
             ProjectionSettingsStatusText.Visibility = Visibility.Visible;
         }
         _projectionSetupInitialized = true;
         ProjectionSettingsDisplayChanged();
     }
 
-    private static ProjectionSetupSettings ParseProjectionSettings(string json, string? displayId, DisplayModeInfo? mode)
+    private static bool TryKeepRejectedProjectionSettings(string path, string rejectedPath, out string? error)
     {
+        try
+        {
+            File.Copy(path, rejectedPath, overwrite: true);
+            error = null;
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            error = " The original file could not be kept; output settings were not saved: " + exception.Message;
+            return false;
+        }
+    }
+
+    private static ProjectionSetupSettings ParseProjectionSettings(string json, string? displayId, DisplayModeInfo? mode) =>
+        ParseProjectionSettings(json, displayId, mode, out _);
+
+    private static ProjectionSetupSettings ParseProjectionSettings(string json, string? displayId, DisplayModeInfo? mode,
+        out int skippedProfiles)
+    {
+        skippedProfiles = 0;
         using var document = JsonDocument.Parse(json);
         if (document.RootElement.GetProperty("Version").GetInt32() == 1)
         {
@@ -65,10 +99,26 @@ public sealed partial class MainWindow
                     new() { LensHeightCentimeters = value };
             return result;
         }
-        var saved = JsonSerializer.Deserialize<ProjectionSetupSettings>(json);
-        if (saved is not { Version: 2, Profiles: not null } ||
-            saved.Profiles.Any(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null || !pair.Value.IsValid))
+        if (document.RootElement.GetProperty("Version").GetInt32() != 2)
             throw new InvalidDataException("Saved output settings are invalid or unsupported.");
+        var saved = new ProjectionSetupSettings();
+        if (!document.RootElement.TryGetProperty("Profiles", out var profiles)) return saved;
+        if (profiles.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("Saved output profiles must be an object.");
+        // Decode each profile independently so a wrong field type cannot discard
+        // valid settings for other outputs. Duplicate names still use the last entry.
+        foreach (var entry in profiles.EnumerateObject())
+        {
+            saved.Profiles.Remove(entry.Name);
+            ProjectionSizeProfile? profile = null;
+            if (!string.IsNullOrWhiteSpace(entry.Name) && entry.Value.ValueKind == JsonValueKind.Object)
+            {
+                try { profile = entry.Value.Deserialize<ProjectionSizeProfile>(); }
+                catch (JsonException) { }
+            }
+            if (profile is { IsValid: true }) saved.Profiles[entry.Name] = profile;
+            else skippedProfiles++;
+        }
         return saved;
     }
 
@@ -131,15 +181,21 @@ public sealed partial class MainWindow
 
     private bool SaveProjectionSettings()
     {
-        bool saved = TrySaveProjectionSettings(_projectionSetup, ProjectionSetupPath, out _projectionSettingsError);
+        bool saved = TrySaveProjectionSettings(_projectionSetup, ProjectionSetupPath, out _projectionSettingsError,
+            _projectionSettingsBackupRequired ? RejectedProjectionSetupPath : null);
+        if (saved) _projectionSettingsBackupRequired = false;
         ProjectionSettingsStatusText.Text = _projectionSettingsError ?? "";
         ProjectionSettingsStatusText.Visibility = saved ? Visibility.Collapsed : Visibility.Visible;
         UpdateBoardFacingStatus();
         return saved;
     }
 
-    private static bool TrySaveProjectionSettings(ProjectionSetupSettings settings, string path, out string? error)
+    private static bool TrySaveProjectionSettings(ProjectionSetupSettings settings, string path, out string? error,
+        string? rejectedPath = null)
     {
+        // A failed startup backup must be retried before any replacement of the
+        // partially loaded source, including saves triggered by audio or facing.
+        if (rejectedPath is not null && !TryKeepRejectedProjectionSettings(path, rejectedPath, out error)) return false;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);

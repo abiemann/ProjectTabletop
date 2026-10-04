@@ -22,13 +22,13 @@ public sealed partial class MainWindow
             scene.SetBoardSetup(false);
             if (scene.GetLastHandBoardSelection() is not null)
                 throw new InvalidOperationException("An idle scene invented a successful hand selection.");
-            var sourceTime = DateTimeOffset.UtcNow;
+            var sourceTime = MonotonicClock.UtcNow;
             var tip = new PixelPoint(.25, .35); // Inside Dragon Slots' menu target.
             scene.SetHandCursors([new(tip, DateTimeOffset.MinValue)], sourceTime);
             scene.ClearHandTips(resetInput);
             // Source frame predates the clear but is still fresh on completion.
             var selectingFrame = sourceTime.AddTicks(1);
-            scene.SetHandCursors([new HandCursor(tip, DateTimeOffset.UtcNow.AddSeconds(1), 1) { TrackingId = 711 }], selectingFrame);
+            scene.SetHandCursors([new HandCursor(tip, MonotonicClock.UtcNow.AddSeconds(1), 1) { TrackingId = 711 }], selectingFrame);
             var expected = resetInput ? BoardScreen.Menu : BoardScreen.Slots;
             if (scene.CurrentBoardScreen != expected)
                 throw new InvalidOperationException(resetInput
@@ -47,34 +47,34 @@ public sealed partial class MainWindow
         {
             using var scene = CreateMenu();
             var pointingTip = new PixelPoint(.7, .33); // Photo Copy.
-            var sourceTime = DateTimeOffset.UtcNow;
+            var sourceTime = MonotonicClock.UtcNow;
             scene.SetHandCursors([new(pointingTip, DateTimeOffset.MinValue)], sourceTime);
             scene.SetHandCursors([new(actualTip, DateTimeOffset.MinValue, 0, pointingTip, sourceTime)],
-                DateTimeOffset.UtcNow);
+                MonotonicClock.UtcNow);
             if (!scene.HoveredBoardButtons.SequenceEqual(["photo-copy"]))
                 throw new InvalidOperationException("Closing a pinch moved the highlight away from Photo Copy.");
-            var selectingFrame = DateTimeOffset.UtcNow;
+            var selectingFrame = MonotonicClock.UtcNow;
             scene.SetHandCursors([new HandCursor(actualTip, selectingFrame.AddSeconds(1), 1, pointingTip, sourceTime)
                 { TrackingId = 712 }], selectingFrame);
             if (scene.CurrentBoardScreen != BoardScreen.PhotoCopy)
                 throw new InvalidOperationException("A curled fingertip prevented the pointed Photo Copy target from opening.");
             var selection = AssertHandSelectionDiagnostic(scene, BoardScreen.Menu, BoardScreen.PhotoCopy,
                 "photo-copy", "Pinch", 712, selectingFrame);
-            scene.SetHandCursors([], DateTimeOffset.UtcNow);
+            scene.SetHandCursors([], MonotonicClock.UtcNow);
             scene.ClearHandTips(resetInput: false);
-            foreach (var rejectedFrame in new[] { DateTimeOffset.UtcNow.AddSeconds(-1), DateTimeOffset.UtcNow.AddSeconds(1) })
+            foreach (var rejectedFrame in new[] { MonotonicClock.UtcNow.AddSeconds(-1), MonotonicClock.UtcNow.AddSeconds(1) })
                 scene.SetHandCursors([new HandCursor(new(.2, .88), rejectedFrame.AddSeconds(1), 2)
                     { TrackingId = 713 }], rejectedFrame);
-            scene.SetHandCursors([new HandCursor(new(double.NaN, .88), DateTimeOffset.UtcNow.AddSeconds(1), 2)
-                { TrackingId = 713 }], DateTimeOffset.UtcNow);
+            scene.SetHandCursors([new HandCursor(new(double.NaN, .88), MonotonicClock.UtcNow.AddSeconds(1), 2)
+                { TrackingId = 713 }], MonotonicClock.UtcNow);
             if (!ReferenceEquals(selection, scene.GetLastHandBoardSelection()) || scene.CurrentBoardScreen != BoardScreen.PhotoCopy)
                 throw new InvalidOperationException("Idle or rejected observations overwrote the successful pinch route after navigation.");
         }
         using (var scene = CreateMenu())
         {
-            var sourceTime = DateTimeOffset.UtcNow;
-            scene.SetHandCursors([new(new(.7, .33), DateTimeOffset.UtcNow.AddSeconds(1), 1,
-                new(.5, .5), sourceTime)], DateTimeOffset.UtcNow);
+            var sourceTime = MonotonicClock.UtcNow;
+            scene.SetHandCursors([new(new(.7, .33), MonotonicClock.UtcNow.AddSeconds(1), 1,
+                new(.5, .5), sourceTime)], MonotonicClock.UtcNow);
             if (scene.CurrentBoardScreen != BoardScreen.Menu || scene.HoveredBoardButtons.Count != 0 ||
                 scene.GetLastHandBoardSelection() is not null)
                 throw new InvalidOperationException("An off-target pointing position clicked under the curled fingertip.");
@@ -108,7 +108,7 @@ public sealed partial class MainWindow
             recorded.GetProperty("gesture").GetString() != gesture ||
             recorded.GetProperty("TrackingId").GetInt64() != trackingId ||
             recorded.GetProperty("frameTime").GetDateTimeOffset() != frameTime ||
-            observedAt < frameTime || observedAt > DateTimeOffset.UtcNow)
+            observedAt < frameTime || observedAt > MonotonicClock.UtcNow)
             throw new InvalidOperationException("The retained hand selection lost its exact route, gesture, identity or source-frame timing.");
         return selection;
     }

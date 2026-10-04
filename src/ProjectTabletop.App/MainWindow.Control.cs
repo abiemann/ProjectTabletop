@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ProjectTabletop.App.Control;
+using ProjectTabletop.Interaction;
 
 namespace ProjectTabletop.App;
 
@@ -207,7 +208,7 @@ public sealed partial class MainWindow
                     handDetectionLog = _handDetectionLog?.Status,
                     paint = _scene.GetPaintDiagnostics(),
                     paintInput = _scene.GetPaintInputDiagnostics(),
-                    paintSaveStatus = _scene.GetPaintSaveStatus(DateTimeOffset.UtcNow),
+                    paintSaveStatus = _scene.GetPaintSaveStatus(MonotonicClock.UtcNow),
                     lastSavedPaintPath = _lastSavedPaintPath,
                     paintSaveDirectory = PaintSaveDirectory,
                     lastPaintDetection = _lastPaintDetection,
@@ -222,13 +223,13 @@ public sealed partial class MainWindow
                     globe = _scene.GlobeState,
                     slots = SlotsStatus(),
                     roulette = RouletteStatus(),
-                    globeDrawer = _scene.GetGlobeDrawerDiagnostics(DateTimeOffset.UtcNow),
+                    globeDrawer = _scene.GetGlobeDrawerDiagnostics(MonotonicClock.UtcNow),
                     monopolySavePath = MonopolySavePath,
                     monopolySaveError = _monopolySaveError,
                     blackjackAnimation = _scene.GetBlackjackAnimationDiagnostics(),
-                    monopolyDiceAnimation = _scene.GetMonopolyDiceAnimationDiagnostics(DateTimeOffset.UtcNow),
+                    monopolyDiceAnimation = _scene.GetMonopolyDiceAnimationDiagnostics(MonotonicClock.UtcNow),
                     monopolyEntrance = _scene.GetMonopolyEntranceDiagnostics(),
-                    monopolyDrawer = _scene.GetMonopolyDrawerDiagnostics(DateTimeOffset.UtcNow),
+                    monopolyDrawer = _scene.GetMonopolyDrawerDiagnostics(MonotonicClock.UtcNow),
                     hoveredBoardButtons = _scene.HoveredBoardButtons,
                     photoCopyStatus = _scene.PhotoCopyStatus,
                     photoCopyLighting = _scene.PhotoCopyLightingStatus,
@@ -326,7 +327,7 @@ public sealed partial class MainWindow
                 bool globeAccepted = _scene.ActivateGlobeButton(globeAction.GetString()!);
                 UpdateBoardAppStatus();
                 return new { accepted = globeAccepted, globe = _scene.GlobeState,
-                    drawer = _scene.GetGlobeDrawerDiagnostics(DateTimeOffset.UtcNow) };
+                    drawer = _scene.GetGlobeDrawerDiagnostics(MonotonicClock.UtcNow) };
             case "capture_globe_preview":
                 return new { path = await SaveGlobePreviewAsync() };
             case "show_slots":

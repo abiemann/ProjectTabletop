@@ -161,25 +161,30 @@ public sealed partial class MainWindow
                 ProjectionSizeProfile.SessionKey("old-id", unidentified)].LensHeightCentimeters == 123 &&
             ProjectionSizeProfile.SessionKey("old-id", unidentified) != ProjectionSizeProfile.SessionKey("old-id", unidentified with { Width = 800 }),
             "Unidentified output lost its legacy height or shared a session profile across modes.");
-        try
-        {
-            ParseProjectionSettings("{\"Version\":2,\"Profiles\":{\"bad\":{\"ThrowRatio\":-1}}}", "id", fourThree);
-            throw new InvalidOperationException("Invalid persisted optics were accepted.");
-        }
-        catch (InvalidDataException) { }
+        // An invalid profile is skipped without discarding another output's settings.
         foreach (string invalid in new[]
         {
-            "{\"Version\":2,\"Profiles\":{\"bad\":{\"MeasuredBoardShortSideCentimeters\":72,\"MeasuredBoardLongSideCentimeters\":56}}}",
-            "{\"Version\":2,\"Profiles\":{\"bad\":{\"MeasuredBoardShortSideCentimeters\":0}}}"
+            "{\"ThrowRatio\":-1}",
+            "{\"MeasuredBoardShortSideCentimeters\":72,\"MeasuredBoardLongSideCentimeters\":56}",
+            "{\"MeasuredBoardShortSideCentimeters\":0}",
+            "{\"ThrowRatio\":\"oops\"}",
+            "{\"EnableDisplayAudio\":{}}",
+            "{\"LastAlignment\":{\"Width\":\"oops\"}}",
+            "null", "[]", "true"
         })
         {
-            try
-            {
-                ParseProjectionSettings(invalid, "id", fourThree);
-                throw new InvalidOperationException("Invalid persisted measured dimensions were accepted.");
-            }
-            catch (InvalidDataException) { }
+            var partial = ParseProjectionSettings("{\"Version\":2,\"Profiles\":{\"bad\":" + invalid +
+                ",\"good\":{\"LensHeightCentimeters\":120}}}", "id", fourThree, out int skipped);
+            Require(skipped == 1 && !partial.Profiles.ContainsKey("bad") &&
+                partial.Profiles["good"].LensHeightCentimeters == 120,
+                "An invalid persisted profile was accepted or discarded another output's settings.");
         }
+        try
+        {
+            ParseProjectionSettings("{\"Version\":3,\"Profiles\":{}}", "id", fourThree);
+            throw new InvalidOperationException("An unsupported settings version was accepted.");
+        }
+        catch (InvalidDataException) { }
         Point2[] corners = [new(.1, .2), new(.9, .2), new(.9, .8), new(.1, .8)];
         var image = profile.ImageSize(fourThree, out _)!.Value;
         var board = BoardSizeEstimate.FromImageDimensions(corners, image.Width, image.Height);
@@ -234,6 +239,23 @@ public sealed partial class MainWindow
         Require(TrySaveProjectionSettings(fileSettings, settingsPath, out saveError) && saveError is null &&
                 ParseProjectionSettings(File.ReadAllText(settingsPath), "unused", fourThree).Profiles[key] == correctedFacing,
             "Retrying a settings save after the obstruction was removed did not recover or retained the old error.");
+
+        string rejectedPath = Path.Combine(files, "projection-setup.rejected.json");
+        const string partiallyInvalid = "{\"Version\":2,\"Profiles\":{\"bad\":{\"ThrowRatio\":\"oops\"},\"good\":{\"LensHeightCentimeters\":120}}}";
+        File.WriteAllText(settingsPath, partiallyInvalid);
+        var salvaged = ParseProjectionSettings(partiallyInvalid, "unused", fourThree, out int rejectedCount);
+        Require(rejectedCount == 1, "The backup fixture did not encounter its invalid profile.");
+        Directory.CreateDirectory(rejectedPath);
+        Require(!TryKeepRejectedProjectionSettings(settingsPath, rejectedPath, out var backupError) &&
+                !string.IsNullOrWhiteSpace(backupError), "A blocked rejected-file backup hid its failure.");
+        Require(!TrySaveProjectionSettings(salvaged, settingsPath, out saveError, rejectedPath) &&
+                !string.IsNullOrWhiteSpace(saveError) && File.ReadAllText(settingsPath) == partiallyInvalid,
+            "A later settings save overwrote the rejected original after its backup failed.");
+        Directory.Delete(rejectedPath);
+        Require(TrySaveProjectionSettings(salvaged, settingsPath, out saveError, rejectedPath) && saveError is null &&
+                File.ReadAllText(rejectedPath) == partiallyInvalid &&
+                ParseProjectionSettings(File.ReadAllText(settingsPath), "unused", fourThree).Profiles["good"].LensHeightCentimeters == 120,
+            "Retrying the backup did not preserve the exact original before saving the valid profiles.");
         return new { passed = true, optionalFields = true, genericAspectRatios = true, portrait = true,
             outputProfilesIsolated = true, persistenceAndLegacyMigration = true, invalidInputsRejected = true,
             boardUsesDetectedEdges = true, measuredReferenceIndependentOfOptics = true,
@@ -242,6 +264,8 @@ public sealed partial class MainWindow
             displayAudioWithoutSizeSettings = true,
             settingsFileWriteAndOverwrite = true, settingsFileFailuresPreserveSavedFacing = true,
             settingsFileSaveRetryRecovery = true,
+            invalidProfileTypeAndShapeSalvage = true, rejectedBackupFailureBlocksOverwrite = true,
+            rejectedBackupRetryPreservesOriginal = true,
             opticalFormulaUnchanged = true, liveSettingsUnchanged = true };
 
         static DisplayModeInfo Mode(string id, int width, int height) => new("DISPLAY1", width, height, 60)

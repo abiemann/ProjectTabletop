@@ -295,6 +295,17 @@ public sealed class SlotGame
         grid[BasePlace(places[0])] = EggCell(Pick([(SlotSymbol.EggGreen, 30), (SlotSymbol.EggRed, 30),
             (SlotSymbol.EggBlue, 30), (SlotSymbol.EggRainbow, 10)]));
         foreach (int place in places.Skip(1)) grid[BasePlace(place)] = CoinCell();
+        // A bought feature pays no line wins, so its filler must not show one.
+        // Every win needs matching third-reel symbols; changing only those, without
+        // drawing again, leaves the rest of a seeded game unchanged.
+        for (int row = BaseFirstRow; row < BaseFirstRow + BaseRowCount; row++)
+        {
+            int cell = Index(2, row);
+            while (Paytable.ContainsKey(grid[cell].Symbol) && Paylines.Any(line => BaseFirstRow + line[2] == row &&
+                grid[Index(0, BaseFirstRow + line[0])].Symbol == grid[cell].Symbol &&
+                grid[Index(1, BaseFirstRow + line[1])].Symbol == grid[cell].Symbol))
+                grid[cell] = new(PaySymbols[(Array.IndexOf(PaySymbols, grid[cell].Symbol) + 1) % PaySymbols.Length]);
+        }
         _grid = grid;
         _spinNumber++;
         _freeSpin = false;

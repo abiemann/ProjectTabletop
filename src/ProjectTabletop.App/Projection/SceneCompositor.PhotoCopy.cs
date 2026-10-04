@@ -41,7 +41,7 @@ public sealed partial class SceneCompositor
             lock (_gate)
             {
                 SyncPhotoCopySession();
-                return PhotoCopyDisplayStatus(DateTimeOffset.UtcNow);
+                return PhotoCopyDisplayStatus(MonotonicClock.UtcNow);
             }
         }
     }
@@ -53,7 +53,7 @@ public sealed partial class SceneCompositor
 
     public int PhotoCopyCount
     {
-        get { lock (_gate) { SyncPhotoCopySession(); return PhotoCopyStampCount(DateTimeOffset.UtcNow); } }
+        get { lock (_gate) { SyncPhotoCopySession(); return PhotoCopyStampCount(MonotonicClock.UtcNow); } }
     }
 
     public void ShowPhotoCopy()
@@ -149,7 +149,7 @@ public sealed partial class SceneCompositor
         {
             if (!IsPhotoCopyMemoryImageCurrent(image)) return false;
             _photoCopyMemorySaveStatus = null;
-            _photoCopySavedUntil = (savedAt ?? DateTimeOffset.UtcNow).AddSeconds(3);
+            _photoCopySavedUntil = (savedAt ?? MonotonicClock.UtcNow).AddSeconds(3);
             _renderedBoardState = null;
             return true;
         }
@@ -180,7 +180,7 @@ public sealed partial class SceneCompositor
                 var illuminatedAfter = _photoCopyObjectShownAt + TimeSpan.FromMilliseconds(400);
                 if (illuminatedAfter > readyAfter) readyAfter = illuminatedAfter;
             }
-            if (DateTimeOffset.UtcNow < readyAfter) return false;
+            if (MonotonicClock.UtcNow < readyAfter) return false;
             var cameraToProjector = _boardCameraMap!.ToMatrix();
             var projectorToBoard = _boardSurfaceMap!.Inverse().ToMatrix();
             var cameraToBoard = new double[9];
@@ -219,7 +219,7 @@ public sealed partial class SceneCompositor
             _photoCopyObjectShownAt = DateTimeOffset.MinValue;
             _photoCopyPremultipliedPixels = PhotoCopyBitmapPixels.Premultiply(cutout.BgraPixels);
             _photoCopyPlacements = placements;
-            _photoCopyAnimationStarts = DateTimeOffset.UtcNow + PhotoCopyRemoveHandDelay;
+            _photoCopyAnimationStarts = MonotonicClock.UtcNow + PhotoCopyRemoveHandDelay;
             _renderedBoardState = null;
             return true;
         }
@@ -277,7 +277,7 @@ public sealed partial class SceneCompositor
         {
             if (!IsPhotoCopyCaptureCurrent(context)) return false;
             _photoCopyCountdownUntil = DateTimeOffset.MinValue;
-            _photoCopySavedUntil = (savedAt ?? DateTimeOffset.UtcNow).AddSeconds(3);
+            _photoCopySavedUntil = (savedAt ?? MonotonicClock.UtcNow).AddSeconds(3);
             _photoCopyStatus = PhotoCopyReadyMessage;
             _renderedBoardState = null;
             return true;

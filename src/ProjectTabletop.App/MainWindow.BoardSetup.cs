@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml;
 using ProjectTabletop.App.Camera;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
+using ProjectTabletop.Interaction;
 using ProjectTabletop.Vision;
 using Windows.Foundation;
 using Windows.UI;
@@ -727,8 +728,8 @@ public sealed partial class MainWindow
         var phase = (BoardSetupPhase)Volatile.Read(ref _boardSetupPhase);
         if (phase == BoardSetupPhase.ScanAmbient &&
             Volatile.Read(ref _latestCameraFrame) is { } freshFrame &&
-            DateTimeOffset.UtcNow - freshFrame.Timestamp < TimeSpan.FromSeconds(1) &&
-            DateTimeOffset.UtcNow - _cameraImageChangedAtUtc < TimeSpan.FromSeconds(2) &&
+            MonotonicClock.UtcNow - freshFrame.Timestamp < TimeSpan.FromSeconds(1) &&
+            MonotonicClock.UtcNow - _cameraImageChangedAtUtc < TimeSpan.FromSeconds(2) &&
             Stopwatch.GetElapsedTime(Interlocked.Read(ref _boardPhaseStartedTick)) >= TimeSpan.FromSeconds(6))
         {
             BeginWhiteScan(whiteOnlyFallback: true);
@@ -773,7 +774,7 @@ public sealed partial class MainWindow
         var phase = (BoardSetupPhase)Volatile.Read(ref _boardSetupPhase);
         if (state is null || state.Width != frame.Width || state.Height != frame.Height ||
             (phase is BoardSetupPhase.ScanAmbient or BoardSetupPhase.ScanWhite &&
-                DateTimeOffset.UtcNow - state.Timestamp > TimeSpan.FromMilliseconds(700)))
+                MonotonicClock.UtcNow - state.Timestamp > TimeSpan.FromMilliseconds(700)))
         {
             _animatedBoardCorners = null;
             return;

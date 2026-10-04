@@ -121,9 +121,9 @@ public sealed partial class SceneCompositor : IDisposable
             _boardSurfaceMap = null;
             ResetBoardRaster();
             _handTips = [];
-            _handVisualResetThrough = DateTimeOffset.UtcNow;
+            _handVisualResetThrough = MonotonicClock.UtcNow;
             ClearHandSpotlights();
-            _boardSession.ResetInput(DateTimeOffset.UtcNow);
+            _boardSession.ResetInput(MonotonicClock.UtcNow);
             CancelBlackjackDeal();
             InvalidatePhotoCopyCapture();
         }
@@ -143,9 +143,9 @@ public sealed partial class SceneCompositor : IDisposable
             if (resetInput)
             {
                 if (cancelMonopolyEntrance) CancelMonopolyEntrance();
-                _handVisualResetThrough = DateTimeOffset.UtcNow;
+                _handVisualResetThrough = MonotonicClock.UtcNow;
                 ClearHandSpotlights();
-                _boardSession.ResetInput(DateTimeOffset.UtcNow);
+                _boardSession.ResetInput(MonotonicClock.UtcNow);
                 CancelBlackjackDeal();
                 CancelMonopolyDiceAnimation();
                 if (!cancelMonopolyEntrance && _monopolyEntranceStartedAt is { } started && !_monopolyEntranceCompleted)
@@ -161,7 +161,7 @@ public sealed partial class SceneCompositor : IDisposable
         {
             if (BlockBoardRevealInput() || MonopolyEntranceActive) return;
             _handTips = [];
-            var now = DateTimeOffset.UtcNow;
+            var now = MonotonicClock.UtcNow;
             var acceptVisual = frameTime <= now && now - frameTime <= TimeSpan.FromMilliseconds(350) &&
                 frameTime > _handVisualResetThrough && frameTime > _lastHandVisualFrameTime;
             var boardSamples = new List<BoardHandSample>();
@@ -319,7 +319,7 @@ public sealed partial class SceneCompositor : IDisposable
         {
             CancelBoardReveal();
             if (enabled) CancelMonopolyDiceAnimation();
-            if (enabled && !_boardSetup) _boardSetupStarted = DateTimeOffset.UtcNow;
+            if (enabled && !_boardSetup) _boardSetupStarted = MonotonicClock.UtcNow;
             if (enabled) ClearBoardMediaClip();
             _boardSetup = enabled;
             _blackOutput = false;
@@ -403,12 +403,12 @@ public sealed partial class SceneCompositor : IDisposable
         _boardCameraMap = cameraMap;
         _boardSurfaceMap = surfaceMap;
         _handTips = [];
-        _handVisualResetThrough = DateTimeOffset.UtcNow;
+        _handVisualResetThrough = MonotonicClock.UtcNow;
         ClearHandSpotlights();
-        _boardSession.ResetInput(DateTimeOffset.UtcNow);
+        _boardSession.ResetInput(MonotonicClock.UtcNow);
         CancelBlackjackDeal();
         InvalidatePhotoCopyCapture();
-        _boardSetupStarted = DateTimeOffset.UtcNow;
+        _boardSetupStarted = MonotonicClock.UtcNow;
     }
 
     public void ShowCalibrationTarget(int index, bool pieceTop)
@@ -522,11 +522,11 @@ public sealed partial class SceneCompositor : IDisposable
                     {
                         using (ds.CreateLayer(1, output))
                             DrawDetectedBoardGrid(ds, output, grid,
-                                DateTimeOffset.UtcNow - _boardSetupStarted);
+                                MonotonicClock.UtcNow - _boardSetupStarted);
                     }
                     else
                         DrawDetectedBoardGrid(ds, output, grid,
-                            DateTimeOffset.UtcNow - _boardSetupStarted);
+                            MonotonicClock.UtcNow - _boardSetupStarted);
                     DrawHandCursor(ds, output);
                 }
                 else
@@ -602,7 +602,7 @@ public sealed partial class SceneCompositor : IDisposable
         }
 
         if (_boardSession.Screen == BoardScreen.Media && _topPlaneMap is not null &&
-            DateTimeOffset.UtcNow - _detectionTime <= TimeSpan.FromMilliseconds(350))
+            MonotonicClock.UtcNow - _detectionTime <= TimeSpan.FromMilliseconds(350))
         {
             foreach (var detection in _detections)
             {
@@ -627,7 +627,7 @@ public sealed partial class SceneCompositor : IDisposable
         // Four-finger aiming is visible on each board. Red pinch feedback stays
         // confined to the gesture tester.
         if (_boardSetup || _calibrationTarget >= 0 || MonopolyEntranceActive || HasGlobeDrawerAnimation(_globeClock())) return;
-        var now = DateTimeOffset.UtcNow;
+        var now = MonotonicClock.UtcNow;
         if (_boardMediaClip is not { } clip || _boardCameraMap is null ||
             _handTips.Length == 0 || _handFrameTime > now ||
             now - _handFrameTime > TimeSpan.FromMilliseconds(350)) return;

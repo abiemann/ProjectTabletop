@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using OpenCvSharp;
 using ProjectTabletop.App.Camera;
+using ProjectTabletop.Interaction;
 
 namespace ProjectTabletop.App;
 
@@ -173,7 +174,7 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
         _active = null;
         _finishing = session;
         _prebuffer.Clear();
-        Enqueue(new End(session, reason, requestedAt ?? DateTimeOffset.UtcNow));
+        Enqueue(new End(session, reason, requestedAt ?? MonotonicClock.UtcNow));
     }
 
     private void QueueFrame(Session session, CameraFrame frame)
@@ -400,7 +401,7 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
             startedAtUtc = encoder.Session.StartedAtUtc, triggerFrameTime = encoder.Session.TriggerTime,
             timelineOriginUtc = encoder.Session.Origin.AddSeconds((encoder.Segment - 1) * 120),
             fps = Fps, width = encoder.Session.Width, height = encoder.Session.Height,
-            timestampMeaning = "Host UTC assigned after camera BGRA copy; not a hardware exposure timestamp.",
+            timestampMeaning = "Host UTC at app start plus monotonic elapsed time, assigned after camera BGRA copy; not a hardware exposure timestamp.",
             videoPath, timelinePath
         }).ConfigureAwait(false);
     }
@@ -438,7 +439,7 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
                     droppedRecords = encoder.Session.DroppedRecords;
                 }
                 await WriteJsonAsync(encoder, new { type = "session_end", recordingId = encoder.Session.Id,
-                    segment = encoder.Segment, reason, endedAtUtc = DateTimeOffset.UtcNow,
+                    segment = encoder.Segment, reason, endedAtUtc = MonotonicClock.UtcNow,
                     stopRequestedAtUtc = requestedAt,
                     segmentFrames = encoder.NextIndex - (encoder.Segment - 1L) * FramesPerSegment,
                     writtenFrames = frames, droppedFrames, droppedRecords, error = encoder.Session.Error }).ConfigureAwait(false);
@@ -518,7 +519,7 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
     private sealed class Session(CameraFrame trigger, DateTimeOffset origin)
     {
         public readonly string Id = $"{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fffffff}-{Guid.NewGuid():N}";
-        public readonly DateTimeOffset StartedAtUtc = DateTimeOffset.UtcNow, TriggerTime = trigger.Timestamp, Origin = origin;
+        public readonly DateTimeOffset StartedAtUtc = MonotonicClock.UtcNow, TriggerTime = trigger.Timestamp, Origin = origin;
         public readonly int Width = trigger.Width, Height = trigger.Height;
         public DateTimeOffset LastHandUtc = trigger.Timestamp, LastQueuedFrame = DateTimeOffset.MinValue;
         public DateTimeOffset? FirstDroppedFrameTime, LastDroppedFrameTime;

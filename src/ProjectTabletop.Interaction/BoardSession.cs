@@ -216,13 +216,13 @@ public sealed partial class BoardSession
         return null;
     }
 
-    public void ShowMenu(DateTimeOffset? now = null) => Show(BoardScreen.Menu, now ?? DateTimeOffset.UtcNow);
-    public void ShowHandTrackingTest(DateTimeOffset? now = null) => Show(BoardScreen.HandTracking, now ?? DateTimeOffset.UtcNow);
-    public void ShowPhotoCopy(DateTimeOffset? now = null) => Show(BoardScreen.PhotoCopy, now ?? DateTimeOffset.UtcNow);
-    public void ShowPaint(DateTimeOffset? now = null) => Show(BoardScreen.Paint, now ?? DateTimeOffset.UtcNow);
-    public void ShowBlackjack(DateTimeOffset? now = null) => Show(BoardScreen.Blackjack, now ?? DateTimeOffset.UtcNow);
-    public void ShowMedia(DateTimeOffset? now = null) => Show(BoardScreen.Media, now ?? DateTimeOffset.UtcNow);
-    public void ShowSettings(DateTimeOffset? now = null) => Show(BoardScreen.Settings, now ?? DateTimeOffset.UtcNow);
+    public void ShowMenu(DateTimeOffset? now = null) => Show(BoardScreen.Menu, now ?? MonotonicClock.UtcNow);
+    public void ShowHandTrackingTest(DateTimeOffset? now = null) => Show(BoardScreen.HandTracking, now ?? MonotonicClock.UtcNow);
+    public void ShowPhotoCopy(DateTimeOffset? now = null) => Show(BoardScreen.PhotoCopy, now ?? MonotonicClock.UtcNow);
+    public void ShowPaint(DateTimeOffset? now = null) => Show(BoardScreen.Paint, now ?? MonotonicClock.UtcNow);
+    public void ShowBlackjack(DateTimeOffset? now = null) => Show(BoardScreen.Blackjack, now ?? MonotonicClock.UtcNow);
+    public void ShowMedia(DateTimeOffset? now = null) => Show(BoardScreen.Media, now ?? MonotonicClock.UtcNow);
+    public void ShowSettings(DateTimeOffset? now = null) => Show(BoardScreen.Settings, now ?? MonotonicClock.UtcNow);
 
     /// <summary>Clear hover and reject observations/pulses that predate a camera or calibration reset.</summary>
     public void ResetInput(DateTimeOffset now)

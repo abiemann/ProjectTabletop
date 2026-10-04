@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using ProjectTabletop.App.Camera;
+using ProjectTabletop.Interaction;
 using ProjectTabletop.Vision;
 
 namespace ProjectTabletop.App;
@@ -47,7 +48,7 @@ public sealed partial class MainWindow
                         _paintTrackerGeneration = generation;
                     }
                     var result = _paintDisturbances.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-                        context, frame.Timestamp, DateTimeOffset.UtcNow);
+                        context, frame.Timestamp, MonotonicClock.UtcNow);
 #if DEBUG
                     var diagnostic = new PaintDiagnosticObservation(frame, context, result);
                     Volatile.Write(ref _lastPaintDiagnostic, diagnostic);

@@ -27,7 +27,7 @@ public sealed partial class BoardSession
     public double GlobeHomeRotationDegrees => _globe.HomeRotationDegrees;
     public double GlobeHomeLatitudeDegrees => _globe.HomeLatitudeDegrees;
 
-    public void ShowGlobe(DateTimeOffset? now = null) => Show(BoardScreen.Globe, now ?? DateTimeOffset.UtcNow);
+    public void ShowGlobe(DateTimeOffset? now = null) => Show(BoardScreen.Globe, now ?? MonotonicClock.UtcNow);
 
     /// <summary>Returns a presentation frame without mutating input barriers or interaction revisions.</summary>
     public GlobeSnapshot GetGlobeSnapshot(DateTimeOffset now) => _globe.GetSnapshot(now);

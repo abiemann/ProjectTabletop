@@ -15,7 +15,7 @@ public sealed partial class SceneCompositor
         {
             lock (_gate)
             {
-                var now = DateTimeOffset.UtcNow;
+                var now = MonotonicClock.UtcNow;
                 return _handFrameTime <= now && now - _handFrameTime <= TimeSpan.FromMilliseconds(350)
                     ? _boardSession.FingerSelectionFeedback.ToArray() : Array.Empty<BoardFingerSelectionFeedback>();
             }
