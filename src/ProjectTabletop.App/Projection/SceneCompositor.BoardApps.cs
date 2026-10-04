@@ -23,7 +23,7 @@ public sealed partial class SceneCompositor
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision,
         long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long MonopolyRevision, long MonopolyDiceRevision,
-        long MonopolySessionRevision, int MonopolyDrawerFrame, long MonopolyEntranceRevision, int MonopolyEntranceFrame,
+        long MonopolySessionRevision, int MonopolyDrawerFrame, long MonopolyEntranceRevision, int MonopolyEntranceFrame, long CrownDeedDevelopmentFrame,
         long GlobeRevision, long GlobeFrame, long GlobeSessionRevision, long SlotsRevision, double SlotsAspect, int MenuFrame,
         long RouletteRevision, double RouletteAspect, string? RouletteHover);
 
@@ -41,6 +41,7 @@ public sealed partial class SceneCompositor
         _boardSession.BlackjackHitOccurred += OnBlackjackHit;
         _boardSession.BlackjackDealOccurred += OnBlackjackDeal;
         _boardSession.MonopolyRollOccurred += OnMonopolyRoll;
+        _boardSession.MonopolyDevelopmentOccurred += OnMonopolyDevelopment;
         _boardSession.BoardOpened += OnBoardOpened;
     }
 
@@ -178,6 +179,7 @@ public sealed partial class SceneCompositor
             _boardSession.Screen == BoardScreen.Monopoly ? MonopolyDrawerFrame(monopolyNow) : -1,
             _boardSession.Screen == BoardScreen.Monopoly ? MonopolyEntranceRevision : 0,
             MonopolyEntranceRenderFrame(monopolyEntrance),
+            _boardSession.Screen == BoardScreen.Monopoly ? CrownDeedDevelopmentRenderFrame(monopolyNow) : 0,
             globe ? _boardSession.GetGlobeSnapshot(globeNow).Revision : 0,
             globe ? GlobeVisualFrame(globeNow) : 0,
             globe ? _boardSession.Revision : 0,
@@ -431,7 +433,7 @@ public sealed partial class SceneCompositor
             BoardScreen.PhotoCopy => "Copy hands and objects",
             BoardScreen.Blackjack => "Play against the dealer",
             BoardScreen.Paint => "Liquid colour & metallic ink",
-            BoardScreen.Monopoly => "Play with humans and AI",
+            BoardScreen.Monopoly => "Build your fortune. Shape the city.",
             BoardScreen.Globe => "Zoom and rotate Earth",
             BoardScreen.Roulette => "Place your chips and spin",
             _ => "Coming soon"

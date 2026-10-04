@@ -350,7 +350,8 @@ public sealed partial class SceneCompositor
             (rendered.MonopolyRevision != _boardSession.MonopolyState.Revision ||
             rendered.MonopolyDiceRevision != MonopolyDicePresentationRevision ||
             rendered.MonopolySessionRevision != _boardSession.Revision ||
-            MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()))) return null;
+            MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()) ||
+            GetCrownDeedDevelopmentFrame(_monopolyClock())?.Active == true)) return null;
         if (slots && rendered.SlotsRevision != _boardSession.SlotsState.Revision) return null;
         if (roulette && rendered.RouletteRevision != _boardSession.RouletteState.Revision) return null;
         if (_boardSession.Screen == BoardScreen.Menu &&

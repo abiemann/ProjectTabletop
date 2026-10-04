@@ -68,12 +68,19 @@ public sealed partial class SceneCompositor
 
     private void CancelMonopolyDiceAnimation()
     {
+        bool hadPresentation = _monopolyDiceRoll is not null || _crownDeedDevelopment is not null;
+        CancelCrownDeedDevelopment();
+        RetireMonopolyDicePresentation();
+        if (hadPresentation) _boardSession.CancelMonopolyPresentation(_monopolyClock());
+    }
+
+    private void RetireMonopolyDicePresentation()
+    {
         if (_monopolyDiceRoll is null) return;
         _monopolyDiceRoll = null;
         _monopolyDicePaths = [];
         _monopolyDiceSettled = false;
         _monopolyDicePresentationRevision++;
-        _boardSession.CancelMonopolyPresentation(_monopolyClock());
     }
 
     private void SynchronizeMonopolyDicePresentation(DateTimeOffset now)
@@ -84,7 +91,11 @@ public sealed partial class SceneCompositor
             current.Phase is MonopolyPhase.Landing or MonopolyPhase.Setup or MonopolyPhase.ExitConfirmation or
                 MonopolyPhase.Saving or MonopolyPhase.GameOver || current.Dice != _monopolyDiceRoll.Current.Dice)
         {
-            CancelMonopolyDiceAnimation();
+            // Retiring an earlier roll must not erase a later accepted build or
+            // release its presentation hold when actions arrive before redraw.
+            RetireMonopolyDicePresentation();
+            if (GetCrownDeedDevelopmentFrame(now)?.Active != true)
+                _boardSession.CancelMonopolyPresentation(now);
             return;
         }
         if (!_monopolyDiceSettled && now - _monopolyDiceRoll.StartedAt >= MonopolyDiceAnimationDuration)

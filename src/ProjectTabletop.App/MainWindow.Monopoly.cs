@@ -8,7 +8,8 @@ public sealed partial class MainWindow
     private Task? _monopolySaveTask;
     private long _queuedMonopolySaveRequest;
     private string? _monopolySaveError;
-    private string MonopolySavePath => Path.Combine(_appDataDirectory, "Monopoly", "saved-game.json");
+    private string MonopolySavePath => Path.Combine(_appDataDirectory, "CrownAndDeed", "saved-game.json");
+    private string LegacyMonopolySavePath => Path.Combine(_appDataDirectory, "Monopoly", "saved-game.json");
 
     private void Monopoly_Click(object sender, RoutedEventArgs e) => ShowMonopoly();
 
@@ -19,21 +20,24 @@ public sealed partial class MainWindow
         _scene.ShowMonopoly();
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
-        SetStatus(_monopolySaveError is { } error ? "Monopoly: " + error :
-            "Monopoly ready. Select Start Game to choose human and AI players. Roll with the dice button; aim with four fingers together, then move your index sideways.");
+        SetStatus(_monopolySaveError is { } error ? "Crown & Deed: " + error :
+            "Crown & Deed ready. Select Start Game to choose human and AI players. Roll with the dice button; aim with four fingers together, then move your index sideways.");
     }
 
     private async Task InitializeMonopolySaveAsync()
     {
         try
         {
-            string? json = await MonopolySaveStore.LoadAsync(MonopolySavePath);
+            // The typed game reader migrates legacy payloads. Keep the old file
+            // untouched; only a later successful save publishes the new version.
+            string? json = await MonopolySaveStore.LoadAsync(MonopolySavePath)
+                ?? await MonopolySaveStore.LoadAsync(LegacyMonopolySavePath);
             if (!_closing && json is not null) _scene.LoadMonopolySave(json);
         }
         catch (Exception error)
         {
             _monopolySaveError = "The saved game could not be opened. Start a new game to continue.";
-            AppLog.Write("Load Monopoly game", error);
+            AppLog.Write("Load Crown & Deed game", error);
         }
     }
 
@@ -51,7 +55,7 @@ public sealed partial class MainWindow
         catch (Exception error)
         {
             _monopolySaveError = error.Message;
-            AppLog.Write("Prepare Monopoly save", error);
+            AppLog.Write("Prepare Crown & Deed save", error);
             if (requestId > 0) _scene.CompleteMonopolySave(requestId, success: false, "Save failed. Please try again.");
         }
     }
@@ -67,7 +71,7 @@ public sealed partial class MainWindow
         catch (Exception error)
         {
             _monopolySaveError = "Save failed. Your game is still open; please try again.";
-            AppLog.Write("Save Monopoly game", error);
+            AppLog.Write("Save Crown & Deed game", error);
             if (!_closing) _scene.CompleteMonopolySave(requestId, success: false, _monopolySaveError);
         }
         finally { if (!_closing) UpdateBoardAppStatus(); }
@@ -75,9 +79,9 @@ public sealed partial class MainWindow
 
     private async Task<string> SaveMonopolyPreviewAsync()
     {
-        string directory = Path.Combine(_appDataDirectory, "MonopolySnapshots");
+        string directory = Path.Combine(_appDataDirectory, "CrownAndDeedSnapshots");
         Directory.CreateDirectory(directory);
-        string path = Path.Combine(directory, $"monopoly-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.png");
+        string path = Path.Combine(directory, $"crown-deed-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.png");
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), 1600, 1600, 96);
         using (var drawing = target.CreateDrawingSession()) _scene.DrawMonopolyPreview(drawing, 1600, 1600);
         await target.SaveAsync(path, CanvasBitmapFileFormat.Png);

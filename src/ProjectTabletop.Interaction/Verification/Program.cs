@@ -36,7 +36,7 @@ static void CheckMenuAndNavigation()
 {
     var session = new BoardSession();
     Require(session.Screen == BoardScreen.Menu, "The board did not start at the menu.");
-    string[] names = ["Dragon Slots", "Photo Copy", "Blackjack", "Paint", "Monopoly", "Globe", "Settings"];
+    string[] names = ["Dragon Slots", "Photo Copy", "Blackjack", "Paint", "Crown & Deed", "Globe", "Settings"];
     Require(session.Buttons.Where(button => !button.IsHold).Select(button => button.Label).SequenceEqual(names), "Menu order or labels differ from the requested menu.");
     Require(session.Buttons.Single(button => button.Id == "settings") is { Destination: BoardScreen.Settings } &&
         session.Buttons.All(button => button.Destination != BoardScreen.HandTracking),

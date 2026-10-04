@@ -11,6 +11,7 @@ public sealed partial class SceneCompositor
     private CanvasRenderTarget? _monopolyEntranceBaseTarget;
     private CanvasRenderTarget? _monopolyEntranceTileAtlas;
     private CanvasRenderTarget? _monopolyEntranceLidTarget;
+    private readonly (CanvasRenderTarget Image, Rect Bounds)?[] _monopolyEntranceParcels = new (CanvasRenderTarget, Rect)?[40];
     private bool _monopolyEntranceBaseReady;
     private (long Game, double Aspect)? _monopolyEntranceTileState;
     private (long Game, long Session, double Aspect, bool HideDice, bool Rolling,
@@ -53,23 +54,9 @@ public sealed partial class SceneCompositor
 
     internal static MonopolyEntrancePose MonopolyEntranceCenterPose(MonopolyEntranceFrame frame)
     {
-        double progress = double.IsFinite(frame.CenterProgress) ? Math.Clamp(frame.CenterProgress, 0, 1) : 0;
-        bool visible = !frame.Active || frame.ElapsedMilliseconds >= MonopolyEntranceCenterStartMilliseconds;
-        if (!frame.Active || progress >= 1) return new(1, visible, true, 0, 1, 0);
-        float height, angle;
-        if (progress < .76)
-        {
-            float falling = (float)(progress / .76);
-            height = 205 * (1 - falling * falling);
-            angle = -.014f * (1 - falling);
-        }
-        else
-        {
-            float settling = (float)((progress - .76) / .24);
-            height = 10 * MathF.Sin(MathF.PI * settling) * (1 - settling);
-            angle = .006f * MathF.Sin(settling * MathF.PI * 3) * (1 - settling);
-        }
-        return new(progress, visible, false, height, 1 + height / 205 * .11f, angle);
+        // The city and plaza stay anchored while the deeds assemble around them.
+        // CenterProgress still determines the shared input release deadline.
+        return new(1, true, true, 0, 1, 0);
     }
 
     private void DrawMonopolyEntrance(CanvasDrawingSession ds, MonopolySnapshot game,
@@ -87,50 +74,41 @@ public sealed partial class SceneCompositor
             hideDice, rolling, drawer, drawerProgress);
         DrawMonopolyEntranceImage(ds, _monopolyEntranceBaseTarget!, new Rect(0, 0, 1000, 1000));
 
-        // Cast all moving shadows before the pieces. Settled pieces retain their
-        // native atlas pixels, with no elevation, scaling, tilt, or residual glow.
+        // Cast all moving shadows before the pieces. Each transparent parcel
+        // owns its native pixels; its rotated AABB never copies a neighbour.
         for (int index = 0; index < 40; index++)
         {
             var pose = MonopolyEntranceTilePose(frame, index);
             if (pose.Visible && !pose.Landed)
-                DrawMonopolyEntranceContactShadow(ds, MonopolySpaceRectangle(index), pose.Elevation, false);
+                DrawMonopolyEntranceContactShadow(ds, CrownDeedParcelPose(index), pose.Elevation);
         }
         for (int index = 0; index < 40; index++)
         {
             var pose = MonopolyEntranceTilePose(frame, index);
             if (!pose.Visible) continue;
-            var rectangle = MonopolySpaceRectangle(index);
+            var parcel = CrownDeedParcelPose(index);
+            var piece = _monopolyEntranceParcels[index]!.Value;
+            var rectangle = piece.Bounds;
             var previous = ds.Transform;
-            ds.Transform = MonopolyEntranceTransform(rectangle, pose) * previous;
+            ds.Transform = MonopolyEntranceTransform(MonopolySpaceRectangle(index), pose) * previous;
             try
             {
                 if (!pose.Landed)
-                    ds.FillRectangle(new Rect(rectangle.X, rectangle.Y + 3, rectangle.Width, rectangle.Height),
+                {
+                    var world = ds.Transform;
+                    ds.Transform = parcel.Transform * world;
+                    ds.FillRoundedRectangle(new Rect(0, 3, parcel.Width, parcel.Depth), 2, 2,
                         ThemeColor(106, 76, 42, 220));
-                DrawMonopolyEntranceImage(ds, _monopolyEntranceTileAtlas!, rectangle);
+                    ds.Transform = world;
+                }
+                ds.DrawImage(piece.Image, rectangle,
+                    new Rect(0, 0, piece.Image.SizeInPixels.Width, piece.Image.SizeInPixels.Height),
+                    1, CanvasImageInterpolation.Linear);
             }
             finally { ds.Transform = previous; }
         }
-
-        var center = MonopolyEntranceCenterPose(frame);
-        if (!center.Visible) return;
-        var lidBounds = new Rect(168, 168, 664, 664);
-        DrawMonopolyEntranceContactShadow(ds, lidBounds, center.Elevation, true);
-        var oldTransform = ds.Transform;
-        ds.Transform = MonopolyEntranceTransform(lidBounds, center) * oldTransform;
-        try
-        {
-            if (!center.Landed)
-                ds.FillRectangle(new Rect(168, 173, 664, 664), ThemeColor(114, 82, 37, 240));
-            DrawMonopolyEntranceImage(ds, _monopolyEntranceLidTarget!, lidBounds);
-        }
-        finally { ds.Transform = oldTransform; }
-        // The rail remains fixed while its captions quietly join the landed lid.
-        float captionOpacity = (float)Math.Clamp((center.Progress - .76) / .24, 0, 1);
-        if (captionOpacity <= 0) return;
-        using var captions = ds.CreateLayer(captionOpacity);
-        DrawMonopolyRailTitle(ds);
-        DrawMonopolyRailCaptions(ds, rolling, feedback);
+        // Keep every stationary control caption protected above airborne deeds.
+        DrawMonopolyEntranceImage(ds, _monopolyEntranceLidTarget!, new Rect(0, 0, 1000, 1000));
     }
 
     private void EnsureMonopolyEntranceLayers(CanvasDevice device, MonopolySnapshot game,
@@ -155,7 +133,10 @@ public sealed partial class SceneCompositor
             drawing.Transform = BoardRasterTransform(_monopolyEntranceTileAtlas);
             drawing.Clear(Colors.Transparent);
             for (int index = 0; index < 40; index++)
+            {
                 DrawMonopolySpace(drawing, MonopolyGame.Spaces[index], game, aspect);
+                CacheMonopolyEntranceParcel(device, index, game, aspect);
+            }
             _monopolyEntranceTileState = tileKey;
         }
         var lidKey = (game.Revision, _boardSession.Revision, aspect, hideDice, rolling, drawer,
@@ -165,13 +146,42 @@ public sealed partial class SceneCompositor
             using var drawing = _monopolyEntranceLidTarget!.CreateDrawingSession();
             drawing.Transform = BoardRasterTransform(_monopolyEntranceLidTarget);
             drawing.Clear(Colors.Transparent);
-            using var clip = drawing.CreateLayer(1, new Rect(168, 168, 664, 664));
-            DrawMonopolyFelt(drawing, new Rect(168, 168, 664, 664));
-            DrawMonopolyCenterDecoration(drawing);
             DrawMonopolyCenterContents(drawing, game, buttons, hovered, feedback, aspect,
                 hideDice, rolling, drawer, drawerProgress);
+            DrawMonopolyRailCaptions(drawing, rolling, feedback);
             _monopolyEntranceLidState = lidKey;
         }
+    }
+
+    private void CacheMonopolyEntranceParcel(CanvasDevice device, int index, MonopolySnapshot game, double aspect)
+    {
+        // Align each crop to the full-board raster so drawing it back at rest is
+        // one-to-one, including anti-aliased boundaries. Padding retains the
+        // building silhouettes and token shadows belonging to this deed alone.
+        var raster = _monopolyEntranceTileAtlas!.SizeInPixels;
+        double densityX = raster.Width / BoardSurfaceSize, densityY = raster.Height / BoardSurfaceSize;
+        var bounds = MonopolySpaceRectangle(index);
+        const double padding = 40;
+        int left = (int)Math.Floor((bounds.X - padding) * densityX);
+        int top = (int)Math.Floor((bounds.Y - padding) * densityY);
+        int right = (int)Math.Ceiling((bounds.Right + padding) * densityX);
+        int bottom = (int)Math.Ceiling((bounds.Bottom + padding) * densityY);
+        int width = Math.Max(1, right - left), height = Math.Max(1, bottom - top);
+        var logicalBounds = new Rect(left / densityX, top / densityY, width / densityX, height / densityY);
+        var image = _monopolyEntranceParcels[index]?.Image;
+        if (image is null || image.Device != device || image.SizeInPixels.Width != width || image.SizeInPixels.Height != height)
+        {
+            image?.Dispose();
+            image = new CanvasRenderTarget(device, width, height, 96);
+        }
+        using (var parcelDrawing = image.CreateDrawingSession())
+        {
+            parcelDrawing.Clear(Colors.Transparent);
+            parcelDrawing.Transform = Matrix3x2.CreateScale((float)densityX, (float)densityY) *
+                Matrix3x2.CreateTranslation(-left, -top);
+            DrawMonopolySpace(parcelDrawing, MonopolyGame.Spaces[index], game, aspect);
+        }
+        _monopolyEntranceParcels[index] = (image, logicalBounds);
     }
 
     private static Matrix3x2 MonopolyEntranceTransform(Rect bounds, MonopolyEntrancePose pose)
@@ -193,19 +203,24 @@ public sealed partial class SceneCompositor
         ds.DrawImage(image, logicalBounds, source, 1, CanvasImageInterpolation.Linear);
     }
 
-    private static void DrawMonopolyEntranceContactShadow(CanvasDrawingSession ds, Rect bounds, float elevation, bool lid)
+    private static void DrawMonopolyEntranceContactShadow(CanvasDrawingSession ds, CrownDeedParcel parcel, float elevation)
     {
-        float separation = Math.Clamp(elevation / (lid ? 205 : 190), 0, 1);
-        float spread = (lid ? 9 : 4) + separation * (lid ? 22 : 11);
-        for (int ring = 4; ring >= 0; ring--)
+        float separation = Math.Clamp(elevation / 190, 0, 1);
+        float spread = 3 + separation * 8;
+        var previous = ds.Transform;
+        ds.Transform = parcel.Transform * previous;
+        try
         {
-            float outset = spread * ring / 4;
-            byte alpha = (byte)((lid ? 20 : 22) * (1 - separation * .65f));
-            ds.FillRoundedRectangle(new Rect(bounds.X - outset, bounds.Y + 3 - outset,
-                bounds.Width + outset * 2, bounds.Height + outset * 2),
-                lid ? 4 + outset : 2 + outset, lid ? 4 + outset : 2 + outset,
-                ThemeColor(0, 8, 4, alpha));
+            for (int ring = 3; ring >= 0; ring--)
+            {
+                float outset = spread * ring / 3;
+                byte alpha = (byte)(18 * (1 - separation * .65f));
+                ds.FillRoundedRectangle(new Rect(-outset, 3 - outset,
+                    parcel.Width + outset * 2, parcel.Depth + outset * 2),
+                    2 + outset, 2 + outset, ThemeColor(0, 8, 4, alpha));
+            }
         }
+        finally { ds.Transform = previous; }
     }
 
     private void DisposeMonopolyEntranceLayers()
@@ -213,6 +228,11 @@ public sealed partial class SceneCompositor
         _monopolyEntranceBaseTarget?.Dispose();
         _monopolyEntranceTileAtlas?.Dispose();
         _monopolyEntranceLidTarget?.Dispose();
+        for (int index = 0; index < _monopolyEntranceParcels.Length; index++)
+        {
+            _monopolyEntranceParcels[index]?.Image.Dispose();
+            _monopolyEntranceParcels[index] = null;
+        }
         _monopolyEntranceBaseTarget = _monopolyEntranceTileAtlas = _monopolyEntranceLidTarget = null;
         _monopolyEntranceBaseReady = false;
         _monopolyEntranceTileState = null;

@@ -119,7 +119,7 @@ public sealed partial class BoardSession
         BoardScreen.PhotoCopy => "Photo Copy",
         BoardScreen.Blackjack => "Blackjack",
         BoardScreen.Paint => "Paint",
-        BoardScreen.Monopoly => "Monopoly",
+        BoardScreen.Monopoly => "Crown & Deed",
         BoardScreen.Globe => "Globe",
         BoardScreen.Media => "Media",
         BoardScreen.Slots => "Dragon Slots",

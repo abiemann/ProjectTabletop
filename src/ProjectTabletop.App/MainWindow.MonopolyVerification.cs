@@ -1,5 +1,8 @@
 #if DEBUG
 using System.Numerics;
+using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Text;
 using ProjectTabletop.App.Projection;
@@ -136,17 +139,17 @@ public sealed partial class MainWindow
         {
             var pixels = Draw();
             Require(pixels.Take(4).SequenceEqual(new byte[] { 0, 0, 0, 255 }), "The Monopoly frame spills outside its physical board clip.");
-            int visible = 0, gold = 0, ivory = 0, emerald = 0;
+            int visible = 0, gold = 0;
             for (int offset = 0; offset < pixels.Length; offset += 4)
             {
                 byte b = pixels[offset], g = pixels[offset + 1], r = pixels[offset + 2];
                 if (r + g + b > 60) visible++;
                 if (r > 145 && g > 95 && b < g * .90) gold++;
-                if (r > 200 && g > 195 && b > 150) ivory++;
-                if (g > r * 1.3 && g > b * 1.2 && g > 25) emerald++;
             }
-            Require(visible > width * height / 3 && gold > 10000 && ivory > 10000 && emerald > 20000,
-                $"The regal {name} frame is missing its board surface, gold, ivory or green material.");
+            Require(visible > width * height / 3 && gold > 10000 &&
+                typeof(SceneCompositor).GetField("_crownDeedCityBitmap", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .GetValue(scene) is CanvasBitmap,
+                $"The {name} frame is missing its fictional city artwork, visible board surface or gold details.");
             string path = Path.Combine(directory, name + ".png");
             await target.SaveAsync(path, CanvasBitmapFileFormat.Png); images.Add(path);
         }
@@ -292,27 +295,28 @@ public sealed partial class MainWindow
             for (int space = 0; space < 40; space++)
             {
                 var cell = SceneCompositor.MonopolySpaceRectangle(space);
-                Require(cell.X >= 49 && cell.Y >= 49 && cell.Right <= 951 && cell.Bottom <= 951,
-                    "A Monopoly square leaves the playable perimeter.");
+                var pose = SceneCompositor.CrownDeedParcelPose(space);
+                Require(cell.X >= 0 && cell.Y >= 0 && cell.Right <= 1000 && cell.Bottom <= 1000 &&
+                    pose.Width == 60 && pose.Depth == 90 && Matrix3x2.Invert(pose.Transform, out _),
+                    "An oval deed leaves the playable board or changes the common parcel footprint.");
+                double expectedAngle = Math.PI / 2 + space * Math.Tau / 40;
+                Require(Math.Abs(pose.Center.X - (500 + 434 * Math.Cos(expectedAngle))) < .001 &&
+                    Math.Abs(pose.Center.Y - (500 + 408 * Math.Sin(expectedAngle))) < .001,
+                    "The equal-angle parcels do not follow the clockwise oval boulevard.");
                 var fixtures = game with { Players = Array.AsReadOnly(game.Players.Select(player => player with { Position = space }).ToArray()) };
                 foreach (var player in fixtures.Players)
                 {
                     var center = SceneCompositor.MonopolyTokenCenter(fixtures, player.Id);
-                    Require(center.X > cell.X + 6 && center.X < cell.Right - 6 && center.Y > cell.Y + 6 && center.Y < cell.Bottom - 6,
-                        $"Player {player.Id}'s token is outside its correct Monopoly square {space}.");
+                    Matrix3x2.Invert(pose.Transform, out var inverse);
+                    var local = Vector2.Transform(center, inverse);
+                    Require(local.X > 6 && local.X < pose.Width - 6 && local.Y > 6 && local.Y < pose.Depth - 6,
+                        $"Player {player.Id}'s token is outside its own rotated deed {space}.");
                     var camera = CameraPoint(center.X / 1000, center.Y / 1000);
                     double u = (camera.X / width - .035) / .93;
                     double v = (camera.Y / height - .035) / .93;
                     u = (u - inset / 2) / (1 - inset); v = (v - inset / 2) / (1 - inset);
                     Require(Math.Abs(u * 1000 - center.X) < .001 && Math.Abs(v * 1000 - center.Y) < .001,
                         "Native projector aspect changes a token's board coordinates.");
-                }
-                if (space is not (9 or 19 or 29 or 39))
-                {
-                    var next = SceneCompositor.MonopolySpaceRectangle(space + 1);
-                    bool correctlyOrdered = space < 10 ? next.X < cell.X : space < 20 ? next.Y < cell.Y
-                        : space < 30 ? next.X > cell.X : next.Y > cell.Y;
-                    Require(correctlyOrdered, "The Monopoly perimeter squares run in the wrong order.");
                 }
             }
         }
@@ -341,6 +345,327 @@ public sealed partial class MainWindow
         static void Require(bool condition, string message)
         {
             if (!condition) throw new InvalidOperationException(message);
+        }
+    }
+    // Real committed human and AI developments feed the same native renderer
+    // used by the projector and laptop. No clock, event or image is substituted.
+    private async Task<object> VerifyMonopolyDevelopmentAsync()
+    {
+        var liveOutput = _output;
+        var liveState = (_camera.IsRunning, _output?.AppWindow.IsVisible,
+            Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.MonopolyState.Revision);
+        var now = DateTimeOffset.UtcNow.AddMinutes(20);
+        string directory = Path.Combine(_appDataDirectory, "CrownDeedDevelopmentVerification", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
+        var images = new List<object>();
+        var samples = new List<object>();
+        int humanBuilds = 0, exactClockChecks = 0, immutableChecks = 0, captionChecks = 0, confinedMotionChecks = 0;
+        foreach (var viewport in new[] { (Name: "measured", Width: 1152, Height: 896),
+            (Name: "landscape", Width: 1920, Height: 1080), (Name: "square", Width: 1000, Height: 1000),
+            (Name: "portrait", Width: 720, Height: 1280) })
+        {
+            var game = GameFixture();
+            var developments = new List<MonopolyDevelopment>();
+            game.DevelopmentOccurred += value => developments.Add(value);
+            using var scene = Fixture(game, viewport.Width, viewport.Height);
+            using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), viewport.Width, viewport.Height, 96);
+            Require(Math.Abs(scene.MonopolyPreviewAspect - viewport.Width / (double)viewport.Height) < .001,
+                "The development fixture lost its physical viewport aspect.");
+            await Capture(scene, target, viewport.Name + "-owned-stage-0");
+            Act(scene, "mp-manage");
+            for (int stage = 1; stage <= 5; stage++)
+            {
+                if (stage > 1) Act(scene, "mp-property-next");
+                Require(scene.MonopolyState.SelectedPropertyIndex == 1, "The human rise selected the wrong deed.");
+                var previous = scene.MonopolyState;
+                int oldCount = developments.Count;
+                Act(scene, "mp-build");
+                humanBuilds++;
+                Require(developments.Count == oldCount + 1, "A human development did not publish exactly once.");
+                var development = developments[^1];
+                var started = now;
+                var committed = scene.MonopolyState;
+                string frozen = scene.ExportMonopolySave();
+                Require(development.StartedAt == started && development.PlayerId == committed.ActivePlayer!.Id &&
+                    !committed.ActivePlayer.IsAi && ReferenceEquals(development.Previous, previous) &&
+                    ReferenceEquals(development.Current, committed) && Level(previous, 1) == stage - 1 &&
+                    Level(committed, 1) == stage && previous.Players[0].Money - committed.Players[0].Money == 50,
+                    "The native rise does not describe the actual committed human purchase.");
+                byte[]? initial = null;
+                var controls = scene.CurrentBoardButtons.ToArray();
+                foreach (double milliseconds in viewport.Name == "measured" ? new[] { 0d, 337.5, 675, 1012.5, 1349, 1350 }
+                    : new[] { 0d, 675, 1350 })
+                {
+                    now = started.AddMilliseconds(milliseconds);
+                    var frame = scene.GetCrownDeedDevelopmentFrame(now) ??
+                        throw new InvalidOperationException("The committed purchase has no development presentation.");
+                    Require(frame.Sequence == development.Sequence && frame.SpaceIndex == 1 &&
+                        frame.PlayerId == development.PlayerId && frame.Active == (milliseconds < 1350) &&
+                        frame.Progress >= 0 && frame.Progress <= 1 &&
+                        (milliseconds != 0 || frame.Progress == 0) && (milliseconds != 675 || frame.Progress == .5f) &&
+                        (milliseconds != 1350 || frame.Progress == 1), "The rise lost its injected source clock or exact deadline.");
+                    var pixels = Draw(scene, target);
+                    Require(pixels.SequenceEqual(Draw(scene, target)), "Repeated same-clock building draws changed native pixels.");
+                    exactClockChecks++;
+                    Require(scene.ExportMonopolySave() == frozen && ReferenceEquals(committed, scene.MonopolyState) &&
+                        developments.Count == oldCount + 1, "Drawing a building mutated rules, cash, state or event identity.");
+                    immutableChecks++;
+                    initial ??= pixels;
+                    if (milliseconds < 1350)
+                    {
+                        Require(!scene.ActivateMonopolyButton("mp-build") && !scene.TickMonopoly(now),
+                            "A development presentation allowed another action before its deadline.");
+                        Require(ButtonPixelsEqual(initial, pixels, controls, viewport.Width, viewport.Height),
+                            "Building motion changed stationary control captions or their surfaces.");
+                        captionChecks++;
+                        var residual = OutsideGrowthDifference(initial, pixels, viewport.Width, viewport.Height, 1);
+                        Require(residual.AlphaStable && residual.MaxChannelDelta <= 12 &&
+                            residual.ChangedPixels <= Math.Ceiling(viewport.Width * (double)viewport.Height * .00002) &&
+                            residual.TotalChannelError <= Math.Ceiling(viewport.Width * (double)viewport.Height * .0003),
+                            "Building motion changed another deed, token, city, plaza or fixed UI.");
+                        samples.Add(new { viewport = viewport.Name, stage, milliseconds, outsideGrowthResidual = new
+                            { residual.ChangedPixels, residual.MaxChannelDelta, residual.TotalChannelError, residual.AlphaStable } });
+                        confinedMotionChecks++;
+                    }
+                    if (viewport.Name == "measured" && milliseconds is 0 or 337.5 or 675 or 1012.5 or 1350)
+                        await Capture(scene, target, $"measured-rise-stage-{stage}-{milliseconds:0000.0}ms");
+                    samples.Add(new { viewport.Name, stage, milliseconds, frame.Progress, frame.Active, frame.Sequence });
+                }
+                Require(!initial!.SequenceEqual(Draw(scene, target)), "The accepted building has no visible native rise.");
+                Act(scene, "mp-property-next");
+                Require(scene.MonopolyState.SelectedPropertyIndex == 3, "The even-development partner is not selected.");
+                Act(scene, "mp-build"); humanBuilds++;
+                now += SceneCompositor.CrownDeedDevelopmentDuration;
+                Draw(scene, target);
+                Require(Level(scene.MonopolyState, 1) == stage && Level(scene.MonopolyState, 3) == stage,
+                    "The final human stage disagrees with the committed legal development levels.");
+                await Capture(scene, target, viewport.Name + "-owned-stage-" + stage);
+            }
+        }
+        CheckEarlierShops();
+        int aiBuilds = await CheckAi();
+        CheckStaleRollRetirement();
+        CheckCancellation();
+        Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
+                Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.MonopolyState.Revision),
+            "Native development verification changed the user's live hardware or game.");
+        string samplePath = Path.Combine(directory, "development-samples.json");
+        await File.WriteAllTextAsync(samplePath, JsonSerializer.Serialize(samples, new JsonSerializerOptions { WriteIndented = true }));
+        return new { passed = true, durationMilliseconds = 1350, humanBuilds, aiBuilds, exactClockChecks, immutableChecks,
+            captionChecks, confinedMotionChecks, allFiveCommittedStages = true, previousShopsStayFullHeight = true,
+            fourPhysicalAspects = true, humanAndAiEvents = true, exactEndpoint = true, navigationAndProjectionCancel = true,
+            stalePriorRollRetirementPreservesDevelopment = true,
+            liveHardwareUnchanged = true, directory, samplePath, images };
+
+        MonopolyGame GameFixture(bool ai = false)
+        {
+            var game = new MonopolyGame(seed: 151, initialRolls: [new(1, 2)]);
+            Require(game.HandleAction("mp-start-game", now) && game.HandleAction("mp-ai-minus", now.AddMilliseconds(1)) &&
+                game.HandleAction("mp-human-plus", now.AddMilliseconds(2)) && game.HandleAction("mp-start", now.AddMilliseconds(3)),
+                "Development game fixture failed to start.");
+            now += TimeSpan.FromMilliseconds(4);
+            var data = JsonSerializer.Deserialize<MonopolySaveData>(game.ExportSave(), json)!;
+            foreach (var property in data.Properties.Where(property => property.SpaceIndex is 1 or 3)) property.OwnerId = 1;
+            if (ai)
+            {
+                data.Humans = 1; data.Ais = 1; data.Players[0].IsAi = true;
+                data.Phase = MonopolyPhase.AwaitingEndTurn;
+            }
+            game.LoadSave(JsonSerializer.Serialize(data, json), now);
+            return game;
+        }
+        SceneCompositor Fixture(MonopolyGame game, int width, int height)
+        {
+            var fixture = new SceneCompositor(monopoly: game, blackjackClock: () => now, monopolyClock: () => now,
+                boardRevealClock: () => now);
+            fixture.SetDisplayAspect(width / (double)height);
+            fixture.SetBoardSetup(true);
+            fixture.SetDetectedBoardGrid([new(.035f, .035f), new(.965f, .035f), new(.965f, .965f), new(.035f, .965f)],
+                Homography.FromFourPoints([new(0, 0), new(width, 0), new(width, height), new(0, height)],
+                    [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
+            fixture.SetBoardSetup(false); fixture.ShowMonopoly();
+            Require(fixture.LoadMonopolySave(game.ExportSave(), resume: true), "An isolated owned city could not load.");
+            return fixture;
+        }
+        void Act(SceneCompositor scene, string id)
+        {
+            now += TimeSpan.FromMilliseconds(20);
+            Require(scene.ActivateMonopolyButton(id), "Development fixture rejected " + id + " during " + scene.MonopolyState.Phase + ".");
+        }
+        static int Level(MonopolySnapshot game, int space) => game.Properties.Single(property => property.SpaceIndex == space).Houses;
+        static byte[] Draw(SceneCompositor scene, CanvasRenderTarget target)
+        {
+            using (var drawing = target.CreateDrawingSession())
+                scene.DrawMonopolyPreview(drawing, (float)target.Size.Width, (float)target.Size.Height);
+            return target.GetPixelBytes();
+        }
+        async Task Capture(SceneCompositor scene, CanvasRenderTarget target, string name)
+        {
+            Draw(scene, target);
+            string path = Path.Combine(directory, name + ".png");
+            await target.SaveAsync(path, CanvasBitmapFileFormat.Png);
+            images.Add(new { name, path });
+        }
+        static bool ButtonPixelsEqual(byte[] first, byte[] current, IReadOnlyList<BoardButton> buttons, int width, int height)
+        {
+            foreach (var button in buttons)
+            {
+                var b = button.Bounds;
+                for (int y = (int)Math.Ceiling(b.Y * height); y < (b.Y + b.Height) * height; y += 2)
+                for (int x = (int)Math.Ceiling(b.X * width); x < (b.X + b.Width) * width; x += 2)
+                {
+                    int offset = (y * width + x) * 4;
+                    for (int channel = 0; channel < 4; channel++) if (first[offset + channel] != current[offset + channel]) return false;
+                }
+            }
+            return true;
+        }
+        static (int ChangedPixels, int MaxChannelDelta, long TotalChannelError, bool AlphaStable) OutsideGrowthDifference(
+            byte[] first, byte[] current, int width, int height, int space)
+        {
+            var b = SceneCompositor.MonopolySpaceRectangle(space);
+            int changed = 0, maxDelta = 0; long total = 0; bool alphaStable = true;
+            for (int y = 0; y < height; y += 2)
+            for (int x = 0; x < width; x += 2)
+            {
+                double u = x * 1000d / width, v = y * 1000d / height;
+                if (u >= b.X - 48 && u <= b.Right + 48 && v >= b.Y - 48 && v <= b.Bottom + 48) continue;
+                // Estate management intentionally displays the same rising
+                // architectural mesh at a larger scale, above its controls.
+                if (u >= 417 && u <= 581 && v >= 345 && v <= 470) continue;
+                int offset = (y * width + x) * 4;
+                int pixelError = 0;
+                for (int channel = 0; channel < 3; channel++)
+                {
+                    int delta = Math.Abs(first[offset + channel] - current[offset + channel]);
+                    pixelError += delta; maxDelta = Math.Max(maxDelta, delta);
+                }
+                if (pixelError > 0) changed++;
+                total += pixelError;
+                alphaStable &= first[offset + 3] == current[offset + 3];
+            }
+            // Rebuilding the native command stream changes a few antialias
+            // boundary samples by <5% brightness. Same-clock cache redraws
+            // remain byte exact; this tightly bounded residual is recorded.
+            return (changed, maxDelta, total, alphaStable);
+        }
+        void CheckEarlierShops()
+        {
+            using var isolated = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), 256, 256, 96);
+            var method = typeof(SceneCompositor).GetMethod("DrawCrownDeedBuildings", BindingFlags.Static | BindingFlags.NonPublic)!;
+            byte[] Buildings(int level, float progress)
+            {
+                using (var drawing = isolated.CreateDrawingSession())
+                {
+                    drawing.Clear(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+                    drawing.Transform = Matrix3x2.CreateTranslation(10, 45) * Matrix3x2.CreateScale(3);
+                    method.Invoke(null, [drawing, 60f, level, progress, Windows.UI.Color.FromArgb(255, 143, 78, 51), 1d]);
+                }
+                return isolated.GetPixelBytes();
+            }
+            for (int level = 2; level <= 4; level++)
+            {
+                var previous = Buildings(level - 1, 1);
+                foreach (float progress in new[] { 0f, .25f, .5f, .75f, 1f })
+                {
+                    var current = Buildings(level, progress);
+                    for (int shop = 0; shop < level - 1; shop++)
+                    for (int y = 159; y < 180; y++)
+                    for (int x = (int)((10 + 10.5 + shop * 12.5 - 2) * 3); x < (10 + 10.5 + shop * 12.5 + 2) * 3; x++)
+                    {
+                        int offset = (y * 256 + x) * 4;
+                        Require(previous.AsSpan(offset, 4).SequenceEqual(current.AsSpan(offset, 4)),
+                            "An earlier shop shrank or regrew while the new shop rose.");
+                    }
+                }
+            }
+        }
+        async Task<int> CheckAi()
+        {
+            var game = GameFixture(ai: true);
+            var developments = new List<MonopolyDevelopment>();
+            game.DevelopmentOccurred += development => developments.Add(development);
+            using var scene = Fixture(game, 1152, 896);
+            using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), 1152, 896, 96);
+            now += TimeSpan.FromMilliseconds(1000);
+            Require(scene.TickMonopoly(now) && developments.Count == 1 && scene.MonopolyState.ActivePlayer!.IsAi &&
+                Level(scene.MonopolyState, 1) == 1, "The real AI did not develop its owned district.");
+            var started = now;
+            string frozen = scene.ExportMonopolySave();
+            foreach (int milliseconds in new[] { 0, 675, 1349 })
+            {
+                now = started.AddMilliseconds(milliseconds);
+                Require(!scene.TickMonopoly(now) && scene.GetCrownDeedDevelopmentFrame(now) is { Active: true } &&
+                    scene.ExportMonopolySave() == frozen && developments.Count == 1,
+                    "The AI made another decision before its building settled.");
+                await Capture(scene, target, "ai-rise-" + milliseconds + "ms");
+            }
+            now = started.AddMilliseconds(1350);
+            Require(scene.GetCrownDeedDevelopmentFrame(now) is { Active: false, Progress: 1 } &&
+                scene.TickMonopoly(now) && developments.Count == 2 && Level(scene.MonopolyState, 3) == 1 &&
+                developments[^1].Sequence > developments[0].Sequence,
+                "The actual AI did not resume one visible even development after the deadline.");
+            await Capture(scene, target, "ai-second-development");
+            return developments.Count;
+        }
+        void CheckStaleRollRetirement()
+        {
+            var game = GameFixture();
+            var data = JsonSerializer.Deserialize<MonopolySaveData>(game.ExportSave(), json)!;
+            foreach (var property in data.Properties.Where(property => property.SpaceIndex is 1 or 3)) property.OwnerId = 2;
+            game.LoadSave(JsonSerializer.Serialize(data, json), now);
+            using var scene = Fixture(game, 1152, 896);
+            using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), 1152, 896, 96);
+            Act(scene, "mp-roll");
+            now += TimeSpan.FromMilliseconds(3600); Draw(scene, target);
+            Require(scene.GetMonopolyDiceFrames(now).Count == 2 && scene.MonopolyState.Phase == MonopolyPhase.AwaitingEndTurn,
+                "The stale-dice fixture has no settled real prior roll.");
+            // No draw between turn change and construction: the compositor must
+            // retire old dice during its first building frame without resetting
+            // the newer presentation or its shared input deadline.
+            Act(scene, "mp-end-turn"); Act(scene, "mp-manage"); Act(scene, "mp-build");
+            var started = now;
+            var committed = scene.MonopolyState;
+            foreach (int milliseconds in new[] { 0, 675, 1349 })
+            {
+                now = started.AddMilliseconds(milliseconds); Draw(scene, target);
+                Require(scene.GetCrownDeedDevelopmentFrame(now) is { Active: true } &&
+                    ReferenceEquals(committed, scene.MonopolyState) && scene.GetMonopolyDiceFrames(now).Count == 0 &&
+                    !scene.CurrentBoardButtons.Single(button => button.Id == "mp-property-next").Enabled &&
+                    !scene.ActivateMonopolyButton("mp-property-next"),
+                    "Retiring a stale prior roll cancelled a newer building rise or released its controls.");
+            }
+            now = started.AddMilliseconds(1350); Draw(scene, target);
+            Require(scene.GetCrownDeedDevelopmentFrame(now) is { Active: false, Progress: 1 } &&
+                scene.ActivateMonopolyButton("mp-property-next"),
+                "The newer building failed to release controls at its own exact deadline.");
+        }
+        void CheckCancellation()
+        {
+            foreach (string cause in new[] { "drawer", "menu", "paint", "same-board", "camera", "clip", "black", "load" })
+            {
+                using var scene = Fixture(GameFixture(), 1000, 1000);
+                Act(scene, "mp-manage"); Act(scene, "mp-build");
+                Require(scene.GetCrownDeedDevelopmentFrame(now) is { Active: true }, "The cancellation fixture has no rise.");
+                switch (cause)
+                {
+                    case "drawer": Act(scene, "mp-exit"); break;
+                    case "menu": scene.ShowBoardMenu(); break;
+                    case "paint": scene.ShowPaint(); break;
+                    case "same-board": scene.ShowMonopoly(); break;
+                    case "camera": scene.ClearHandTips(resetInput: true); break;
+                    case "clip": scene.ClearBoardMediaClip(); break;
+                    case "black": scene.SetBlackOutput(true); break;
+                    case "load": scene.LoadMonopolySave(scene.ExportMonopolySave(), resume: true); break;
+                }
+                Require(scene.GetCrownDeedDevelopmentFrame(now) is null,
+                    "A cancelled " + cause + " presentation retained stale development pixels.");
+            }
+        }
+        static void Require(bool valid, string message)
+        {
+            if (!valid) throw new InvalidOperationException(message);
         }
     }
 }

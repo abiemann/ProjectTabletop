@@ -30,6 +30,7 @@ public sealed partial class BoardSession
         _roulette = roulette ?? new RouletteGame();
         _monopoly = monopoly ?? new MonopolyGame();
         _monopoly.RollOccurred += RelayMonopolyRoll;
+        _monopoly.DevelopmentOccurred += RelayMonopolyDevelopment;
         _globe = globe ?? new GlobeState();
     }
     public BlackjackSnapshot BlackjackState => _blackjack.Snapshot;

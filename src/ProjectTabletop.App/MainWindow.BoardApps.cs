@@ -48,7 +48,7 @@ public sealed partial class MainWindow
         bool boardGame = blackjack || monopoly || globe || slots || roulette;
         BoardGamePreviewTitle.Text = roulette ? "VICE ROYALE  ·  ROULETTE  ·  click to place chips  ·  virtual credits" :
             slots ? "DRAGON SLOTS  ·  click a button to play  ·  virtual credits" :
-            globe ? "GLOBE  ·  zoom Earth in and out" : monopoly ? "MONOPOLY  ·  click the table to play" :
+            globe ? "GLOBE  ·  zoom Earth in and out" : monopoly ? "CROWN & DEED  ·  click the table to play" :
             "BLACKJACK  ·  click the table to play  ·  virtual chips";
         BlackjackPreviewPanel.Visibility = boardGame ? Visibility.Visible : Visibility.Collapsed;
         CameraPreviewPanel.Visibility = ProjectionPreviewPanel.Visibility = boardGame ? Visibility.Collapsed : Visibility.Visible;

@@ -10,7 +10,7 @@ public sealed partial class SceneCompositor
     private readonly Func<DateTimeOffset> _monopolyClock;
     private CanvasRenderTarget? _monopolyPreviewTarget;
     private (long Revision, long DiceRevision, long SessionRevision, int DrawerFrame, long EntranceRevision,
-        int EntranceFrame, string Hover, int Feedback, double Aspect)? _monopolyPreviewState;
+        int EntranceFrame, long DevelopmentFrame, string Hover, int Feedback, double Aspect)? _monopolyPreviewState;
     public double MonopolyPreviewAspect { get { lock (_gate) return PaintBoardAspect(); } }
 
     public MonopolySnapshot MonopolyState { get { lock (_gate) return _boardSession.MonopolyState; } }
@@ -110,7 +110,7 @@ public sealed partial class SceneCompositor
             var hovered = HoveredBoardButtons;
             var feedback = CurrentFingerSelectionFeedback;
             var key = (state.Revision, MonopolyDicePresentationRevision, _boardSession.Revision,
-                MonopolyDrawerFrame(now), MonopolyEntranceRevision, MonopolyEntranceRenderFrame(entrance), string.Join(",", hovered),
+                MonopolyDrawerFrame(now), MonopolyEntranceRevision, MonopolyEntranceRenderFrame(entrance), CrownDeedDevelopmentRenderFrame(now), string.Join(",", hovered),
                 FingerSelectionRenderStep(feedback), aspect);
             if (_monopolyPreviewState != key)
             {

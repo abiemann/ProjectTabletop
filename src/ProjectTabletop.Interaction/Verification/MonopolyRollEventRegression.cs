@@ -120,24 +120,24 @@ internal static class MonopolyRollEventRegression
 
     private static void JailRollsRetainTheirActualMovement()
     {
-        foreach (var dice in new MonopolyDice[] { new(1, 2), new(3, 3) })
+        foreach (var dice in new MonopolyDice[] { new(1, 2), new(2, 2) })
         {
             var game = new MonopolyGame(seed: 53, initialRolls: [dice]);
             Start(game, humansOnly: true);
             var save = JsonSerializer.Deserialize<MonopolySaveData>(game.ExportSave(), SaveJson)!;
-            save.Players[0].Position = 10; save.Players[0].InJail = true;
+            save.Players[0].Position = 13; save.Players[0].InJail = true;
             game.LoadSave(JsonSerializer.Serialize(save, SaveJson), Next());
             var events = Observe(game);
             var time = Next();
             Require(game.HandleAction("mp-roll", time) && events.Count == 1, "A legal Jail roll emitted no event.");
             var roll = events[0];
-            Require(roll.StartedAt == time && roll.Previous.ActivePlayer is { Position: 10, InJail: true, JailTurns: 0 } &&
+            Require(roll.StartedAt == time && roll.Previous.ActivePlayer is { Position: 13, InJail: true, JailTurns: 0 } &&
                 roll.Current.Dice == dice && roll.Current.ActivePlayer!.Money == 1500,
                 "Jail roll payload lost its before state or actual dice.");
             Require(dice.IsDouble
-                ? roll.Current.ActivePlayer is { Position: 16, InJail: false, JailTurns: 0 } &&
+                ? roll.Current.ActivePlayer is { Position: 17, InJail: false, JailTurns: 0 } &&
                     roll.Current.Phase == MonopolyPhase.AwaitingPurchase
-                : roll.Current.ActivePlayer is { Position: 10, InJail: true, JailTurns: 1 } &&
+                : roll.Current.ActivePlayer is { Position: 13, InJail: true, JailTurns: 1 } &&
                     roll.Current.Phase == MonopolyPhase.AwaitingEndTurn,
                 "Jail roll event invented movement or missed release on doubles.");
         }

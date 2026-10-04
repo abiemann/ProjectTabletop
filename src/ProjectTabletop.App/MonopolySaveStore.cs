@@ -11,7 +11,7 @@ internal static class MonopolySaveStore
     {
         if (!File.Exists(path)) return null;
         if (new FileInfo(path).Length > MaximumSaveBytes)
-            throw new InvalidDataException("The saved Monopoly game is too large.");
+            throw new InvalidDataException("The saved Crown & Deed game is too large.");
         return await File.ReadAllTextAsync(path, Encoding.UTF8);
     }
 
@@ -20,10 +20,10 @@ internal static class MonopolySaveStore
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
         byte[] bytes = Encoding.UTF8.GetBytes(json);
         if (bytes.Length > MaximumSaveBytes)
-            throw new InvalidDataException("The Monopoly game is too large to save.");
+            throw new InvalidDataException("The Crown & Deed game is too large to save.");
         string directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
         Directory.CreateDirectory(directory);
-        string temporary = Path.Combine(directory, $".monopoly-{Guid.NewGuid():N}.tmp");
+        string temporary = Path.Combine(directory, $".crown-deed-{Guid.NewGuid():N}.tmp");
         try
         {
             await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write,

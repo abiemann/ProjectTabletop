@@ -170,9 +170,11 @@ fingers together rearms the gesture; stale results and wall time cannot complete
 it. The camera and projector show four fingertip markers with the middle aim
 marker in gold. Button feedback advances through **Bring fingers together**,
 **Ready · separate index**, **Selecting**, and **Selected · bring fingers
-together**. Thumb/index pinch selection remains available. Photo Copy's shutter,
-menu and reset buttons also accept index separation. The shutter matches the
-confirmed selecting cursor to the same frame's actual hand landmarks.
+together**. Thumb/index pinch selection remains available for gesture-enabled
+controls. Photo Copy's bottom Exit, Swirl/Copy and Clear/Save controls instead
+require one-second holds over their stationary captions. Its hidden object-field
+shutter still accepts index separation and matches the confirmed selecting
+cursor to the same frame's actual hand landmarks.
 
 `HandPoseClassifier.IsSpreadOut` classifies the current 21 landmarks: all four
 fingers must be extended and laterally separated, with an extended, open thumb.

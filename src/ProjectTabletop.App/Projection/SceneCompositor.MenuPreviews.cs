@@ -16,7 +16,6 @@ public sealed partial class SceneCompositor
     // panel's diagonal sheen band. Images render once at native board density.
     private const float MenuPreviewUnits = 160;
     private readonly Dictionary<BoardScreen, CanvasRenderTarget> _menuPreviews = [];
-    private static readonly Lazy<MonopolySnapshot> MenuPreviewMonopoly = new(() => new MonopolyGame(1).Snapshot);
     private bool _menuGlobePreviewDeferred;
 
     private void PrepareMenuPreviews(CanvasDevice device)
@@ -277,25 +276,56 @@ public sealed partial class SceneCompositor
 
     private static void DrawMonopolyPreview(CanvasDrawingSession ds, float span)
     {
-        // The GO corner of the real board: rail, gold trim, tiles and felt.
-        // Only the tiles nearest GO are laid, so the dark rail bed rather than
-        // bright paper runs beneath the tile's captions.
-        float scale = MenuPreviewUnits / 270;
-        var previous = ds.Transform;
-        ds.Transform = Matrix3x2.CreateTranslation(-(990 - span / scale), -720) * Matrix3x2.CreateScale(scale) * previous;
-        try
+        // A native miniature of Crown & Deed's oval boulevard and city skyline.
+        // Small physical shapes stay crisp at the tile's cached native density.
+        ds.Clear(ThemeColor(9, 25, 22));
+        var center = new Vector2(span - 88, 94);
+        ds.FillEllipse(center + new Vector2(0, 7), 86, 48, ThemeColor(3, 10, 9));
+        ds.FillEllipse(center, 85, 48, ThemeColor(43, 45, 29));
+        ds.DrawEllipse(center, 85, 48, ThemeColor(202, 164, 88), 1.3f);
+        ds.FillEllipse(center - new Vector2(0, 2), 77, 40, ThemeColor(15, 53, 42));
+        ds.DrawEllipse(center - new Vector2(0, 2), 77, 40, ThemeColor(122, 119, 66), .7f);
+        ds.DrawEllipse(center - new Vector2(0, 2), 68, 33, ThemeColor(215, 186, 114), .8f);
+        for (int index = 0; index < 40; index++)
         {
-            var game = MenuPreviewMonopoly.Value;
-            DrawMonopolyFrame(ds);
-            foreach (int index in new[] { 0, 1, 38, 39 })
-                DrawMonopolySpace(ds, MonopolyGame.Spaces[index], game, 1);
-            for (int slot = 0; slot < 2; slot++)
-                DrawMonopolyToken(ds, Vector2.Transform(MonopolyLocalTokenCenter(0, slot, 2), MonopolySpaceTransform(0)),
-                    7.2f, slot * 2, false);
-            DrawMonopolyDie(ds, new Rect(690, 752, 42, 42), 5, MonopolyIvory, MonopolyInk);
-            DrawMonopolyDie(ds, new Rect(746, 766, 42, 42), 2, MonopolyIvory, MonopolyInk);
+            float angle = MathF.PI / 2 + index * MathF.Tau / 40;
+            var radial = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+            ds.DrawLine(center - new Vector2(0, 2) + radial * new Vector2(70, 35),
+                center - new Vector2(0, 2) + radial * new Vector2(75, 39),
+                ThemeColor(209, 183, 117, 180), .65f);
         }
-        finally { ds.Transform = previous; }
+
+        House(-48, -13, 14, 24, ThemeColor(113, 139, 113));
+        House(-28, -23, 15, 32, ThemeColor(197, 172, 116));
+        House(-7, -30, 18, 43, ThemeColor(150, 164, 131));
+        House(17, -18, 15, 29, ThemeColor(211, 191, 143));
+        House(38, -8, 14, 24, ThemeColor(131, 157, 130));
+        House(-35, 12, 16, 24, ThemeColor(204, 186, 137));
+        House(-10, 18, 19, 29, ThemeColor(151, 174, 145));
+        House(18, 17, 16, 23, ThemeColor(197, 171, 118));
+        DrawMonopolyDie(ds, new Rect(span - 46, 118, 18, 18), 5, MonopolyIvory, MonopolyInk);
+        DrawMonopolyDie(ds, new Rect(span - 24, 125, 16, 16), 2, MonopolyIvory, MonopolyInk);
+
+        void House(float x, float y, float width, float height, Color stone)
+        {
+            var foot = center + new Vector2(x, y);
+            ds.FillEllipse(foot + new Vector2(width / 2 + 2, 2), width * .66f, 3.2f, ThemeColor(2, 15, 12, 160));
+            ds.FillRectangle(new Rect(foot.X, foot.Y - height, width, height), stone);
+            ds.FillRectangle(new Rect(foot.X + width * .72f, foot.Y - height, width * .28f, height), ThemeColor(76, 99, 79));
+            using var roof = new CanvasPathBuilder(ds.Device);
+            roof.BeginFigure(new Vector2(foot.X - 2, foot.Y - height));
+            roof.AddLine(new Vector2(foot.X + width / 2, foot.Y - height - width * .44f));
+            roof.AddLine(new Vector2(foot.X + width + 2, foot.Y - height));
+            roof.EndFigure(CanvasFigureLoop.Closed);
+            using var roofGeometry = CanvasGeometry.CreatePath(roof);
+            ds.FillGeometry(roofGeometry, ThemeColor(44, 74, 65));
+            ds.DrawGeometry(roofGeometry, ThemeColor(205, 173, 99), .65f);
+            ds.DrawLine(foot.X, foot.Y - height + 2, foot.X, foot.Y, ThemeColor(230, 208, 150), .6f);
+            for (float row = foot.Y - height + 5; row < foot.Y - 4; row += 7)
+                for (float column = foot.X + 3; column < foot.X + width * .7f; column += 5)
+                    ds.FillRectangle(new Rect(column, row, 2.2, 3.2), ThemeColor(246, 218, 139));
+            ds.FillRectangle(new Rect(foot.X + width * .36f, foot.Y - 6, width * .22f, 6), ThemeColor(23, 49, 39));
+        }
     }
 
     private void DrawGlobePreview(CanvasDrawingSession ds, float span)

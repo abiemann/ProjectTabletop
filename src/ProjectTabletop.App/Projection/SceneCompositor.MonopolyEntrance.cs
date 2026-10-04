@@ -40,6 +40,7 @@ public sealed partial class SceneCompositor
 
     private void OnBoardOpened(BoardScreen screen)
     {
+        CancelCrownDeedDevelopment();
         CancelMonopolyEntrance();
         if (screen != BoardScreen.Monopoly) return;
         _monopolyEntrancePending = true;

@@ -64,48 +64,47 @@ public sealed partial class MonopolyGame
     {
         switch (card)
         {
-            case 0: CardMove(0, "Advance to GO. Collect $200."); break;
-            case 1: CardMove(24, "Advance to Illinois Avenue. Collect $200 if you pass GO."); break;
-            case 2: CardMove(11, "Advance to St. Charles Place. Collect $200 if you pass GO."); break;
-            case 3: CardMove(39, "Advance to Boardwalk."); break;
-            case 4: CardMove(5, "Take a trip to Reading Railroad. Collect $200 if you pass GO."); break;
+            case 0: CardMove(CrownGateIndex, "The city opens a new trading season. Return to Crown Gate for 200 crowns."); break;
+            case 1: CardMove(34, "A spice consortium invites you to Suncrest Avenue. Take the circuit grant if you cross Crown Gate."); break;
+            case 2: CardMove(26, "A new garden market opens at Starling Gardens. Take the circuit grant if you cross Crown Gate."); break;
+            case 3: CardMove(22, "Present your proposal at Royal Arcade. Travel there by the boulevard."); break;
+            case 4: CardMove(5, "Your cargo awaits at North Ferry. Take the circuit grant if you cross Crown Gate."); break;
             case 5:
             case 6:
-                Card("Advance to the nearest Railroad. Pay twice the usual rent if owned.");
-                int railroad = new[] { 5, 15, 25, 35 }.FirstOrDefault(i => i > Active.Position);
-                MoveTo(railroad == 0 ? 5 : railroad);
+                Card("An express freight charter takes you to the next transit route. Its owner charges double passage.");
+                MoveTo(NextSpaceOfKind(MonopolySpaceKind.Railroad));
                 ResolveLanding(railroadMultiplier: 2);
                 break;
             case 7:
-                Card("Advance to the nearest Utility. If owned, roll and pay ten times the total.");
-                MoveTo(Active.Position < 12 || Active.Position >= 28 ? 12 : 28);
+                Card("An urgent city-service call takes you to the next service. If owned, roll fresh dice and pay ten crowns per pip.");
+                MoveTo(NextSpaceOfKind(MonopolySpaceKind.Utility));
                 ResolveLanding(specialUtility: true);
                 break;
             case 8:
-                Card("Go back three spaces.");
+                Card("Roadworks divert your carriage three stops backward. Resolve the new stop.");
                 MoveBy(-3, collectGo: false);
                 ResolveLanding();
                 break;
             case 9:
-                Card("Go directly to Jail. Do not collect $200.");
+                Card("A charter review summons you directly to Civic Watch. No circuit grant is paid.");
                 SendToJail(_state.LastCard);
                 break;
-            case 10: Card("Bank dividend. Collect $50."); Receive(50); break;
-            case 11: Card("Your building loan matures. Collect $150."); Receive(150); break;
+            case 10: Card("Your ferry syndicate distributes a surplus. Receive 50 crowns."); Receive(50); break;
+            case 11: Card("The guild repays your market-hall bond. Receive 150 crowns."); Receive(150); break;
             case 12:
-                Card("General repairs: pay $25 per house and $100 per hotel.");
+                Card("Renew your fire wardens: 25 crowns per shop and 100 per grand hall.");
                 Charge(Active.Id, RepairCost(25, 100), null, "finish");
                 break;
-            case 13: Card("Speeding fine. Pay $15."); Charge(Active.Id, 15, null, "finish"); break;
+            case 13: Card("A hurried delivery damaged a lantern. Pay 15 crowns for its repair."); Charge(Active.Id, 15, null, "finish"); break;
             case 14:
-                Card("Elected chairman of the board. Pay each player $50.");
+                Card("Sponsor the merchant assembly. Pay each other company 50 crowns.");
                 foreach (var player in _state.Players.Where(p => !p.Bankrupt && p.Id != Active.Id))
                     _state.Payments.Add(new() { PlayerId = Active.Id, CreditorId = player.Id, Amount = 50 });
                 _state.DebtContinuation = "finish";
                 ProcessPayments();
                 break;
             case 15:
-                Card("Get Out of Jail Free. Keep this card until used.");
+                Card("Safe-Conduct Pass. Retain it to leave Civic Watch without paying clearance.");
                 _state.ChanceFreeCardHolderId = Active.Id;
                 Active.GetOutOfJailCards++;
                 FinishLanding();
@@ -117,38 +116,43 @@ public sealed partial class MonopolyGame
     {
         switch (card)
         {
-            case 0: CardMove(0, "Advance to GO. Collect $200."); break;
-            case 1: Card("Bank error in your favor. Collect $200."); Receive(200); break;
-            case 2: Card("Doctor's fee. Pay $50."); Charge(Active.Id, 50, null, "finish"); break;
-            case 3: Card("Sale of stock. Collect $50."); Receive(50); break;
+            case 0: CardMove(CrownGateIndex, "The city opens a new trading season. Return to Crown Gate for 200 crowns."); break;
+            case 1: Card("A forgotten warehouse account is settled. Receive 200 crowns."); Receive(200); break;
+            case 2: Card("Fund the harbor first-aid station. Pay 50 crowns."); Charge(Active.Id, 50, null, "finish"); break;
+            case 3: Card("Your surplus silk sells at the night market. Receive 50 crowns."); Receive(50); break;
             case 4:
-                Card("Get Out of Jail Free. Keep this card until used.");
+                Card("Safe-Conduct Pass. Retain it to leave Civic Watch without paying clearance.");
                 _state.ChestFreeCardHolderId = Active.Id;
                 Active.GetOutOfJailCards++;
                 FinishLanding();
                 break;
-            case 5: Card("Go directly to Jail. Do not collect $200."); SendToJail(_state.LastCard); break;
-            case 6: Card("Holiday fund matures. Collect $100."); Receive(100); break;
-            case 7: Card("Income tax refund. Collect $20."); Receive(20); break;
+            case 5: Card("A charter review summons you directly to Civic Watch. No circuit grant is paid."); SendToJail(_state.LastCard); break;
+            case 6: Card("The lantern festival commissions your stalls. Receive 100 crowns."); Receive(100); break;
+            case 7: Card("The city returns an unused permit deposit. Receive 20 crowns."); Receive(20); break;
             case 8:
-                Card("It's your birthday. Collect $10 from every player.");
+                Card("Your company hosts the guild fair. Each other company contributes 10 crowns.");
                 foreach (var player in _state.Players.Where(p => !p.Bankrupt && p.Id != Active.Id))
                     _state.Payments.Add(new() { PlayerId = player.Id, CreditorId = Active.Id, Amount = 10 });
                 _state.DebtContinuation = "finish";
                 ProcessPayments();
                 break;
-            case 9: Card("Life insurance matures. Collect $100."); Receive(100); break;
-            case 10: Card("Hospital fees. Pay $100."); Charge(Active.Id, 100, null, "finish"); break;
-            case 11: Card("School fees. Pay $50."); Charge(Active.Id, 50, null, "finish"); break;
-            case 12: Card("Consultancy fee. Collect $25."); Receive(25); break;
+            case 9: Card("A restored canal brings a civic reward. Receive 100 crowns."); Receive(100); break;
+            case 10: Card("Repair the public footbridge beside your warehouses. Pay 100 crowns."); Charge(Active.Id, 100, null, "finish"); break;
+            case 11: Card("Sponsor two craft apprentices. Pay 50 crowns."); Charge(Active.Id, 50, null, "finish"); break;
+            case 12: Card("A visiting caravan buys your route maps. Receive 25 crowns."); Receive(25); break;
             case 13:
-                Card("Street repairs: pay $40 per house and $115 per hotel.");
+                Card("Resurface your shopfronts: 40 crowns per shop and 115 per grand hall.");
                 Charge(Active.Id, RepairCost(40, 115), null, "finish");
                 break;
-            case 14: Card("Second prize in a beauty contest. Collect $10."); Receive(10); break;
-            case 15: Card("You inherit $100."); Receive(100); break;
+            case 14: Card("Your window display earns a festival ribbon. Receive 10 crowns."); Receive(10); break;
+            case 15: Card("An old trading partner settles a debt. Receive 100 crowns."); Receive(100); break;
         }
     }
+
+    private int NextSpaceOfKind(MonopolySpaceKind kind) => Spaces
+        .Where(space => space.Kind == kind)
+        .OrderBy(space => (space.Index - Active.Position + Spaces.Count) % Spaces.Count)
+        .First().Index;
 
     private int RepairCost(int houseCost, int hotelCost) => Owned(Active.Id).Sum(p => p.Houses == 5 ? hotelCost : p.Houses * houseCost);
 }

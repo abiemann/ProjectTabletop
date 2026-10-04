@@ -113,7 +113,7 @@
                         <TextBlock Text="Place an object on grey above the bottom controls, then lift your hands to lock its light. Select Swirl to fill the board or Copy to save a PNG with a photocopier sound. Swirl becomes Clear while copies are displayed. Bring four fingers together until Ready, then move your index sideways. Saved images go to Pictures / Project Tabletop." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Blackjack" Click="Blackjack_Click" />
                         <TextBlock Text="Play the dealer with virtual chips. Aim with four fingers together, then move your index finger sideways to select, or click the laptop table. The laptop table works with the projector off." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
-                        <Button Content="Monopoly" Click="Monopoly_Click" />
+                        <Button Content="Crown &amp; Deed" Click="Monopoly_Click" />
                         <TextBlock Text="Choose 2–6 human and AI players, then play on the gold-and-emerald board. Click the laptop table or use the same four-finger selection gesture. Exit offers Save &amp; Exit, Exit without saving, or Cancel; saved games can be resumed." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Globe" Click="Globe_Click" />
                         <TextBlock Text="Explore a detailed Earth with a distant arrival and slow spin. Open the left drawer for Exit and zoom controls, using gestures or laptop clicks." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />

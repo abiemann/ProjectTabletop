@@ -886,6 +886,8 @@ public sealed partial class SceneCompositor : IDisposable
             DisposeSlotsLayers();
             DisposeRouletteLayers();
             DisposeMonopolyEntranceLayers();
+            DisposeCrownDeedArtwork();
+            CancelCrownDeedDevelopment();
             _globePreviewTarget?.Dispose();
             _globePreviewTarget = null;
             DisposeMenuPreviews();
@@ -897,6 +899,7 @@ public sealed partial class SceneCompositor : IDisposable
             _boardSession.BlackjackHitOccurred -= OnBlackjackHit;
             _boardSession.BlackjackDealOccurred -= OnBlackjackDeal;
             _boardSession.MonopolyRollOccurred -= OnMonopolyRoll;
+            _boardSession.MonopolyDevelopmentOccurred -= OnMonopolyDevelopment;
             _boardSession.BoardOpened -= OnBoardOpened;
             _photoCopyBitmap?.Dispose();
             _photoCopyBitmap = null;

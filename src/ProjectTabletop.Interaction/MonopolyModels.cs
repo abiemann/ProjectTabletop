@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace ProjectTabletop.Interaction;
 
 public enum MonopolyPhase
@@ -34,7 +36,8 @@ public sealed record MonopolySnapshot(MonopolyPhase Phase, int HumanPlayers, int
 /// <summary>Versioned save payload. Property ownership refers to stable player IDs.</summary>
 public sealed class MonopolySaveData
 {
-    public int Version { get; set; } = 1;
+    [JsonRequired]
+    public int Version { get; set; } = 2;
     public MonopolyPhase Phase { get; set; }
     public int Humans { get; set; } = 1;
     public int Ais { get; set; } = 1;

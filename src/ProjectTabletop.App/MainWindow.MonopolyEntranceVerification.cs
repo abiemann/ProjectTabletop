@@ -47,18 +47,32 @@ public sealed partial class MainWindow
         var atlasKey = Field<object>(scene, "_monopolyEntranceTileState");
         var lidKey = Field<object>(scene, "_monopolyEntranceLidState");
         var firstBoard = board.GetPixelBytes();
+        var parcelMasks = NativeParcelMasks();
+        var fixedCenterMask = Enumerable.Range(0, lidPixels.Length / 4)
+            .Where(pixel => lidPixels[pixel * 4 + 3] >= 254).Select(pixel => pixel * 4).ToArray();
+        Require(fixedCenterMask.Length > 100, "The anchored plaza has no opaque stationary contents.");
+        byte[] initialPixels;
+        using (var initial = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), rasterWidth, rasterHeight, 96))
+        {
+            using (var drawing = initial.CreateDrawingSession())
+            {
+                drawing.DrawImage(baseLayer);
+                drawing.DrawImage(lid);
+            }
+            initialPixels = initial.GetPixelBytes();
+        }
         Require(rasterWidth >= width * .8 && rasterHeight >= height * .8 &&
                 new[] { baseLayer, atlas, lid }.All(layer => layer.SizeInPixels == board.SizeInPixels),
             "The entrance layers lost the projector's native sampling density.");
-        Require(MeanError(firstBoard, basePixels, rasterWidth, rasterHeight, new(0, 0, 1000, 1000)) < .1,
-            "The first entrance frame contains more than the felt and outer frame.");
+        Require(MeanError(firstBoard, initialPixels, rasterWidth, rasterHeight, new(0, 0, 1000, 1000)) < .1,
+            "The first entrance frame differs from the stationary city and plaza contents.");
         for (int index = 0; index < 40; index++)
-            Require(PaperFraction(firstBoard, rasterWidth, rasterHeight, Tile(index)) < .01,
-                $"Tile {index} is visible before the GO delivery.");
-        Require(AlphaFraction(atlasPixels, rasterWidth, rasterHeight, new(200, 200, 600, 600)) == 0 &&
+            Require(ParcelError(firstBoard, initialPixels, index) < .1,
+                $"Parcel {index} is visible before the opening delivery.");
+        Require(AlphaFraction(atlasPixels, rasterWidth, rasterHeight, new(400, 400, 200, 200)) == 0 &&
                 AlphaFraction(lidPixels, rasterWidth, rasterHeight, new(60, 60, 90, 90)) == 0,
             "The native atlas or center lid includes opaque pixels outside its own pieces.");
-        await Capture("00-felt-and-edge");
+        await Capture("00-stationary-city-and-plaza");
 
         now = started.AddMilliseconds(-200);
         Require(Frame(scene) is { ElapsedMilliseconds: 0, LandedTiles: 0, CenterProgress: 0 } &&
@@ -66,7 +80,7 @@ public sealed partial class MainWindow
 
         now = started.AddMilliseconds(lead - 1);
         Require(first.SequenceEqual(Draw(scene)) && Frame(scene).LandedTiles == 0,
-            "A tile or caption appeared during the initial felt-only pause.");
+            "A parcel moved during the initial city pause.");
         now = started.AddMilliseconds(lead + 50);
         var goFrame = Frame(scene);
         var goPose = SceneCompositor.MonopolyEntranceTilePose(goFrame, 0);
@@ -93,9 +107,11 @@ public sealed partial class MainWindow
                 "A landed tile retains elevation, scaling or tilt.");
             var pixels = Draw(scene);
             Require(OutsideCornersBlack(pixels, width, height), "A falling Monopoly piece escaped the physical board clip.");
+            Require(CenterError(board.GetPixelBytes()) < .1,
+                "An airborne parcel changed the anchored center lettering or controls.");
             if (index is 0 or 9 or 19 or 29 or 39)
             {
-                double error = MeanError(board.GetPixelBytes(), atlasPixels, rasterWidth, rasterHeight, Inset(Tile(index), 20));
+                double error = ParcelError(board.GetPixelBytes(), atlasPixels, index);
                 Require(error < 3, $"Delivered tile {index} does not show its native final artwork (RGB error {error:F3}).");
                 await Capture($"tile-{index:00}-landed");
             }
@@ -108,28 +124,30 @@ public sealed partial class MainWindow
         Draw(scene);
         var perimeter = board.GetPixelBytes();
         Require(Frame(scene) is { LandedTiles: 40, CenterProgress: 0 } &&
-                !SceneCompositor.MonopolyEntranceCenterPose(Frame(scene)).Visible &&
-                MeanError(perimeter, basePixels, rasterWidth, rasterHeight, new(210, 210, 580, 580)) < .1,
-            "The center title, game controls or lid arrived before all perimeter tiles were resting.");
+                SceneCompositor.MonopolyEntranceCenterPose(Frame(scene)) is
+                    { Visible: true, Landed: true, Elevation: 0, Scale: 1, RotationRadians: 0 } &&
+                CenterError(perimeter) < .1,
+            "The plaza contents moved while the oval parcels assembled.");
         for (int index = 0; index < 40; index++)
-            Require(MeanError(perimeter, atlasPixels, rasterWidth, rasterHeight, Inset(Tile(index), 8)) < 3 &&
-                    PaperFraction(perimeter, rasterWidth, rasterHeight, Tile(index)) > .5,
+            Require(ParcelError(perimeter, atlasPixels, index) < 3 &&
+                    ParcelError(perimeter, basePixels, index) > 1,
                 $"The complete clockwise perimeter is missing its real artwork at tile {index}.");
-        await Capture("02-perimeter-complete-center-empty");
+        await Capture("02-oval-parcels-complete");
         CheckPreview(scene);
 
         now = started.AddMilliseconds(centerStart + 525);
         var middle = Frame(scene);
         var center = SceneCompositor.MonopolyEntranceCenterPose(middle);
         Require(middle.LandedTiles == 40 && middle.CenterProgress is > .49 and < .51 &&
-                center.Visible && !center.Landed && center.Elevation > 40 && center.Scale > 1,
-            "The center panel did not descend as the last raised piece.");
+                center is { Visible: true, Landed: true, Elevation: 0, Scale: 1, RotationRadians: 0 },
+            "The fixed plaza became a falling rectangular panel.");
         Draw(scene);
-        Require(Differences(perimeter, board.GetPixelBytes()) > 1000, "The center panel's descent does not change the native GPU image.");
+        Require(perimeter.SequenceEqual(board.GetPixelBytes()),
+            "The finished parcel assembly changed during its input-settling interval.");
         CheckSuppression(scene);
         CheckPreview(scene);
         CheckCaches();
-        await Capture("03-center-lid-descending");
+        await Capture("03-stationary-settling-interval");
 
         now = started.AddMilliseconds(duration - 1);
         Draw(scene);
@@ -168,7 +186,7 @@ public sealed partial class MainWindow
         string samplePath = Path.Combine(directory, "entrance-samples.json");
         await File.WriteAllTextAsync(samplePath, JsonSerializer.Serialize(samples, new JsonSerializerOptions { WriteIndented = true }));
         return new { passed = true, durationMilliseconds = duration, nativeWidth = rasterWidth, nativeHeight = rasterHeight,
-            feltAndEdgeOnlyInitially = true, goThenFortyClockwiseTiles = true, centerLidLast = true,
+            cityAndPlazaStationaryInitially = true, goThenFortyClockwiseParcels = true, centerContentsRemainAnchored = true,
             exactStaticFinalPixels = true, projectorPreviewSameClockAndPixels = true, nativeLayersReused = true,
             inputAiAndLightingBlocked = true, staleInputConsumed = true, navigationAndRescanCancellation = true,
             liveHardwareUnchanged = true, directory, samplePath, images };
@@ -227,7 +245,7 @@ public sealed partial class MainWindow
                 "The moving board supplied acquisition evidence or a white search light.");
             fixture.CompleteHandAcquisition(context, [new(new(50, 50, 100, 100), new(100, 100), 40,
                 now, .10, .10, .10)], [], now);
-            fixture.SetHandSpotlights([Hand()], DateTimeOffset.UtcNow);
+            fixture.SetHandSpotlights([Hand()], now);
             Require(fixture.GetHandAcquisitionContext(now)?.IlluminatedHint is null && fixture.ActiveHandSpotlightCount == 0,
                 "A qualified asynchronous acquisition or tracked hand illuminated the falling board.");
         }
@@ -299,7 +317,7 @@ public sealed partial class MainWindow
         }
         async Task CheckMenuGesture()
         {
-            now = DateTimeOffset.UtcNow;
+            now = MonotonicClock.UtcNow;
             using var menu = Fixture(showMonopoly: false);
             var button = menu.CurrentBoardButtons.Single(item => item.Id == "monopoly");
             var map = Field<Homography>(menu, "_boardSurfaceMap");
@@ -315,20 +333,20 @@ public sealed partial class MainWindow
             foreach (var (hand, delay) in new[] { (grouped, 5), (grouped, 110), (separated, 20), (separated, 90) })
             {
                 await Task.Delay(delay);
-                now = DateTimeOffset.UtcNow;
+                now = MonotonicClock.UtcNow;
                 menu.SetHandCursors([hand], now);
             }
             Require(menu.CurrentBoardScreen == BoardScreen.Monopoly && menu.MonopolyEntranceActive &&
                     Frame(menu).ElapsedMilliseconds == 0 && Frame(menu).LandedTiles == 0,
                 "The projected menu's sideways-index selection bypassed Monopoly entrance startup.");
-            await Task.Delay(5); now = DateTimeOffset.UtcNow;
+            await Task.Delay(5); now = MonotonicClock.UtcNow;
             menu.SetHandCursors([separated], now);
             Require(menu.MonopolyState.Phase == MonopolyPhase.Landing && menu.HoveredBoardButtons.Count == 0,
                 "The menu selection carried its held separated pose into the moving Monopoly board.");
         }
         async Task CheckInputBarrier()
         {
-            // The camera-facing compositor uses wall-clock freshness. Prove its
+            // The camera-facing compositor uses monotonic freshness. Prove its
             // active guard with a real timestamp, then use the private session's
             // coherent synthetic clock to check exact post-deadline source times.
             now = DateTimeOffset.UtcNow.AddMinutes(10);
@@ -340,7 +358,7 @@ public sealed partial class MainWindow
             var camera = Field<Homography>(input, "_boardCameraMap");
             var point = camera.InverseTransform(map.Transform(new(button.Bounds.X + button.Bounds.Width / 2,
                 button.Bounds.Y + button.Bounds.Height / 2)));
-            var frame = DateTimeOffset.UtcNow;
+            var frame = MonotonicClock.UtcNow;
             var held = new HandCursor(new(point.X, point.Y), frame.AddSeconds(1), 81001) { TrackingId = 81001 };
             input.SetHandCursors([held], frame);
             Require(input.MonopolyState.Phase == MonopolyPhase.Landing && input.HoveredBoardButtons.Count == 0,
@@ -392,21 +410,54 @@ public sealed partial class MainWindow
         static T Field<T>(SceneCompositor fixture, string name) =>
             typeof(SceneCompositor).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(fixture) is T value
                 ? value : throw new InvalidOperationException("Missing entrance verification field " + name + ".");
-        static Rect Tile(int index)
+        int[][] NativeParcelMasks()
         {
-            const double edge = 50, corner = 118, inner = edge + corner, far = 1000 - inner, cell = (900 - 2 * corner) / 9;
-            return index switch
+            // Real opaque parcel interiors remain valid for rounded, rotated or
+            // curved lots. Neighbouring parcels must not enter a rectangular
+            // probe merely because their axis-aligned bounding boxes overlap.
+            var masks = new int[40][];
+            using var isolated = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), rasterWidth, rasterHeight, 96);
+            var method = typeof(SceneCompositor).GetMethod("DrawMonopolySpace",
+                BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)!;
+            for (int index = 0; index < masks.Length; index++)
             {
-                0 => new(far, far, corner, corner), 10 => new(edge, far, corner, corner),
-                20 => new(edge, edge, corner, corner), 30 => new(far, edge, corner, corner),
-                < 10 => new(far - index * cell, far, cell, corner),
-                < 20 => new(edge, far - (index - 10) * cell, corner, cell),
-                < 30 => new(inner + (index - 21) * cell, edge, cell, corner),
-                _ => new(far, inner + (index - 31) * cell, corner, cell)
-            };
+                using (var drawing = isolated.CreateDrawingSession())
+                {
+                    drawing.Clear(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+                    drawing.Transform = Matrix3x2.CreateScale(rasterWidth / 1000f, rasterHeight / 1000f);
+                    method.Invoke(method.IsStatic ? null : scene,
+                        [drawing, MonopolyGame.Spaces[index], state, scene.MonopolyPreviewAspect, 1f]);
+                }
+                var pixels = isolated.GetPixelBytes();
+                var offsets = new List<int>();
+                for (int y = 0; y < rasterHeight; y += 3)
+                for (int x = 0; x < rasterWidth; x += 3)
+                {
+                    int offset = (y * rasterWidth + x) * 4;
+                    if (pixels[offset + 3] >= 250) offsets.Add(offset);
+                }
+                Require(offsets.Count >= 32, "Parcel " + index + " has no visible native opaque artwork.");
+                masks[index] = offsets.ToArray();
+            }
+            return masks;
         }
-        static Rect Inset(Rect rect, double inset) => new(rect.X + inset, rect.Y + inset,
-            rect.Width - 2 * inset, rect.Height - 2 * inset);
+        double ParcelError(byte[] actual, byte[] expected, int index)
+        {
+            Require(actual.Length == expected.Length, "Parcel comparison changed native dimensions.");
+            double error = 0;
+            foreach (int offset in parcelMasks[index])
+                for (int channel = 0; channel < 3; channel++)
+                    error += Math.Abs(actual[offset + channel] - expected[offset + channel]);
+            return error / (parcelMasks[index].Length * 3d);
+        }
+        double CenterError(byte[] actual)
+        {
+            double error = 0;
+            foreach (int offset in fixedCenterMask)
+                for (int channel = 0; channel < 3; channel++)
+                    error += Math.Abs(actual[offset + channel] - firstBoard[offset + channel]);
+            return error / (fixedCenterMask.Length * 3d);
+        }
         static double MeanError(byte[] actual, byte[] expected, int imageWidth, int imageHeight, Rect bounds)
         {
             Require(actual.Length == expected.Length, "Entrance comparison changed native dimensions.");
@@ -417,16 +468,6 @@ public sealed partial class MainWindow
                 count += 3;
             });
             return error / Math.Max(1, count);
-        }
-        static double PaperFraction(byte[] pixels, int imageWidth, int imageHeight, Rect bounds)
-        {
-            int paper = 0, count = 0;
-            ForPixels(imageWidth, imageHeight, Inset(bounds, 6), offset =>
-            {
-                if (pixels[offset] > 130 && pixels[offset + 1] > 130 && pixels[offset + 2] > 130) paper++;
-                count++;
-            });
-            return paper / (double)Math.Max(1, count);
         }
         static double AlphaFraction(byte[] pixels, int imageWidth, int imageHeight, Rect bounds)
         {

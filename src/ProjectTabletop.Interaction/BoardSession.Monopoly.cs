@@ -6,6 +6,7 @@ public sealed partial class BoardSession
     private readonly MonopolyGame _monopoly;
     private long _monopolySaveRequestId;
     private long _lastRelayedMonopolyRollSequence;
+    private long _lastRelayedMonopolyDevelopmentSequence;
     private DateTimeOffset? _monopolyPresentationUntil;
     private DateTimeOffset _monopolyPresentationObservedAt = DateTimeOffset.MinValue;
     private bool _monopolyInactiveDrawerOpen;
@@ -20,6 +21,9 @@ public sealed partial class BoardSession
 
     /// <summary>Raised after each human or AI roll and its shared input barrier are committed.</summary>
     public event Action<MonopolyRoll>? MonopolyRollOccurred;
+
+    /// <summary>Committed human/AI building changes, after the shared input barrier.</summary>
+    public event Action<MonopolyDevelopment>? MonopolyDevelopmentOccurred;
 
     /// <summary>
     /// Pauses AI progress and game controls while a roll presentation runs. Exit and its
@@ -55,8 +59,10 @@ public sealed partial class BoardSession
         AdvanceMonopolyPresentation(now);
         if (Screen != BoardScreen.Monopoly || _monopolyPresentationUntil is not null) return false;
         long previousRoll = _lastRelayedMonopolyRollSequence;
+        long previousDevelopment = _lastRelayedMonopolyDevelopmentSequence;
         if (!_monopoly.Tick(now)) return false;
-        if (_lastRelayedMonopolyRollSequence == previousRoll) MonopolyInputBarrier(now);
+        if (_lastRelayedMonopolyRollSequence == previousRoll &&
+            _lastRelayedMonopolyDevelopmentSequence == previousDevelopment) MonopolyInputBarrier(now);
         return true;
     }
 
@@ -112,12 +118,14 @@ public sealed partial class BoardSession
         bool immediateExit = button.Id == "mp-exit-game" && !MonopolyState.IsActiveGame;
         if (button.Id == "mp-exit-game" && (!MonopolyDrawerOpen || !immediateExit)) return false;
         long previousRoll = _lastRelayedMonopolyRollSequence;
+        long previousDevelopment = _lastRelayedMonopolyDevelopmentSequence;
         if (!_monopoly.HandleAction(immediateExit ? "mp-exit" : button.Id, now)) return false;
         if (button.Id == "mp-exit") BeginMonopolyDrawer(now);
         if (IsMonopolyNavigation(button.Id)) ClearMonopolyPresentationHold();
         if (button.Id == "mp-exit-cancel" || immediateExit) ClearMonopolyDrawerUi();
         if (button.Id == "mp-save-exit") _monopolySaveRequestId++;
-        if (_lastRelayedMonopolyRollSequence == previousRoll) MonopolyInputBarrier(now);
+        if (_lastRelayedMonopolyRollSequence == previousRoll &&
+            _lastRelayedMonopolyDevelopmentSequence == previousDevelopment) MonopolyInputBarrier(now);
         if (immediateExit) Show(BoardScreen.Menu, now);
         return true;
     }
@@ -131,6 +139,18 @@ public sealed partial class BoardSession
             MonopolyInputBarrier(roll.StartedAt);
         }
         MonopolyRollOccurred?.Invoke(roll);
+    }
+
+    private void RelayMonopolyDevelopment(MonopolyDevelopment development)
+    {
+        if (development.Sequence <= _lastRelayedMonopolyDevelopmentSequence) return;
+        _lastRelayedMonopolyDevelopmentSequence = development.Sequence;
+        if (Screen == BoardScreen.Monopoly)
+        {
+            AdvanceMonopolyPresentation(development.StartedAt);
+            MonopolyInputBarrier(development.StartedAt);
+        }
+        MonopolyDevelopmentOccurred?.Invoke(development);
     }
 
     private void AdvanceMonopolyPresentation(DateTimeOffset now)
@@ -194,7 +214,7 @@ public sealed partial class BoardSession
             return result.AsReadOnly();
         }
         Add("mp-exit", "^", game.Phase == MonopolyPhase.Landing
-            ? new(.34, .752, .32, .06) : new(.215, .215, .26, .06));
+            ? new(.34, .752, .32, .06) : new(.215, .232, .26, .06));
         switch (game.Phase)
         {
             case MonopolyPhase.Landing:
@@ -213,24 +233,24 @@ public sealed partial class BoardSession
                 Add("mp-roll", "Roll", new(.365, .62, .27, .072));
                 if (game.ActivePlayer?.InJail == true)
                 {
-                    Add("mp-jail-pay", "Pay $50", new(.30, .715, .19, .055));
-                    Add("mp-jail-card", "Use jail card", new(.51, .715, .19, .055));
-                    Add("mp-manage", "Properties", new(.395, .777, .21, .040));
+                    Add("mp-jail-pay", "Pay 50", new(.30, .695, .19, .055));
+                    Add("mp-jail-card", "Use pass", new(.51, .695, .19, .055));
+                    Add("mp-manage", "Properties", new(.395, .758, .21, .040));
                 }
-                else Add("mp-manage", "Properties", new(.395, .715, .21, .055));
+                else Add("mp-manage", "Properties", new(.395, .695, .21, .055));
                 break;
             case MonopolyPhase.AwaitingPurchase:
                 Add("mp-buy", "Buy property", new(.365, .62, .27, .072));
-                Add("mp-auction", "Auction", new(.395, .715, .21, .055));
+                Add("mp-auction", "Auction", new(.395, .695, .21, .055));
                 break;
             case MonopolyPhase.AwaitingEndTurn:
                 Add("mp-end-turn", "End turn", new(.365, .62, .27, .072));
-                Add("mp-manage", "Properties", new(.395, .715, .21, .055));
+                Add("mp-manage", "Properties", new(.395, .695, .21, .055));
                 break;
             case MonopolyPhase.Auction:
-                Add("mp-bid-10", "+ $10", new(.255, .62, .15, .064));
-                Add("mp-bid-50", "+ $50", new(.425, .62, .15, .064));
-                Add("mp-bid-100", "+ $100", new(.595, .62, .15, .064));
+                Add("mp-bid-10", "+ 10", new(.255, .62, .15, .064));
+                Add("mp-bid-50", "+ 50", new(.425, .62, .15, .064));
+                Add("mp-bid-100", "+ 100", new(.595, .62, .15, .064));
                 Add("mp-pass", "Pass", new(.395, .71, .21, .055));
                 break;
             case MonopolyPhase.ManageProperties:

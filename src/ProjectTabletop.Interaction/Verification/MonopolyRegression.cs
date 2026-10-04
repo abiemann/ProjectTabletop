@@ -19,7 +19,9 @@ internal static class MonopolyRegression
         CheckCardsAndEliminatedAi();
         CheckSaveValidationAndIsolation();
         CheckAiAndSeededGames();
-        Console.WriteLine("Monopoly game verification passed: player setup, purchases/rent/GO, doubles/jail, " +
+        MonopolyMigrationRegression.Run();
+        MonopolyDevelopmentRegression.Run();
+        Console.WriteLine("Monopoly game verification passed: player setup, purchases/rent/Crown Gate, doubles/jail, " +
             "auctions, even building/selling, mortgages, debt/bankruptcy, cards, save validation and immutable snapshots, and AI turns.");
     }
 
@@ -42,7 +44,7 @@ internal static class MonopolyRegression
         Require(game.Snapshot.Phase == MonopolyPhase.AwaitingRoll && game.Snapshot.Players.Count == 2 &&
             game.Snapshot.Players.All(player => !player.IsAi && player.Money == 1500 && player.Position == 0) &&
             game.Snapshot.Players.Select(player => player.Id).Distinct().Count() == 2,
-            "Starting two humans did not create distinct funded players at GO.");
+            "Starting two humans did not create distinct funded players at Crown Gate.");
         var started = game.Snapshot;
         foreach (string id in new[] { "mp-start", "mp-start-game", "mp-buy", "mp-end-turn", "mp-build", "mp-jail-pay" })
             Require(!game.HandleAction(id, Next()), $"Unavailable action {id} was accepted before a roll.");
@@ -56,23 +58,23 @@ internal static class MonopolyRegression
         Act(game, "mp-roll");
         Require(game.Snapshot.Phase == MonopolyPhase.AwaitingPurchase && game.Snapshot.ActivePlayer!.Position == 3 &&
             game.Snapshot.PendingPropertyIndex == 3 && game.Snapshot.ActivePlayer.Money == 1500,
-            "Landing on Baltic Avenue did not offer the unowned property.");
+            "Landing on Copper Lane did not offer the unowned property.");
         Act(game, "mp-buy");
         Require(Property(game, 3).OwnerId == game.Snapshot.Players[0].Id && game.Snapshot.Players[0].Money == 1440 &&
-            game.Snapshot.Phase == MonopolyPhase.AwaitingEndTurn, "Buying Baltic did not debit its $60 price exactly once.");
+            game.Snapshot.Phase == MonopolyPhase.AwaitingEndTurn, "Buying Copper Lane did not debit its $60 price exactly once.");
         var bought = game.Snapshot;
         Require(!game.HandleAction("mp-buy", Next()) && ReferenceEquals(bought, game.Snapshot), "A purchase was charged twice.");
         Act(game, "mp-end-turn");
         Act(game, "mp-roll");
         Require(game.Snapshot.ActivePlayerIndex == 1 && game.Snapshot.Players[1].Position == 3 &&
             game.Snapshot.Players[1].Money == 1496 && game.Snapshot.Players[0].Money == 1444,
-            "An opponent paid the wrong Baltic rent or the owner did not receive it.");
+            "An opponent paid the wrong Copper Lane rent or the owner did not receive it.");
 
         var passGo = Started(new MonopolyDice(3, 3));
         Change(passGo, data => data.Players[0].Position = 37);
         Act(passGo, "mp-roll");
         Require(passGo.Snapshot.ActivePlayer!.Position == 3 && passGo.Snapshot.ActivePlayer.Money == 1700,
-            "Passing GO failed to pay exactly $200.");
+            "Passing Crown Gate failed to pay exactly $200.");
 
         var mortgaged = Started(new MonopolyDice(1, 2));
         Change(mortgaged, data => { var property = data.Properties.Single(p => p.SpaceIndex == 3);
@@ -96,17 +98,23 @@ internal static class MonopolyRegression
             "The first double did not grant another roll to the same player.");
         Act(doubles, "mp-roll");
         Require(doubles.Snapshot.ActivePlayer!.Position == 10 && !doubles.Snapshot.ActivePlayer.InJail,
-            "Visiting Jail was mistaken for imprisonment.");
+            "A levy landing after doubles was mistaken for custody.");
         Act(doubles, "mp-roll");
-        Require(doubles.Snapshot.ActivePlayer!.InJail && doubles.Snapshot.ActivePlayer.Position == 10 &&
+        Require(doubles.Snapshot.ActivePlayer!.InJail && doubles.Snapshot.ActivePlayer.Position == 13 &&
             doubles.Snapshot.Phase == MonopolyPhase.AwaitingEndTurn,
             "Three doubles did not send the player directly to Jail.");
         Act(doubles, "mp-end-turn");
         Require(doubles.Snapshot.ActivePlayerIndex == 1, "A third double granted another roll after Jail.");
 
-        var jailDouble = Jailed(new MonopolyDice(3, 3));
+        var visiting = Started(new MonopolyDice(1, 2));
+        Change(visiting, data => data.Players[0].Position = 10);
+        Act(visiting, "mp-roll");
+        Require(visiting.Snapshot.ActivePlayer is { Position: 13, InJail: false },
+            "Visiting Civic Watch incorrectly detained the player.");
+
+        var jailDouble = Jailed(new MonopolyDice(2, 2));
         Act(jailDouble, "mp-roll");
-        Require(!jailDouble.Snapshot.ActivePlayer!.InJail && jailDouble.Snapshot.ActivePlayer.Position == 16,
+        Require(!jailDouble.Snapshot.ActivePlayer!.InJail && jailDouble.Snapshot.ActivePlayer.Position == 17,
             "A jailed double failed to release and move the player.");
         Act(jailDouble, "mp-buy"); Act(jailDouble, "mp-end-turn");
         Require(jailDouble.Snapshot.ActivePlayerIndex == 1, "A double used to leave Jail incorrectly granted an extra roll.");
@@ -116,18 +124,18 @@ internal static class MonopolyRegression
         Require(!jailPay.Snapshot.ActivePlayer!.InJail && jailPay.Snapshot.ActivePlayer.Money == 1450 &&
             jailPay.Snapshot.Phase == MonopolyPhase.AwaitingRoll, "Paying Jail bail did not cost $50 and allow a roll.");
         Act(jailPay, "mp-roll");
-        Require(jailPay.Snapshot.ActivePlayer!.Position == 13, "Bail payment itself moved the player or prevented its roll.");
+        Require(jailPay.Snapshot.ActivePlayer!.Position == 16, "Bail payment itself moved the player or prevented its roll.");
 
         var jailFailure = Jailed(new MonopolyDice(1, 2));
         Act(jailFailure, "mp-roll");
-        Require(jailFailure.Snapshot.ActivePlayer!.InJail && jailFailure.Snapshot.ActivePlayer.Position == 10 &&
+        Require(jailFailure.Snapshot.ActivePlayer!.InJail && jailFailure.Snapshot.ActivePlayer.Position == 13 &&
             jailFailure.Snapshot.ActivePlayer.JailTurns == 1 && jailFailure.Snapshot.ActivePlayer.Money == 1500,
             "A failed Jail roll moved the player or deducted premature bail.");
 
         var thirdFailure = Jailed(new MonopolyDice(1, 2));
         Change(thirdFailure, data => data.Players[0].JailTurns = 2);
         Act(thirdFailure, "mp-roll");
-        Require(!thirdFailure.Snapshot.ActivePlayer!.InJail && thirdFailure.Snapshot.ActivePlayer.Position == 13 &&
+        Require(!thirdFailure.Snapshot.ActivePlayer!.InJail && thirdFailure.Snapshot.ActivePlayer.Position == 16 &&
             thirdFailure.Snapshot.ActivePlayer.Money == 1450, "The third failed Jail roll did not charge bail and use that roll.");
 
         var jailCard = Jailed(new MonopolyDice(1, 2));
@@ -192,25 +200,25 @@ internal static class MonopolyRegression
         Require(!Property(mortgage, 1).Mortgaged && mortgage.Snapshot.ActivePlayer!.Money == 1497,
             "Unmortgaging omitted its 10% interest.");
         var utility = Started();
-        Change(utility, data => data.Properties.Single(p => p.SpaceIndex == 12).OwnerId = data.Players[0].Id);
+        Change(utility, data => data.Properties.Single(p => p.SpaceIndex == 4).OwnerId = data.Players[0].Id);
         Act(utility, "mp-manage"); Act(utility, "mp-mortgage"); Act(utility, "mp-unmortgage");
-        Require(utility.Snapshot.ActivePlayer!.Money == 1492 && !Property(utility, 12).Mortgaged,
+        Require(utility.Snapshot.ActivePlayer!.Money == 1492 && !Property(utility, 4).Mortgaged,
             "A utility mortgage failed to round its $7.50 redemption interest up to $8.");
     }
 
     private static void CheckDebtAndBankruptcy()
     {
         var game = Started(new MonopolyDice(1, 1));
-        Change(game, data => { data.Players[0].Position = 37; data.Players[0].Money = 50;
-            foreach (var property in data.Properties.Where(p => p.SpaceIndex is 37 or 39)) property.OwnerId = data.Players[1].Id;
-            data.Properties.Single(p => p.SpaceIndex == 39).Houses = 5;
-            data.Properties.Single(p => p.SpaceIndex == 37).Houses = 5;
+        Change(game, data => { data.Players[0].Position = 20; data.Players[0].Money = 50;
+            foreach (var property in data.Properties.Where(p => p.SpaceIndex is 21 or 22)) property.OwnerId = data.Players[1].Id;
+            data.Properties.Single(p => p.SpaceIndex == 22).Houses = 5;
+            data.Properties.Single(p => p.SpaceIndex == 21).Houses = 5;
         });
         Act(game, "mp-roll");
         Require(game.Snapshot.Phase == MonopolyPhase.Debt && game.Snapshot.DebtAmount == 2000 &&
             game.Snapshot.DebtPlayerId == game.Snapshot.Players[0].Id &&
             game.Snapshot.DebtCreditorId == game.Snapshot.Players[1].Id && !game.HandleAction("mp-end-turn", Next()),
-            "Unpayable Boardwalk rent did not enter creditor-specific debt.");
+            "Unpayable Royal Arcade rent did not enter creditor-specific debt.");
         Act(game, "mp-bankrupt");
         Require(game.Snapshot.Players[0].Bankrupt && game.Snapshot.Players[0].Money == 0 &&
             game.Snapshot.Players[1].Money == 1550 && game.Snapshot.Phase == MonopolyPhase.GameOver &&
@@ -219,14 +227,14 @@ internal static class MonopolyRegression
         Require(!game.Tick(Next()) && !game.HandleAction("mp-roll", Next()), "A completed game continued taking turns.");
 
         var recovery = Started(new MonopolyDice(1, 2));
-        Change(recovery, data => { data.Players[0].Position = 1; data.Players[0].Money = 100;
-            data.Properties.Single(p => p.SpaceIndex == 39).OwnerId = data.Players[0].Id; });
+        Change(recovery, data => { data.Players[0].Position = 7; data.Players[0].Money = 100;
+            data.Properties.Single(p => p.SpaceIndex == 22).OwnerId = data.Players[0].Id; });
         Act(recovery, "mp-roll");
         Require(recovery.Snapshot.Phase == MonopolyPhase.Debt && recovery.Snapshot.DebtAmount == 200,
-            "Insufficient cash for Income Tax bypassed debt.");
+            "Insufficient cash for Market Levy bypassed debt.");
         Act(recovery, "mp-manage"); Act(recovery, "mp-mortgage");
         Require(recovery.Snapshot.Phase == MonopolyPhase.AwaitingEndTurn && recovery.Snapshot.ActivePlayer!.Money == 100 &&
-            Property(recovery, 39).Mortgaged && recovery.Snapshot.DebtAmount == 0,
+            Property(recovery, 22).Mortgaged && recovery.Snapshot.DebtAmount == 0,
             "Mortgage proceeds did not settle the tax debt once and resume the turn.");
     }
 
@@ -280,20 +288,20 @@ internal static class MonopolyRegression
     {
         var utility = Started(new MonopolyDice(1, 2), new(2, 3));
         Change(utility, data => { data.Players[0].Position = 4; data.ChanceDeck = Deck(7);
-            data.Properties.Single(p => p.SpaceIndex == 12).OwnerId = data.Players[1].Id; });
+            data.Properties.Single(p => p.SpaceIndex == 27).OwnerId = data.Players[1].Id; });
         Act(utility, "mp-roll");
-        Require(utility.Snapshot.Players[0].Position == 12 && utility.Snapshot.Players[0].Money == 1450 &&
-            utility.Snapshot.Players[1].Money == 1550, "The nearest-utility Chance card did not use a fresh roll at ten times its total.");
+        Require(utility.Snapshot.Players[0].Position == 27 && utility.Snapshot.Players[0].Money == 1450 &&
+            utility.Snapshot.Players[1].Money == 1550, "The nearest-utility City Charter card did not use a fresh roll at ten times its total.");
         var advance = Started(new MonopolyDice(1, 2));
         Change(advance, data => { data.Players[0].Position = 4; data.ChanceDeck = Deck(0); });
         Act(advance, "mp-roll");
         Require(advance.Snapshot.Players[0].Position == 0 && advance.Snapshot.Players[0].Money == 1700,
-            "Advance to GO did not move to GO and pay $200 once.");
+            "Advance to Crown Gate did not move to Crown Gate and pay $200 once.");
         var backThree = Started(new MonopolyDice(1, 3));
         Change(backThree, data => { data.Players[0].Position = 32; data.ChanceDeck = Deck(8); data.ChestDeck = Deck(1); });
         Act(backThree, "mp-roll");
-        Require(backThree.Snapshot.Players[0].Position == 33 && backThree.Snapshot.Players[0].Money == 1700,
-            "Going back three spaces failed to resolve Community Chest or incorrectly paid GO.");
+        Require(backThree.Snapshot.Players[0].Position == 13 && backThree.Snapshot.Players[0].InJail && backThree.Snapshot.Players[0].Money == 1500,
+            "The backward diversion failed to resolve Civic Review or incorrectly paid the circuit grant.");
 
         var heldCard = Started(new MonopolyDice(1, 1));
         Change(heldCard, data => data.ChestDeck = Deck(4));
@@ -301,7 +309,7 @@ internal static class MonopolyRegression
         var heldData = Data(heldCard);
         Require(heldCard.Snapshot.Players[0].GetOutOfJailCards == 1 && heldData.ChestFreeCardHolderId == heldData.Players[0].Id,
             "Drawing a Jail Free card did not preserve the card's player and deck ownership.");
-        Change(heldCard, data => { data.Players[0].InJail = true; data.Players[0].Position = 10;
+        Change(heldCard, data => { data.Players[0].InJail = true; data.Players[0].Position = 13;
             data.Phase = MonopolyPhase.AwaitingRoll; data.ExtraRoll = false; data.DoublesCount = 0; });
         Act(heldCard, "mp-jail-card");
         var returned = Data(heldCard);
@@ -314,7 +322,7 @@ internal static class MonopolyRegression
         Act(birthday, "mp-roll");
         Require(birthday.Snapshot.Phase == MonopolyPhase.Debt && birthday.Snapshot.ActivePlayerIndex == 0 &&
             birthday.Snapshot.DebtPlayerId == birthday.Snapshot.Players[1].Id && birthday.Snapshot.DebtAmount == 10,
-            "A birthday obligation was assigned to the active player instead of the owing opponent.");
+            "A guild-fair obligation was assigned to the active player instead of the owing opponent.");
         Act(birthday, "mp-bankrupt");
         Require(birthday.Snapshot.Players[1].Bankrupt && birthday.Snapshot.Players[0].Money == 1505 &&
             birthday.Snapshot.WinnerId == birthday.Snapshot.Players[0].Id,
@@ -365,7 +373,7 @@ internal static class MonopolyRegression
     private static MonopolyGame Jailed(params MonopolyDice[] rolls)
     {
         var game = Started(rolls);
-        Change(game, data => { data.Players[0].InJail = true; data.Players[0].Position = 10; });
+        Change(game, data => { data.Players[0].InJail = true; data.Players[0].Position = 13; });
         return game;
     }
     private static MonopolyGame Started(params MonopolyDice[] rolls)

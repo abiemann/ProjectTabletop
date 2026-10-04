@@ -26,7 +26,7 @@ internal static class MonopolyBoardRegression
             if (count < 2) continue;
             var board = new BoardSession(monopoly: new MonopolyGame(seed: 17));
             Pinch(board, "monopoly");
-            Require(board.Screen == BoardScreen.Monopoly && board.Title == "Monopoly" &&
+            Require(board.Screen == BoardScreen.Monopoly && board.Title == "Crown & Deed" &&
                 board.MonopolyState.Phase == MonopolyPhase.Landing,
                 "The replacement menu entry did not open the Monopoly landing board.");
             Require(board.Buttons.Any(button => button.Label == "Start Game"), "The landing board lacks Start Game.");

@@ -7,8 +7,12 @@ namespace ProjectTabletop.Interaction;
 public sealed record MonopolyRoll(long Sequence, MonopolySnapshot Previous, MonopolySnapshot Current,
     DateTimeOffset StartedAt);
 
+/// <summary>An accepted development, emitted only after its cash and building change are committed.</summary>
+public sealed record MonopolyDevelopment(long Sequence, int SpaceIndex, int PlayerId,
+    MonopolySnapshot Previous, MonopolySnapshot Current, DateTimeOffset StartedAt);
+
 /// <summary>
-/// Classic US Monopoly for two to six local players. All state changes are synchronous;
+/// Crown &amp; Deed, an original merchant-city game for two to six local players. State changes are synchronous;
 /// AI makes at most one visible decision per Tick. Saves preserve decks and decisions.
 /// </summary>
 public sealed partial class MonopolyGame
@@ -23,7 +27,7 @@ public sealed partial class MonopolyGame
     private readonly Random _random;
     private readonly Queue<MonopolyDice> _initialRolls;
     private MonopolySaveData _state = new() { Phase = MonopolyPhase.Landing, ActivePlayerIndex = -1,
-        Status = "A grand game of property and fortune." };
+        Status = "Build a merchant city. Leave your mark on the boulevard." };
     private MonopolySnapshot? _snapshot;
     private DateTimeOffset _nextAiStep;
     private DateTimeOffset? _lastNow;
@@ -31,6 +35,8 @@ public sealed partial class MonopolyGame
     private string _exitReturnStatus = "";
     private string? _resumeSave;
     private long _rollSequence;
+    private long _developmentSequence;
+    private (MonopolySnapshot Previous, int SpaceIndex, int PlayerId)? _pendingDevelopment;
 
     public MonopolyGame(int? seed = null, IEnumerable<MonopolyDice>? initialRolls = null)
     {
@@ -45,6 +51,9 @@ public sealed partial class MonopolyGame
 
     /// <summary>Raised once per accepted roll; sequence numbers survive new games and save loads.</summary>
     public event Action<MonopolyRoll>? RollOccurred;
+
+    /// <summary>Raised once for a human or AI build; not replayed by saves, loads, selling or drawing.</summary>
+    public event Action<MonopolyDevelopment>? DevelopmentOccurred;
 
     public bool HandleAction(string id, DateTimeOffset now)
     {
@@ -77,12 +86,12 @@ public sealed partial class MonopolyGame
         else if (id == "mp-start-game")
         {
             _state.Phase = MonopolyPhase.Setup;
-            _state.Status = "Choose your company. Two to six players can join.";
+            _state.Status = "Gather your companies. Two to six merchants can join.";
         }
         else if (id == "mp-setup-cancel")
         {
             _state.Phase = MonopolyPhase.Landing;
-            _state.Status = "A grand game of property and fortune.";
+            _state.Status = "Build a merchant city. Leave your mark on the boulevard.";
         }
         else if (id == "mp-human-plus") _state.Humans++;
         else if (id == "mp-human-minus") _state.Humans--;
@@ -97,12 +106,13 @@ public sealed partial class MonopolyGame
         else if (id == "mp-new-game")
         {
             _state = new() { Phase = MonopolyPhase.Setup, ActivePlayerIndex = -1,
-                Status = "Choose your company. Two to six players can join." };
+                Status = "Gather your companies. Two to six merchants can join." };
         }
         else PerformGameAction(id, now);
         _nextAiStep = now + AiPause;
         Changed();
         PublishRoll(beforeRoll, now);
+        PublishDevelopment(now);
         return true;
     }
 
@@ -134,6 +144,7 @@ public sealed partial class MonopolyGame
         _nextAiStep = now + AiPause;
         Changed();
         PublishRoll(beforeRoll, now);
+        PublishDevelopment(now);
         return true;
     }
 
@@ -203,7 +214,7 @@ public sealed partial class MonopolyGame
     }
 
     private void ReturnToLanding() => _state = new() { Phase = MonopolyPhase.Landing, ActivePlayerIndex = -1,
-        Humans = _state.Humans, Ais = _state.Ais, Status = "A grand game of property and fortune." };
+        Humans = _state.Humans, Ais = _state.Ais, Status = "Build a merchant city. Leave your mark on the boulevard." };
 
     private void PerformGameAction(string id, DateTimeOffset now)
     {
@@ -214,7 +225,7 @@ public sealed partial class MonopolyGame
                 Active.Money -= 50;
                 Active.InJail = false;
                 Active.JailTurns = 0;
-                _state.Status = $"{Active.Name} paid $50. Roll to leave Jail.";
+                _state.Status = $"{Active.Name} paid 50 crowns. Roll to leave Civic Watch.";
                 break;
             case "mp-jail-card":
                 if (_state.ChanceFreeCardHolderId == Active.Id) ReturnJailCard(chance: true);
@@ -222,13 +233,13 @@ public sealed partial class MonopolyGame
                 Active.GetOutOfJailCards--;
                 Active.InJail = false;
                 Active.JailTurns = 0;
-                _state.Status = $"{Active.Name} used a Get Out of Jail Free card.";
+                _state.Status = $"{Active.Name} used a Safe-Conduct Pass.";
                 break;
             case "mp-buy":
                 var space = Spaces[_state.PendingPropertyIndex!.Value];
                 Active.Money -= space.Price;
                 PropertyAt(space.Index).OwnerId = Active.Id;
-                _state.Status = $"{Active.Name} bought {space.Name} for ${space.Price}.";
+                _state.Status = $"{Active.Name} bought {space.Name} for {space.Price} crowns.";
                 _state.PendingPropertyIndex = null;
                 FinishLanding();
                 break;
@@ -283,7 +294,7 @@ public sealed partial class MonopolyGame
             }
             else
             {
-                _state.Status = $"{Active.Name} rolled {_state.Dice.First} + {_state.Dice.Second} and stays in Jail.";
+                _state.Status = $"{Active.Name} rolled {_state.Dice.First} + {_state.Dice.Second} and stays in Civic Watch.";
                 _state.Phase = MonopolyPhase.AwaitingEndTurn;
             }
             return;
@@ -292,7 +303,7 @@ public sealed partial class MonopolyGame
         _state.ExtraRoll = _state.Dice.IsDouble;
         if (_state.DoublesCount == 3)
         {
-            SendToJail("Three doubles in a row. Go directly to Jail.");
+            SendToJail("Three hurried circuits draw a civic review. Report to Civic Watch.");
             return;
         }
         MoveBy(_state.Dice.Total);
@@ -323,7 +334,7 @@ public sealed partial class MonopolyGame
             {
                 _state.PendingPropertyIndex = space.Index;
                 _state.Phase = MonopolyPhase.AwaitingPurchase;
-                _state.Status += $" Buy for ${space.Price}, or send it to auction.";
+                _state.Status += $" Buy for {space.Price} crowns, or send it to auction.";
             }
             else if (property.OwnerId != Active.Id && !property.Mortgaged)
             {
@@ -333,14 +344,14 @@ public sealed partial class MonopolyGame
                     var utilityDice = _initialRolls.Count > 0 ? _initialRolls.Dequeue() : new(_random.Next(1, 7), _random.Next(1, 7));
                     rent = utilityDice.Total * 10;
                 }
-                _state.Status = $"{Active.Name} owes ${rent} rent to {Player(property.OwnerId.Value).Name}.";
+                _state.Status = $"{Active.Name} owes {rent} crowns rent to {Player(property.OwnerId.Value).Name}.";
                 Charge(Active.Id, rent, property.OwnerId, "finish");
             }
             else FinishLanding();
         }
         else switch (space.Kind)
         {
-            case MonopolySpaceKind.GoToJail: SendToJail("Go directly to Jail. Do not collect $200."); break;
+            case MonopolySpaceKind.GoToJail: SendToJail("Report to Civic Watch. No circuit grant is paid."); break;
             case MonopolySpaceKind.Tax: Charge(Active.Id, space.Price, null, "finish"); break;
             case MonopolySpaceKind.Chance: DrawCard(true); break;
             case MonopolySpaceKind.CommunityChest: DrawCard(false); break;
@@ -365,7 +376,7 @@ public sealed partial class MonopolyGame
 
     private void SendToJail(string message)
     {
-        Active.Position = 10;
+        Active.Position = CivicWatchIndex;
         Active.InJail = true;
         Active.JailTurns = 0;
         _state.ExtraRoll = false;
@@ -387,7 +398,7 @@ public sealed partial class MonopolyGame
         _state.Dice = default;
         _state.LastCard = "";
         _state.Phase = MonopolyPhase.AwaitingRoll;
-        _state.Status = Active.InJail ? $"{Active.Name} is in Jail. Roll doubles, pay $50, or use a card."
+        _state.Status = Active.InJail ? $"{Active.Name} is in Civic Watch. Roll doubles, pay 50 crowns, or use a card."
             : $"{Active.Name}, your turn. Roll the dice.";
     }
 
@@ -416,7 +427,7 @@ public sealed partial class MonopolyGame
         var auction = _state.Auction!;
         auction.Bid += increment;
         auction.BidderId = auction.CurrentBidderId;
-        _state.Status = $"{Player(auction.BidderId.Value).Name} bids ${auction.Bid}.";
+        _state.Status = $"{Player(auction.BidderId.Value).Name} bids {auction.Bid} crowns.";
         AdvanceAuction();
     }
 
@@ -438,9 +449,9 @@ public sealed partial class MonopolyGame
             {
                 Player(winner).Money -= auction.Bid;
                 PropertyAt(auction.SpaceIndex).OwnerId = winner;
-                _state.Status = $"{Player(winner).Name} wins {Spaces[auction.SpaceIndex].Name} for ${auction.Bid}.";
+                _state.Status = $"{Player(winner).Name} wins {Spaces[auction.SpaceIndex].Name} for {auction.Bid} crowns.";
             }
-            else _state.Status = $"No bids. {Spaces[auction.SpaceIndex].Name} remains with the Bank.";
+            else _state.Status = $"No bids. {Spaces[auction.SpaceIndex].Name} remains with the city treasury.";
             _state.Auction = null;
             _state.PendingPropertyIndex = null;
             FinishLanding();
@@ -473,7 +484,7 @@ public sealed partial class MonopolyGame
                 _state.DebtPlayerId = debtor.Id;
                 _state.DebtCreditorId = payment.CreditorId;
                 _state.Phase = MonopolyPhase.Debt;
-                _state.Status = $"{debtor.Name} owes ${payment.Amount}. Sell buildings or mortgage property to raise funds.";
+                _state.Status = $"{debtor.Name} owes {payment.Amount} crowns. Sell buildings or mortgage property to raise funds.";
                 return;
             }
             debtor.Money -= payment.Amount;
@@ -504,7 +515,7 @@ public sealed partial class MonopolyGame
         var properties = Owned(debtor.Id).ToList();
         foreach (var property in properties)
         {
-            // Buildings are returned to the Bank at half their purchase price.
+            // Buildings are returned to the city treasury at half their purchase price.
             debtor.Money += property.Houses * Spaces[property.SpaceIndex].HouseCost / 2;
             property.Houses = 0;
             property.OwnerId = creditor;
@@ -577,21 +588,22 @@ public sealed partial class MonopolyGame
 
     private void Build(MonopolySavedProperty p)
     {
+        _pendingDevelopment = (Snapshot, p.SpaceIndex, p.OwnerId!.Value);
         Player(p.OwnerId!.Value).Money -= Spaces[p.SpaceIndex].HouseCost;
         p.Houses++;
-        _state.Status = p.Houses == 5 ? $"A hotel now crowns {Spaces[p.SpaceIndex].Name}." : $"A house was built on {Spaces[p.SpaceIndex].Name}.";
+        _state.Status = p.Houses == 5 ? $"A grand hall now crowns {Spaces[p.SpaceIndex].Name}." : $"A shop opened on {Spaces[p.SpaceIndex].Name}.";
     }
     private void Sell(MonopolySavedProperty p)
     {
         p.Houses--;
         Player(p.OwnerId!.Value).Money += Spaces[p.SpaceIndex].HouseCost / 2;
-        _state.Status = $"A building on {Spaces[p.SpaceIndex].Name} was sold back to the Bank.";
+        _state.Status = $"A building on {Spaces[p.SpaceIndex].Name} was sold back to the city treasury.";
     }
     private void Mortgage(MonopolySavedProperty p)
     {
         p.Mortgaged = true;
         Player(p.OwnerId!.Value).Money += Spaces[p.SpaceIndex].Price / 2;
-        _state.Status = $"{Spaces[p.SpaceIndex].Name} mortgaged for ${Spaces[p.SpaceIndex].Price / 2}.";
+        _state.Status = $"{Spaces[p.SpaceIndex].Name} mortgaged for {Spaces[p.SpaceIndex].Price / 2} crowns.";
     }
     private void SellGroup(MonopolySavedProperty selected)
     {
@@ -599,7 +611,7 @@ public sealed partial class MonopolyGame
         int proceeds = group.Sum(p => p.Houses * Spaces[p.SpaceIndex].HouseCost / 2);
         foreach (var property in group) property.Houses = 0;
         Player(selected.OwnerId!.Value).Money += proceeds;
-        _state.Status = $"All buildings in the {Spaces[selected.SpaceIndex].Group} group sold for ${proceeds}.";
+        _state.Status = $"All buildings in {GroupName(Spaces[selected.SpaceIndex].Group)} sold for {proceeds} crowns.";
     }
     private void SelectProperty(int direction)
     {
@@ -736,11 +748,19 @@ public sealed partial class MonopolyGame
         long sequence = ++_rollSequence;
         RollOccurred?.Invoke(new(sequence, previous, Snapshot, now));
     }
+    private void PublishDevelopment(DateTimeOffset now)
+    {
+        if (_pendingDevelopment is not { } development) return;
+        _pendingDevelopment = null;
+        long sequence = ++_developmentSequence;
+        DevelopmentOccurred?.Invoke(new(sequence, development.SpaceIndex, development.PlayerId,
+            development.Previous, Snapshot, now));
+    }
     private MonopolySnapshot CreateSnapshot() => new(_state.Phase, _state.Humans, _state.Ais,
         Array.AsReadOnly(_state.Players.Select(p => new MonopolyPlayerSnapshot(p.Id, p.Name, p.IsAi, p.Money,
             p.Position, p.InJail, p.JailTurns, p.GetOutOfJailCards, p.Bankrupt, p.ColorIndex)).ToArray()),
         Array.AsReadOnly(_state.Properties.Select(p => new MonopolyPropertySnapshot(p.SpaceIndex, p.OwnerId, p.Houses, p.Mortgaged)).ToArray()),
-        _state.ActivePlayerIndex, _state.Dice, _state.Status, _state.LastCard, _state.TurnNumber, AvailableActions(),
+        _state.ActivePlayerIndex, _state.Dice, _state.Status, _state.LastCard, _state.TurnNumber, Array.AsReadOnly(AvailableActions().ToArray()),
         _state.SelectedPropertyIndex, _state.PendingPropertyIndex,
         _state.Auction is { } a ? new(a.SpaceIndex, a.Bid, a.BidderId, a.CurrentBidderId, Array.AsReadOnly(a.PassedPlayerIds.ToArray())) : null,
         _state.WinnerId, Revision, _resumeSave is not null, _state.DebtAmount, _state.DebtPlayerId, _state.DebtCreditorId);
@@ -754,64 +774,65 @@ public sealed partial class MonopolyGame
 
     private static MonopolySaveData ParseSave(string json)
     {
-        if (string.IsNullOrWhiteSpace(json) || json.Length > 100_000) throw new FormatException("The Monopoly save is empty or too large.");
+        if (string.IsNullOrWhiteSpace(json) || json.Length > 100_000) throw new FormatException("The Crown & Deed save is empty or too large.");
         MonopolySaveData s;
         try { s = JsonSerializer.Deserialize<MonopolySaveData>(json, SaveOptions) ?? throw new JsonException(); }
-        catch (Exception e) when (e is JsonException or NotSupportedException) { throw new FormatException("The Monopoly save is not valid JSON.", e); }
-        if (s.Version != 1 || s.Players is null || s.Properties is null || s.Payments is null || s.PendingBankAuctions is null
+        catch (Exception e) when (e is JsonException or NotSupportedException) { throw new FormatException("The Crown & Deed save is not valid JSON.", e); }
+        if (s.Version is not (1 or 2) || s.Players is null || s.Properties is null || s.Payments is null || s.PendingBankAuctions is null
             || s.ChanceDeck is null || s.ChestDeck is null || s.Status is null || s.LastCard is null)
-            throw new FormatException("The Monopoly save version or fields are invalid.");
+            throw new FormatException("The Crown & Deed save version or fields are invalid.");
         if (s.Players.Any(p => p is null) || s.Properties.Any(p => p is null) || s.Payments.Any(p => p is null))
-            throw new FormatException("The Monopoly save contains missing players, properties, or payments.");
+            throw new FormatException("The Crown & Deed save contains missing players, properties, or payments.");
+        if (s.Version == 1) MigrateLegacySave(s);
         bool gamePhase = s.Phase is MonopolyPhase.AwaitingRoll or MonopolyPhase.AwaitingPurchase or MonopolyPhase.Auction
             or MonopolyPhase.ManageProperties or MonopolyPhase.Debt or MonopolyPhase.AwaitingEndTurn or MonopolyPhase.GameOver;
         if (!gamePhase || s.Humans < 0 || s.Ais < 0 || s.Humans + s.Ais is < 2 or > 6 || s.Players.Count != s.Humans + s.Ais
             || s.Players.Count(p => !p.IsAi) != s.Humans || s.Players.Count(p => p.IsAi) != s.Ais
             || s.ActivePlayerIndex < 0 || s.ActivePlayerIndex >= s.Players.Count || s.TurnNumber < 1 || s.TurnNumber > 10_000_000
             || s.DoublesCount is < 0 or > 3 || s.Status.Length > 2000 || s.LastCard.Length > 2000)
-            throw new FormatException("The Monopoly save contains invalid gameplay state.");
+            throw new FormatException("The Crown & Deed save contains invalid gameplay state.");
         var ids = s.Players.Select(p => p?.Id ?? 0).ToHashSet();
         if (ids.Count != s.Players.Count || ids.Any(id => id is < 1 or > 6) || s.Players.Any(p => p is null || p.Name is null
             || p.Name.Length is < 1 or > 40 || p.Money is < 0 or > 100_000_000 || p.Position is < 0 or > 39
             || p.ColorIndex is < 0 or > 5 || p.JailTurns is < 0 or > 2 || p.GetOutOfJailCards is < 0 or > 2
-            || p.InJail && p.Position != 10 || p.Bankrupt && p.Money != 0))
-            throw new FormatException("The Monopoly save contains invalid players.");
+            || p.InJail && p.Position != CivicWatchIndex || p.Bankrupt && p.Money != 0))
+            throw new FormatException("The Crown & Deed save contains invalid players.");
         var propertyIndices = Spaces.Where(IsPurchasable).Select(p => p.Index).ToHashSet();
         if (s.Properties.Count != propertyIndices.Count || !s.Properties.Select(p => p?.SpaceIndex ?? -1).ToHashSet().SetEquals(propertyIndices)
             || s.Properties.Any(p => p is null || p.OwnerId is { } id && (!ids.Contains(id) || s.Players.First(player => player.Id == id).Bankrupt)
                 || p.Houses is < 0 or > 5 || p.Houses > 0 && (p.OwnerId is null || p.Mortgaged || Spaces[p.SpaceIndex].Kind != MonopolySpaceKind.Property)
                 || p.Mortgaged && p.OwnerId is null))
-            throw new FormatException("The Monopoly save contains invalid property ownership.");
+            throw new FormatException("The Crown & Deed save contains invalid property ownership.");
         foreach (var group in s.Properties.Where(p => Spaces[p.SpaceIndex].Group != MonopolyGroup.None).GroupBy(p => Spaces[p.SpaceIndex].Group))
         {
             if (group.Any(p => p.Houses > 0) && (group.Select(p => p.OwnerId).Distinct().Count() != 1
                 || group.Any(p => p.Mortgaged) || group.Max(p => p.Houses) - group.Min(p => p.Houses) > 1))
-                throw new FormatException("The Monopoly save contains invalid buildings.");
+                throw new FormatException("The Crown & Deed save contains invalid buildings.");
         }
         if (s.Properties.Where(p => p.Houses < 5).Sum(p => p.Houses) > 32 || s.Properties.Count(p => p.Houses == 5) > 12)
-            throw new FormatException("The Monopoly save exceeds the Bank's building supply.");
+            throw new FormatException("The Crown & Deed save exceeds the city treasury's building supply.");
         if (s.ChanceDeck.Count != 16 || !s.ChanceDeck.ToHashSet().SetEquals(Enumerable.Range(0, 16))
             || s.ChestDeck.Count != 16 || !s.ChestDeck.ToHashSet().SetEquals(Enumerable.Range(0, 16))
             || s.ChanceIndex is < 0 or > 15 || s.ChestIndex is < 0 or > 15 || s.Dice.First is < 0 or > 6 || s.Dice.Second is < 0 or > 6
-            || (s.Dice.First == 0) != (s.Dice.Second == 0)) throw new FormatException("The Monopoly save contains invalid cards or dice.");
+            || (s.Dice.First == 0) != (s.Dice.Second == 0)) throw new FormatException("The Crown & Deed save contains invalid cards or dice.");
         if (s.ChanceFreeCardHolderId is { } chanceHolder && (!ids.Contains(chanceHolder) || s.Players.First(p => p.Id == chanceHolder).Bankrupt)
             || s.ChestFreeCardHolderId is { } chestHolder && (!ids.Contains(chestHolder) || s.Players.First(p => p.Id == chestHolder).Bankrupt)
             || s.Players.Any(p => p.GetOutOfJailCards != (s.ChanceFreeCardHolderId == p.Id ? 1 : 0) + (s.ChestFreeCardHolderId == p.Id ? 1 : 0)))
-            throw new FormatException("The Monopoly save contains invalid held Jail cards.");
+            throw new FormatException("The Crown & Deed save contains invalid held Safe-Conduct Passes.");
         if (s.PendingPropertyIndex is { } pending && (!propertyIndices.Contains(pending) || s.Properties.First(p => p.SpaceIndex == pending).OwnerId is not null)
             || s.SelectedPropertyIndex is { } selected && !propertyIndices.Contains(selected)
             || s.Phase == MonopolyPhase.AwaitingPurchase && (s.PendingPropertyIndex is null || s.PendingPropertyIndex != s.Players[s.ActivePlayerIndex].Position)
             || s.Phase is not (MonopolyPhase.AwaitingPurchase or MonopolyPhase.Auction) && s.PendingPropertyIndex is not null)
-            throw new FormatException("The Monopoly save contains invalid property decisions.");
+            throw new FormatException("The Crown & Deed save contains invalid property decisions.");
         if (s.Phase == MonopolyPhase.Auction && (s.Auction is null || s.PendingPropertyIndex != s.Auction.SpaceIndex)
             || s.Phase != MonopolyPhase.Auction && s.Auction is not null)
-            throw new FormatException("The Monopoly save contains an invalid auction.");
+            throw new FormatException("The Crown & Deed save contains an invalid auction.");
         if (s.Auction is { } a && (a.PassedPlayerIds is null || a.Bid is < 0 or > 100_000_000 || !ids.Contains(a.CurrentBidderId)
             || s.Players.First(p => p.Id == a.CurrentBidderId).Bankrupt || a.PassedPlayerIds.Contains(a.CurrentBidderId)
             || a.PassedPlayerIds.Count != a.PassedPlayerIds.Distinct().Count() || a.PassedPlayerIds.Any(id => !ids.Contains(id))
             || a.BidderId is { } bidder && (!ids.Contains(bidder) || s.Players.First(p => p.Id == bidder).Bankrupt
                 || s.Players.First(p => p.Id == bidder).Money < a.Bid || a.PassedPlayerIds.Contains(bidder))
-            || (a.Bid == 0) != (a.BidderId is null))) throw new FormatException("The Monopoly save contains invalid bids.");
+            || (a.Bid == 0) != (a.BidderId is null))) throw new FormatException("The Crown & Deed save contains invalid bids.");
         bool inDebt = s.Phase == MonopolyPhase.Debt || s.Phase == MonopolyPhase.ManageProperties && s.ManageReturnPhase == MonopolyPhase.Debt;
         if (s.DebtContinuation is not ("finish" or "jail-move") || s.DebtAmount is < 0 or > 100_000_000
             || s.DebtPlayerId is { } debtor && (!ids.Contains(debtor) || s.Players.First(p => p.Id == debtor).Bankrupt)
@@ -822,18 +843,18 @@ public sealed partial class MonopolyGame
             || !inDebt && (s.DebtAmount != 0 || s.DebtPlayerId is not null || s.DebtCreditorId is not null || s.Payments.Count != 0)
             || s.Payments.Any(p => p is null || !ids.Contains(p.PlayerId) || p.Amount is < 1 or > 100_000_000
                 || p.CreditorId is { } payee && (!ids.Contains(payee) || payee == p.PlayerId)))
-            throw new FormatException("The Monopoly save contains invalid debt.");
+            throw new FormatException("The Crown & Deed save contains invalid debt.");
         if (s.Phase == MonopolyPhase.ManageProperties && (s.ManageReturnPhase is not (MonopolyPhase.AwaitingRoll or MonopolyPhase.AwaitingEndTurn or MonopolyPhase.Debt)
             || s.SelectedPropertyIndex is null || s.Properties.First(p => p.SpaceIndex == s.SelectedPropertyIndex).OwnerId != (s.DebtPlayerId ?? s.Players[s.ActivePlayerIndex].Id)
             || s.Players.First(p => p.Id == (s.DebtPlayerId ?? s.Players[s.ActivePlayerIndex].Id)).IsAi))
-            throw new FormatException("The Monopoly save contains invalid management controls.");
+            throw new FormatException("The Crown & Deed save contains invalid management controls.");
         if (s.PendingBankAuctions.Any(index => !propertyIndices.Contains(index) || s.Properties.First(p => p.SpaceIndex == index).OwnerId is not null)
-            || s.PendingBankAuctions.Count != s.PendingBankAuctions.Distinct().Count()) throw new FormatException("The Monopoly save contains invalid bank auctions.");
+            || s.PendingBankAuctions.Count != s.PendingBankAuctions.Distinct().Count()) throw new FormatException("The Crown & Deed save contains invalid bank auctions.");
         int alive = s.Players.Count(p => !p.Bankrupt);
         if (s.Phase == MonopolyPhase.GameOver && (alive != 1 || s.WinnerId != s.Players.First(p => !p.Bankrupt).Id)
             || s.Phase != MonopolyPhase.GameOver && (alive < 2 || s.WinnerId is not null)
             || s.Players[s.ActivePlayerIndex].Bankrupt && s.Phase is not (MonopolyPhase.AwaitingEndTurn or MonopolyPhase.Auction or MonopolyPhase.GameOver or MonopolyPhase.Debt or MonopolyPhase.ManageProperties))
-            throw new FormatException("The Monopoly save contains invalid turn or winner state.");
+            throw new FormatException("The Crown & Deed save contains invalid turn or winner state.");
         return s;
     }
 }
