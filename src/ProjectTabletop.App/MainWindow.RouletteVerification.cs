@@ -1,4 +1,5 @@
 #if DEBUG
+using System.Numerics;
 using System.Reflection;
 using Microsoft.Graphics.Canvas;
 using ProjectTabletop.App.Projection;
@@ -22,25 +23,43 @@ public sealed partial class MainWindow
         var images = new List<string>();
         var aspects = new List<object>();
         int exactClockChecks = 0, unchangedCaptionChecks = 0, nativeHolds = 0;
+        int pocketEndpointChecks = 0, consecutiveRoundContinuityChecks = 0, boundedTrackRadiusChecks = 0;
 
         // Prove the absolute-time visual endpoint independently for every pocket,
         // including zero and the discontinuity across the last/first angle.
         var sample = new RouletteGame(71).Snapshot;
         var motionStart = DateTimeOffset.UtcNow;
+        foreach (long roundNumber in new[] { 1L, 2L })
         foreach (int index in Enumerable.Range(0, RouletteGame.WheelOrder.Count))
         {
-            var round = sample with { Phase = RoulettePhase.Spinning, RoundNumber = 1,
+            var round = sample with { Phase = RoulettePhase.Spinning, RoundNumber = roundNumber,
                 RoundStartedAt = motionStart, Outcome = RouletteGame.WheelOrder[index], PocketIndex = index };
             var terminal = SceneCompositor.GetRouletteMotion(round, motionStart + round.SpinDuration);
             var approaching = SceneCompositor.GetRouletteMotion(round,
                 motionStart + round.SpinDuration - TimeSpan.FromMilliseconds(1));
-            double expected = index * Math.Tau / RouletteGame.WheelOrder.Count - Math.PI / 2;
-            Check(Math.Abs(terminal.WheelAngle) < 1e-10 && terminal.BallRadius == 130 && terminal.Progress == 1 &&
+            double resting = SceneCompositor.RouletteRestingWheelAngle(roundNumber);
+            double expected = index * Math.Tau / RouletteGame.WheelOrder.Count - Math.PI / 2 + resting;
+            var settled = SceneCompositor.GetRouletteMotion(round with { Phase = RoulettePhase.Betting }, motionStart + round.SpinDuration);
+            Check(AngleError(terminal.WheelAngle, resting) < 1e-10 && terminal.BallRadius == 130 && terminal.Progress == 1 &&
                 AngleError(terminal.BallAngle, expected) < 1e-10 &&
                 AngleError(approaching.BallAngle, terminal.BallAngle) < .001 &&
                 AngleError(approaching.WheelAngle, terminal.WheelAngle) < .001 &&
-                Math.Abs(approaching.BallRadius - terminal.BallRadius) < .01,
+                Math.Abs(approaching.BallRadius - terminal.BallRadius) < .01 && terminal == settled &&
+                Vector2.Distance(SceneCompositor.ProjectRouletteBall(approaching), SceneCompositor.ProjectRouletteBall(terminal)) < .15,
                 "Roulette's ball/wheel endpoint does not settle continuously in pocket " + index + ".");
+            pocketEndpointChecks++;
+            if (index == 0)
+            {
+                // A ball may bounce radially on descent, but its center must
+                // remain inside the physical track rather than cross the rail.
+                for (int frame = 0; frame <= 420; frame++)
+                {
+                    var moving = SceneCompositor.GetRouletteMotion(round, motionStart.AddSeconds(frame / 60d));
+                    Check(double.IsFinite(moving.BallRadius) && moving.BallRadius <= 159.000001,
+                        "Roulette's descending ball crossed its fixed outer rail.");
+                    boundedTrackRadiusChecks++;
+                }
+            }
         }
 
         foreach (var aspect in new[] { (Width: 1152, Height: 896, Name: "72x56"),
@@ -55,7 +74,7 @@ public sealed partial class MainWindow
             var scene = fixture.Scene;
             scene.ShowRoulette();
             byte[] idle = await Capture("idle");
-            var circle = fixture.CheckCircularRim(idle);
+            var projection = fixture.CheckProjectedRim(idle);
             fixture.CheckRotorPocketColors();
             Check(typeof(SceneCompositor).GetField("_rouletteBackdrop", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .GetValue(scene) is CanvasBitmap, "Roulette rendered a fallback instead of its generated casino artwork.");
@@ -76,8 +95,10 @@ public sealed partial class MainWindow
             byte[] flight = await Capture("spin-flight");
             fixture.Now = committed.RoundStartedAt.AddSeconds(3.15);
             byte[] orbit = fixture.Draw();
+            var mechanism = fixture.CheckMechanismParts(committed);
             Check(ReferenceEquals(committed, scene.RouletteState) &&
                 !flight.AsSpan().SequenceEqual(orbit), "Roulette motion either changed authoritative state or did not animate.");
+            fixture.CheckStationaryRimAndWood(flight, orbit);
             foreach (var button in scene.CurrentBoardButtons.Where(button => button.IsHold))
             {
                 Check(fixture.RegionUnchanged(flight, orbit, button.Bounds),
@@ -100,12 +121,37 @@ public sealed partial class MainWindow
             fixture.Now += TimeSpan.FromMilliseconds(650);
             await Capture("win-glints");
             Check(ReferenceEquals(result, scene.RouletteState), "Winning decorative glints changed roulette state.");
+
+            // A second paid round must inherit the first physical resting pose,
+            // rather than resetting its rotor or ball when Betting/Spinning flips.
+            fixture.Now = result.RoundStartedAt + result.SpinDuration + TimeSpan.FromSeconds(4);
+            Check(scene.ActivateRouletteButton("roulette-number-7"), "The second consecutive round could not place its wager.");
+            var previousPose = SceneCompositor.GetRouletteMotion(scene.RouletteState, fixture.Now);
+            fixture.Hold("roulette-spin");
+            nativeHolds++;
+            var second = scene.RouletteState;
+            var secondStart = SceneCompositor.GetRouletteMotion(second, second.RoundStartedAt);
+            Check(second.RoundNumber == 2 && second.Phase == RoulettePhase.Spinning &&
+                AngleError(previousPose.WheelAngle, secondStart.WheelAngle) < 1e-10 &&
+                AngleError(previousPose.BallAngle, secondStart.BallAngle) < 1e-10 &&
+                Vector2.Distance(SceneCompositor.ProjectRouletteBall(previousPose), SceneCompositor.ProjectRouletteBall(secondStart)) < .001,
+                "The next roulette round reset its inherited wheel/ball pose.");
+            consecutiveRoundContinuityChecks++;
+            await Capture("second-spin-start");
+            fixture.Now = second.RoundStartedAt.AddSeconds(3.15);
+            await Capture("second-spin-orbit");
+            fixture.Now = second.RoundStartedAt + second.SpinDuration;
+            var secondLanded = await Capture("second-landing");
+            var final = scene.RouletteState;
+            Check(final.RoundNumber == 2 && final.History.Count == 2 && final.Phase == RoulettePhase.Betting,
+                "The second roulette round did not settle exactly once.");
+            fixture.CheckRenderedBall(secondLanded, final);
             fixture.Hold("roulette-exit");
             nativeHolds++;
-            Check(scene.CurrentBoardScreen == BoardScreen.Menu && scene.RouletteState == result,
+            Check(scene.CurrentBoardScreen == BoardScreen.Menu && scene.RouletteState == final,
                 "Roulette's caption-held Exit lost the table state or failed to return to the menu.");
-            aspects.Add(new { aspect.Name, aspect.Width, aspect.Height, circle, winningNumber,
-                pocket = result.PocketIndex, result.LastWin, result.Balance });
+            aspects.Add(new { aspect.Name, aspect.Width, aspect.Height, projection, mechanism, winningNumber,
+                firstPocket = result.PocketIndex, secondPocket = final.PocketIndex, final.LastWin, final.Balance });
 
             async Task<byte[]> Capture(string name)
             {
@@ -124,10 +170,12 @@ public sealed partial class MainWindow
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "Isolated roulette verification changed live hardware or navigation.");
         return new { passed = true, directory, images, aspects, exactClockChecks, unchangedCaptionChecks, nativeHolds,
+            pocketEndpointChecks, consecutiveRoundContinuityChecks, boundedTrackRadiusChecks,
             all37PocketEndpoints = true, continuousTerminalGeometry = true, actualNativeCaptionHolds = true,
             all37RenderedPocketColors = true,
             intactCaptionCancels = true, immutableCommittedRound = true, renderedBallMatchesOutcome = true,
-            physicalWheelCircles = true, generatedArtworkLoaded = true, liveHardwareUnchanged = true };
+            fixedPerspectiveSilhouette = true, fixedBowlLighting = true, independentPocketAndSpindleMotion = true,
+            persistentRestingOrientation = true, generatedArtworkLoaded = true, liveHardwareUnchanged = true };
 
         static double AngleError(double a, double b) => Math.Abs(Math.Atan2(Math.Sin(a - b), Math.Cos(a - b)));
         static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
@@ -305,56 +353,143 @@ public sealed partial class MainWindow
             return Scene.ObserveHoldButtons(context, held, Now, context.ClearedButtons(presence));
         }
 
-        public object CheckCircularRim(byte[] pixels)
+        public object CheckProjectedRim(byte[] pixels)
         {
-            var center = CameraPoint(.274, .294);
-            double fit = Math.Min(1, Width / (double)Height * 1.22);
-            double expected = 176 * fit * Height / 1000 * .93 * (1 - _inset);
-            int Find(int dx, int dy)
+            var rim = Enumerable.Range(0, 128).Select(i =>
             {
-                for (int distance = (int)Math.Ceiling(expected + 7); distance >= (int)Math.Floor(expected - 7); distance--)
+                double angle = i * Math.Tau / 128;
+                return LocalToCamera(SceneCompositor.ProjectRouletteWheelPoint(176 * Math.Cos(angle), 176 * Math.Sin(angle), 8));
+            }).ToArray();
+            double expectedWidth = rim.Max(p => p.X) - rim.Min(p => p.X);
+            double expectedHeight = rim.Max(p => p.Y) - rim.Min(p => p.Y);
+            Check(expectedWidth > expectedHeight * 1.06,
+                "Roulette's fixed perspective camera no longer foreshortens the round world-space bowl.");
+            double maximumProbeDistance = 0;
+            foreach (int index in new[] { 0, 32, 64, 96 })
+            {
+                double nearest = double.PositiveInfinity;
+                var point = rim[index];
+                for (int y = Math.Max(0, (int)point.Y - 7); y <= Math.Min(Height - 1, (int)point.Y + 7); y++)
+                for (int x = Math.Max(0, (int)point.X - 7); x <= Math.Min(Width - 1, (int)point.X + 7); x++)
                 {
-                    int x = (int)Math.Round(center.X) + dx * distance, y = (int)Math.Round(center.Y) + dy * distance;
-                    if (x < 0 || y < 0 || x >= Width || y >= Height) continue;
                     int p = (y * Width + x) * 4;
-                    if (pixels[p + 2] > 70 && pixels[p + 1] > 35 && pixels[p + 2] > pixels[p + 1] * 1.05 &&
-                        pixels[p + 1] > pixels[p] * 1.15) return distance;
+                    if (pixels[p + 2] > 45 && pixels[p + 1] > 20 && pixels[p + 2] > pixels[p + 1] * 1.05 &&
+                        pixels[p + 1] > pixels[p] * 1.12)
+                        nearest = Math.Min(nearest, Math.Sqrt(Math.Pow(x - point.X, 2) + Math.Pow(y - point.Y, 2)));
                 }
-                throw new InvalidOperationException("Roulette's actual gold rim was not found at a cardinal edge.");
+                Check(nearest < 5, "Roulette's native rim does not follow its projected world-space circle.");
+                maximumProbeDistance = Math.Max(maximumProbeDistance, nearest);
             }
-            int diameterX = Find(-1, 0) + Find(1, 0), diameterY = Find(0, -1) + Find(0, 1);
-            Check(Math.Abs(diameterX - diameterY) <= Math.Max(3, expected * .025),
-                "Roulette's wheel is oval on the physical board.");
-            return new { diameterX, diameterY, expectedDiameter = 2 * expected, ratio = diameterX / (double)diameterY };
+            return new { expectedWidth, expectedHeight, projectedRatio = expectedWidth / expectedHeight,
+                maximumProbeDistance, intentionallyForeshortenedWorldCircle = true };
         }
 
         public void CheckRotorPocketColors()
         {
-            var rotor = (CanvasRenderTarget?)typeof(SceneCompositor).GetField("_rouletteRotor",
-                BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Scene);
-            Check(rotor is not null, "Roulette's authored native rotor did not render.");
-            var pixels = rotor!.GetPixelBytes();
-            int width = (int)rotor.SizeInPixels.Width;
+            byte[] pixels = DrawMechanismPart("DrawRoulettePocketRotor", 0);
             foreach (int pocket in Enumerable.Range(0, RouletteGame.WheelOrder.Count))
             {
                 double angle = pocket * Math.Tau / RouletteGame.WheelOrder.Count - Math.PI / 2;
-                // Inside each colored pocket, clear of numbers and separator pins.
-                int x = (int)Math.Round(400 + Math.Cos(angle) * 244);
-                int y = (int)Math.Round(400 + Math.Sin(angle) * 244);
-                int p = (y * width + x) * 4, number = RouletteGame.WheelOrder[pocket];
-                byte blue = pixels[p], green = pixels[p + 1], red = pixels[p + 2];
-                Check(pixels[p + 3] >= 250 && (number == 0 ? green > red * 1.3 : RouletteGame.IsRed(number)
-                    ? red > green * 1.8 : red < 50 && green < 50 && blue < 50),
+                // Inside the recessed colored pocket, clear of the number band.
+                var point = SceneCompositor.ProjectRouletteWheelPoint(126 * Math.Cos(angle), 126 * Math.Sin(angle), -10) * 2;
+                int number = RouletteGame.WheelOrder[pocket], matching = 0;
+                for (int y = Math.Max(0, (int)point.Y - 3); y <= Math.Min(799, (int)point.Y + 3); y++)
+                for (int x = Math.Max(0, (int)point.X - 3); x <= Math.Min(799, (int)point.X + 3); x++)
+                {
+                    int p = (y * 800 + x) * 4;
+                    byte blue = pixels[p], green = pixels[p + 1], red = pixels[p + 2];
+                    if (pixels[p + 3] >= 230 && (number == 0 ? green > red * 1.15 : RouletteGame.IsRed(number)
+                        ? red > green * 1.5 : red < 70 && green < 70 && blue < 70)) matching++;
+                }
+                Check(matching >= 3,
                     "The rendered rotor's pocket color/order differs from outcome " + number + ".");
             }
+        }
+
+        public object CheckMechanismParts(RouletteSnapshot game)
+        {
+            var first = SceneCompositor.GetRouletteMotion(game, game.RoundStartedAt.AddSeconds(1.05));
+            var next = SceneCompositor.GetRouletteMotion(game, game.RoundStartedAt.AddSeconds(3.15));
+            var previousClock = Now;
+            Now = game.RoundStartedAt.AddSeconds(1.05);
+            byte[] bowl = DrawMechanismPart("DrawRouletteFixedBowl");
+            Now = game.RoundStartedAt.AddSeconds(3.15);
+            byte[] nextBowl = DrawMechanismPart("DrawRouletteFixedBowl");
+            Now = previousClock;
+            Check(bowl.AsSpan().SequenceEqual(nextBowl),
+                "Roulette's stationary bowl or lighting changes with the rotor clock.");
+            byte[] ring = DrawMechanismPart("DrawRoulettePocketRotor", first.WheelAngle);
+            byte[] nextRing = DrawMechanismPart("DrawRoulettePocketRotor", next.WheelAngle);
+            byte[] spindle = DrawMechanismPart("DrawRouletteSpindle", first.WheelAngle);
+            byte[] nextSpindle = DrawMechanismPart("DrawRouletteSpindle", next.WheelAngle);
+            int changedRing = ChangedPixels(ring, nextRing), changedSpindle = ChangedPixels(spindle, nextSpindle);
+            Check(changedRing > 500 && changedSpindle > 100,
+                "Roulette's recessed ring and raised spindle do not move as independent projected geometry.");
+
+            // The axisymmetric cap keeps its camera/light anchor while the raised
+            // radial arms turn. A flattened, baked highlight would orbit the hub.
+            var cap = SceneCompositor.ProjectRouletteWheelPoint(0, 0, 44) * 2;
+            int opaqueCapPixels = 0;
+            for (int y = (int)cap.Y - 3; y <= (int)cap.Y + 3; y++)
+            for (int x = (int)cap.X - 3; x <= (int)cap.X + 3; x++)
+            {
+                int p = (y * 800 + x) * 4;
+                Check(spindle.AsSpan(p, 4).SequenceEqual(nextSpindle.AsSpan(p, 4)),
+                    "Roulette's fixed cap lighting rotates like a painted record.");
+                if (spindle[p + 3] > 230) opaqueCapPixels++;
+            }
+            Check(opaqueCapPixels >= 9, "The projected spindle's raised cap is not visible at its world-space anchor.");
+            return new { stationaryBowlAndLighting = true, changedRingPixels = changedRing,
+                changedSpindlePixels = changedSpindle, fixedCapPixels = opaqueCapPixels,
+                stationaryNativeRimAndWoodSamples = 16 };
+        }
+
+        public void CheckStationaryRimAndWood(byte[] a, byte[] b)
+        {
+            // Also prove the fixed material survives the complete production
+            // composition; a correct isolated bowl must not be rotated upstream.
+            // The cone carries faint rotor spokes, and the near bank projects
+            // into moving number-band edge pixels. Probe visible fixed wood.
+            foreach (var surface in new[] { (Radius: 176d, Height: 8d), (Radius: 170d, Height: 8d) })
+            foreach (int index in Enumerable.Range(0, 8))
+            {
+                double angle = index * Math.Tau / 8;
+                var point = LocalToCamera(SceneCompositor.ProjectRouletteWheelPoint(
+                    surface.Radius * Math.Cos(angle), surface.Radius * Math.Sin(angle), surface.Height));
+                for (int y = (int)point.Y - 1; y <= (int)point.Y + 1; y++)
+                for (int x = (int)point.X - 1; x <= (int)point.X + 1; x++)
+                {
+                    int p = (y * Width + x) * 4;
+                    Check(a.AsSpan(p, 4).SequenceEqual(b.AsSpan(p, 4)),
+                        "Roulette's stationary rim/wood lighting moved in the final composition.");
+                }
+            }
+        }
+
+        private byte[] DrawMechanismPart(string name, double? angle = null)
+        {
+            using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), 800, 800, 96);
+            using (var ds = target.CreateDrawingSession())
+            {
+                ds.Clear(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+                ds.Transform = Matrix3x2.CreateScale(2);
+                var method = typeof(SceneCompositor).GetMethod(name, BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic)!;
+                method.Invoke(method.IsStatic ? null : Scene, angle is double rotation ? [ds, rotation] : [ds]);
+            }
+            return target.GetPixelBytes();
+        }
+
+        private static int ChangedPixels(byte[] a, byte[] b)
+        {
+            int changed = 0;
+            for (int p = 0; p < a.Length; p += 4) if (!a.AsSpan(p, 4).SequenceEqual(b.AsSpan(p, 4))) changed++;
+            return changed;
         }
 
         public void CheckRenderedBall(byte[] pixels, RouletteSnapshot game)
         {
             var motion = SceneCompositor.GetRouletteMotion(game, Now);
-            double aspect = Width / (double)Height, fit = Math.Min(1, aspect * 1.22);
-            var point = CameraPoint(.274 + Math.Cos(motion.BallAngle) * motion.BallRadius * fit / aspect / 1000,
-                .294 + Math.Sin(motion.BallAngle) * motion.BallRadius * fit / 1000);
+            var point = LocalToCamera(SceneCompositor.ProjectRouletteBall(motion));
             int ivory = 0;
             for (int y = Math.Max(0, (int)point.Y - 3); y <= Math.Min(Height - 1, (int)point.Y + 3); y++)
                 for (int x = Math.Max(0, (int)point.X - 3); x <= Math.Min(Width - 1, (int)point.X + 3); x++)
@@ -377,6 +512,12 @@ public sealed partial class MainWindow
 
         private PixelPoint CameraPoint(double u, double v) => new(Width * (.035 + .93 * (_inset / 2 + u * (1 - _inset))),
             Height * (.035 + .93 * (_inset / 2 + v * (1 - _inset))));
+        private PixelPoint LocalToCamera(Vector2 point)
+        {
+            double aspect = Width / (double)Height, fit = Math.Min(1, aspect * 1.22);
+            return CameraPoint(.274 + (point.X - 200) * fit / aspect / 1000,
+                .294 + (point.Y - 200) * fit / 1000);
+        }
         public void Dispose() { Scene.Dispose(); Target.Dispose(); }
         private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     }

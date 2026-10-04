@@ -26,7 +26,7 @@ public sealed class RouletteGame
     private readonly List<RouletteBet[]> _undo = [];
     private RouletteBet[] _lastBets = [];
     private readonly List<RouletteResult> _history = [];
-    private decimal _balance, _chip = 5m, _lastWin, _lastProfit;
+    private decimal _balance, _chip = 25m, _lastWin, _lastProfit;
     private RoulettePhase _phase;
     private DateTimeOffset _roundStartedAt = DateTimeOffset.MinValue;
     private DateTimeOffset _lastObservedAt = DateTimeOffset.MinValue;

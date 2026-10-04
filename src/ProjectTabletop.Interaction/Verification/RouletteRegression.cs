@@ -60,6 +60,8 @@ internal static class RouletteRegression
     private static void CheckReservationsAndRefunds()
     {
         var game = new RouletteGame(1, 40);
+        Require(game.Snapshot.Chip == 25, "Roulette did not select the 25-credit chip initially.");
+        Act(game, "roulette-chip-5");
         Require(!game.HandleAction("roulette-spin", Origin), "An empty slip could spin.");
         Act(game, "roulette-red"); Act(game, "roulette-red"); Act(game, "roulette-black");
         var placed = game.Snapshot;

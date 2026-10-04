@@ -20,6 +20,7 @@ internal static class RouletteBoardRegression
         var board = new BoardSession(roulette: game);
         board.ShowRoulette(Origin);
         Require(board.Title == "Roulette" && board.Buttons.Count == 58, "Roulette controls or title are incomplete.");
+        Require(board.RouletteState.Chip == 25, "The Roulette board did not start with the 25-credit chip selected.");
         var buttons = board.Buttons;
         Require(buttons.Select(button => button.Id).Distinct().Count() == buttons.Count &&
             buttons.All(button => button.Bounds.X > 0 && button.Bounds.Y > 0 &&
@@ -46,14 +47,14 @@ internal static class RouletteBoardRegression
             "The conventional three-row betting table is transposed or reversed.");
         Require(!board.ActivateButton("roulette-spin", Origin.AddMilliseconds(100)), "The board enabled Spin without a wager.");
         var betTime = Origin.AddMilliseconds(200);
-        Require(board.ActivateButton("roulette-number-17", betTime) && game.TotalBet == 5 && game.Balance == 995,
+        Require(board.ActivateButton("roulette-number-17", betTime) && game.TotalBet == 25 && game.Balance == 975,
             "Pointer selection did not reserve a straight-number chip.");
         var red = board.Buttons.Single(button => button.Id == "roulette-red").Bounds;
         var gestureAt = Origin.AddMilliseconds(400);
         var gesture = new BoardHandSample(red.X + red.Width / 2, red.Y + red.Height / 2, gestureAt.AddSeconds(1), 1);
-        Require(board.Update([gesture], gestureAt, gestureAt)?.ButtonId == "roulette-red" && game.TotalBet == 10,
+        Require(board.Update([gesture], gestureAt, gestureAt)?.ButtonId == "roulette-red" && game.TotalBet == 50,
             "A fresh gesture could not place an outside bet.");
-        Require(board.Update([gesture], gestureAt.AddMilliseconds(100), gestureAt.AddMilliseconds(100)) is null && game.TotalBet == 10,
+        Require(board.Update([gesture], gestureAt.AddMilliseconds(100), gestureAt.AddMilliseconds(100)) is null && game.TotalBet == 50,
             "A held betting gesture placed duplicate chips.");
         var spin = BoardSession.RouletteSpinBounds;
         var spinAt = Origin.AddMilliseconds(600);
@@ -127,10 +128,10 @@ internal static class RouletteBoardRegression
         Require(board.TickRoulette(returnedAt) && game.Snapshot.Outcome == active.Outcome &&
             game.Snapshot.RoundStartedAt == active.RoundStartedAt && game.Snapshot.History.Count == 1,
             "Returning to a spin lost, rerolled or failed to settle its pending wager.");
-        decimal expected = active.Balance + RouletteGame.Payout(new(RouletteBetKind.Red), 5, active.Outcome!.Value);
+        decimal expected = active.Balance + RouletteGame.Payout(new(RouletteBetKind.Red), 25, active.Outcome!.Value);
         Require(game.Balance == expected && !board.TickRoulette(returnedAt.AddSeconds(1)) && game.Balance == expected,
             "Navigation settled the same wager more than once.");
-        Require(board.ActivateButton("roulette-rebet", returnedAt.AddSeconds(2)) && game.TotalBet == 5,
+        Require(board.ActivateButton("roulette-rebet", returnedAt.AddSeconds(2)) && game.TotalBet == 25,
             "A completed round could not restore its previous slip.");
     }
 
