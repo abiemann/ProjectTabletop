@@ -1,7 +1,12 @@
 # Third-party notices
 
-These notices cover bundled Globe imagery and the open-source GPU rendering code. Other
-dependencies retain their own package and model license notices.
+ProjectTabletop's original material is governed by the [project license](LICENSE).
+The commercial-use restriction in that license does not replace or restrict the
+separate licenses for third-party material.
+
+These notices cover bundled Globe imagery and the open-source GPU rendering code.
+Other dependencies retain their own package and model license notices. Preserve
+all applicable third-party licenses and attributions when redistributing.
 
 ## NASA Blue Marble imagery
 

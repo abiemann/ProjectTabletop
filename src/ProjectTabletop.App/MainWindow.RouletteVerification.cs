@@ -195,6 +195,7 @@ public sealed partial class MainWindow
             .GetValue(scene)!;
         scene.ShowBoardMenu();
         byte[] initial = await Capture("menu-top");
+        var initialButtons = scene.CurrentBoardButtons.Select(button => (button.Id, button.Bounds)).ToArray();
         Check(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
             ["slots", "photo-copy", "blackjack", "paint", "monopoly", "globe", "settings", "menu-scroll-down"]),
             "The initial menu does not show the six original cards and a separate scroll handle.");
@@ -214,7 +215,7 @@ public sealed partial class MainWindow
         await Capture("menu-slide-start");
         fixture.Now = started + BoardSession.MenuScrollDuration / 2;
         byte[] midpoint = await Capture("menu-slide-half");
-        Check(Math.Abs(board.GetMenuScrollOffset(fixture.Now) - .10) < 1e-8 &&
+        Check(Math.Abs(board.GetMenuScrollOffset(fixture.Now) - .30) < 1e-8 &&
             fixture.RegionUnchanged(initial, midpoint, new(.06, .035, .66, .19)) &&
             fixture.RegionUnchanged(initial, midpoint, new(.06, .89, .64, .08)) &&
             scene.GetHandAcquisitionContext(fixture.Now) is null,
@@ -222,11 +223,14 @@ public sealed partial class MainWindow
         fixture.Now = started + BoardSession.MenuScrollDuration;
         await Capture("menu-scrolled");
         Check(board.MenuScrolled && !board.MenuScrolling && scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
-            ["blackjack", "paint", "monopoly", "globe", "roulette", "settings", "menu-scroll-up"]),
-            "The settled menu did not reveal Roulette and its up arrow.");
+            ["roulette", "settings", "menu-scroll-up"]),
+            "The settled second page did not show exactly Roulette and the fixed navigation controls.");
         var roulette = scene.CurrentBoardButtons.Single(button => button.Id == "roulette");
-        Check(Math.Abs(roulette.Bounds.Y - .65) < 1e-9 && roulette.Bounds.Height == .16,
-            "Roulette's visible card and input bounds do not share the scrolled position.");
+        Check(Math.Abs(board.GetMenuScrollOffset(fixture.Now) - .60) < 1e-9 &&
+            Math.Abs(roulette.Bounds.Y - .25) < 1e-9 && roulette.Bounds.Height == .16 &&
+            board.GetMenuCards(fixture.Now).Where(button => button.Id != "roulette")
+                .All(button => button.Bounds.Y + button.Bounds.Height <= BoardSession.MenuCardViewport.Y),
+            "A full-page scroll left an original card in the viewport or misplaced Roulette's visible/input bounds.");
         scene.GetHandAcquisitionContext(fixture.Now);
         fixture.Now += TimeSpan.FromMilliseconds(600);
         fixture.Draw();
@@ -237,18 +241,19 @@ public sealed partial class MainWindow
         fixture.Hold("menu-scroll-up");
         var returning = fixture.Now;
         fixture.Now = returning + BoardSession.MenuScrollDuration;
-        await Capture("menu-returned");
+        byte[] returned = await Capture("menu-returned");
         Check(!board.MenuScrolled && !board.MenuScrolling &&
-            scene.CurrentBoardButtons.Any(button => button.Id == "menu-scroll-down") &&
-            scene.CurrentBoardButtons.All(button => button.Id != "roulette"),
-            "The up-arrow caption hold did not restore the initial menu cards.");
+            scene.CurrentBoardButtons.Select(button => (button.Id, button.Bounds)).SequenceEqual(initialButtons) &&
+            fixture.RegionUnchanged(initial, returned, BoardSession.MenuCardViewport),
+            "The up-arrow caption hold did not restore all six initial cards, their positions and their native pixels.");
         Check(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "Isolated menu-scroll verification changed live hardware or navigation.");
         return new { passed = true, directory, images, nativeArrowHolds = 2, actualChevronEvidence = true,
             intactChevronCancels = true, scrollDurationMilliseconds = BoardSession.MenuScrollDuration.TotalMilliseconds,
             fixedHeadingAndFooter = true, movingInputAndAcquisitionSuppressed = true,
-            seventhCardRevealed = true, sharedVisibleAndInputBounds = true, settledReferenceRefreshed = true,
+            seventhCardRevealed = true, fullPageScroll = true, originalCardsFullyLeaveViewport = true,
+            firstPageRestoredExactly = true, sharedVisibleAndInputBounds = true, settledReferenceRefreshed = true,
             liveHardwareUnchanged = true };
 
         async Task<byte[]> Capture(string name)

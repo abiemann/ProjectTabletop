@@ -5,7 +5,7 @@ public sealed partial class BoardSession
     public static readonly TimeSpan MenuScrollDuration = TimeSpan.FromMilliseconds(650);
     public static readonly BoardRect MenuCardViewport = new(.06, .238, .88, .587);
     public static readonly BoardRect MenuScrollButtonBounds = new(.76, .85, .18, .105);
-    private const double MenuRowStep = .20;
+    private const double MenuPageStep = .60; // Three rows, with two cards per row.
     private static readonly IReadOnlyList<BoardButton> MenuCards = Array.AsReadOnly(new[]
     {
         new BoardButton("slots", "Dragon Slots", new(.08, .25, .40, .16), BoardScreen.Slots),
@@ -24,13 +24,13 @@ public sealed partial class BoardSession
     public bool MenuScrolled => Screen == BoardScreen.Menu && _menuScrolled;
     public bool MenuScrolling => Screen == BoardScreen.Menu && _menuScrollStartedAt is not null;
 
-    /// <summary>Pure presentation sample: one row of motion, using the caller's clock.</summary>
+    /// <summary>Pure presentation sample: one full page of motion, using the caller's clock.</summary>
     public double GetMenuScrollOffset(DateTimeOffset now)
     {
-        if (_menuScrollStartedAt is not { } started) return _menuScrolled ? MenuRowStep : 0;
+        if (_menuScrollStartedAt is not { } started) return _menuScrolled ? MenuPageStep : 0;
         double progress = Math.Clamp((now - started) / MenuScrollDuration, 0, 1);
         double eased = progress * progress * (3 - 2 * progress);
-        return MenuRowStep * (_menuScrolled ? eased : 1 - eased);
+        return MenuPageStep * (_menuScrolled ? eased : 1 - eased);
     }
 
     /// <summary>All seven cards for drawing inside MenuCardViewport, including moving, clipped cards.
@@ -42,7 +42,7 @@ public sealed partial class BoardSession
 
     private IReadOnlyList<BoardButton> CurrentMenuButtons()
     {
-        double offset = _menuScrolled ? MenuRowStep : 0;
+        double offset = _menuScrolled ? MenuPageStep : 0;
         var buttons = MenuCards.Select(button => MoveMenuCard(button, offset, !MenuScrolling))
             .Where(button => button.Bounds.Y >= MenuCardViewport.Y &&
                 button.Bounds.Y + button.Bounds.Height <= MenuCardViewport.Y + MenuCardViewport.Height).ToList();

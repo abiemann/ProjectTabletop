@@ -15,6 +15,7 @@ internal static class MenuScrollRegression
     private static void CheckScrollAndInputBarriers()
     {
         var board = new BoardSession();
+        var firstPage = board.Buttons.Select(button => (button.Id, button.Bounds)).ToArray();
         Require(board.GetMenuCards(At(0)).Count == 7 && board.Buttons.All(button => button.Id != "roulette"),
             "Roulette must begin below the six visible menu cards.");
         var arrow = Button(board, "menu-scroll-down");
@@ -29,7 +30,7 @@ internal static class MenuScrollRegression
             board.MenuScrolling && board.MenuScrolled, "A full caption hold did not start the downward menu scroll.");
         long revision = board.Revision;
         Require(Near(board.GetMenuScrollOffset(At(1300)), 0) &&
-            Near(board.GetMenuScrollOffset(At(1625)), .1) && Near(board.GetMenuScrollOffset(At(1950)), .2) &&
+            Near(board.GetMenuScrollOffset(At(1625)), .3) && Near(board.GetMenuScrollOffset(At(1950)), .6) &&
             board.Revision == revision && board.MenuScrolling,
             "Presentation samples must be clock-deterministic and cannot settle interaction state.");
         Require(board.Buttons.All(button => !button.Enabled) &&
@@ -43,11 +44,12 @@ internal static class MenuScrollRegression
             "The replacement caption warmed while its menu was moving.");
         Require(board.TickMenu(At(1950)) && !board.MenuScrolling && !board.TickMenu(At(1950)) &&
             !board.TickMenu(At(1949)), "Menu settlement repeated or moved backward in time.");
-        Require(board.Buttons.Where(button => !button.IsHold && button.Id != "settings").Select(button => button.Id)
-            .SequenceEqual(["blackjack", "paint", "monopoly", "globe", "roulette"]),
-            "The scrolled menu did not expose exactly its lower five cards.");
-        Require(Near(Button(board, "blackjack").Bounds.Y, .25) && Near(Button(board, "monopoly").Bounds.Y, .45) &&
-            Near(Button(board, "roulette").Bounds.Y, .65), "Scrolled render and input card rows diverged.");
+        Require(board.Buttons.Select(button => button.Id).SequenceEqual(["roulette", "settings", "menu-scroll-up"]),
+            "The second page did not expose exactly Roulette and the fixed navigation controls.");
+        Require(Near(Button(board, "roulette").Bounds.Y, .25) &&
+            board.GetMenuCards(At(1950)).Where(button => button.Id != "roulette")
+                .All(button => button.Bounds.Y + button.Bounds.Height <= BoardSession.MenuCardViewport.Y),
+            "A full-page scroll left an original card in the viewport or misplaced Roulette.");
         var roulette = Button(board, "roulette");
         Require(board.Update([Pinch(roulette, 3, 1949)], At(1949), At(2000)) is null,
             "A delayed camera observation from the animation selected a settled card.");
@@ -58,13 +60,15 @@ internal static class MenuScrollRegression
         Require(board.Update([Pinch(roulette, 6, 2100)], At(2100), At(2100)) is
             { ButtonId: "roulette", Current: BoardScreen.Roulette }, "A fresh Roulette card selection failed.");
         board.ShowMenu(At(2200));
-        Require(!board.MenuScrolled && !board.MenuScrolling && board.Buttons.Any(button => button.Id == "slots") &&
-            board.Buttons.All(button => button.Id != "roulette"), "Returning to the menu did not restore the first six cards.");
+        Require(!board.MenuScrolled && !board.MenuScrolling &&
+            board.Buttons.Select(button => (button.Id, button.Bounds)).SequenceEqual(firstPage),
+            "Returning to the menu did not restore all six original cards and their positions.");
     }
 
     private static void CheckArrowReleaseAndReverse()
     {
         var board = new BoardSession();
+        var firstPage = board.Buttons.Select(button => (button.Id, button.Bounds)).ToArray();
         Clear(board, "menu-scroll-down", 10);
         for (int time = 100; time <= 1100; time += 100) Hold(board, "menu-scroll-down", time);
         board.TickMenu(At(1750));
@@ -76,10 +80,12 @@ internal static class MenuScrollRegression
         for (int time = 3600; time < 4600; time += 100)
             Require(Hold(board, "menu-scroll-up", time).Count == 0, "The reverse arrow reused earlier hold time.");
         Require(Hold(board, "menu-scroll-up", 4600).SequenceEqual(["menu-scroll-up"]) && board.MenuScrolling &&
-            !board.MenuScrolled && Near(board.GetMenuScrollOffset(At(4925)), .1),
+            !board.MenuScrolled && Near(board.GetMenuScrollOffset(At(4925)), .3),
             "Released, freshly covered up-arrow did not scroll smoothly back.");
         Require(board.TickMenu(At(5250)) && Near(board.GetMenuScrollOffset(At(5250)), 0) &&
-            Button(board, "menu-scroll-down").Enabled, "The reverse scroll did not settle at the first row.");
+            Button(board, "menu-scroll-down").Enabled &&
+            board.Buttons.Select(button => (button.Id, button.Bounds)).SequenceEqual(firstPage),
+            "The reverse scroll did not restore the entire first page and its original positions.");
     }
 
     private static void CheckReset()
