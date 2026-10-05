@@ -21,10 +21,12 @@ internal static class HandAcquisitionPresenceRegression
         CompactReferenceControlOcclusion();
         ControlTriggerRegions();
         HandAcquisitionManyControlsRegression.Run();
+        HandAcquisitionTransparentReferenceRegression.Run();
         RenderedCompactControls();
         HandAcquisitionOpticalHistoryRegression.Run();
         HandAcquisitionGoldDealRegression.Run();
         HandAcquisitionShortLabelRegression.Run();
+        HandAcquisitionCaptionResolutionRegression.Run();
         HandAcquisitionCompactControlRegression.Run();
         HandAcquisitionLocalContextRegression.Run();
         HandAcquisitionReachingRegression.Run();

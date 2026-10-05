@@ -119,6 +119,12 @@ public sealed partial class MainWindow
                 return await VerifyMonopolyEntranceAsync();
             case "verify_crown_deed_development":
                 return await VerifyMonopolyDevelopmentAsync();
+            case "verify_crown_deed_water":
+                return await VerifyCrownDeedWaterAsync();
+            case "verify_crown_deed_windows":
+                return await VerifyCrownDeedWindowsAsync();
+            case "verify_crown_deed_pieces":
+                return await VerifyCrownDeedPiecesAsync();
             case "verify_globe":
                 return await VerifyGlobeAsync();
             case "verify_slots":

@@ -142,11 +142,13 @@ public sealed partial class MainWindow
                 presentedPosition = presented.Players[0].Position, actualPosition = scene.MonopolyState.Players[0].Position });
             earlierOverlay = overlayPixels; earlierOutput = pixels; earlierLayerKey = layerKey;
         }
-        var settledPixels = earlierOutput!;
+        var settledBoardPixels = Field<CanvasRenderTarget>(scene, "_boardApplicationTarget").GetPixelBytes();
         var settledFrames = JsonSerializer.Serialize(scene.GetMonopolyDiceFrames(now), jsonOptions);
         now = started.AddSeconds(5);
+        Draw(scene, target, width, height);
         Require(settledFrames == JsonSerializer.Serialize(scene.GetMonopolyDiceFrames(now), jsonOptions) &&
-                settledPixels.SequenceEqual(Draw(scene, target, width, height)),
+                settledBoardPixels.SequenceEqual(Field<CanvasRenderTarget>(scene, "_boardApplicationTarget").GetPixelBytes()) &&
+                earlierOverlay!.SequenceEqual(Field<CanvasRenderTarget>(scene, "_monopolyDiceTarget").GetPixelBytes()),
             "The settled cubes disappeared, moved or replayed after their animation deadline.");
         Act(scene, "mp-buy");
         Require(scene.GetMonopolyDiceFrames(now).All(frame => frame.Settled && frame.FrontFace == frame.Result) &&

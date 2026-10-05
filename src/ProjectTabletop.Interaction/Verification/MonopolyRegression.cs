@@ -21,6 +21,7 @@ internal static class MonopolyRegression
         CheckAiAndSeededGames();
         MonopolyMigrationRegression.Run();
         MonopolyDevelopmentRegression.Run();
+        MonopolyPiecesRegression.Run();
         Console.WriteLine("Monopoly game verification passed: player setup, purchases/rent/Crown Gate, doubles/jail, " +
             "auctions, even building/selling, mortgages, debt/bankruptcy, cards, save validation and immutable snapshots, and AI turns.");
     }

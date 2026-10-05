@@ -1,6 +1,8 @@
 namespace ProjectTabletop.Vision;
 
 /// <summary>The exact rendered board and the calibrated native-camera to board-UV homography.</summary>
+/// <param name="Bgra">Rendered BGRA pixels. Only opaque pixels are eligible reference samples;
+/// transparent cutouts may contain live graphics that are absent from this static image.</param>
 /// <param name="BoardSearchRegions">Optional normalized board-UV rectangles whose union contains
 /// stable controls. Changes elsewhere in the rendered board cannot become foreground evidence.</param>
 /// <param name="BoardReferenceRegions">Optional normalized board-UV rectangles used to fit camera
@@ -125,10 +127,13 @@ public sealed partial class HandAcquisitionPresenceTracker
             if (frameTime < _lastTime) ResetTextConfirmation();
             return Empty("old-camera-frame");
         }
-        int samplingAxis = SamplingAxis(searchPolygon, expectedScene);
-        if (width != _width || height != _height || !_polygon.SequenceEqual(searchPolygon) ||
-            (!ReferenceEquals(_scene, expectedScene) && Math.Abs(_scale - SamplingScale(searchPolygon, samplingAxis)) > .001))
-            if (!Configure(width, height, searchPolygon, samplingAxis)) return Empty("invalid-search-polygon");
+        bool geometryChanged = width != _width || height != _height || !_polygon.SequenceEqual(searchPolygon);
+        if (geometryChanged || !ReferenceEquals(_scene, expectedScene))
+        {
+            int samplingAxis = SamplingAxis(searchPolygon, expectedScene, width, height);
+            if (geometryChanged || Math.Abs(_scale - SamplingScale(searchPolygon, samplingAxis, width, height)) > .001)
+                if (!Configure(width, height, searchPolygon, samplingAxis)) return Empty("invalid-search-polygon");
+        }
         _lastTime = frameTime;
         SampledCellCount = 0;
         LocalContextSampledCellCount = 0;
@@ -394,22 +399,30 @@ public sealed partial class HandAcquisitionPresenceTracker
         if (_textCorruptionTimes is not null) Array.Clear(_textCorruptionTimes);
     }
 
-    private static double SamplingScale(IReadOnlyList<PixelPoint> polygon, int axis) => polygon.Count == 0 ? 1 :
-        Math.Max(1, Math.Max(polygon.Max(point => point.X) - polygon.Min(point => point.X),
-            polygon.Max(point => point.Y) - polygon.Min(point => point.Y)) / axis);
+    private static double SamplingScale(IReadOnlyList<PixelPoint> polygon, int axis, int width, int height) => polygon.Count == 0 ? 1 :
+        Math.Max(1, Math.Max(Math.Clamp(polygon.Max(point => point.X), 0, width) - Math.Clamp(polygon.Min(point => point.X), 0, width),
+            Math.Clamp(polygon.Max(point => point.Y), 0, height) - Math.Clamp(polygon.Min(point => point.Y), 0, height)) / axis);
 
-    private static int SamplingAxis(IReadOnlyList<PixelPoint> polygon, HandAcquisitionSceneImage? scene)
+    private static int SamplingAxis(IReadOnlyList<PixelPoint> polygon, HandAcquisitionSceneImage? scene, int cameraWidth, int cameraHeight)
     {
         var references = scene?.BoardReferenceRegions ?? scene?.BoardSearchRegions;
         if (polygon.Count < 3 || references is not { Count: > 0 }) return 192;
+        // A short minus can fall entirely between coarse grid rows. Refine to
+        // the existing bounded density if its actual caption cannot contain a
+        // full native sample. Never expand the caption or count partial samples.
+        // This decision is reused until the scene reference or geometry changes.
+        if (scene is { CameraToBoard.Count: 9, BoardTriggerRegions.Count: > 0 } &&
+            ValidRegions(scene.BoardTriggerRegions) && scene.BoardTriggerRegions.Any(trigger =>
+                !CaptionContainsSample(scene, polygon, trigger, SamplingScale(polygon, 192, cameraWidth, cameraHeight),
+                    cameraWidth, cameraHeight))) return 384;
         if (scene?.BoardSearchRegions is not { Count: 1 }) return 192;
         var control = scene.BoardSearchRegions[0];
         if (references.Any(region => region.X < control.X || region.Y < control.Y ||
             region.X + region.Width > control.X + control.Width + 1e-12 ||
             region.Y + region.Height > control.Y + control.Height + 1e-12)) return 192;
-        double width = polygon.Max(point => point.X) - polygon.Min(point => point.X);
-        double height = polygon.Max(point => point.Y) - polygon.Min(point => point.Y);
-        double scale = SamplingScale(polygon, 192);
+        double width = Math.Clamp(polygon.Max(point => point.X), 0, cameraWidth) - Math.Clamp(polygon.Min(point => point.X), 0, cameraWidth);
+        double height = Math.Clamp(polygon.Max(point => point.Y), 0, cameraHeight) - Math.Clamp(polygon.Min(point => point.Y), 0, cameraHeight);
+        double scale = SamplingScale(polygon, 192, cameraWidth, cameraHeight);
         // A compact self-reference needs enough independent native samples on
         // its two glass margins. Increase only the bounded POI grid density;
         // sampling is still restricted to controls/references and never duplicates
@@ -417,6 +430,38 @@ public sealed partial class HandAcquisitionPresenceTracker
         double referenceSamples = width * height / (scale * scale) *
             references.Sum(region => region.Width * region.Height);
         return referenceSamples * .20 < 100 ? 384 : 192;
+    }
+
+    private static bool CaptionContainsSample(HandAcquisitionSceneImage scene, IReadOnlyList<PixelPoint> polygon,
+        HandTrackingBounds trigger, double scale, int cameraWidth, int cameraHeight)
+    {
+        var m = scene.CameraToBoard;
+        double u = trigger.X + trigger.Width / 2, v = trigger.Y + trigger.Height / 2;
+        // Solve the projective map at the caption centre without constructing
+        // a second image or scanning the board. Nine nearby grid cells suffice
+        // for the bounded resolution probe; uncertain geometry refines safely.
+        double a = m[0] - u * m[6], b = m[1] - u * m[7], c = u * m[8] - m[2];
+        double d = m[3] - v * m[6], e = m[4] - v * m[7], f = v * m[8] - m[5];
+        double determinant = a * e - b * d;
+        if (!double.IsFinite(determinant) || Math.Abs(determinant) < 1e-16) return false;
+        double x = (c * e - b * f) / determinant, y = (a * f - c * d) / determinant;
+        if (!double.IsFinite(x) || !double.IsFinite(y)) return false;
+        double left = Math.Clamp(polygon.Min(point => point.X), 0, cameraWidth), top = Math.Clamp(polygon.Min(point => point.Y), 0, cameraHeight);
+        double column = Math.Round((x - left) / scale - .5), row = Math.Round((y - top) / scale - .5);
+        double radius = scale * .25 + 1; // Same four-pixel footprint as WithinSampleRegions.
+        for (int dy = -1; dy <= 1; dy++)
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            var center = new PixelPoint(left + (column + dx + .5) * scale, top + (row + dy + .5) * scale);
+            bool contained = true;
+            for (int corner = 0; corner < 4; corner++)
+                if (!BoardPosition(scene, new(center.X + (corner % 2 == 0 ? -radius : radius),
+                    center.Y + (corner < 2 ? -radius : radius)), out double cu, out double cv) ||
+                    cu < trigger.X || cu > trigger.X + trigger.Width || cv < trigger.Y || cv > trigger.Y + trigger.Height)
+                { contained = false; break; }
+            if (contained) return true;
+        }
+        return false;
     }
 
     private bool Configure(int width, int height, IReadOnlyList<PixelPoint> polygon, int samplingAxis = 192)
@@ -619,11 +664,17 @@ public sealed partial class HandAcquisitionPresenceTracker
         double x = u * (scene.Width - 1), y = v * (scene.Height - 1);
         int ix = (int)x, iy = (int)y, rx = Math.Min(scene.Width - 1, ix + 1), by = Math.Min(scene.Height - 1, iy + 1);
         double fx = x - ix, fy = y - iy;
+        int topLeft = (iy * scene.Width + ix) * 4, topRight = (iy * scene.Width + rx) * 4;
+        int bottomLeft = (by * scene.Width + ix) * 4, bottomRight = (by * scene.Width + rx) * 4;
+        double a = (1 - fx) * (1 - fy), b = fx * (1 - fy), c = (1 - fx) * fy, d = fx * fy;
+        // A transparent hole is absent reference data, not an opaque black
+        // surface. Reject every contributing nonopaque texel so antialiased
+        // animation boundaries cannot enter the photometric fit either.
+        if ((a > 0 && scene.Bgra[topLeft + 3] < 254) || (b > 0 && scene.Bgra[topRight + 3] < 254) ||
+            (c > 0 && scene.Bgra[bottomLeft + 3] < 254) || (d > 0 && scene.Bgra[bottomRight + 3] < 254)) return false;
         for (int channel = 0; channel < 3; channel++)
-            result[channel] = scene.Bgra[(iy * scene.Width + ix) * 4 + channel] * (1 - fx) * (1 - fy) +
-                scene.Bgra[(iy * scene.Width + rx) * 4 + channel] * fx * (1 - fy) +
-                scene.Bgra[(by * scene.Width + ix) * 4 + channel] * (1 - fx) * fy +
-                scene.Bgra[(by * scene.Width + rx) * 4 + channel] * fx * fy;
+            result[channel] = scene.Bgra[topLeft + channel] * a + scene.Bgra[topRight + channel] * b +
+                scene.Bgra[bottomLeft + channel] * c + scene.Bgra[bottomRight + channel] * d;
         return true;
     }
 

@@ -212,8 +212,8 @@ public sealed partial class MainWindow
                     ready = Ready();
                 }
                 var occupied = (byte[])unlit.Clone();
-                // Stationary four-finger strips cover the actual label. They are
-                // present on the first frame, with no motion history supplied.
+                // Stationary four-finger strips cover the actual label. They
+                // are present at startup, with no motion history supplied.
                 double centerU = region.X + region.Width / 2;
                 double fingerSpan = Math.Min(bounds.Width - .032, Math.Max(region.Width + .018, bounds.Width * .30));
                 var topLeft = CameraPoint(Math.Max(bounds.X + .016, centerU - fingerSpan / 2), bounds.Y + .013);
@@ -246,6 +246,9 @@ public sealed partial class MainWindow
                     second.Hints.Any(hint => hint.ControlCoverage >= .07 && hint.ControlTriggerCoverage >= .07),
                     $"Two stationary label occlusions did not produce measured 7% foreground over {state}/{button.Label}: {second.Reason}. " +
                     System.Text.Json.JsonSerializer.Serialize(new { second.TextPatterns, second.Hints }));
+                Require(second.TextPatterns!.Where(pattern => pattern.ControlRegion != index)
+                    .All(pattern => pattern.LabelIntact && !pattern.ShapeCorrupted),
+                    "Obstructing one caption corrupted an untouched neighboring control.");
                 var measured = second.Hints.First(hint => hint.ControlCoverage >= .07 && hint.ControlTriggerCoverage >= .07);
                 foreach (var belowThreshold in new[] { measured with { ControlCoverage = .069999 },
                     measured with { ControlTriggerCoverage = .069999 } })
@@ -393,6 +396,7 @@ public sealed partial class MainWindow
                     Level(committed, 1) == stage && previous.Players[0].Money - committed.Players[0].Money == 50,
                     "The native rise does not describe the actual committed human purchase.");
                 byte[]? initial = null;
+                byte[]? initialForeground = null;
                 var controls = scene.CurrentBoardButtons.ToArray();
                 foreach (double milliseconds in viewport.Name == "measured" ? new[] { 0d, 337.5, 675, 1012.5, 1349, 1350 }
                     : new[] { 0d, 675, 1350 })
@@ -419,10 +423,19 @@ public sealed partial class MainWindow
                         Require(ButtonPixelsEqual(initial, pixels, controls, viewport.Width, viewport.Height),
                             "Building motion changed stationary control captions or their surfaces.");
                         captionChecks++;
-                        var residual = OutsideGrowthDifference(initial, pixels, viewport.Width, viewport.Height, 1);
+                        // Canal reflections have their own independently verified
+                        // motion layer. Construction must leave the static city,
+                        // neighbouring deeds and fixed UI in this foreground alone.
+                        var foreground = (CanvasRenderTarget)typeof(SceneCompositor)
+                            .GetField("_monopolyPreviewTarget", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scene)!;
+                        var foregroundPixels = foreground.GetPixelBytes();
+                        initialForeground ??= foregroundPixels;
+                        var nativeSize = foreground.SizeInPixels;
+                        var residual = OutsideGrowthDifference(initialForeground, foregroundPixels,
+                            (int)nativeSize.Width, (int)nativeSize.Height, 1);
                         Require(residual.AlphaStable && residual.MaxChannelDelta <= 12 &&
-                            residual.ChangedPixels <= Math.Ceiling(viewport.Width * (double)viewport.Height * .00002) &&
-                            residual.TotalChannelError <= Math.Ceiling(viewport.Width * (double)viewport.Height * .0003),
+                            residual.ChangedPixels <= Math.Ceiling(nativeSize.Width * (double)nativeSize.Height * .00002) &&
+                            residual.TotalChannelError <= Math.Ceiling(nativeSize.Width * (double)nativeSize.Height * .0003),
                             "Building motion changed another deed, token, city, plaza or fixed UI.");
                         samples.Add(new { viewport = viewport.Name, stage, milliseconds, outsideGrowthResidual = new
                             { residual.ChangedPixels, residual.MaxChannelDelta, residual.TotalChannelError, residual.AlphaStable } });

@@ -75,15 +75,15 @@ public sealed partial class SceneCompositor
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
         IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback, double boardAspect = 1, bool hideDiceDisplay = false,
         bool rolling = false, bool drawerOpen = false, float drawerProgress = 1,
-        MonopolyEntranceFrame? entrance = null)
+        MonopolyEntranceFrame? entrance = null, bool renderCityAnimations = true)
     {
         if (entrance is { Active: true } frame)
         {
             DrawMonopolyEntrance(ds, game, buttons, hovered, selectionFeedback, boardAspect,
-                hideDiceDisplay, rolling, drawerOpen, drawerProgress, frame);
+                hideDiceDisplay, rolling, drawerOpen, drawerProgress, frame, renderCityAnimations);
             return;
         }
-        DrawMonopolyFrame(ds);
+        DrawMonopolyFrame(ds, renderCityAnimations: renderCityAnimations, boardAspect: boardAspect);
         var development = GetCrownDeedDevelopmentFrame(_monopolyClock());
         for (int index = 0; index < MonopolyGame.Spaces.Count; index++)
             DrawMonopolySpace(ds, MonopolyGame.Spaces[index], game, boardAspect,
@@ -93,7 +93,7 @@ public sealed partial class SceneCompositor
         DrawMonopolyRailCaptions(ds, rolling, selectionFeedback);
     }
 
-    private static void DrawMonopolyCenterContents(CanvasDrawingSession ds, MonopolySnapshot game,
+    private void DrawMonopolyCenterContents(CanvasDrawingSession ds, MonopolySnapshot game,
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
         IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback, double boardAspect,
         bool hideDiceDisplay, bool rolling, bool drawerOpen, float drawerProgress, CrownDeedDevelopmentFrame? development = null)
@@ -127,24 +127,42 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private void DrawMonopolyFrame(CanvasDrawingSession ds, bool entranceBase = false)
+    private CanvasBitmap? EnsureCrownDeedCity(CanvasDevice device)
     {
-        ds.Clear(ThemeColor(10, 24, 25));
-        if (_crownDeedCityDevice != ds.Device)
+        if (_crownDeedCityDevice != device)
         {
             _crownDeedCityBitmap?.Dispose();
             _crownDeedCityBitmap = null;
-            _crownDeedCityDevice = ds.Device;
+            _crownDeedCityDevice = device;
         }
         if (_crownDeedCityBitmap is null)
         {
             string path = Path.Combine(AppContext.BaseDirectory, "Assets", "CrownDeed", "crown-deed-city.png");
             if (File.Exists(path))
-                _crownDeedCityBitmap = CanvasBitmap.LoadAsync(ds.Device, path, 96).AsTask().GetAwaiter().GetResult();
+                _crownDeedCityBitmap = CanvasBitmap.LoadAsync(device, path, 96).AsTask().GetAwaiter().GetResult();
         }
-        if (_crownDeedCityBitmap is { } city)
+        return _crownDeedCityBitmap;
+    }
+
+    private void DrawMonopolyFrame(CanvasDrawingSession ds, bool entranceBase = false,
+        bool renderCityAnimations = true, double boardAspect = 1)
+    {
+        ds.Clear(ThemeColor(10, 24, 25));
+        if (EnsureCrownDeedCity(ds.Device) is { } city)
+        {
             ds.DrawImage(city, new Rect(0, 0, 1000, 1000),
                 new Rect(0, 0, city.SizeInPixels.Width, city.SizeInPixels.Height));
+            // Live city details sit beneath the cached stonework, window frames,
+            // parcels and captions. Their clocks never invalidate this cache.
+            ClearCrownDeedWater(ds);
+            ClearCrownDeedWindows(ds);
+            if (renderCityAnimations)
+            {
+                var now = _monopolyClock();
+                DrawCrownDeedWater(ds, now, boardAspect);
+                DrawCrownDeedWindows(ds, now);
+            }
+        }
         // A continuous granite boulevard connects the equal-sized deed plaques.
         ds.DrawEllipse(new Vector2(500, 500), 434, 408, ThemeColor(6, 19, 20, 225), 99);
         ds.DrawEllipse(new Vector2(500, 500), 479, 453, ThemeColor(155, 121, 63), 2.5f);
@@ -227,7 +245,7 @@ public sealed partial class SceneCompositor
     private static Matrix3x2 MonopolySpaceTransform(int index) => CrownDeedParcelPose(index).Transform;
 
     private static Vector2 MonopolyLocalTokenCenter(int spaceIndex, int slot, int occupants) =>
-        new(MonopolyCellWidth / 2 + (slot - (occupants - 1) / 2f) * (occupants > 3 ? 9 : 15), 79);
+        new(MonopolyCellWidth / 2 + (slot - (occupants - 1) / 2f) * (occupants > 3 ? 10 : 18), 82);
 
     internal static Vector2 MonopolyTokenCenter(MonopolySnapshot game, int playerId)
     {
@@ -238,7 +256,7 @@ public sealed partial class SceneCompositor
         return Vector2.Transform(MonopolyLocalTokenCenter(player.Position, slot, occupants.Length), MonopolySpaceTransform(player.Position));
     }
 
-    private static void DrawMonopolySpace(CanvasDrawingSession ds, MonopolySpace space, MonopolySnapshot game,
+    private void DrawMonopolySpace(CanvasDrawingSession ds, MonopolySpace space, MonopolySnapshot game,
         double boardAspect, float developmentProgress = 1)
     {
         var previous = ds.Transform;
@@ -287,12 +305,12 @@ public sealed partial class SceneCompositor
             }
         }
         finally { ds.Transform = previous; }
-        // Tokens are placed in the world to preserve their round physical shape
-        // at every ellipse angle and under portrait projector homographies.
+        // Place the metal pieces in world coordinates. Their forward axis aims
+        // at the plaza, independently of the deed's elliptical tangent.
         var occupants = game.Players.Where(player => !player.Bankrupt && player.Position == space.Index).ToArray();
         for (int i = 0; i < occupants.Length; i++)
-            DrawMonopolyToken(ds, MonopolyTokenCenter(game, occupants[i].Id),
-                occupants.Length > 3 ? 4 : 6.2f, occupants[i].ColorIndex,
+            DrawCrownDeedPiece(ds, MonopolyTokenCenter(game, occupants[i].Id),
+                occupants.Length > 3 ? 5 : 9, occupants[i].PieceIndex, occupants[i].ColorIndex,
                 occupants[i].Id == game.Players.ElementAtOrDefault(game.ActivePlayerIndex)?.Id, boardAspect);
     }
 
@@ -363,7 +381,7 @@ public sealed partial class SceneCompositor
         return (float)(preferred * scale);
     }
 
-    private static void DrawMonopolyCenter(CanvasDrawingSession ds, MonopolySnapshot game, double boardAspect,
+    private void DrawMonopolyCenter(CanvasDrawingSession ds, MonopolySnapshot game, double boardAspect,
         bool hideDiceDisplay = false, bool drawerOpen = false, CrownDeedDevelopmentFrame? development = null)
     {
         if (game.Phase == MonopolyPhase.Landing)
@@ -376,19 +394,19 @@ public sealed partial class SceneCompositor
             MonopolyText(ds, "Human players and AI opponents share one beautiful board.", new Rect(242, 687, 516, 42), 16, MonopolyMuted, wrap: true);
             return;
         }
-        bool headerCaret = !drawerOpen;
-        MonopolyText(ds, "CROWN & DEED", headerCaret ? new Rect(440, 232, 355, 42) : new Rect(280, 232, 440, 42),
+        MonopolyText(ds, "CROWN & DEED", new Rect(280, 232, 440, 42),
             30, MonopolyIvory, "Georgia", true);
-        DrawMonopolyRule(ds, 278, 100, headerCaret ? 635 : 500);
+        DrawMonopolyRule(ds, 278, 100);
         if (game.Phase == MonopolyPhase.Setup)
         {
             MonopolyText(ds, "YOUR TABLE, YOUR COMPANY", new Rect(226, 287, 548, 28), 18, MonopolyGold);
             MonopolyText(ds, "Choose 2 to 6 players. Pass the turn between human players.", new Rect(239, 323, 522, 43), 17, MonopolyIvory, wrap: true);
-            MonopolyText(ds, "HUMAN PLAYERS", new Rect(307, 382, 386, 27), 17, MonopolyGold);
-            MonopolyText(ds, game.HumanPlayers.ToString(CultureInfo.InvariantCulture), new Rect(443, 414, 114, 65), 38, MonopolyIvory, "Georgia", true);
-            MonopolyText(ds, "AI OPPONENTS", new Rect(307, 492, 386, 27), 17, MonopolyGold);
-            MonopolyText(ds, game.AiPlayers.ToString(CultureInfo.InvariantCulture), new Rect(443, 524, 114, 65), 38, MonopolyIvory, "Georgia", true);
-            MonopolyText(ds, $"{game.HumanPlayers + game.AiPlayers} players  ·  1,500 crowns each", new Rect(259, 608, 482, 26), 16, MonopolyMuted);
+            MonopolyText(ds, "HUMAN PLAYERS", new Rect(307, 365, 386, 24), 17, MonopolyGold);
+            MonopolyText(ds, game.HumanPlayers.ToString(CultureInfo.InvariantCulture), new Rect(443, 395, 114, 48), 34, MonopolyIvory, "Georgia", true);
+            MonopolyText(ds, "AI OPPONENTS", new Rect(307, 458, 386, 24), 17, MonopolyGold);
+            MonopolyText(ds, game.AiPlayers.ToString(CultureInfo.InvariantCulture), new Rect(443, 490, 114, 48), 34, MonopolyIvory, "Georgia", true);
+            MonopolyText(ds, $"{game.HumanPlayers + game.AiPlayers} players  ·  1,500 crowns each", new Rect(259, 558, 482, 24), 16, MonopolyMuted);
+            MonopolyText(ds, "CHOOSE YOUR SILVER PIECE", new Rect(259, 590, 482, 22), 14, MonopolyGold);
             return;
         }
         if (game.Phase == MonopolyPhase.ManageProperties)
@@ -437,7 +455,7 @@ public sealed partial class SceneCompositor
             MonopolyText(ds, game.LastCard, new Rect(320, 772, 360, 38), 12, MonopolyMuted, wrap: true);
     }
 
-    private static void DrawMonopolyRoster(CanvasDrawingSession ds, MonopolySnapshot game, double boardAspect)
+    private void DrawMonopolyRoster(CanvasDrawingSession ds, MonopolySnapshot game, double boardAspect)
     {
         int rows = (game.Players.Count + 1) / 2;
         float start = rows <= 2 ? 309 : 306;
@@ -448,7 +466,8 @@ public sealed partial class SceneCompositor
             bool active = index == game.ActivePlayerIndex && !player.Bankrupt;
             var rect = new Rect(221 + index % 2 * 286, start + index / 2 * (height + 8), 272, height);
             DrawMonopolyPlaque(ds, rect, active);
-            DrawMonopolyToken(ds, new Vector2((float)rect.X + 26, (float)(rect.Y + height / 2)), 10, player.ColorIndex, active, boardAspect);
+            DrawCrownDeedPiece(ds, new Vector2((float)rect.X + 26, (float)(rect.Y + height / 2)),
+                16, player.PieceIndex, player.ColorIndex, active, boardAspect, faceCenter: false);
             MonopolyText(ds, player.Name + (player.IsAi ? " · AI" : ""), new Rect(rect.X + 48, rect.Y + 6, 138, 22),
                 14, player.Bankrupt ? ThemeColor(123, 139, 124) : MonopolyIvory, "Bahnschrift", true);
             MonopolyText(ds, player.Bankrupt ? "BANKRUPT" : MonopolyMoney(player.Money), new Rect(rect.X + 168, rect.Y + 6, 91, 25),
@@ -523,14 +542,16 @@ public sealed partial class SceneCompositor
     {
         var bounds = button.Bounds;
         bool roll = button.Id == "mp-roll";
-        return new Rect(bounds.X * BoardSurfaceSize + (roll ? 92 : 12), bounds.Y * BoardSurfaceSize + 4,
-            bounds.Width * BoardSurfaceSize - (roll ? 104 : 24), bounds.Height * BoardSurfaceSize - 12);
+        bool piece = button.Id.StartsWith("mp-piece-next-", StringComparison.Ordinal);
+        return new Rect(bounds.X * BoardSurfaceSize + (roll ? 92 : piece ? 40 : 12), bounds.Y * BoardSurfaceSize + 4,
+            bounds.Width * BoardSurfaceSize - (roll ? 104 : piece ? 47 : 24), bounds.Height * BoardSurfaceSize - 12);
     }
 
     private static CanvasTextFormat MonopolyButtonTextFormat(BoardButton button) => new()
     {
         FontFamily = "Bahnschrift", FontWeight = FontWeights.SemiBold,
-        FontSize = button.Label is "+" or "−" or "-" ? 28 : button.Id == "mp-roll" ? 26 :
+        FontSize = button.Id.StartsWith("mp-piece-next-", StringComparison.Ordinal) ? 13 :
+            button.Label is "+" or "−" or "-" ? 28 : button.Id == "mp-roll" ? 26 :
             button.Bounds.Height < .05 ? 17 : button.Id is "mp-start-game" or "mp-start" ? 26 :
             button.Bounds.Width < .1 ? 24 : button.Label.Length > 15 ? 18 : 22,
         HorizontalAlignment = CanvasHorizontalAlignment.Center,
@@ -538,7 +559,7 @@ public sealed partial class SceneCompositor
         WordWrapping = CanvasWordWrapping.NoWrap
     };
 
-    private static void DrawMonopolyButton(CanvasDrawingSession ds, BoardButton button, bool hovered, double boardAspect)
+    private void DrawMonopolyButton(CanvasDrawingSession ds, BoardButton button, bool hovered, double boardAspect)
     {
         var b = button.Bounds;
         var rect = new Rect(b.X * BoardSurfaceSize, b.Y * BoardSurfaceSize, b.Width * BoardSurfaceSize, b.Height * BoardSurfaceSize);
@@ -571,6 +592,11 @@ public sealed partial class SceneCompositor
             DrawMonopolyDrawerArrow(ds, button, boardAspect, hovered);
             return;
         }
+        if (button.Id.StartsWith("mp-piece-next-", StringComparison.Ordinal) &&
+            int.TryParse(button.Id.AsSpan("mp-piece-next-".Length), out int slot) &&
+            slot > 0 && slot <= _boardSession.MonopolyState.SetupPieces.Count)
+            DrawCrownDeedPiece(ds, new Vector2((float)rect.X + 23, (float)(rect.Y + rect.Height / 2)),
+                14, _boardSession.MonopolyState.SetupPieces[slot - 1], slot - 1, false, boardAspect, faceCenter: false);
         using var format = MonopolyButtonTextFormat(button);
         ds.DrawText(button.Label, MonopolyButtonTextRectangle(button), ink, format);
     }
@@ -587,19 +613,6 @@ public sealed partial class SceneCompositor
         if (value >= 2) { Dot(.26f, .26f); Dot(.74f, .74f); }
         if (value >= 4) { Dot(.74f, .26f); Dot(.26f, .74f); }
         if (value == 6) { Dot(.26f, .5f); Dot(.74f, .5f); }
-    }
-
-    private static void DrawMonopolyToken(CanvasDrawingSession ds, Vector2 center, float radius, int colorIndex, bool active, double boardAspect = 1)
-    {
-        using var aspectTransform = new MonopolyArtAspect(ds, center, boardAspect);
-        Color color = MonopolyPlayerColor(colorIndex);
-        ds.FillEllipse(center + new Vector2(0, radius * .32f), radius + 1, radius * .74f, ThemeColor(20, 22, 16, 90));
-        using var finish = new CanvasLinearGradientBrush(ds.Device, ThemeColor((byte)Math.Min(255, color.R + 34), (byte)Math.Min(255, color.G + 34), (byte)Math.Min(255, color.B + 34)), color)
-        { StartPoint = center - new Vector2(0, radius), EndPoint = center + new Vector2(0, radius) };
-        ds.FillCircle(center, radius, finish);
-        ds.DrawCircle(center, radius, active ? MonopolyIvory : ThemeColor(33, 39, 24), active ? 1.6f : .8f);
-        ds.DrawCircle(center, radius * .63f, ThemeColor(255, 245, 212, 140), .7f);
-        DrawMonopolyStar(ds, center, radius * .38f, MonopolyIvory);
     }
 
     private static Color MonopolyPlayerColor(int index) => ((index % 6 + 6) % 6) switch

@@ -138,9 +138,10 @@ public sealed partial class MainWindow
                     Require(empty.TextPatterns?.SingleOrDefault(pattern => pattern.ControlRegion == index) is
                         { LabelIntact: true, Correlation: > .8 }, "The gold chevron used a rectangular fallback instead of an ink template.");
                     var away = (byte[])clean.Clone();
-                    var corner = CameraPoint(control.X + .018, control.Y + .008);
-                    var opposite = CameraPoint(Math.Min(control.X + control.Width * .35, trigger.X - .020),
-                        control.Y + control.Height - .008);
+                    // A compact plate has little space beside the chevron.
+                    // Cover its upper surface while preserving every ink pixel.
+                    var corner = CameraPoint(control.X + .006, control.Y + .004);
+                    var opposite = CameraPoint(control.X + control.Width - .006, trigger.Y - .003);
                     var controlStart = CameraPoint(control.X, control.Y);
                     var controlEnd = CameraPoint(control.X + control.Width, control.Y + control.Height);
                     int changedPixels = 0;

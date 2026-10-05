@@ -41,11 +41,24 @@ internal static class MonopolyBoardRegression
             Require(board.MonopolyState.HumanPlayers == humans && board.MonopolyState.AiPlayers == ais &&
                 board.Buttons.Single(button => button.Id == "mp-start").Enabled,
                 "A valid player mixture did not enable Start.");
+            Require(board.Buttons.Count(button => button.Id.StartsWith("mp-piece-next-", StringComparison.Ordinal)) == count,
+                "A setup player is missing an independent silver-piece control.");
+            var beforePieces = board.MonopolyState;
+            long beforeRevision = board.Revision;
+            string pieceId = $"mp-piece-next-{count}";
+            Separate(board, pieceId);
+            Require(board.Revision > beforeRevision && board.MonopolyState.SetupPieces[count - 1] != beforePieces.SetupPieces[count - 1] &&
+                board.MonopolyState.SetupPieces.Distinct().Count() == count &&
+                Button(board, pieceId).Label.StartsWith(ais > 0 ? $"A{ais} · " : $"P{humans} · ", StringComparison.Ordinal),
+                "Shared piece selection lost its caption identity, uniqueness or input/reference barrier.");
+            int[] pieces = board.MonopolyState.SetupPieces.ToArray();
             Pinch(board, "mp-start");
             Require(board.MonopolyState.Players.Count == count && board.MonopolyState.Players.Count(player => player.IsAi) == ais &&
                 board.MonopolyState.Players.Count(player => !player.IsAi) == humans &&
                 board.MonopolyState.Phase == MonopolyPhase.AwaitingRoll,
                 $"The {humans}-human/{ais}-AI setup produced the wrong game.");
+            Require(board.MonopolyState.Players.Select(player => player.PieceIndex).SequenceEqual(pieces),
+                "Shared setup selected different pieces from the started players.");
             Targets(board);
         }
         var one = new BoardSession(); one.ShowMonopoly(Next()); Pinch(one, "mp-start-game"); Pinch(one, "mp-ai-minus");

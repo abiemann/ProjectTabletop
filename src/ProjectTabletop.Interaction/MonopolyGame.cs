@@ -97,6 +97,8 @@ public sealed partial class MonopolyGame
         else if (id == "mp-human-minus") _state.Humans--;
         else if (id == "mp-ai-plus") _state.Ais++;
         else if (id == "mp-ai-minus") _state.Ais--;
+        else if (id.StartsWith("mp-piece-next-", StringComparison.Ordinal))
+            CycleSetupPiece(int.Parse(id.AsSpan("mp-piece-next-".Length)) - 1);
         else if (id == "mp-start") Start(now);
         else if (id == "mp-resume")
         {
@@ -109,6 +111,7 @@ public sealed partial class MonopolyGame
                 Status = "Gather your companies. Two to six merchants can join." };
         }
         else PerformGameAction(id, now);
+        if (_state.Phase == MonopolyPhase.Setup) ReconcileSetupPieces();
         _nextAiStep = now + AiPause;
         Changed();
         PublishRoll(beforeRoll, now);
@@ -170,6 +173,8 @@ public sealed partial class MonopolyGame
     {
         var restored = ParseSave(json);
         _state = restored;
+        for (int slot = 0; slot < restored.Players.Count; slot++)
+            _setupPieces[slot] = restored.Players[slot].PieceIndex!.Value;
         _lastNow = now;
         _nextAiStep = now + AiPause;
         Changed();
@@ -202,12 +207,13 @@ public sealed partial class MonopolyGame
 
     private void Start(DateTimeOffset now)
     {
+        ReconcileSetupPieces();
         int humans = _state.Humans, ais = _state.Ais;
         _state = new() { Phase = MonopolyPhase.AwaitingRoll, Humans = humans, Ais = ais,
             ActivePlayerIndex = 0, TurnNumber = 1, ChanceDeck = ShuffleDeck(), ChestDeck = ShuffleDeck() };
         for (int i = 0; i < humans + ais; i++)
             _state.Players.Add(new() { Id = i + 1, Name = i < humans ? $"Player {i + 1}" : $"AI {i - humans + 1}",
-                IsAi = i >= humans, Money = 1500, ColorIndex = i });
+                IsAi = i >= humans, Money = 1500, ColorIndex = i, PieceIndex = _setupPieces[i] });
         _state.Properties = Spaces.Where(IsPurchasable).Select(s => new MonopolySavedProperty { SpaceIndex = s.Index }).ToList();
         _state.Status = $"{Active.Name}, roll the dice to begin.";
         _nextAiStep = now + AiPause;
@@ -668,6 +674,7 @@ public sealed partial class MonopolyGame
                 if (_state.Ais > 0) actions.Add("mp-ai-minus");
                 if (_state.Humans + _state.Ais < 6) { actions.Add("mp-human-plus"); actions.Add("mp-ai-plus"); }
                 if (_state.Humans + _state.Ais >= 2) actions.Add("mp-start");
+                for (int slot = 0; slot < _state.Humans + _state.Ais; slot++) actions.Add($"mp-piece-next-{slot + 1}");
                 actions.Add("mp-setup-cancel");
                 break;
             case MonopolyPhase.ExitConfirmation:
@@ -758,12 +765,14 @@ public sealed partial class MonopolyGame
     }
     private MonopolySnapshot CreateSnapshot() => new(_state.Phase, _state.Humans, _state.Ais,
         Array.AsReadOnly(_state.Players.Select(p => new MonopolyPlayerSnapshot(p.Id, p.Name, p.IsAi, p.Money,
-            p.Position, p.InJail, p.JailTurns, p.GetOutOfJailCards, p.Bankrupt, p.ColorIndex)).ToArray()),
+            p.Position, p.InJail, p.JailTurns, p.GetOutOfJailCards, p.Bankrupt, p.ColorIndex)
+            { PieceIndex = p.PieceIndex ?? p.ColorIndex }).ToArray()),
         Array.AsReadOnly(_state.Properties.Select(p => new MonopolyPropertySnapshot(p.SpaceIndex, p.OwnerId, p.Houses, p.Mortgaged)).ToArray()),
         _state.ActivePlayerIndex, _state.Dice, _state.Status, _state.LastCard, _state.TurnNumber, Array.AsReadOnly(AvailableActions().ToArray()),
         _state.SelectedPropertyIndex, _state.PendingPropertyIndex,
         _state.Auction is { } a ? new(a.SpaceIndex, a.Bid, a.BidderId, a.CurrentBidderId, Array.AsReadOnly(a.PassedPlayerIds.ToArray())) : null,
-        _state.WinnerId, Revision, _resumeSave is not null, _state.DebtAmount, _state.DebtPlayerId, _state.DebtCreditorId);
+        _state.WinnerId, Revision, _resumeSave is not null, _state.DebtAmount, _state.DebtPlayerId, _state.DebtCreditorId)
+        { SetupPieces = Array.AsReadOnly(_setupPieces.Take(_state.Humans + _state.Ais).ToArray()) };
 
     private List<int> ShuffleDeck()
     {
@@ -855,6 +864,7 @@ public sealed partial class MonopolyGame
             || s.Phase != MonopolyPhase.GameOver && (alive < 2 || s.WinnerId is not null)
             || s.Players[s.ActivePlayerIndex].Bankrupt && s.Phase is not (MonopolyPhase.AwaitingEndTurn or MonopolyPhase.Auction or MonopolyPhase.GameOver or MonopolyPhase.Debt or MonopolyPhase.ManageProperties))
             throw new FormatException("The Crown & Deed save contains invalid turn or winner state.");
+        ResolveSavedPieces(s);
         return s;
     }
 }

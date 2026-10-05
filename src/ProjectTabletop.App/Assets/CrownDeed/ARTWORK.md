@@ -1,6 +1,6 @@
 # Crown & Deed artwork
 
-`crown-deed-city.png` is original artwork created with the built-in imagegen tool on 2026-10-04 for this project. No reference image was supplied. The boulevard, district parcels, captions, tokens, and developing buildings are rendered separately in code.
+`crown-deed-city.png` is original artwork created with the built-in imagegen tool on 2026-10-04 for this project. No reference image was supplied. The boulevard, district parcels, captions, and developing buildings are rendered separately in code; the player pieces use the original silver artwork documented below.
 
 SHA-256: `71670bfaafdc36a2342e7800d058f87a676a9fa9ccda05d51270df8bdcce9919`.
 
@@ -13,3 +13,9 @@ Create a gorgeous highly detailed premium painted/3D hybrid aerial map of a fict
 ## Authored composition
 
 The renderer places forty equal parcels around an oval boulevard, uses a new fictional district order, and builds lit architectural meshes over the city illustration. The image contains no brands, property labels, game tiles, or player tokens. It is intentionally opaque and is copied into build and publish output.
+
+Canal animation uses a code-authored shader and water-only outlines traced from this same image, with stationary cutouts for boats, bridges and shoreline details. Refraction and warm lamp reflections render beneath the board foreground; the original image pixels and SHA-256 remain unchanged.
+
+Architectural window animation also uses a code-authored shader with glass apertures traced from the original painting. Roughly 60% of the traced windows receive independent lighting schedules; panes in the same window share a schedule, and frames, mullions and street lamps stay fixed. Lit windows retain their painted texture, fading into dark moonlit glass when the room goes dark. No replacement bitmap or external artwork is used.
+
+Eight original silver player pieces are documented in [Pieces/ARTWORK.md](Pieces/ARTWORK.md), including their generation prompts, PNG hashes, framing and verified transparency. The renderer preserves their aspect and silver material, aims each piece's forward axis toward the physical board centre, and adds a separate contact shadow and small player-colour marker. The artwork is loaded once per graphics device and shared by board pieces, roster portraits and setup previews.

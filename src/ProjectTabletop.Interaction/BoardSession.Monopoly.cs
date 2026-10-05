@@ -207,14 +207,14 @@ public sealed partial class BoardSession
         if (MonopolyDrawerOpen)
         {
             bool enabled = game.Phase != MonopolyPhase.Saving;
-            result.Add(new("mp-exit-cancel", "v", new(.34, .752, .32, .06), BoardScreen.Monopoly, enabled));
+            result.Add(new("mp-exit-cancel", "v", new(.456, .752, .088, .06), BoardScreen.Monopoly, enabled));
             result.Add(new(game.IsActiveGame ? "mp-save-exit" : "mp-exit-game",
                 game.IsActiveGame ? "Save and Exit" : "Exit Game", new(.32, .632, .36, .08),
                 BoardScreen.Monopoly, enabled && _monopolyDrawerOpeningReady));
             return result.AsReadOnly();
         }
         Add("mp-exit", "^", game.Phase == MonopolyPhase.Landing
-            ? new(.34, .752, .32, .06) : new(.215, .232, .26, .06));
+            ? new(.456, .752, .088, .06) : new(.456, .160, .088, .06));
         switch (game.Phase)
         {
             case MonopolyPhase.Landing:
@@ -222,12 +222,18 @@ public sealed partial class BoardSession
                 if (game.CanResume) Add("mp-resume", "Resume saved game", new(.335, .573, .33, .064));
                 break;
             case MonopolyPhase.Setup:
-                Add("mp-human-minus", "-", new(.36, .42, .07, .058));
-                Add("mp-human-plus", "+", new(.57, .42, .07, .058));
-                Add("mp-ai-minus", "-", new(.36, .53, .07, .058));
-                Add("mp-ai-plus", "+", new(.57, .53, .07, .058));
-                Add("mp-start", "Start", new(.365, .665, .27, .072));
-                Add("mp-setup-cancel", "Cancel", new(.395, .755, .21, .048));
+                Add("mp-human-minus", "-", new(.36, .391, .07, .056));
+                Add("mp-human-plus", "+", new(.57, .391, .07, .056));
+                Add("mp-ai-minus", "-", new(.36, .488, .07, .056));
+                Add("mp-ai-plus", "+", new(.57, .488, .07, .056));
+                for (int slot = 0; slot < game.SetupPieces.Count; slot++)
+                {
+                    string player = slot < game.HumanPlayers ? $"P{slot + 1}" : $"A{slot - game.HumanPlayers + 1}";
+                    Add($"mp-piece-next-{slot + 1}", $"{player} · {MonopolyGame.PieceNames[game.SetupPieces[slot]]}",
+                        new(.253 + slot % 3 * .170, .624 + slot / 3 * .052, .154, .044));
+                }
+                Add("mp-start", "Start", new(.365, .734, .27, .064));
+                Add("mp-setup-cancel", "Cancel", new(.395, .810, .21, .032));
                 break;
             case MonopolyPhase.AwaitingRoll:
                 Add("mp-roll", "Roll", new(.365, .62, .27, .072));

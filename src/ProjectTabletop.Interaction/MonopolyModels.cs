@@ -17,7 +17,11 @@ public readonly record struct MonopolyDice(int First, int Second)
     public bool IsDouble => First == Second;
 }
 public sealed record MonopolyPlayerSnapshot(int Id, string Name, bool IsAi, int Money, int Position,
-    bool InJail, int JailTurns, int GetOutOfJailCards, bool Bankrupt, int ColorIndex);
+    bool InJail, int JailTurns, int GetOutOfJailCards, bool Bankrupt, int ColorIndex)
+{
+    /// <summary>Silver piece design; player and ownership colours remain independent.</summary>
+    public int PieceIndex { get; init; } = ColorIndex;
+}
 public sealed record MonopolyPropertySnapshot(int SpaceIndex, int? OwnerId, int Houses, bool Mortgaged);
 public sealed record MonopolyAuctionSnapshot(int SpaceIndex, int Bid, int? BidderId, int CurrentBidderId,
     IReadOnlyList<int> PassedPlayerIds);
@@ -28,6 +32,8 @@ public sealed record MonopolySnapshot(MonopolyPhase Phase, int HumanPlayers, int
     MonopolyAuctionSnapshot? Auction, int? WinnerId, long Revision, bool CanResume,
     int DebtAmount, int? DebtPlayerId, int? DebtCreditorId)
 {
+    /// <summary>Independent, immutable piece choices for the active setup slots, humans then AI.</summary>
+    public IReadOnlyList<int> SetupPieces { get; init; } = [];
     public MonopolyPlayerSnapshot? ActivePlayer => ActivePlayerIndex >= 0 && ActivePlayerIndex < Players.Count
         ? Players[ActivePlayerIndex] : null;
     public bool IsActiveGame => Players.Count > 0 && Phase != MonopolyPhase.GameOver;
@@ -80,6 +86,8 @@ public sealed class MonopolySavedPlayer
     public int GetOutOfJailCards { get; set; }
     public bool Bankrupt { get; set; }
     public int ColorIndex { get; set; }
+    /// <summary>Absent in earlier saves; resolved deterministically from the player's colour.</summary>
+    public int? PieceIndex { get; set; }
 }
 public sealed class MonopolySavedProperty
 {

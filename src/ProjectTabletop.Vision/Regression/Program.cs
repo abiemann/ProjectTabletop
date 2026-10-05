@@ -2,6 +2,12 @@ using System.Runtime.InteropServices;
 using OpenCvSharp;
 using ProjectTabletop.Vision;
 
+if (args is ["--hand-caption-resolution"])
+{
+    HandAcquisitionCaptionResolutionRegression.Run();
+    return;
+}
+
 if (args is ["--hand-acquisition-compact-native-replay", var compactNativeSnapshot])
 {
     HandAcquisitionCompactControlRegression.ReplayNative(compactNativeSnapshot);

@@ -443,7 +443,7 @@ public sealed partial class SceneCompositor
                 BoardScreen.Globe => regions,
                 BoardScreen.Slots => regions,
                 BoardScreen.Roulette => regions,
-                // Fixed ivory spaces and gold trim constrain the camera response
+                // Fixed deed plaques and gold trim constrain the camera response
                 // when a hand covers the only gold action panel. These bands
                 // calibrate colour only; searches remain inside the controls.
                 BoardScreen.Monopoly => [.. regions,

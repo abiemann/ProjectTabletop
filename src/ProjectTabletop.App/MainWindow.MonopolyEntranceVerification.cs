@@ -56,8 +56,14 @@ public sealed partial class MainWindow
         {
             using (var drawing = initial.CreateDrawingSession())
             {
-                drawing.DrawImage(baseLayer);
-                drawing.DrawImage(lid);
+                drawing.Clear(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+                drawing.Transform = Matrix3x2.CreateScale(rasterWidth / 1000f, rasterHeight / 1000f);
+                // Compare the same logical-to-native sampling path. An identity
+                // bitmap blit rounds translucent cutout edges differently.
+                var logical = new Rect(0, 0, 1000, 1000);
+                var source = new Rect(0, 0, rasterWidth, rasterHeight);
+                drawing.DrawImage(baseLayer, logical, source, 1, CanvasImageInterpolation.Linear);
+                drawing.DrawImage(lid, logical, source, 1, CanvasImageInterpolation.Linear);
             }
             initialPixels = initial.GetPixelBytes();
         }
@@ -79,7 +85,8 @@ public sealed partial class MainWindow
                 first.SequenceEqual(Draw(scene)), "A future entrance start produced negative progress or premature pieces.");
 
         now = started.AddMilliseconds(lead - 1);
-        Require(first.SequenceEqual(Draw(scene)) && Frame(scene).LandedTiles == 0,
+        Draw(scene);
+        Require(firstBoard.SequenceEqual(board.GetPixelBytes()) && Frame(scene).LandedTiles == 0,
             "A parcel moved during the initial city pause.");
         now = started.AddMilliseconds(lead + 50);
         var goFrame = Frame(scene);
@@ -154,7 +161,7 @@ public sealed partial class MainWindow
         Require(scene.MonopolyEntranceActive && !scene.ActivateMonopolyButton("mp-start-game") &&
                 !scene.ActivateMonopolyButton("mp-exit"), "The final moving contact frame accepted input early.");
         now = started.AddMilliseconds(duration);
-        var completed = Draw(scene);
+        Draw(scene);
         Require(!scene.MonopolyEntranceActive && ReferenceEquals(state, scene.MonopolyState),
             "Completing the entrance altered rules state or missed its exact deadline.");
         using (var baseline = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), rasterWidth, rasterHeight, 96))
@@ -164,14 +171,17 @@ public sealed partial class MainWindow
                 drawing.Transform = Matrix3x2.CreateScale(rasterWidth / 1000f, rasterHeight / 1000f);
                 typeof(SceneCompositor).GetMethod("DrawMonopolyBoard", BindingFlags.Instance | BindingFlags.NonPublic)!
                     .Invoke(scene, [drawing, scene.MonopolyState, scene.CurrentBoardButtons, Array.Empty<string>(),
-                        Array.Empty<BoardFingerSelectionFeedback>(), scene.MonopolyPreviewAspect, false, false, false, 1f, null]);
+                        Array.Empty<BoardFingerSelectionFeedback>(), scene.MonopolyPreviewAspect, false, false, false, 1f, null, false]);
             }
             Require(board.GetPixelBytes().SequenceEqual(baseline.GetPixelBytes()),
                 "The final entrance frame differs from the independent unanimated native board.");
         }
         CheckPreview(scene);
+        var completedForeground = board.GetPixelBytes();
         now = started.AddMilliseconds(duration + 700);
-        Require(completed.SequenceEqual(Draw(scene)), "The finished entrance replayed or changed its landed board.");
+        Draw(scene);
+        Require(completedForeground.SequenceEqual(board.GetPixelBytes()),
+            "The finished entrance replayed or changed its landed foreground.");
         await Capture("04-exact-complete-board");
         Require(scene.ActivateMonopolyButton("mp-start-game"), "The completed entrance did not release fresh pointer input.");
 
