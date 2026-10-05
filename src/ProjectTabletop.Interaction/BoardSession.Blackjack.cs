@@ -72,7 +72,7 @@ public sealed partial class BoardSession
     {
         AdvanceBlackjackPresentation(now);
         AdvanceMonopolyPresentation(now);
-        AdvanceGlobeDrawer(now);
+        AdvanceBottomDrawers(now);
         AdvanceSlots(now);
         AdvanceRoulette(now);
         AdvanceMenuScroll(now);
@@ -88,7 +88,7 @@ public sealed partial class BoardSession
     {
         AdvanceBlackjackPresentation(now);
         AdvanceMonopolyPresentation(now);
-        AdvanceGlobeDrawer(now);
+        AdvanceBottomDrawers(now);
         AdvanceMenuScroll(now);
         BlackjackHit? hit = null;
         BlackjackDeal? deal = null;
@@ -108,6 +108,17 @@ public sealed partial class BoardSession
         if (Screen == BoardScreen.Slots)
         {
             return SelectSlotsButton(button, now);
+        }
+        if (Screen == BoardScreen.PhotoCopy)
+        {
+            if (now < _photoCopyDrawer.ObservedAt) return false;
+            if (button.Id == "photo-drawer-open")
+                return SelectBottomDrawer(_photoCopyDrawer, BoardScreen.PhotoCopy, open: true, now);
+            if (button.Id == "photo-drawer-close")
+                return SelectBottomDrawer(_photoCopyDrawer, BoardScreen.PhotoCopy, open: false, now);
+            // The hidden object-field shutter remains independent of the drawer.
+            // Every visible action needs an open, settled current control row.
+            if (button.Id != PhotoCopyShutter.Id && (!PhotoCopyDrawerOpen || !_photoCopyDrawer.OpeningReady)) return false;
         }
         if (button.Id == "paint-save")
         {
@@ -141,10 +152,13 @@ public sealed partial class BoardSession
             ClearBlackjackPresentationHold();
             ClearMonopolyPresentationHold();
             ClearMonopolyDrawerUi();
-            ClearGlobeDrawerUi();
+            // Clear intentionally restarts the captured result, but keeps its
+            // drawer in place so the new Swirl/Copy captions remain available.
+            if (Screen != BoardScreen.PhotoCopy || button.Id != "capture-again") ClearBottomDrawers(now);
             Screen = button.Destination;
             if (Screen == BoardScreen.Globe) _globe.Start(now);
             Revision++;
+            NavigationRevision++;
             openedBoard = true;
         }
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

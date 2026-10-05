@@ -128,8 +128,9 @@ public sealed partial class MainWindow
         cutout = PhotoCopyCameraImage.Capture(size, size, size * 4, fixture, selectedContext.CameraToBoard, cutout!);
         Require(cutout?.CameraGeometry is not null, "The photograph lost its original camera proportions before rendering.");
         Require(scene.SetPhotoCopyCapture(cutout!, selectedContext.Revision, lockedObject), "The gesture capture did not enter the renderer.");
+        await captionHolds.OpenDrawerAsync();
         Require(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
-                ["menu", "capture-again", "photo-save"]) &&
+                ["photo-drawer-close", "menu", "capture-again", "photo-save"]) &&
             scene.CurrentBoardButtons.Single(button => button.Id == "capture-again") is { Label: "Clear", Enabled: true } &&
             scene.CurrentBoardButtons.Single(button => button.Id == "photo-save") is { Label: "Save", Enabled: true },
             "Swirl did not expose Clear and Save for the retained photograph.");

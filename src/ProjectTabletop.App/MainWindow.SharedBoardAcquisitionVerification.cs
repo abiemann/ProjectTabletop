@@ -53,8 +53,12 @@ public sealed partial class MainWindow
         // chips and the small table chip, with Undo/Clear/Spin enabled.
         Require(scene.ActivateRouletteButton("roulette-number-17"), "Roulette acquisition fixture could not place its stake.");
         VerifyButtons("Roulette");
-        scene.ShowPhotoCopy(); VerifyButtons("Photo Copy");
-        foreach (var (id, title) in new[] { ("paint", "Paint"), ("monopoly", "Monopoly"), ("globe", "Globe") })
+        scene.ShowPhotoCopy(); VerifyButtons("Photo Copy closed drawer");
+        Require(scene.ActivatePhotoCopyButton("photo-drawer-open"), "The Photo Copy acquisition drawer could not open.");
+        now += BoardSession.PhotoCopyDrawerOpeningDuration;
+        scene.TickPhotoCopy(now);
+        VerifyButtons("Photo Copy open drawer");
+        foreach (var (id, title) in new[] { ("paint", "Paint"), ("monopoly", "Crown & Deed"), ("globe", "Globe") })
         {
             // Acquisition runs on a synthetic presentation clock. Navigation
             // gestures use wall time and are covered by Interaction verification.
@@ -120,6 +124,7 @@ public sealed partial class MainWindow
             blackjackExitAndYourChipsIncluded = true, yourChipsAcquiresHeadingInsteadOfBalance = true,
             mediaAndCalibrationInactive = true,
             globeClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Globe", StringComparison.Ordinal)) == 5,
+            photoCopyClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Photo Copy", StringComparison.Ordinal)) == 5,
             rouletteBetsChipsAndHoldsCovered = selectedBoard is null or BoardScreen.Roulette,
             menuScrollArrowUsesSharedCaptionEvidence = selectedBoard is null or BoardScreen.Menu,
             intactReflectiveSpinCaptionChecked = selectedBoard is null or BoardScreen.Slots,
@@ -231,7 +236,8 @@ public sealed partial class MainWindow
                 // Keep this geometric fixture visibly distinct even from the
                 // gold Deal button. Actual skin/projector contrast is evaluated
                 // in recorded camera captures, not asserted by a painted patch.
-                bool arrow = button.Id is "globe-drawer-open" or "globe-drawer-close" or "menu-scroll-down" or "menu-scroll-up";
+                bool arrow = button.Id is "globe-drawer-open" or "globe-drawer-close" or
+                    "photo-drawer-open" or "photo-drawer-close" or "menu-scroll-down" or "menu-scroll-up";
                 if (screen == BoardScreen.Roulette && !button.IsHold)
                 {
                     // Roulette's compact numbers, outside labels and chip values

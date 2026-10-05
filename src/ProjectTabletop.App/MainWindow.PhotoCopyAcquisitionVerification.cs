@@ -30,6 +30,9 @@ public sealed partial class MainWindow
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
         scene.SetBoardSetup(false);
         scene.ShowPhotoCopy();
+        Require(scene.ActivatePhotoCopyButton("photo-drawer-open"), "The acquisition fixture could not open Photo Copy's drawer.");
+        now += BoardSession.PhotoCopyDrawerOpeningDuration;
+        scene.TickPhotoCopy(now);
         Draw();
         Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false },
             "Photo Copy acquisition did not settle after navigation.");
@@ -37,10 +40,10 @@ public sealed partial class MainWindow
         var before = Ready();
         Require(before.ExpectedScene is { Width: size, Height: size } &&
                 before.ExpectedScene.Bgra.Length == size * size * 4 &&
-                before.ExpectedScene.BoardSearchRegions is { Count: 3 } &&
+                before.ExpectedScene.BoardSearchRegions is { Count: 4 } &&
                 before.RestrictAcquisitionToSearchRegions && before.AllowsSearchIllumination &&
                 before.ContinuousSearchPolygon is { Length: 4 },
-            "Photo Copy needs its own bounded button reference, three search masks and a focused object field.");
+            "Photo Copy needs its own bounded button reference, four search masks and a focused object field.");
         AssertSearchCenters(before);
         AssertEmpty(before, Draw(), "The empty Photo Copy controls produced foreground candidates.");
 
@@ -84,7 +87,7 @@ public sealed partial class MainWindow
             "Changing Swirl/Copy to Clear/Save did not invalidate the previous control image.");
         now += TimeSpan.FromMilliseconds(600);
         var ready = Ready();
-        Require(scene.CurrentBoardButtons.Select(button => button.Label).SequenceEqual(["Exit", "Clear", "Save"]),
+        Require(scene.CurrentBoardButtons.Select(button => button.Label).SequenceEqual(["v", "Exit", "Clear", "Save"]),
             "The retained photograph did not expose the requested result controls.");
         Require(ready.ContinuousSearchPolygon is null && ready.RestrictAcquisitionToSearchRegions,
             "Photo Copy continued scanning the object field after Swirl changed the controls to Clear/Save.");
@@ -138,7 +141,7 @@ public sealed partial class MainWindow
                 $"Foreground over {button.Label} projected a search light onto protected lettering.");
             Require(scene.ActiveHandSpotlightCount == 0 && scene.HoveredBoardButtons.Count == 0 &&
                     scene.CurrentBoardScreen == BoardScreen.PhotoCopy &&
-                    scene.CurrentBoardButtons.Select(item => item.Label).SequenceEqual(["Exit", "Clear", "Save"]) &&
+                    scene.CurrentBoardButtons.Select(item => item.Label).SequenceEqual(["v", "Exit", "Clear", "Save"]) &&
                     scene.TryGetPhotoCopyMemoryImage(out var unchanged) && ReferenceEquals(unchanged.Cutout, photograph) &&
                     !scene.TryTakePhotoCopyCaptureRequest(now, out _) &&
                     !scene.TryTakePhotoCopyMemorySaveRequest(now, out _),
@@ -163,12 +166,23 @@ public sealed partial class MainWindow
             "A confirmed hand illuminated a protected caption hold.");
         now += TimeSpan.FromMilliseconds(600);
         ready = Ready();
+        var beforeReset = ready;
         scene.ClearHandTips();
         scene.CompleteHandAcquisition(ready, [hint with { ObservedAt = now }], [], now);
         Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null },
             "A result from before input reset restored its obsolete search light.");
+        Require(!scene.PhotoCopyDrawerOpen && scene.CurrentBoardButtons.Single().Id == "photo-drawer-open" &&
+                scene.TryGetPhotoCopyMemoryImage(out var resetImage) && ReferenceEquals(resetImage.Cutout, photograph),
+            "Input reset failed to close the controls while preserving the retained photograph.");
+        // Reset now hides the drawer. Its newly visible arrow must really be
+        // rendered before acquisition can capture a matching stationary image.
+        Draw();
         now += TimeSpan.FromMilliseconds(600);
         ready = Ready();
+        Require(ready.Revision != beforeReset.Revision &&
+                !ReferenceEquals(ready.ExpectedScene, beforeReset.ExpectedScene) &&
+                ready.ExpectedScene!.BoardSearchRegions is { Count: 1 },
+            "The closed drawer reused its previous open-row camera reference.");
         await Task.Delay(5);
         var sourceTime = DateTimeOffset.UtcNow;
         scene.SetHandCursors([new(CameraPoint(.5, .5), sourceTime.AddSeconds(1), 99001)
@@ -179,6 +193,7 @@ public sealed partial class MainWindow
         Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null },
             "A button disturbance relit an executed hand before it was removed.");
         scene.ClearHandTips();
+        Draw();
         scene.GetHandAcquisitionContext(now);
         now += TimeSpan.FromMilliseconds(600);
         ready = Ready();
@@ -212,8 +227,8 @@ public sealed partial class MainWindow
         }
         void AssertSearchCenters(SceneCompositor.HandAcquisitionContext context)
         {
-            Require(context.StationarySearchCenters is { Length: 3 }, "Three control search centers are required.");
-            for (int index = 0; index < 3; index++)
+            Require(context.StationarySearchCenters is { Length: 4 }, "Four control search centers are required.");
+            for (int index = 0; index < 4; index++)
             {
                 var bounds = scene.CurrentBoardButtons[index].Bounds;
                 var expected = CameraPoint(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);

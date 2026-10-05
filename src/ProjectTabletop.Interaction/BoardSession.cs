@@ -89,12 +89,6 @@ public sealed partial class BoardSession
     {
         new BoardButton("menu", "Back to settings", new(.06, .055, .30, .105), BoardScreen.Settings)
     });
-    private static readonly IReadOnlyList<BoardButton> PhotoCopyButtons = Array.AsReadOnly(new[]
-    {
-        new BoardButton("menu", "Exit", new(.08, .835, .26, .105), BoardScreen.Menu, Hold: BoardButtonHold.Once),
-        new BoardButton("photo-swirl", "Swirl", new(.37, .835, .26, .105), BoardScreen.PhotoCopy, Hold: BoardButtonHold.Once),
-        new BoardButton("photo-copy-once", "Copy", new(.66, .835, .26, .105), BoardScreen.PhotoCopy, Hold: BoardButtonHold.Once)
-    });
     private static readonly IReadOnlyList<BoardButton> PaintButtons = Array.AsReadOnly(new[]
     {
         new BoardButton("menu", "Exit", new(.06, .85, .26, .105), BoardScreen.Menu),
@@ -108,8 +102,10 @@ public sealed partial class BoardSession
     private long _consumedEventId;
 
     public BoardScreen Screen { get; private set; } = BoardScreen.Menu;
-    /// <summary>Changes on every navigation, including restarting the current application.</summary>
+    /// <summary>Changes on navigation and input/presentation changes such as opening a drawer.</summary>
     public long Revision { get; private set; }
+    /// <summary>Changes only when a board opens or intentionally restarts, never for drawer presentation.</summary>
+    public long NavigationRevision { get; private set; }
     /// <summary>Raised once after a board opens, including menu gestures and reopening the same board.</summary>
     public event Action<BoardScreen>? BoardOpened;
     public string Title => Screen switch
@@ -158,7 +154,7 @@ public sealed partial class BoardSession
         _lastNow = now;
         AdvanceBlackjackPresentation(now);
         AdvanceMonopolyPresentation(now);
-        AdvanceGlobeDrawer(now);
+        AdvanceBottomDrawers(now);
         AdvanceSlots(now);
         AdvanceRoulette(now);
         AdvanceMenuScroll(now);
@@ -233,8 +229,7 @@ public sealed partial class BoardSession
         ClearMonopolyPresentationHold();
         ClearMonopolyDrawerUi();
         AdvanceMonopolyPresentation(now);
-        ClearGlobeDrawerUi();
-        AdvanceGlobeDrawer(now);
+        ClearBottomDrawers(now);
         ClearHolds();
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
@@ -254,12 +249,12 @@ public sealed partial class BoardSession
         ClearMonopolyPresentationHold();
         ClearMonopolyDrawerUi();
         AdvanceMonopolyPresentation(now);
-        ClearGlobeDrawerUi();
-        AdvanceGlobeDrawer(now);
+        ClearBottomDrawers(now);
         if (screen == BoardScreen.Globe) _globe.Start(now);
         ClearHolds();
         Screen = screen;
         Revision++;
+        NavigationRevision++;
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

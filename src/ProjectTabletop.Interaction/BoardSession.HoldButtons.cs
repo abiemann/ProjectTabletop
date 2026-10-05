@@ -64,9 +64,10 @@ public sealed partial class BoardSession
         // Like any camera frame, hold evidence advances timed presentations.
         AdvanceBlackjackPresentation(now);
         AdvanceMonopolyPresentation(now);
-        AdvanceGlobeDrawer(now);
+        AdvanceBottomDrawers(now);
         AdvanceSlots(now);
         AdvanceRoulette(now);
+        if (!BottomDrawerHoldFrameIsCurrent(frameTime)) return [];
         var holdButtons = Buttons.Where(button => button.IsHold && button.Enabled)
             .ToDictionary(button => button.Id);
         foreach (string id in _clearHoldCaptions.Keys.ToArray())

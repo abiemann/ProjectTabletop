@@ -11,12 +11,29 @@ public sealed partial class MainWindow
     // Exercise the rendered caption -> camera evidence -> shared hold -> exact
     // frame request path. No hand model, landmark or synthetic selection event
     // participates. Real clock pacing also exercises SetHandCursors freshness.
-    private sealed class PhotoCopyCaptionHoldFixture(SceneCompositor scene, Func<byte[]> draw, int size)
+    private sealed class PhotoCopyCaptionHoldFixture(SceneCompositor scene, Func<byte[]> draw, int size,
+        Action<DateTimeOffset>? setClock = null, int? height = null)
     {
+        private readonly int _height = height ?? size;
         private readonly HandAcquisitionPresenceTracker _presence = new();
         private long _revision = -1;
         public int SuccessfulHolds { get; private set; }
         public int BrokenCaptionFrames { get; private set; }
+        public List<object> FrameDiagnostics { get; } = [];
+        public byte[]? LastCameraPixels { get; private set; }
+        public SceneCompositor.HoldButtonContext? LastContext { get; private set; }
+        private DateTimeOffset? _lastEvidenceTime;
+
+        public async Task OpenDrawerAsync()
+        {
+            if (!scene.PhotoCopyDrawerOpen)
+                Check(scene.ActivatePhotoCopyButton("photo-drawer-open"), "Photo Copy drawer could not open.");
+            await Task.Delay(350);
+            scene.TickPhotoCopy(MonotonicClock.UtcNow);
+            draw();
+            Check(scene.PhotoCopyDrawerOpen && scene.CurrentBoardButtons.Any(button => button.Id == "menu" && button.Enabled),
+                "Photo Copy actions did not settle after opening the drawer.");
+        }
 
         public async Task<DateTimeOffset> HoldAsync(string id, bool busy = false,
             bool expectActivation = true, bool prepareHeldFrames = true)
@@ -78,8 +95,13 @@ public sealed partial class MainWindow
             string id, bool broken, bool busy = false, bool prepare = true)
         {
             await Task.Delay(100);
-            var time = DateTimeOffset.UtcNow;
+            var time = MonotonicClock.UtcNow;
+            setClock?.Invoke(time);
             if (prepare) scene.SetHandCursors([], time, photoCopyCaptureBusy: busy);
+            // SetHandCursors updates the board with its own live monotonic clock.
+            // Preserve the camera source timestamp, then sample a newer consumer
+            // clock just as the live pipeline does after recognition work.
+            setClock?.Invoke(MonotonicClock.UtcNow);
             byte[] pixels = draw();
             var context = scene.GetHoldButtonContext(time) ??
                 throw new InvalidOperationException("Photo Copy has no current rendered hold reference.");
@@ -95,7 +117,7 @@ public sealed partial class MainWindow
             {
                 var trigger = context.ExpectedScene.BoardTriggerRegions![index];
                 var matrix = context.ExpectedScene.CameraToBoard;
-                Point2[] corners = [new(0, 0), new(size, 0), new(size, size), new(0, size)];
+                Point2[] corners = [new(0, 0), new(size, 0), new(size, _height), new(0, _height)];
                 var map = Homography.FromFourPoints(corners, corners.Select(point =>
                 {
                     double denominator = matrix[6] * point.X + matrix[7] * point.Y + matrix[8];
@@ -106,7 +128,7 @@ public sealed partial class MainWindow
                 // Four separated, stationary occlusion strips visibly break the
                 // native letters while leaving the surrounding panel as reference.
                 for (int strip = 0; strip < 4; strip++)
-                    for (int y = Math.Max(0, (int)center.Y - 34); y < Math.Min(size, (int)center.Y + 34); y++)
+                    for (int y = Math.Max(0, (int)center.Y - 34); y < Math.Min(_height, (int)center.Y + 34); y++)
                         for (int x = Math.Max(0, (int)center.X - 38 + strip * 20);
                             x < Math.Min(size, (int)center.X - 20 + strip * 20); x++)
                         {
@@ -114,8 +136,8 @@ public sealed partial class MainWindow
                             pixels[offset] = 75; pixels[offset + 1] = 95; pixels[offset + 2] = 185; pixels[offset + 3] = 255;
                         }
             }
-            var presence = _presence.Update(size, size, size * 4, pixels, context.SearchPolygon,
-                context.ExpectedScene, time, DateTimeOffset.UtcNow);
+            var presence = _presence.Update(size, _height, size * 4, pixels, context.SearchPolygon,
+                context.ExpectedScene, time, MonotonicClock.UtcNow);
             var held = context.HeldButtons(presence);
             var cleared = context.ClearedButtons(presence);
             if (held.Contains(id))
@@ -125,7 +147,17 @@ public sealed partial class MainWindow
                     id + " qualified without genuinely broken rendered lettering.");
                 BrokenCaptionFrames++;
             }
+            setClock?.Invoke(MonotonicClock.UtcNow);
             var activated = scene.ObserveHoldButtons(context, held, time, cleared);
+            LastCameraPixels = pixels;
+            LastContext = context;
+            FrameDiagnostics.Add(new { id, broken, time,
+                gapMilliseconds = _lastEvidenceTime is { } previous ? (time - previous).TotalMilliseconds : 0,
+                processingMilliseconds = (MonotonicClock.UtcNow - time).TotalMilliseconds,
+                revision = context.Revision, held, cleared, activated,
+                patterns = presence.TextPatterns?.Where(pattern => pattern.ControlRegion == index).ToArray(),
+                progress = scene.CurrentHoldProgress.ToArray(), reason = presence.Reason });
+            _lastEvidenceTime = time;
             return (time, held.Contains(id), activated);
         }
 

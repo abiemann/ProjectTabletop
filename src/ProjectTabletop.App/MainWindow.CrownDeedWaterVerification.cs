@@ -169,7 +169,7 @@ public sealed partial class MainWindow
         await File.WriteAllTextAsync(reportPath, JsonSerializer.Serialize(samples, new JsonSerializerOptions { WriteIndented = true }));
         return new { passed = true, fourCanals = true, fourAspects = true, sameClockChecks, stateChecks,
             controlChecks, outsideMaskChecks, cacheChecks, canalMotionChecks, compositionChecks, recreationChecks,
-            maskSamplingEdgePixels = 1, windowsFrozenAtInitialFrame = true,
+            maskSamplingEdgePixels = 1, architecturalWindowsUseOriginalArtwork = true,
             cacheClockIndependent = true, epochPreservedOnRecreation = true,
             liveServicesConstructed = false, directory, reportPath, images };
 
@@ -182,10 +182,6 @@ public sealed partial class MainWindow
             now += TimeSpan.FromMilliseconds(4);
             var scene = new SceneCompositor(monopoly: game, blackjackClock: () => now,
                 monopolyClock: () => now, boardRevealClock: () => now);
-            // Freeze only the other city animation in this private fixture.
-            // Its ordinary negative-age clamp retains a real rendered window
-            // layer, without allowing it to mask a water-boundary regression.
-            type.GetField("_crownDeedWindowsEpoch", instance)!.SetValue(scene, now.AddYears(1));
             scene.SetDisplayAspect(width / (double)height);
             scene.SetBoardSetup(true);
             inset = scene.SetDetectedBoardGrid([new(.035f, .035f), new(.965f, .035f), new(.965f, .965f), new(.035f, .965f)],
@@ -237,13 +233,11 @@ public sealed partial class MainWindow
             {
                 drawing.Clear(Windows.UI.Color.FromArgb(255, 0, 0, 0));
                 var water = Field<CanvasRenderTarget>(scene, "_crownDeedWaterTarget");
-                var windows = Field<CanvasRenderTarget>(scene, "_crownDeedWindowsTarget");
                 var foreground = Field<CanvasRenderTarget>(scene, "_monopolyPreviewTarget");
                 double width = output.Size.Width, height = output.Size.Height, aspect = scene.MonopolyPreviewAspect;
                 double drawWidth = Math.Min(width, height * aspect), drawHeight = drawWidth / aspect;
                 var destination = new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
                 drawing.DrawImage(water, destination, new Rect(0, 0, water.SizeInPixels.Width, water.SizeInPixels.Height));
-                drawing.DrawImage(windows, destination, new Rect(0, 0, windows.SizeInPixels.Width, windows.SizeInPixels.Height));
                 drawing.DrawImage(foreground, destination, new Rect(0, 0, foreground.SizeInPixels.Width, foreground.SizeInPixels.Height));
             }
             Require(actual.SequenceEqual(expected.GetPixelBytes()),

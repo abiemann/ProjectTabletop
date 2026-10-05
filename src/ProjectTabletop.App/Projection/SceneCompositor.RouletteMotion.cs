@@ -161,7 +161,17 @@ public sealed partial class SceneCompositor
         DrawRouletteProjectedCircle(ds, 157.5, 5, ThemeColor(213, 194, 136, 120), .8f);
         using (var interior = RouletteSurfaceBand(ds.Device, 0, -12, 153, -4))
             ds.FillGeometry(interior, ThemeColor(16, 23, 24));
-        DrawRouletteConeLighting(ds);
+        // The figured wooden cone belongs to the rotor and is drawn with it.
+        // Only the stationary track, casing and deflectors live in this cache.
+        for (int i = 0; i < 8; i++)
+        {
+            double angle = i * Math.Tau / 8 + .24;
+            var tip = RoulettePolarPoint(155, angle, 2);
+            using var diamond = RouletteQuad(ds.Device, RoulettePolarPoint(155, angle - .012, -.5),
+                RoulettePolarPoint(154.1, angle, -.5), tip, RoulettePolarPoint(156.8, angle, -.5));
+            ds.FillGeometry(diamond, ThemeColor(163, 128, 68));
+            ds.DrawLine(RoulettePolarPoint(155, angle - .012, -.5), tip, RouletteCream, .55f);
+        }
     }
 
     private void DrawRouletteCasing(CanvasDrawingSession ds, bool nearSideOnly = false)
@@ -173,25 +183,31 @@ public sealed partial class SceneCompositor
              new() { Position = .64f, Color = ThemeColor(35, 23, 24) },
              new() { Position = 1, Color = ThemeColor(98, 51, 34) }])
             { StartPoint = new(30, 180), EndPoint = new(360, 350) };
-        using (var body = RouletteSurfaceBand(ds.Device, 178, -14, 178, 8, 0, Math.PI))
+        using (var body = RouletteSurfaceBand(ds.Device, 186, -10, 186, 8, 0, Math.PI))
             ds.FillGeometry(body, wall);
-        using var wood = new CanvasLinearGradientBrush(ds.Device,
-            [new() { Position = 0, Color = ThemeColor(57, 33, 30) },
-             new() { Position = .28f, Color = ThemeColor(132, 74, 45) },
-             new() { Position = .52f, Color = ThemeColor(53, 32, 30) },
-             new() { Position = .83f, Color = ThemeColor(101, 56, 35) },
-             new() { Position = 1, Color = ThemeColor(38, 26, 25) }])
-            { StartPoint = new(48, 54), EndPoint = new(330, 370) };
-        using (var rim = RouletteSurfaceBand(ds.Device, 162, 8, 178, 8, 0, end))
-            ds.FillGeometry(rim, wood);
-        for (int ring = 0; ring < 8; ring++)
-            DrawRouletteProjectedCircle(ds, 164 + ring * 1.7, 8,
-                ThemeColor(233, 168, 101, (byte)(ring % 2 == 0 ? 31 : 15)), .65f, 0, end);
+        DrawRouletteBurlSurface(ds, cone: false, nearSideOnly: nearSideOnly);
         using var gold = RouletteMetalBrush(ds.Device, new(40, 65), new(347, 344));
         using (var lip = RouletteSurfaceBand(ds.Device, 158, 6, 164, 8, 0, end))
             ds.FillGeometry(lip, gold);
-        DrawRouletteProjectedCircle(ds, 176, 8, gold, 2.4f, 0, end);
+        // Fine inlay and moulded edges leave broad, uninterrupted burl between
+        // the brass details. The near-side wall supplies actual bowl thickness.
+        DrawRouletteProjectedCircle(ds, 186, -9.5, ThemeColor(18, 14, 13), 2.5f, 0, Math.PI);
+        DrawRouletteProjectedCircle(ds, 186, -6.5, gold, 1.1f, 0, Math.PI);
+        DrawRouletteProjectedCircle(ds, 186, 8, ThemeColor(34, 20, 16), 2.7f, 0, end);
+        DrawRouletteProjectedCircle(ds, 185, 8, gold, 1.2f, 0, end);
+        DrawRouletteProjectedCircle(ds, 181.8, 8, ThemeColor(237, 205, 146, 175), .55f, 0, end);
+        DrawRouletteProjectedCircle(ds, 180.3, 8, ThemeColor(29, 16, 12, 170), .65f, 0, end);
+        DrawRouletteProjectedCircle(ds, 166.4, 8, ThemeColor(239, 204, 145, 170), .55f, 0, end);
         DrawRouletteProjectedCircle(ds, 162, 8, ThemeColor(255, 238, 184), 1.1f, 0, end);
+        for (int i = 0; i < 24; i++)
+        {
+            double angle = i * Math.Tau / 24;
+            if (nearSideOnly && angle > Math.PI) continue;
+            using var inlay = RouletteQuad(ds.Device, RoulettePolarPoint(177.6, angle, 8.1),
+                RoulettePolarPoint(179, angle - .004, 8.1), RoulettePolarPoint(180.4, angle, 8.1),
+                RoulettePolarPoint(179, angle + .004, 8.1));
+            ds.FillGeometry(inlay, gold);
+        }
     }
 
     private static CanvasLinearGradientBrush RouletteMetalBrush(CanvasDevice device, Vector2 start, Vector2 end) =>
@@ -204,78 +220,86 @@ public sealed partial class SceneCompositor
 
     private static double RouletteConeHeight(double radius) => 24 - 36 * Math.Pow(radius / 112, .85);
 
-    private void DrawRouletteConeLighting(CanvasDrawingSession ds)
-    {
-        // Raised-cone normals meet one stationary light. The highlight cannot
-        // orbit with the mechanism as it did in the baked rotor texture.
-        var light = Vector3.Normalize(new(-.60f, -.75f, 1.6f));
-        var halfway = Vector3.Normalize(light + Vector3.Normalize(new(0, -.55f, 1.2f)));
-        for (int ring = 0; ring < 18; ring++)
-        {
-            double inner = ring * 112.0 / 18, outer = (ring + 1) * 112.0 / 18;
-            double mid = Math.Max(2, (inner + outer) / 2);
-            double slope = 36 * .85 / 112 * Math.Pow(mid / 112, -.15);
-            for (int slice = 0; slice < 72; slice++)
-            {
-                double angle = (slice + .5) * Math.Tau / 72;
-                var normal = Vector3.Normalize(new((float)(Math.Cos(angle) * slope),
-                    (float)(Math.Sin(angle) * slope), 1));
-                double diffuse = Math.Max(0, Vector3.Dot(normal, light));
-                double specular = Math.Pow(Math.Max(0, Vector3.Dot(normal, halfway)), 46);
-                double shade = .28 + diffuse * .60;
-                var color = ThemeColor((byte)Math.Clamp(143 * shade + specular * 123, 0, 255),
-                    (byte)Math.Clamp(130 * shade + specular * 113, 0, 255),
-                    (byte)Math.Clamp(84 * shade + specular * 93, 0, 255));
-                using var facet = RouletteSurfaceBand(ds.Device, inner, RouletteConeHeight(inner),
-                    outer, RouletteConeHeight(outer), slice * Math.Tau / 72 - .001, (slice + 1) * Math.Tau / 72 + .001);
-                ds.FillGeometry(facet, color);
-                ds.DrawGeometry(facet, color, .28f);
-            }
-        }
-        DrawRouletteProjectedCircle(ds, 112, -12, ThemeColor(181, 151, 92), 1.4f);
-        DrawRouletteProjectedCircle(ds, 109, -11, ThemeColor(67, 58, 36), .6f);
-    }
-
     private void DrawRoulettePocketRotor(CanvasDrawingSession ds, double wheelAngle)
     {
+        DrawRouletteBurlSurface(ds, cone: true, wheelAngle: wheelAngle);
         double step = Math.Tau / 37;
-        using var text = RouletteTextFormat(11.5f);
+        using var text = RouletteTextFormat(12);
+        using var gold = RouletteMetalBrush(ds.Device, new(42, 72), new(348, 350));
+        DrawRouletteProjectedCircle(ds, 112.8, -11, gold, 2.1f);
+        DrawRouletteProjectedCircle(ds, 109.2, -10.7, ThemeColor(242, 210, 151, 165), .6f);
         for (int i = 0; i < 37; i++)
         {
             double angle = i * step - Math.PI / 2 + wheelAngle;
             int number = RouletteGame.WheelOrder[i];
             double illumination = .88 + .12 * Math.Cos(angle + Math.PI * .65);
-            Color face = number == 0 ? ThemeColor(15, (byte)(123 * illumination), 83)
-                : RouletteGame.IsRed(number) ? ThemeColor((byte)(148 * illumination), 26, 46)
-                : ThemeColor(14, 24, 29);
+            Color face = number == 0 ? ThemeColor(12, (byte)(119 * illumination), 77)
+                : RouletteGame.IsRed(number) ? ThemeColor((byte)(161 * illumination), 22, 39)
+                : ThemeColor(9, 16, 19);
             using (var band = RouletteSurfaceBand(ds.Device, 137, -4, 153, -4, angle - step / 2, angle + step / 2))
             {
                 ds.FillGeometry(band, face);
-                ds.DrawGeometry(band, ThemeColor(212, 184, 131, 160), .55f);
+                ds.DrawGeometry(band, ThemeColor(212, 184, 131, 185), .55f);
             }
             Color pocket = number == 0 ? ThemeColor(10, 72, 54)
                 : RouletteGame.IsRed(number) ? ThemeColor(86, 17, 31) : ThemeColor(7, 15, 19);
-            using (var well = RouletteSurfaceBand(ds.Device, 115, -10, 136, -10, angle - step / 2, angle + step / 2))
+            using (var well = RouletteSurfaceBand(ds.Device, 114, -10, 136, -10, angle - step / 2, angle + step / 2))
                 ds.FillGeometry(well, pocket);
             using (var edge = RouletteSurfaceBand(ds.Device, 136, -10, 137, -4, angle - step / 2, angle + step / 2))
-                ds.FillGeometry(edge, ThemeColor(108, 87, 53));
-            double divider = angle - step / 2;
-            using (var separator = RouletteQuad(ds.Device,
-                RoulettePolarPoint(115, divider, -10), RoulettePolarPoint(136, divider, -10),
-                RoulettePolarPoint(136, divider, -6), RoulettePolarPoint(115, divider, -6)))
-                ds.FillGeometry(separator, ThemeColor(67, 53, 32));
-            ds.DrawLine(RoulettePolarPoint(115, divider, -6), RoulettePolarPoint(136, divider, -6),
-                ThemeColor(217, 191, 138), .85f);
+                ds.FillGeometry(edge, gold);
+            using (var gloss = RouletteSurfaceBand(ds.Device, 151.3, -3.9, 152.2, -3.9,
+                angle - step * .43, angle + step * .43))
+                ds.FillGeometry(gloss, ThemeColor(255, 226, 191, (byte)(12 + 16 * illumination)));
             DrawRoulettePocketLabel(ds, number, angle, text);
         }
-        DrawRouletteProjectedCircle(ds, 137, -4, ThemeColor(181, 149, 85), .7f);
-        DrawRouletteProjectedCircle(ds, 153, -4, ThemeColor(217, 193, 139), .85f);
+        // Solid, bevelled brass fins rise out of the coloured pocket floors.
+        // Render them after the wells so adjacent floors cannot erase a face.
+        var dividers = Enumerable.Range(0, 37).Select(i => i * step - Math.PI / 2 + wheelAngle - step / 2)
+            .OrderBy(angle => RoulettePolarPoint(126, angle, -4).Y);
+        foreach (double angle in dividers)
+        {
+            var inner = RoulettePolarPoint(114, angle, -5);
+            var left = RoulettePolarPoint(136, angle - .030, -4);
+            var right = RoulettePolarPoint(136, angle + .030, -4);
+            var crest = RoulettePolarPoint(136, angle, -2);
+            var lower = RoulettePolarPoint(114, angle, -10);
+            var tangent = new Vector3((float)-Math.Sin(angle), (float)Math.Cos(angle), 0);
+            var radial = new Vector3((float)Math.Cos(angle), (float)Math.Sin(angle), 0);
+            using (var side = RouletteQuad(ds.Device, lower, RoulettePolarPoint(136, angle + .030, -10), right, inner))
+                ds.FillGeometry(side, RouletteBrassFacet(Vector3.Normalize(tangent * 2 + Vector3.UnitZ * .3f)));
+            using (var face = RouletteQuad(ds.Device, inner, left, crest))
+                ds.FillGeometry(face, RouletteBrassFacet(Vector3.Normalize(-tangent * .49f - radial * .14f + Vector3.UnitZ)));
+            using (var face = RouletteQuad(ds.Device, inner, crest, right))
+                ds.FillGeometry(face, RouletteBrassFacet(Vector3.Normalize(tangent * .49f - radial * .14f + Vector3.UnitZ)));
+            ds.DrawLine(inner, crest, ThemeColor(255, 241, 198, 225), .6f);
+            ds.DrawLine(inner, right, ThemeColor(126, 88, 40, 200), .45f);
+        }
+        DrawRouletteProjectedCircle(ds, 137, -4, gold, 1);
+        DrawRouletteProjectedCircle(ds, 153, -4, ThemeColor(237, 212, 162), 1.05f);
+        DrawRouletteProjectedCircle(ds, 36, RouletteConeHeight(36) + .2, gold, .65f);
+        DrawRouletteProjectedCircle(ds, 39, RouletteConeHeight(39) + .2, ThemeColor(48, 24, 14), .6f);
         for (int i = 0; i < 37; i++)
         {
-            double angle = i * step + wheelAngle;
-            ds.DrawLine(RoulettePolarPoint(36, angle, RouletteConeHeight(36) + .15),
-                RoulettePolarPoint(107, angle, RouletteConeHeight(107) + .15), ThemeColor(225, 204, 155, 18), .4f);
+            double angle = i * step - Math.PI / 2 + wheelAngle;
+            ds.DrawLine(RoulettePolarPoint(109.4, angle, RouletteConeHeight(109.4) + .2),
+                RoulettePolarPoint(111.2, angle, RouletteConeHeight(111.2) + .2), ThemeColor(236, 206, 147, 190), .5f);
         }
+    }
+
+    private static Color RouletteBrassFacet(Vector3 normal)
+    {
+        // Facet normals rotate with the brass; room illumination does not.
+        // The warm key and cool room reflection keep bevels visibly distinct.
+        var light = Vector3.Normalize(new(-.55f, -.72f, 1.45f));
+        var half = Vector3.Normalize(light + Vector3.Normalize(new(0, -.63f, .77f)));
+        double diffuse = Math.Max(0, Vector3.Dot(normal, light));
+        double reflection = Math.Pow(Math.Max(0, Vector3.Dot(normal, half)), 32);
+        double room = Math.Max(0, Vector3.Dot(normal, Vector3.Normalize(new(.7f, .4f, .6f))));
+        double red = .18 + diffuse * .52 + reflection * .72 + room * .045;
+        double green = .095 + diffuse * .35 + reflection * .65 + room * .060;
+        double blue = .027 + diffuse * .15 + reflection * .47 + room * .070;
+        return ThemeColor((byte)(Math.Sqrt(Math.Clamp(red, 0, 1)) * 255),
+            (byte)(Math.Sqrt(Math.Clamp(green, 0, 1)) * 255), (byte)(Math.Sqrt(Math.Clamp(blue, 0, 1)) * 255));
     }
 
     private static void DrawRoulettePocketLabel(CanvasDrawingSession ds, int number, double angle, CanvasTextFormat text)
@@ -287,37 +311,61 @@ public sealed partial class SceneCompositor
         var origin = center - tangent * 12 - inward * 8;
         var prior = ds.Transform;
         ds.Transform = new Matrix3x2(tangent.X, tangent.Y, inward.X, inward.Y, origin.X, origin.Y) * prior;
-        try { ds.DrawText(number.ToString(), new Rect(0, 0, 24, 16), ThemeColor(255, 239, 204), text); }
+        try
+        {
+            ds.DrawText(number.ToString(), new Rect(.4, -.45, 24, 16), ThemeColor(0, 0, 0, 150), text);
+            ds.DrawText(number.ToString(), new Rect(0, 0, 24, 16), ThemeColor(255, 244, 218), text);
+        }
         finally { ds.Transform = prior; }
     }
 
     private void DrawRouletteSpindle(CanvasDrawingSession ds, double angle)
     {
-        var root = ProjectRouletteWheelPoint(0, 0, 26);
+        var root = ProjectRouletteWheelPoint(0, 0, 30);
         using var metal = RouletteMetalBrush(ds.Device, root - new Vector2(35, 40), root + new Vector2(38, 35));
+        using var foot = RouletteSurfaceBand(ds.Device, 0, 24, 22, 24);
+        ds.FillGeometry(foot, metal);
+        DrawRouletteProjectedCircle(ds, 22, 24, ThemeColor(77, 50, 25), .8f);
+        var profile = new[] { (22d, 24d), (23d, 26d), (18d, 28d), (13.5d, 33d), (18d, 36d), (19d, 38d) };
+        for (int i = 0; i < profile.Length - 1; i++)
+        {
+            var lower = profile[i]; var next = profile[i + 1];
+            using var wall = RouletteSurfaceBand(ds.Device, lower.Item1, lower.Item2, next.Item1, next.Item2, 0, Math.PI);
+            ds.FillGeometry(wall, metal);
+            DrawRouletteProjectedCircle(ds, next.Item1, next.Item2, ThemeColor(248, 218, 158, 205), .65f);
+        }
         var arms = Enumerable.Range(0, 4).Select(i =>
         {
             double a = i * Math.PI / 2 + .3 + angle;
-            return (Point: RoulettePolarPoint(43, a, 30), Shadow: RoulettePolarPoint(43, a, 23));
+            return (Angle: a, Point: RoulettePolarPoint(46, a, 31), Shadow: RoulettePolarPoint(46, a, 21));
         }).OrderBy(arm => arm.Point.Y);
         foreach (var arm in arms)
         {
-            ds.DrawLine(ProjectRouletteWheelPoint(0, 0, 23), arm.Shadow, ThemeColor(8, 12, 13, 160), 9);
-            ds.DrawLine(root, arm.Point, ThemeColor(78, 59, 34), 8);
-            ds.DrawLine(root - new Vector2(0, 1), arm.Point - new Vector2(0, 1), metal, 5.4f);
-            ds.FillEllipse(arm.Point, 4.7f, 4.1f, metal);
-            ds.FillEllipse(arm.Point - new Vector2(1.1f, 1.3f), 1.5f, 1.1f, RouletteCream);
+            var join = RoulettePolarPoint(17, arm.Angle, 31);
+            ds.DrawLine(RoulettePolarPoint(20, arm.Angle, 21), arm.Shadow, ThemeColor(8, 4, 2, 110), 6);
+            ds.DrawLine(join + new Vector2(0, 1.3f), arm.Point + new Vector2(0, 1.3f), ThemeColor(83, 53, 25), 6);
+            ds.DrawLine(join, arm.Point, metal, 4.4f);
+            ds.DrawLine(join - new Vector2(.65f, .8f), arm.Point - new Vector2(.65f, .8f), ThemeColor(255, 235, 190, 205), .7f);
+            using var handle = new CanvasRadialGradientBrush(ds.Device, RouletteCream, ThemeColor(108, 72, 33))
+                { Center = arm.Point - new Vector2(1.2f, 1.6f), RadiusX = 6, RadiusY = 5 };
+            ds.FillEllipse(arm.Point, 4.3f, 3.7f, handle);
+            ds.FillEllipse(arm.Point - new Vector2(1.1f, 1.3f), 1.2f, .8f, RouletteCream);
         }
-        var lower = ProjectRouletteWheelPoint(0, 0, 24);
         var upper = ProjectRouletteWheelPoint(0, 0, 38);
-        ds.FillRoundedRectangle(new Rect(upper.X - 15, upper.Y, 30, lower.Y - upper.Y + 10), 5, 5, metal);
-        ds.FillEllipse(lower, 20, 12.5f, ThemeColor(66, 50, 29));
         ds.FillEllipse(upper, 19, 12, metal);
         ds.DrawEllipse(upper, 16, 10, ThemeColor(115, 86, 46), .8f);
+        ds.DrawEllipse(upper, 13.5f, 8.4f, ThemeColor(255, 226, 166, 205), .65f);
+        for (int i = 0; i < 16; i++)
+        {
+            double a = i * Math.Tau / 16 + angle;
+            ds.DrawLine(RoulettePolarPoint(14.5, a, 38), RoulettePolarPoint(17.8, a, 38),
+                ThemeColor(82, 57, 27, 150), .65f);
+        }
         var knob = ProjectRouletteWheelPoint(0, 0, 44);
         using var crown = new CanvasRadialGradientBrush(ds.Device, RouletteCream, ThemeColor(91, 68, 37))
             { Center = knob - new Vector2(3, 4), RadiusX = 11, RadiusY = 9 };
         ds.FillEllipse(knob, 10, 8, crown);
+        ds.DrawEllipse(knob, 10, 8, ThemeColor(212, 177, 108, 180), .55f);
         ds.FillEllipse(knob - new Vector2(3, 3), 2.1f, 1.5f, RouletteCream);
     }
 
@@ -423,6 +471,7 @@ public sealed partial class SceneCompositor
         _rouletteMotionTarget?.Dispose(); _rouletteMotionTarget = null; _rouletteMotionKey = null;
         _rouletteFixedBowl?.Dispose(); _rouletteFixedBowl = null;
         _rouletteForegroundRim?.Dispose(); _rouletteForegroundRim = null;
+        DisposeRouletteMaterials();
         _roulettePreviewTarget?.Dispose(); _roulettePreviewTarget = null; _roulettePreviewKey = null;
         _rouletteBackdrop?.Dispose(); _rouletteBackdrop = null; _rouletteBackdropFailed = false;
     }

@@ -52,7 +52,7 @@ public sealed partial class SceneCompositor
             var now = HoldClock();
             var buttons = _boardSession.Buttons;
             if (!AcquisitionBoardReady || !buttons.Any(button => button.IsHold && button.Enabled) ||
-                HasGlobeDrawerAnimation(_globeClock()) || frameTime > now ||
+                HasBoardControlDrawerAnimation() || frameTime > now ||
                 now - frameTime > TimeSpan.FromMilliseconds(350)) return null;
             var key = new HoldSceneKey(_boardSession.Screen,
                 string.Join('|', buttons.Select(button => $"{button.Id}:{button.Label}:{button.Enabled}:{button.Bounds}")),
@@ -155,10 +155,13 @@ public sealed partial class SceneCompositor
     // contours keep the same corners on every board and at every raster size.
     private static float BoardButtonCornerRadius(BoardButton button) => button.Id switch
     {
-        "globe-drawer-open" or "globe-drawer-close" or "menu-scroll-down" or "menu-scroll-up" => 25,
+        "globe-drawer-open" or "globe-drawer-close" or "photo-drawer-open" or "photo-drawer-close" or
+            "menu-scroll-down" or "menu-scroll-up" => 25,
         _ when button.Id.StartsWith("slot-", StringComparison.Ordinal) => 18,
         _ when button.Id.StartsWith("bj-", StringComparison.Ordinal) => 13,
         _ when button.Id.StartsWith("globe-", StringComparison.Ordinal) => 15,
+        _ when button.Id.StartsWith("photo-", StringComparison.Ordinal) || button.Id == "capture-again" ||
+            button.Id == "menu" && button.IsHold => 15,
         _ => 19
     };
 

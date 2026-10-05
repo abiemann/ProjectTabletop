@@ -79,7 +79,6 @@ public sealed partial class SceneCompositor
         {
             var now = _monopolyClock();
             DrawCrownDeedWater(ds, now, aspect);
-            DrawCrownDeedWindows(ds, now);
         }
         DrawMonopolyEntranceImage(ds, _monopolyEntranceBaseTarget!, new Rect(0, 0, 1000, 1000));
 

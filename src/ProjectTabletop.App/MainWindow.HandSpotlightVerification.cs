@@ -32,7 +32,7 @@ public sealed partial class MainWindow
         Draw(); // Warm cached text/surface creation before timed light observations.
 
         HandDetection centerHand = Hand(.45, .6);
-        scene.SetHandSpotlights([centerHand], DateTimeOffset.UtcNow);
+        scene.SetHandSpotlights([centerHand], MonotonicClock.UtcNow);
         var illuminated = Draw();
         Require(scene.ActiveHandSpotlightCount == 1, "The synthetic hand did not acquire a spotlight.");
         foreach (PixelPoint point in centerHand.Landmarks.Skip(1))
@@ -42,22 +42,23 @@ public sealed partial class MainWindow
         pinchingPoints[0] = new(.45, .79); // Wrist extension must not pull light away from the fingers.
         pinchingPoints[4] = pinchingPoints[8] = new(.4, .6);
         var pinchingHand = centerHand with { Landmarks = pinchingPoints };
-        scene.SetHandSpotlights([pinchingHand], DateTimeOffset.UtcNow);
+        scene.SetHandSpotlights([pinchingHand], MonotonicClock.UtcNow);
         var pinchIlluminated = Draw();
         foreach (PixelPoint point in pinchingHand.Landmarks.Skip(1))
             Require(WhiteAt(pinchIlluminated, point), "The opaque white core lost finger coverage during a pinch.");
 
         HandDetection left = Hand(.3, .6), right = Hand(.7, .6);
         scene.ClearHandTips(); // Begin an independent fixture rather than retaining the preceding hand's hold.
-        scene.SetHandSpotlights([left, right], DateTimeOffset.UtcNow);
+        scene.SetHandSpotlights([left, right], MonotonicClock.UtcNow);
         var both = Draw();
         Require(scene.ActiveHandSpotlightCount == 2 && WhiteAt(both, new(.3, .6)) && WhiteAt(both, new(.7, .6)),
-            "Two detected hands did not render independent white spotlights.");
+            $"Two detected hands did not render independent white spotlights (count {scene.ActiveHandSpotlightCount}, " +
+            $"left {WhiteAt(both, new(.3, .6))}, right {WhiteAt(both, new(.7, .6))}).");
 
         // The hand's circle crosses the left board edge; clipped output must
         // still be black even where that circle would otherwise illuminate it.
         scene.ClearHandTips();
-        scene.SetHandSpotlights([Hand(.13, .6)], DateTimeOffset.UtcNow);
+        scene.SetHandSpotlights([Hand(.13, .6)], MonotonicClock.UtcNow);
         var clipped = Draw();
         Require(WhiteAt(clipped, new(.16, .6)) && BlackAt(clipped, new(.08, .6)),
             "A spotlight failed to reach the board edge or spilled outside the board clip.");
@@ -66,37 +67,37 @@ public sealed partial class MainWindow
         // held light remains; a tracked hand is never searched twice.
         scene.ClearHandTips();
         await Task.Delay(150); // Frames must follow the reset and still be fresh.
-        var seen = DateTimeOffset.UtcNow.AddMilliseconds(-100);
+        var seen = MonotonicClock.UtcNow.AddMilliseconds(-100);
         scene.SetHandSpotlights([left], seen);
         Require(scene.ActiveHandSpotlightCount == 1 && scene.GetHandAcquisitionContext(seen)?.LostHands is { Count: 0 },
             "A currently tracked hand was offered as a lost-hand search.");
-        var missed = DateTimeOffset.UtcNow;
+        var missed = MonotonicClock.UtcNow;
         scene.SetHandSpotlights([], missed);
         Require(scene.GetHandAcquisitionContext(missed)?.LostHands is [var lost] && lost == left,
             "A hand missed for one frame was not searched under its held light.");
         scene.ClearHandTips();
-        Require(scene.GetHandAcquisitionContext(DateTimeOffset.UtcNow)?.LostHands is { Count: 0 },
+        Require(scene.GetHandAcquisitionContext(MonotonicClock.UtcNow)?.LostHands is { Count: 0 },
             "A cleared light still requested a lost-hand search.");
 
         scene.ClearHandTips();
-        scene.SetHandSpotlights([left], DateTimeOffset.UtcNow);
-        var currentTime = DateTimeOffset.UtcNow;
+        scene.SetHandSpotlights([left], MonotonicClock.UtcNow);
+        var currentTime = MonotonicClock.UtcNow;
         scene.SetHandSpotlights([left], currentTime);
         scene.SetHandSpotlights([right], currentTime.AddMilliseconds(-10));
-        scene.SetHandSpotlights([right], DateTimeOffset.UtcNow.AddSeconds(1));
-        scene.SetHandSpotlights([right], DateTimeOffset.UtcNow.AddSeconds(-1));
+        scene.SetHandSpotlights([right], MonotonicClock.UtcNow.AddSeconds(1));
+        scene.SetHandSpotlights([right], MonotonicClock.UtcNow.AddSeconds(-1));
         var ordered = Draw();
         Require(scene.ActiveHandSpotlightCount == 1 && WhiteAt(ordered, new(.3, .6)) && !WhiteAt(ordered, new(.7, .6)),
             "An old, stale or future camera frame moved the current spotlight.");
 
         PixelPoint pointingTip = BoardPoint(.25, .35); // Dragon Slots button.
-        var observationTime = DateTimeOffset.UtcNow;
+        var observationTime = MonotonicClock.UtcNow;
         scene.SetHandCursors([new(pointingTip, DateTimeOffset.MinValue)], observationTime);
         Require(scene.HoveredBoardButtons.SequenceEqual(["slots"]),
             "The isolated input fixture did not point at Dragon Slots.");
         scene.SetHandSpotlights([left], observationTime);
-        scene.SetHandSpotlights([], DateTimeOffset.UtcNow);
-        scene.SetHandCursors([], DateTimeOffset.UtcNow);
+        scene.SetHandSpotlights([], MonotonicClock.UtcNow);
+        scene.SetHandCursors([], MonotonicClock.UtcNow);
         Require(scene.ActiveHandSpotlightCount == 1 && scene.HoveredBoardButtons.Count == 0 &&
             scene.CurrentBoardScreen == BoardScreen.Menu,
             "Lighting hold supplied a phantom hover/click or ended on the first missing hand frame.");
@@ -107,10 +108,10 @@ public sealed partial class MainWindow
         scene.SetHandSpotlights([left], observationTime);
         Require(scene.ActiveHandSpotlightCount == 0, "An in-flight frame from before reset relit the board.");
 
-        var expirySourceTime = DateTimeOffset.UtcNow;
+        var expirySourceTime = MonotonicClock.UtcNow;
         scene.SetHandSpotlights([left], expirySourceTime);
         await Task.Delay(120);
-        scene.SetHandSpotlights([], DateTimeOffset.UtcNow);
+        scene.SetHandSpotlights([], MonotonicClock.UtcNow);
         Require(scene.ActiveHandSpotlightCount == 1, "The light disappeared before its short dropout hold completed.");
         await Task.Delay(630);
         Require(scene.ActiveHandSpotlightCount == 0 && !WhiteAt(Draw(), new(.3, .6)),
@@ -125,7 +126,7 @@ public sealed partial class MainWindow
         const long normalId = 4101, suppressedId = 4102, recoveredId = 4103;
         void Observe((HandDetection Hand, long Id)[] observations, bool executeOther = false)
         {
-            var sourceTime = DateTimeOffset.UtcNow;
+            var sourceTime = MonotonicClock.UtcNow;
             long eventId = executeOther ? ++gestureEvent : 0;
             scene.SetHandCursors(observations.Select(item => new HandCursor(item.Hand.IndexTip,
                 executeOther && item.Id == suppressedId ? sourceTime.AddSeconds(1) : DateTimeOffset.MinValue,
@@ -170,7 +171,7 @@ public sealed partial class MainWindow
             "A different hand refreshed expired illumination or lost its execute suppression.");
         scene.ClearHandTips();
 
-        scene.SetHandSpotlights([left], DateTimeOffset.UtcNow);
+        scene.SetHandSpotlights([left], MonotonicClock.UtcNow);
         scene.ShowPhotoCopy();
         Draw();
         await Task.Delay(1100);
@@ -208,7 +209,7 @@ public sealed partial class MainWindow
         await Task.Delay(450);
         Require(scene.TryGetPhotoCopyCaptureContext(out var litContext) && ReferenceEquals(litContext.Target, photoObject),
             "The settled object light did not expose its matching capture target.");
-        scene.SetHandSpotlights([right], DateTimeOffset.UtcNow);
+        scene.SetHandSpotlights([right], MonotonicClock.UtcNow);
         var twoLights = Draw();
         var objectCenter = BoardPoint(photoObject!.Center.X / 1000, photoObject.Center.Y / 1000);
         Require(scene.ActiveHandSpotlightCount == 1 && WhiteAt(twoLights, objectCenter) && WhiteAt(twoLights, new(.7, .6)),
@@ -254,12 +255,18 @@ public sealed partial class MainWindow
         scene.ClearHandTips(resetInput: false);
         var photoButtons = new BoardSession();
         photoButtons.ShowPhotoCopy();
+        Require(scene.ActivatePhotoCopyButton("photo-drawer-open") &&
+            photoButtons.ActivateButton("photo-drawer-open", MonotonicClock.UtcNow),
+            "The Photo Copy caption-light fixture could not open its drawer.");
+        await Task.Delay(350);
+        scene.TickPhotoCopy(MonotonicClock.UtcNow);
+        photoButtons.TickPhotoCopy(MonotonicClock.UtcNow);
         var backBounds = photoButtons.Buttons.Single(button => button.Id == "menu").Bounds;
         var backCenter = BoardPoint(backBounds.X + backBounds.Width / 2, backBounds.Y + backBounds.Height / 2);
         // The hand light reaches the bottom row, but all hold captions must stay
         // unchanged so projected illumination cannot manufacture a hold.
         var unlitControls = Draw();
-        scene.SetHandSpotlights([Hand(backCenter.X, backCenter.Y)], DateTimeOffset.UtcNow);
+        scene.SetHandSpotlights([Hand(backCenter.X, backCenter.Y)], MonotonicClock.UtcNow);
         var litControls = Draw();
         Require(WhiteAt(litControls, backCenter) == WhiteAt(unlitControls, backCenter) &&
             !WhiteAt(litControls, BoardPoint(backBounds.X + backBounds.Width / 2, backBounds.Y + .02)),
@@ -275,12 +282,12 @@ public sealed partial class MainWindow
         Require(!scene.SetPhotoCopyCapture(obsoleteSprite, photoContext.Revision, photoObject),
             "A capture completed after its object lock had been removed.");
         scene.ShowBoardMenu();
-        scene.SetHandSpotlights([left], DateTimeOffset.UtcNow);
+        scene.SetHandSpotlights([left], MonotonicClock.UtcNow);
         scene.ShowCalibrationTarget(0, pieceTop: false);
-        scene.SetHandSpotlights([left], DateTimeOffset.UtcNow);
+        scene.SetHandSpotlights([left], MonotonicClock.UtcNow);
         Require(scene.ActiveHandSpotlightCount == 0, "A spotlight remained enabled during calibration.");
         scene.ShowCalibrationTarget(-1, pieceTop: false);
-        scene.SetHandSpotlights([left], DateTimeOffset.UtcNow);
+        scene.SetHandSpotlights([left], MonotonicClock.UtcNow);
         Require(scene.ActiveHandSpotlightCount == 1, "Lighting did not resume from a fresh post-calibration hand.");
         scene.SetBlackOutput(true);
         Require(scene.ActiveHandSpotlightCount == 0 && BlackAt(Draw(), new(.3, .6)),
@@ -297,7 +304,7 @@ public sealed partial class MainWindow
             // artwork, such as the menu's card and chip previews, may be red;
             // only pixels the pinch turns red count as a marker.
             var baseline = Draw();
-            var frameTime = DateTimeOffset.UtcNow;
+            var frameTime = MonotonicClock.UtcNow;
             scene.SetHandCursors([new(probeTip, frameTime.AddSeconds(1), ++gestureEvent)], frameTime);
             var rendered = Draw();
             var redPixels = 0;
@@ -319,7 +326,7 @@ public sealed partial class MainWindow
 
         scene.ShowBoardMenu();
         CheckPinchRendering(showCircle: false);
-        var navigateTime = DateTimeOffset.UtcNow;
+        var navigateTime = MonotonicClock.UtcNow;
         scene.SetHandCursors([new(BoardPoint(.25, .53), navigateTime.AddSeconds(1), ++gestureEvent)], navigateTime);
         Require(scene.CurrentBoardScreen == BoardScreen.Blackjack,
             "Suppressing pinch markers prevented normal board navigation.");

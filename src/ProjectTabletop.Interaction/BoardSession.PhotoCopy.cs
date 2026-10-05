@@ -5,6 +5,24 @@ public enum PhotoCopyAction { Swirl, Copy, TimedCopy, Save }
 
 public sealed partial class BoardSession
 {
+    public static readonly TimeSpan PhotoCopyDrawerOpeningDuration = BottomDrawerOpeningDuration;
+    private static readonly IReadOnlyList<BoardButton> PhotoCopyButtons = Array.AsReadOnly(new[]
+    {
+        new BoardButton("menu", "Exit", new(.20, .87, .155, .12), BoardScreen.Menu, Hold: BoardButtonHold.Once),
+        new BoardButton("photo-swirl", "Swirl", new(.365, .87, .155, .12), BoardScreen.PhotoCopy, Hold: BoardButtonHold.Once),
+        new BoardButton("photo-copy-once", "Copy", new(.53, .87, .155, .12), BoardScreen.PhotoCopy, Hold: BoardButtonHold.Once)
+    });
+
+    public bool PhotoCopyDrawerOpen => Screen == BoardScreen.PhotoCopy && _photoCopyDrawer.Open;
+    public DateTimeOffset? PhotoCopyDrawerOpenedAt => PhotoCopyDrawerOpen ? _photoCopyDrawer.OpenedAt : null;
+
+    /// <summary>Pure entrance sampling using the caller's presentation clock.</summary>
+    public double GetPhotoCopyDrawerProgress(DateTimeOffset now) =>
+        BottomDrawerProgress(_photoCopyDrawer, BoardScreen.PhotoCopy, now);
+
+    /// <summary>Enables settled controls once and rejects evidence from their moving captions.</summary>
+    public bool TickPhotoCopy(DateTimeOffset now) => AdvanceBottomDrawer(_photoCopyDrawer, BoardScreen.PhotoCopy, now);
+
     /// <summary>The normalized object area between the Photo Copy title and controls.</summary>
     public static BoardRect PhotoCopyShutterBounds => new(.01, .06, .98, .66);
 
@@ -73,14 +91,28 @@ public sealed partial class BoardSession
             if (track.TargetId is { } id && Affected(id)) track.Clear();
     }
 
-    private IReadOnlyList<BoardButton> CurrentPhotoCopyButtons() =>
-        Array.AsReadOnly(PhotoCopyButtons.Select(button =>
+    private IReadOnlyList<BoardButton> CurrentPhotoCopyButtons()
+    {
+        if (!PhotoCopyDrawerOpen) return Array.AsReadOnly(new[]
+        {
+            new BoardButton("photo-drawer-open", "^", BottomDrawerHandleBounds, BoardScreen.PhotoCopy,
+                Hold: BoardButtonHold.Once)
+        });
+        var buttons = new List<BoardButton>
+        {
+            new("photo-drawer-close", "v", BottomDrawerHandleBounds, BoardScreen.PhotoCopy,
+                Hold: BoardButtonHold.Once)
+        };
+        buttons.AddRange(PhotoCopyButtons.Select(button =>
             PhotoCopyHasSwirl && button.Id == "photo-swirl"
                 ? button with { Id = "capture-again", Label = "Clear" }
                 : PhotoCopyHasSwirl && button.Id == "photo-copy-once"
                     ? button with { Id = "photo-save", Label = "Save", Enabled = true }
                 : TryGetPhotoCopyAction(button.Id, out _)
-                    ? button with { Enabled = PhotoCopyShutterEnabled && !PhotoCopyHasSwirl } : button).ToArray());
+                    ? button with { Enabled = PhotoCopyShutterEnabled && !PhotoCopyHasSwirl } : button)
+            .Select(button => button with { Enabled = _photoCopyDrawer.OpeningReady && button.Enabled }));
+        return buttons.AsReadOnly();
+    }
 
     private IReadOnlyList<BoardButton> FingerTargets(IReadOnlyList<BoardButton> buttons) =>
         Screen == BoardScreen.PhotoCopy && PhotoCopyShutterEnabled && !PhotoCopyHasSwirl

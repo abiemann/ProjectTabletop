@@ -40,10 +40,8 @@ public sealed partial class SceneCompositor
         RouletteText(ds, "R O U L E T T E", new Rect(49, 91, 390, 22), 14, RoulettePink,
             aspect, alignment: CanvasHorizontalAlignment.Left);
         RouletteText(ds, "EUROPEAN  /  SINGLE ZERO", new Rect(630, 53, 320, 20), 12, RouletteGold, aspect);
-        RouletteText(ds, "VIRTUAL CREDITS", new Rect(630, 79, 320, 17), 10, RouletteCream, aspect);
         DrawRouletteSummary(ds, game, aspect);
         DrawRouletteControls(ds, game, buttons, hovered, feedback, aspect);
-        RouletteText(ds, "CHIP VALUE", new Rect(52, 800, 112, 20), 11, RouletteGold, aspect);
     }
 
     private void DrawRouletteBackdrop(CanvasDrawingSession ds)

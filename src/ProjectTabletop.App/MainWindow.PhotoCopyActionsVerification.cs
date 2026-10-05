@@ -31,6 +31,7 @@ public sealed partial class MainWindow
         await Task.Delay(1100);
         Require(scene.TryGetPhotoCopyCaptureContext(out var grey), "Photo Copy fixture did not settle.");
         var holds = new PhotoCopyCaptionHoldFixture(scene, Draw, size);
+        await holds.OpenDrawerAsync();
         var unavailable = await holds.HoldAsync("photo-copy-once", expectActivation: false);
         Require(!scene.TryTakePhotoCopyCaptureRequest(unavailable, out _),
             "A caption hold captured without a locked object or two-hand capture permission.");
@@ -61,10 +62,10 @@ public sealed partial class MainWindow
         (string Id, PhotoCopyAction Action)[] actions =
             [("photo-swirl", PhotoCopyAction.Swirl), ("photo-copy-once", PhotoCopyAction.Copy)];
         Require(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
-            ["menu", "photo-swirl", "photo-copy-once"]),
-            "Photo Copy did not expose just Exit, Swirl and Copy.");
-        Require(scene.CurrentBoardButtons[0].Label == "Exit" &&
-            scene.CurrentBoardButtons.All(button => button.Bounds.Y == .835 && button.Hold == BoardButtonHold.Once) &&
+            ["photo-drawer-close", "menu", "photo-swirl", "photo-copy-once"]),
+            "Photo Copy did not expose its down arrow, Exit, Swirl and Copy.");
+        Require(scene.CurrentBoardButtons[1].Label == "Exit" &&
+            scene.CurrentBoardButtons.All(button => button.Bounds.Y == .87 && button.Hold == BoardButtonHold.Once) &&
             scene.CurrentBoardButtons.All(button => button.Bounds.Y >
                 BoardSession.PhotoCopyShutterBounds.Y + BoardSession.PhotoCopyShutterBounds.Height),
             "Photo Copy controls did not sit below the capture area near the bottom edge.");
@@ -153,6 +154,7 @@ public sealed partial class MainWindow
         scene.ShowPhotoCopy();
         Require(scene.PhotoCopyStatus != "Image Saved" && !scene.SetPhotoCopyImageSaved(context),
             "Reset retained success or accepted completion from an obsolete capture.");
+        await holds.OpenDrawerAsync();
         Draw(); await Task.Delay(1100);
         Require(scene.TryGetPhotoCopyCaptureContext(out var resetGrey) && scene.SetPhotoCopyObject(lockedObject!, resetGrey.Revision),
             "Reset fixture could not reacquire the object.");

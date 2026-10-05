@@ -96,6 +96,7 @@ public sealed partial class MainWindow
             fixture.Now = committed.RoundStartedAt.AddSeconds(3.15);
             byte[] orbit = fixture.Draw();
             var mechanism = fixture.CheckMechanismParts(committed);
+            var material = fixture.CheckMaterialFinish();
             Check(ReferenceEquals(committed, scene.RouletteState) &&
                 !flight.AsSpan().SequenceEqual(orbit), "Roulette motion either changed authoritative state or did not animate.");
             fixture.CheckStationaryRimAndWood(flight, orbit);
@@ -150,7 +151,7 @@ public sealed partial class MainWindow
             nativeHolds++;
             Check(scene.CurrentBoardScreen == BoardScreen.Menu && scene.RouletteState == final,
                 "Roulette's caption-held Exit lost the table state or failed to return to the menu.");
-            aspects.Add(new { aspect.Name, aspect.Width, aspect.Height, projection, mechanism, winningNumber,
+            aspects.Add(new { aspect.Name, aspect.Width, aspect.Height, projection, mechanism, material, winningNumber,
                 firstPocket = result.PocketIndex, secondPocket = final.PocketIndex, final.LastWin, final.Balance });
 
             async Task<byte[]> Capture(string name)
@@ -468,6 +469,96 @@ public sealed partial class MainWindow
                     Check(a.AsSpan(p, 4).SequenceEqual(b.AsSpan(p, 4)),
                         "Roulette's stationary rim/wood lighting moved in the final composition.");
                 }
+            }
+        }
+
+        public object CheckMaterialFinish()
+        {
+            const int size = 800;
+            var field = typeof(SceneCompositor).GetField("_rouletteBurlBitmap", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var shaderField = typeof(SceneCompositor).GetField("_rouletteWoodShader", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            byte[] first = DrawCone(0), turned = DrawCone(1.15);
+            Check(first.AsSpan().SequenceEqual(DrawCone(0)), "The same cone angle changed its native wood pixels.");
+            var original = field.GetValue(Scene) as CanvasBitmap;
+            Check(original is not null, "The cone finish did not load its original burl artwork.");
+            object? shader = shaderField.GetValue(Scene);
+            int changedInterior = 0, opaqueInterior = 0;
+            for (int pixel = 0; pixel < size * size; pixel++)
+            {
+                int p = pixel * 4;
+                Check(first[p + 3] == turned[p + 3], "Turning the cone grain changed the physical surface silhouette.");
+                if (first[p + 3] != 255) continue;
+                opaqueInterior++;
+                if (!first.AsSpan(p, 3).SequenceEqual(turned.AsSpan(p, 3))) changedInterior++;
+            }
+            Check(opaqueInterior > 10000 && changedInterior > 1000,
+                "The cone's actual wood grain did not turn visibly inside its fixed surface.");
+
+            // Remove the photographed albedo as an independent lighting oracle.
+            // Uniform material has no grain orientation: its projected normals,
+            // shadows and room reflections must stay anchored to the camera.
+            byte[] uniform = new byte[16 * 16 * 4];
+            for (int p = 0; p < uniform.Length; p += 4)
+            {
+                uniform[p] = 60; uniform[p + 1] = 90; uniform[p + 2] = 130; uniform[p + 3] = 255;
+            }
+            using var reference = CanvasBitmap.CreateFromBytes(Target.Device, uniform, 16, 16,
+                Windows.Graphics.DirectX.DirectXPixelFormat.B8G8R8A8UIntNormalized, 96,
+                Microsoft.Graphics.Canvas.CanvasAlphaMode.Premultiplied);
+            int maximumLightingDelta = 0, changedLightingPixels = 0;
+            int minimumLight = 255, maximumLight = 0;
+            try
+            {
+                field.SetValue(Scene, reference);
+                byte[] lit = DrawCone(0), turnedLit = DrawCone(1.15);
+                for (int pixel = 0; pixel < size * size; pixel++)
+                {
+                    int p = pixel * 4;
+                    Check(lit[p + 3] == first[p + 3] && turnedLit[p + 3] == first[p + 3],
+                        "The reference material changed the cone's geometry or coverage.");
+                    int delta = 0;
+                    for (int channel = 0; channel < 3; channel++)
+                        delta = Math.Max(delta, Math.Abs(lit[p + channel] - turnedLit[p + channel]));
+                    maximumLightingDelta = Math.Max(maximumLightingDelta, delta);
+                    if (delta > 0) changedLightingPixels++;
+                    if (lit[p + 3] == 255)
+                    {
+                        minimumLight = Math.Min(minimumLight, lit[p + 2]);
+                        maximumLight = Math.Max(maximumLight, lit[p + 2]);
+                    }
+                }
+                Check(maximumLightingDelta <= 1,
+                    "Uniform cone material reveals lighting that rotates with the wood instead of staying world-fixed.");
+                Check(maximumLight - minimumLight > 20,
+                    "The uniform-material lighting oracle is flat or invisible.");
+            }
+            finally
+            {
+                field.SetValue(Scene, original);
+                // Rebind the production shader before disposing our temporary
+                // bitmap, without disposing or replacing the owned source art.
+                byte[] restored = DrawCone(0);
+                Check(restored.AsSpan().SequenceEqual(first) && ReferenceEquals(field.GetValue(Scene), original) &&
+                    ReferenceEquals(shaderField.GetValue(Scene), shader),
+                    "The finish fixture failed to restore the original artwork and reusable shader.");
+            }
+            return new { nativeWidth = size, nativeHeight = size, opaqueInteriorPixels = opaqueInterior,
+                changedWoodInteriorPixels = changedInterior, silhouetteAlphaIdentical = true,
+                sameAnglePixelsIdentical = true, uniformLightingMaximumChannelDelta = maximumLightingDelta,
+                uniformLightingChangedPixels = changedLightingPixels, uniformLightingRange = maximumLight - minimumLight,
+                originalArtworkAndShaderRestored = true };
+
+            byte[] DrawCone(double angle)
+            {
+                using var target = new CanvasRenderTarget(Target.Device, size, size, 96);
+                using (var ds = target.CreateDrawingSession())
+                {
+                    ds.Clear(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+                    ds.Transform = Matrix3x2.CreateScale(2);
+                    typeof(SceneCompositor).GetMethod("DrawRouletteBurlSurface", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(Scene, [ds, true, angle, false]);
+                }
+                return target.GetPixelBytes();
             }
         }
 

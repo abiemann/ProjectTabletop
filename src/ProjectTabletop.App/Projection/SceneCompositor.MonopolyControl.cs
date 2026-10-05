@@ -127,10 +127,6 @@ public sealed partial class SceneCompositor
                 ds.DrawImage(waterLayer,
                     new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight),
                     new Rect(0, 0, waterLayer.SizeInPixels.Width, waterLayer.SizeInPixels.Height));
-            if (DrawCrownDeedWindowsLayer(ds.Device, now) is { } windowsLayer)
-                ds.DrawImage(windowsLayer,
-                    new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight),
-                    new Rect(0, 0, windowsLayer.SizeInPixels.Width, windowsLayer.SizeInPixels.Height));
             ds.DrawImage(rendered,
                 new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight),
                 new Rect(0, 0, rendered.SizeInPixels.Width, rendered.SizeInPixels.Height));

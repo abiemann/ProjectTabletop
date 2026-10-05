@@ -152,15 +152,13 @@ public sealed partial class SceneCompositor
         {
             ds.DrawImage(city, new Rect(0, 0, 1000, 1000),
                 new Rect(0, 0, city.SizeInPixels.Width, city.SizeInPixels.Height));
-            // Live city details sit beneath the cached stonework, window frames,
-            // parcels and captions. Their clocks never invalidate this cache.
+            // Only canal water is cut out for its live layer. Architectural
+            // windows retain the original painting at every presentation time.
             ClearCrownDeedWater(ds);
-            ClearCrownDeedWindows(ds);
             if (renderCityAnimations)
             {
                 var now = _monopolyClock();
                 DrawCrownDeedWater(ds, now, boardAspect);
-                DrawCrownDeedWindows(ds, now);
             }
         }
         // A continuous granite boulevard connects the equal-sized deed plaques.

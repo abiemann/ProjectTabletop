@@ -39,9 +39,9 @@ public sealed partial class MainWindow
         var holds = new PhotoCopyCaptionHoldFixture(scene, () => { Draw(); return target.GetPixelBytes(); }, size);
         await CaptureFixture();
         Require(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
-                ["menu", "capture-again", "photo-save"]) &&
-            scene.CurrentBoardButtons[1] is { Label: "Clear", Enabled: true } &&
-            scene.CurrentBoardButtons[2] is { Label: "Save", Enabled: true } &&
+                ["photo-drawer-close", "menu", "capture-again", "photo-save"]) &&
+            scene.CurrentBoardButtons[2] is { Label: "Clear", Enabled: true } &&
+            scene.CurrentBoardButtons[3] is { Label: "Save", Enabled: true } &&
             scene.CurrentBoardButtons.All(button => button.Hold == BoardButtonHold.Once),
             "Swirl did not expose Clear and an enabled Save button.");
         Require(scene.TryGetPhotoCopyMemoryImage(out var retained) && ReferenceEquals(retained.Cutout, cutout) &&
@@ -155,7 +155,7 @@ public sealed partial class MainWindow
                 !scene.TryTakePhotoCopyMemorySaveRequest(clearedAt, out _) &&
                 !scene.IsPhotoCopyMemoryImageCurrent(retained) && !scene.BeginPhotoCopyMemorySave(retained) &&
                 !scene.CompletePhotoCopyMemorySave(retained) && !scene.TryGetPhotoCopyMemoryImage(out _) &&
-                scene.PhotoCopyCount == 0 && scene.CurrentBoardButtons[2].Label == "Copy",
+                scene.PhotoCopyCount == 0 && scene.CurrentBoardButtons[3].Label == "Copy",
             "Clear retained an old Save request, image, success completion or Save label.");
         string obsoleteDirectory = Path.Combine(directory, "obsolete");
         Require(await SavePhotoCopyMemoryImageAsync(scene, retained, obsoleteDirectory) is null &&
@@ -229,6 +229,7 @@ public sealed partial class MainWindow
             await Task.Delay(1100);
             Require(scene.TryGetPhotoCopyCaptureContext(out var context) && context.Target is null &&
                     scene.SetPhotoCopyCapture(cutout, context.Revision), "Memory-save photograph fixture did not settle.");
+            await holds.OpenDrawerAsync();
         }
         async Task<DateTimeOffset> Pinch(string id, bool busy = false, bool repeat = false)
         {

@@ -28,6 +28,7 @@ BlackjackRegression.Run();
 BlackjackBoardRegression.Run();
 BoardFingerSelectionRegression.Run();
 PhotoCopyShutterRegression.Run();
+PhotoCopyDrawerRegression.Run();
 Console.WriteLine("Board interaction verification passed: menu/navigation, shared hit targets, off-target consumption, " +
     "held-pinch suppression, dropouts, independent hands, freshness, anchored selection and navigation barriers, " +
     "reset, Photo Copy restarts and dense full-board inward spiral placement.");
@@ -64,7 +65,8 @@ static void CheckMenuAndNavigation()
         Require(session.Title == names[index], "The application title is incorrect.");
         Require(session.Buttons.Count >= 1 && (session.Buttons[0].Destination == BoardScreen.Menu ||
             button.Destination == BoardScreen.Monopoly && session.Buttons[0].Id == "mp-exit" ||
-            button.Destination == BoardScreen.Globe && session.Buttons[0].Id == "globe-drawer-open"),
+            button.Destination == BoardScreen.Globe && session.Buttons[0].Id == "globe-drawer-open" ||
+            button.Destination == BoardScreen.PhotoCopy && session.Buttons[0].Id == "photo-drawer-open"),
             "An application lacks a back-to-menu target.");
         if (button.Destination == BoardScreen.Monopoly)
         {
@@ -96,10 +98,33 @@ static void CheckMenuAndNavigation()
                     .SequenceEqual(["globe-exit"]) && session.Screen == BoardScreen.Menu,
                 "The Globe drawer's long-press Exit did not return to the launcher.");
         }
-        else if (button.Destination is BoardScreen.Slots or BoardScreen.PhotoCopy)
+        else if (button.Destination == BoardScreen.PhotoCopy)
+        {
+            Require(session.Buttons.Single() is { Id: "photo-drawer-open", Hold: BoardButtonHold.Once } &&
+                Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is null &&
+                !session.PhotoCopyDrawerOpen, "Photo Copy's hidden actions or drawer handle accepted a pinch.");
+            session.ObserveHeldButtons([], Time(time + 30), Time(time + 30), ["photo-drawer-open"]);
+            for (int held = 100; held < 1100; held += 100)
+                Require(session.ObserveHeldButtons(["photo-drawer-open"], Time(time + held), Time(time + held), []).Count == 0,
+                    "The Photo Copy drawer opened before a full caption hold.");
+            Require(session.ObserveHeldButtons(["photo-drawer-open"], Time(time + 1100), Time(time + 1100), [])
+                    .SequenceEqual(["photo-drawer-open"]) && session.PhotoCopyDrawerOpen && session.TickPhotoCopy(Time(time + 1400)),
+                "Photo Copy's full caption hold did not open and settle its drawer.");
+            var exit = session.Buttons.Single(item => item.Id == "menu");
+            Require(Update(session, time + 1410, Over(exit, ++eventId, time + 1410)) is null,
+                "A pinch selected Photo Copy's long-press Exit.");
+            session.ObserveHeldButtons([], Time(time + 1420), Time(time + 1420), ["menu"]);
+            for (int held = 1500; held < 2500; held += 100)
+                Require(session.ObserveHeldButtons(["menu"], Time(time + held), Time(time + held), []).Count == 0,
+                    "Photo Copy's Exit acted before a full caption hold.");
+            Require(session.ObserveHeldButtons(["menu"], Time(time + 2500), Time(time + 2500), [])
+                    .SequenceEqual(["menu"]) && session.Screen == BoardScreen.Menu,
+                "Photo Copy's drawer Exit did not return to the launcher.");
+        }
+        else if (button.Destination == BoardScreen.Slots)
         {
             // These boards use single-action holds on the viewer's edge row.
-            string exitId = button.Destination == BoardScreen.Slots ? "slot-exit" : "menu";
+            const string exitId = "slot-exit";
             Require(session.Buttons.All(item => item.Hold == BoardButtonHold.Once) && session.Buttons[0].Id == exitId,
                 "The board's bottom controls are not long-press buttons led by Exit.");
             Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is null &&
@@ -240,29 +265,32 @@ static void CheckResetAndExternalNavigation()
 static void CheckPhotoCopyNavigation()
 {
     var session = new BoardSession();
-    Require(session.Revision == 0, "An unused session already has a navigation revision.");
+    Require(session.NavigationRevision == 0, "An unused session already has a navigation revision.");
     Require(Update(session, 100, Over(session.Buttons[1], 1, 100)) is { Current: BoardScreen.PhotoCopy, ButtonId: "photo-copy" },
         "The renamed Photo Copy target did not launch Photo Copy.");
-    Require(session.Revision == 1, "Launching Photo Copy did not advance the navigation revision.");
+    Require(session.NavigationRevision == 1, "Launching Photo Copy did not advance the navigation revision.");
     session.PhotoCopyHasSwirl = true;
+    Require(session.ActivateButton("photo-drawer-open", Time(110)) && session.TickPhotoCopy(Time(410)) &&
+        session.NavigationRevision == 1, "Opening Photo Copy's action drawer restarted its capture session.");
     BoardButton captureAgain = session.Buttons.Single(button => button.Id == "capture-again");
-    Require(!captureAgain.Bounds.Contains(session.Buttons[0].Bounds.X, session.Buttons[0].Bounds.Y),
+    var exitBounds = session.Buttons.Single(button => button.Id == "menu").Bounds;
+    Require(!captureAgain.Bounds.Contains(exitBounds.X, exitBounds.Y),
         "Capture again overlaps Back to menu.");
-    Require(Update(session, 140, Over(captureAgain, 1, 100)) is null && session.Revision == 1,
+    Require(Update(session, 440, Over(captureAgain, 1, 100)) is null && session.NavigationRevision == 1,
         "A held launch pinch restarted Photo Copy.");
-    Require(Update(session, 180, Over(captureAgain, 2, 180)) is null && session.Revision == 1,
+    Require(Update(session, 480, Over(captureAgain, 2, 480)) is null && session.NavigationRevision == 1,
         "A new pinch selected Photo Copy's long-press Clear control.");
-    Require(session.ActivateButton("capture-again", Time(200)) && session.Revision == 2,
+    Require(session.ActivateButton("capture-again", Time(500)) && session.NavigationRevision == 2 && session.PhotoCopyDrawerOpen,
         "Pointer Clear did not restart the current Photo Copy session.");
-    Require(Update(session, 220, Over(captureAgain, 2, 180)) is null && session.Revision == 2,
+    Require(Update(session, 520, Over(captureAgain, 2, 480)) is null && session.NavigationRevision == 2,
         "A held Capture again pinch repeatedly restarted Photo Copy.");
-    session.ShowPhotoCopy(Time(260));
-    Require(session.Screen == BoardScreen.PhotoCopy && session.Revision == 3,
+    session.ShowPhotoCopy(Time(560));
+    Require(session.Screen == BoardScreen.PhotoCopy && session.NavigationRevision == 3 && !session.PhotoCopyDrawerOpen,
         "External navigation to the current Photo Copy screen did not restart it.");
-    session.ResetInput(Time(300));
-    Require(session.Revision == 3, "Resetting camera input restarted the application.");
-    session.ShowMenu(Time(340));
-    Require(session.Screen == BoardScreen.Menu && session.Revision == 4, "External menu navigation did not advance revision.");
+    session.ResetInput(Time(600));
+    Require(session.NavigationRevision == 3, "Resetting camera input restarted the application.");
+    session.ShowMenu(Time(640));
+    Require(session.Screen == BoardScreen.Menu && session.NavigationRevision == 4, "External menu navigation did not advance revision.");
 }
 
 static void CheckAnchoredSelection()

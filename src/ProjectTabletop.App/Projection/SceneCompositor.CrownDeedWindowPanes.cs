@@ -5,7 +5,8 @@ namespace ProjectTabletop.App.Projection;
 public sealed partial class SceneCompositor
 {
 // Reviewed glazing in native 1254-pixel city artwork; logical 1000 coordinates.
-// One stable 1-based identity per architectural window; mullion gaps stay static.
+// Kept for native checks that the original painted windows stay unchanged.
+// These regions no longer mask, darken or animate any production artwork.
 internal static readonly Vector2[][][] CrownDeedWindowPanes =
 [
     // ID1: northwest-001

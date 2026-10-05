@@ -90,7 +90,7 @@ internal static class PhotoCopyShutterRegression
         // holds survive real readiness transitions as well as repeated assignments.
         foreach (string id in new[] { "menu", "capture-again", "photo-save" })
         {
-            board = PhotoCopy();
+            board = PhotoCopy(drawerOpen: true);
             board.PhotoCopyHasSwirl = id != "menu";
             Clear(board, id, 100);
             for (int time = 200; time < 1200; time += 100)
@@ -107,11 +107,10 @@ internal static class PhotoCopyShutterRegression
     private static void CheckAreaAndControls()
     {
         var board = PhotoCopy();
-        Require(board.Buttons.Select(item => item.Id).SequenceEqual(
-                ["menu", "photo-swirl", "photo-copy-once"]) &&
+        Require(board.Buttons.Select(item => item.Id).SequenceEqual(["photo-drawer-open"]) &&
             board.Buttons.All(item => item.Hold == BoardButtonHold.Once) &&
             !board.ActivateButton("photo-shutter", Time(10)),
-            "Photo Copy did not expose three single-action hold controls while keeping its field shutter hidden.");
+            "Photo Copy did not begin with only its single-action drawer handle and hidden field shutter.");
         Require(BoardSession.PhotoCopyShutterBounds == new BoardRect(.01, .06, .98, .66),
             "The shutter no longer matches the normalized object capture area.");
         foreach (var aim in new[] { new BoardAim(.01, .06), new(.99, .72), new(.5, .6) })
@@ -124,7 +123,7 @@ internal static class PhotoCopyShutterRegression
 
         foreach (string id in new[] { "menu", "photo-swirl", "photo-copy-once", "capture-again", "photo-save" })
         {
-            board = PhotoCopy();
+            board = PhotoCopy(drawerOpen: true);
             board.PhotoCopyHasSwirl = id is "capture-again" or "photo-save";
             var button = board.Buttons.Single(item => item.Id == id);
             var hand = Together(button.Bounds.X + button.Bounds.Width / 2, button.Bounds.Y + button.Bounds.Height / 2);
@@ -136,17 +135,17 @@ internal static class PhotoCopyShutterRegression
                 id + " still accepted a bottom-control pinch.");
         }
 
-        board = PhotoCopy();
+        board = PhotoCopy(drawerOpen: true);
         var capturedHand = Together(.5, .6);
         At(board, 100, capturedHand); At(board, 200, capturedHand); At(board, 300, Apart(capturedHand));
         Require(At(board, 380, Apart(capturedHand), new BoardHandSample(.2, .88, Time(1380), 9))?.ButtonId == "photo-shutter",
             "An ignored pinch over a hold control stole the hidden object's valid shutter gesture.");
-        board = PhotoCopy();
+        board = PhotoCopy(drawerOpen: true);
         Require(At(board, 100, new BoardHandSample(.5, .6, Time(1100), 7)) is null &&
             board.HoveredButtonIds.Count == 0, "A field pinch activated or hovered the index-only shutter.");
-        long revision = board.Revision;
+        long revision = board.NavigationRevision;
         Press(board, "menu", 200);
-        Require(board.Screen == BoardScreen.Menu && board.Revision == revision + 1,
+        Require(board.Screen == BoardScreen.Menu && board.NavigationRevision == revision + 1,
             "Photo Copy's full Exit hold did not navigate exactly once.");
     }
 
@@ -196,17 +195,17 @@ internal static class PhotoCopyShutterRegression
     {
         (string Id, PhotoCopyAction Action, BoardRect Bounds)[] actions =
         [
-            ("photo-swirl", PhotoCopyAction.Swirl, new(.37, .835, .26, .105)),
-            ("photo-copy-once", PhotoCopyAction.Copy, new(.66, .835, .26, .105))
+            ("photo-swirl", PhotoCopyAction.Swirl, new(.365, .87, .155, .12)),
+            ("photo-copy-once", PhotoCopyAction.Copy, new(.53, .87, .155, .12))
         ];
         Require(BoardSession.TryGetPhotoCopyAction("photo-shutter", out var fieldAction) && fieldAction == PhotoCopyAction.Swirl &&
             !BoardSession.TryGetPhotoCopyAction("menu", out _) && !BoardSession.TryGetPhotoCopyAction("capture-again", out _) &&
             !BoardSession.TryGetPhotoCopyAction("photo-copy-timer", out _) &&
             !BoardSession.TryGetPhotoCopyAction("unknown", out _), "Photo Copy action IDs were mapped incorrectly.");
-        var layout = PhotoCopy().Buttons;
+        var layout = PhotoCopy(drawerOpen: true).Buttons;
         Require(layout.Single(button => button.Id == "menu") is { Label: "Exit", Hold: BoardButtonHold.Once } exit &&
-            exit.Bounds == new BoardRect(.08, .835, .26, .105),
-            "Photo Copy did not preserve its bottom Exit geometry.");
+            exit.Bounds == new BoardRect(.20, .87, .155, .12),
+            "Photo Copy did not use the shared drawer Exit geometry.");
         foreach (var button in layout)
             Require(layout.Count(other => other.Bounds.Contains(button.Bounds.X + button.Bounds.Width / 2,
                 button.Bounds.Y + button.Bounds.Height / 2)) == 1, "Photo Copy bottom controls overlap.");
@@ -217,7 +216,7 @@ internal static class PhotoCopyShutterRegression
 
         foreach (var action in actions)
         {
-            var board = new BoardSession(); board.ShowPhotoCopy(Time(0));
+            var board = PhotoCopy(drawerOpen: true, ready: false);
             var button = board.Buttons.Single(item => item.Id == action.Id);
             long revision = board.Revision;
             Require(button.Bounds == action.Bounds && !button.Enabled && button.Hold == BoardButtonHold.Once &&
@@ -241,7 +240,7 @@ internal static class PhotoCopyShutterRegression
 
             // A busy->ready round trip without any intervening camera frame
             // must erase both partial progress and previous clear-caption readiness.
-            board = PhotoCopy();
+            board = PhotoCopy(drawerOpen: true);
             Clear(board, action.Id, 100);
             for (int time = 200; time <= 600; time += 100) Hold(board, action.Id, time);
             Require(board.HoldProgress(Time(600)).Count == 1, "The readiness fixture did not create partial progress.");
@@ -260,14 +259,14 @@ internal static class PhotoCopyShutterRegression
             Require(Hold(board, action.Id, 3200).SequenceEqual([action.Id]),
                 "Unchanged readiness interrupted a newly cleared full capture hold.");
 
-            board = PhotoCopy(); revision = board.Revision;
+            board = PhotoCopy(drawerOpen: true); revision = board.Revision;
             Require(board.ActivateButton(action.Id, Time(100)) && board.Screen == BoardScreen.PhotoCopy &&
                 board.Revision == revision, "Pointer capture lost its immediate same-session action.");
             board.PhotoCopyShutterEnabled = false;
             Require(!board.ActivateButton(action.Id, Time(200)), "Pointer capture ignored disabled readiness.");
         }
 
-        var ambiguous = PhotoCopy();
+        var ambiguous = PhotoCopy(drawerOpen: true);
         ambiguous.ObserveHeldButtons([], Time(100), Time(100), ["photo-swirl", "photo-copy-once"]);
         for (int time = 200; time <= 1600; time += 100)
             Require(ambiguous.ObserveHeldButtons(["photo-swirl", "photo-copy-once"], Time(time), Time(time), []).Count == 0 &&
@@ -276,7 +275,7 @@ internal static class PhotoCopyShutterRegression
 
     private static void CheckSwirlControls()
     {
-        var board = PhotoCopy();
+        var board = PhotoCopy(drawerOpen: true);
         Require(!board.PhotoCopyHasSwirl && board.Buttons.All(button => button.Id != "capture-again") &&
             !board.ActivateButton("capture-again", Time(10)) && !board.ActivateButton("photo-copy-timer", Time(20)) &&
             !board.ActivateButton("photo-save", Time(30)), "Result controls appeared without a captured swirl.");
@@ -284,7 +283,7 @@ internal static class PhotoCopyShutterRegression
         Press(board, "photo-swirl", 100);
         board.PhotoCopyHasSwirl = true;
         board.PhotoCopyShutterEnabled = false;
-        Require(board.Buttons.Select(button => button.Id).SequenceEqual(["menu", "capture-again", "photo-save"]) &&
+        Require(board.Buttons.Select(button => button.Id).SequenceEqual(["photo-drawer-close", "menu", "capture-again", "photo-save"]) &&
             board.Buttons.Single(button => button.Id == "capture-again") is { Label: "Clear", Enabled: true, Hold: BoardButtonHold.Once } clear &&
             clear.Bounds == swirl.Bounds &&
             board.Buttons.Single(button => button.Id == "photo-save") is { Label: "Save", Enabled: true, Hold: BoardButtonHold.Once },
@@ -319,7 +318,7 @@ internal static class PhotoCopyShutterRegression
     {
         Require(BoardSession.TryGetPhotoCopyAction("photo-save", out var action) && action == PhotoCopyAction.Save,
             "Save did not identify the in-memory output action.");
-        var board = PhotoCopy(); board.PhotoCopyHasSwirl = true; board.PhotoCopyShutterEnabled = false;
+        var board = PhotoCopy(drawerOpen: true); board.PhotoCopyHasSwirl = true; board.PhotoCopyShutterEnabled = false;
         long revision = board.Revision;
         Press(board, "photo-save", 100);
         Require(board.Revision == revision && board.PhotoCopyHasSwirl && board.Screen == BoardScreen.PhotoCopy,
@@ -340,7 +339,7 @@ internal static class PhotoCopyShutterRegression
             ("capture-again", "photo-swirl", true), ("photo-save", "photo-copy-once", true)
         })
         {
-            board = PhotoCopy(); board.PhotoCopyHasSwirl = hasSwirl;
+            board = PhotoCopy(drawerOpen: true); board.PhotoCopyHasSwirl = hasSwirl;
             Clear(board, before, 100);
             for (int time = 200; time <= 600; time += 100) Hold(board, before, time);
             board.PhotoCopyHasSwirl = !hasSwirl;
@@ -350,7 +349,7 @@ internal static class PhotoCopyShutterRegression
                     "A replacement caption inherited the previous action's clearance.");
             Press(board, after, 2000);
 
-            board = PhotoCopy(); board.PhotoCopyHasSwirl = hasSwirl;
+            board = PhotoCopy(drawerOpen: true); board.PhotoCopyHasSwirl = hasSwirl;
             Clear(board, before, 100);
             for (int time = 200; time <= 600; time += 100) Hold(board, before, time);
             board.PhotoCopyHasSwirl = !hasSwirl;
@@ -376,9 +375,15 @@ internal static class PhotoCopyShutterRegression
         Require(Hold(board, id, clearAt + 1100).SequenceEqual([id]), id + " did not act after its full one-second hold.");
     }
 
-    private static BoardSession PhotoCopy()
+    private static BoardSession PhotoCopy(bool drawerOpen = false, bool ready = true)
     {
-        var board = new BoardSession(); board.ShowPhotoCopy(Time(0)); board.PhotoCopyShutterEnabled = true; return board;
+        var board = new BoardSession();
+        board.ShowPhotoCopy(Time(drawerOpen ? -400 : 0));
+        board.PhotoCopyShutterEnabled = ready;
+        if (drawerOpen)
+            Require(board.ActivateButton("photo-drawer-open", Time(-300)) && board.TickPhotoCopy(Time(0)),
+                "The action fixture could not settle its explicitly opened Photo Copy drawer.");
+        return board;
     }
     private static BoardNavigation? Select(BoardSession board, BoardHandSample hand, int start)
     {

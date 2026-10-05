@@ -4,7 +4,7 @@ public sealed partial class BoardSession
 {
     public static readonly TimeSpan MenuScrollDuration = TimeSpan.FromMilliseconds(650);
     public static readonly BoardRect MenuCardViewport = new(.06, .238, .88, .587);
-    public static readonly BoardRect MenuScrollButtonBounds = new(.76, .85, .18, .105);
+    public static readonly BoardRect MenuScrollButtonBounds = new(.74, .85, .18, .105);
     private const double MenuPageStep = .60; // Three rows, with two cards per row.
     private static readonly IReadOnlyList<BoardButton> MenuCards = Array.AsReadOnly(new[]
     {

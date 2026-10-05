@@ -1,5 +1,7 @@
 # Vice Royale casino background
 
+The wheel's original burl-wood material has separate [generation details, hash and exact prompt](ROULETTE_MATERIALS.md). Its brass, enamel, raised geometry, reflections and motion are rendered by the app; the wheel does not use a flattened rotating photograph.
+
 Asset: `vice-royale-casino.png`
 
 Created on 2026-10-03 with the built-in `image_gen.imagegen` tool. This is original generated artwork for the roulette board, not a copied game screenshot or video frame. The source output is preserved at `C:/Users/abiem/.codex/generated_images/01a0f9a2-8cd6-72f3-9bfc-54b851419206/exec-56cca042-7096-4e09-9604-d5fd1b9c6443.png`.

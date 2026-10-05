@@ -1,5 +1,7 @@
 #if DEBUG
 using System.Diagnostics;
+using System.Numerics;
+using System.Reflection;
 using Microsoft.Graphics.Canvas;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
@@ -33,6 +35,7 @@ public sealed partial class MainWindow
             Draw();
             return target.GetPixelBytes();
         }, 800);
+        await captionHolds.OpenDrawerAsync();
         Draw();
         var before = target.GetPixelBytes();
         int PixelIndex(double u, double v)
@@ -76,25 +79,47 @@ public sealed partial class MainWindow
                 rendered[index + 2] > rendered[index + 1] + 30) coloredPixels++;
         if (coloredPixels < 200)
             throw new InvalidOperationException("Photo Copy counted stamps without rendering their color pixels.");
-        // Check real rendered coverage near every corner, edge midpoint and center.
+        // Prove the complete original stamp layout, including corners now
+        // intentionally covered by the opaque drawer, through its production pass.
+        using var stamps = new CanvasRenderTarget(target.Device, 800, 800, 96);
+        using (var drawing = stamps.CreateDrawingSession())
+        {
+            drawing.Clear(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+            drawing.Transform = Matrix3x2.CreateScale((float)(800 * .8 * (1 - inset) / 1000)) *
+                Matrix3x2.CreateTranslation(new Vector2((float)(800 * (.1 + .8 * inset / 2))));
+            typeof(SceneCompositor).GetMethod("DrawPhotoCopyStamps", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(scene, [drawing, PhotoCopyLayout.DefaultCount]);
+        }
+        var stampPixels = stamps.GetPixelBytes();
         foreach (var (u, v) in new[] { (.025, .025), (.5, .025), (.975, .025),
             (.025, .5), (.5, .5), (.975, .5), (.025, .975), (.5, .975), (.975, .975) })
+            CheckCoverage(stampPixels, u, v, "The complete production stamp layer");
+        // The actual composition must also show stamps around every exposed edge.
+        // Lower-left/middle controls deliberately cover the original bottom probes.
+        foreach (var (u, v) in new[] { (.025, .025), (.5, .025), (.975, .025),
+            (.025, .5), (.5, .5), (.975, .5), (.025, .84), (.73, .975), (.975, .975) })
         {
-            var covered = 0;
-            for (var dy = -2; dy <= 2; dy++)
-            for (var dx = -2; dx <= 2; dx++)
+            if (scene.CurrentBoardButtons.Any(button => button.Bounds.Contains(u, v)))
+                throw new InvalidOperationException("An exposed stamp probe moved underneath a control.");
+            CheckCoverage(rendered, u, v, "The exposed board composition");
+        }
+        void CheckCoverage(byte[] image, double u, double v, string scope)
+        {
+            int covered = 0;
+            for (int dy = -2; dy <= 2; dy++)
+            for (int dx = -2; dx <= 2; dx++)
             {
-                var index = PixelIndex(u + dx * .005, v + dy * .005);
-                if (rendered[index + 2] > rendered[index] + 30 &&
-                    rendered[index + 2] > rendered[index + 1] + 30) covered++;
+                int index = PixelIndex(u + dx * .005, v + dy * .005);
+                if (image[index + 2] > image[index] + 30 && image[index + 2] > image[index + 1] + 30) covered++;
             }
             if (covered < 10)
-                throw new InvalidOperationException($"Copies leave the board empty near ({u}, {v}).");
+                throw new InvalidOperationException($"{scope} leaves missing copies near ({u}, {v}).");
         }
-        // Opaque buttons must remain identical even with hundreds of copies beneath.
-        foreach (var u in new[] { .09, .67 })
+        // The shared opaque glass must protect its body from hundreds of copies.
+        // Caption content deliberately changes from Swirl/Copy to Clear/Save.
+        foreach (var button in scene.CurrentBoardButtons)
         {
-            var index = PixelIndex(u, .85);
+            var index = PixelIndex(button.Bounds.X + .022, button.Bounds.Y + .026);
             if (!before.AsSpan(index, 4).SequenceEqual(rendered.AsSpan(index, 4)))
                 throw new InvalidOperationException("Photo Copy stamps covered a navigation button.");
         }
@@ -163,7 +188,8 @@ public sealed partial class MainWindow
             throw new InvalidOperationException("Invalidating camera capture retained a ready grey field.");
 
         return new { passed = true, copies = completedCopies, transparentSource = true,
-            fullBoardCoverage = true, buttonsVisible = true, obsoleteCaptureRejected = true,
+            fullBoardCoverage = true, completeStampLayerCoverageProbes = 9, exposedCompositionCoverageProbes = 9,
+            buttonsVisible = true, obsoleteCaptureRejected = true,
             obsoleteFailureRejected = true, resetRequiresSurfaceSettle = true,
             clearIgnoresPinch = true, clearAndExitByCaptionHold = true,
             captionHolds.SuccessfulHolds, captionHolds.BrokenCaptionFrames, path };

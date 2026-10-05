@@ -19,7 +19,8 @@ public sealed partial class SceneCompositor
     private static readonly TimeSpan PhotoCopySurfaceSettle = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan PhotoCopyRemoveHandDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan PhotoCopyStampInterval = TimeSpan.FromMilliseconds(25);
-    private const string PhotoCopyReadyMessage = "Place an object above the controls and lift your hand. Hold Swirl or Copy for a second.";
+    private const string PhotoCopyReadyMessage = "Place an object on the board and lift your hand. Open the controls with the up arrow.";
+    private const string PhotoCopyObjectReadyMessage = "Object ready. Hold SWIRL to fill the board, or COPY to save an image.";
     private long _photoCopySessionRevision = -1;
     private long _photoCopyRevision;
     private DateTimeOffset _photoCopySurfaceShownAt;
@@ -62,7 +63,7 @@ public sealed partial class SceneCompositor
         {
             CancelBoardReveal();
             _blackOutput = false;
-            _boardSession.ShowPhotoCopy();
+            _boardSession.ShowPhotoCopy(_blackjackClock());
             ClearHandSpotlights();
             SyncPhotoCopySession();
         }
@@ -72,7 +73,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
-            _photoCopySessionRevision = _boardSession.Revision;
+            _photoCopySessionRevision = _boardSession.NavigationRevision;
             _photoCopyGestureShutter = null;
             _photoCopyMemorySaveRequest = null;
             _photoCopyInputAllowed = false;
@@ -102,7 +103,7 @@ public sealed partial class SceneCompositor
     private void SyncPhotoCopySession()
     {
         HasMonopolyDicePresentation(_monopolyClock());
-        if (_photoCopySessionRevision != _boardSession.Revision)
+        if (_photoCopySessionRevision != _boardSession.NavigationRevision)
             InvalidatePhotoCopyCapture();
     }
 
@@ -309,14 +310,23 @@ public sealed partial class SceneCompositor
                 BoardFingerSelectionStage.Arming => "Keep four fingers together beside the subject.",
                 BoardFingerSelectionStage.Armed => "Ready · move your index finger sideways to copy.",
                 BoardFingerSelectionStage.Separating => "Taking your selection...",
-                _ => _photoCopyStatus
+                _ => _photoCopyStatus switch
+                {
+                    PhotoCopyReadyMessage when _boardSession.PhotoCopyDrawerOpen =>
+                        "Place an object on the board and lift your hand. Then hold SWIRL or COPY.",
+                    PhotoCopyObjectReadyMessage when !_boardSession.PhotoCopyDrawerOpen =>
+                        "Object ready. Open the controls with the up arrow, then hold SWIRL or COPY.",
+                    _ => _photoCopyStatus
+                }
             };
         }
         var count = PhotoCopyStampCount(now);
         if (count == 0) return "Photo captured. Remove the object and your hands.";
         return count < _photoCopyPlacements.Count
             ? $"Copying your photo: {count} of {_photoCopyPlacements.Count}"
-            : "Copies complete. Select Save to save the swirl, or Clear to start again.";
+            : _boardSession.PhotoCopyDrawerOpen
+                ? "Copies complete. Hold SAVE to save the swirl, or CLEAR to start again."
+                : "Copies complete. Open the controls with the up arrow for SAVE and CLEAR.";
     }
 
     private void DrawPhotoCopyStamps(CanvasDrawingSession surface, int count)

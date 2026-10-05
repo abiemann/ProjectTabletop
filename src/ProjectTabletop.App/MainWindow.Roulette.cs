@@ -9,7 +9,7 @@ public sealed partial class MainWindow
         StopBoardSetup(); PrepareBoardApp(); _scene.ShowRoulette();
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
-        SetStatus("Vice Royale Roulette. Choose a chip, then select numbers or outside bets. Hold SPIN for a second. Virtual credits only.");
+        SetStatus("Vice Royale Roulette. Choose a chip, then select numbers or outside bets. Hold SPIN for a second.");
     }
 
     private object RouletteStatus()

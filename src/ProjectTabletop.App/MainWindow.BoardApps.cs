@@ -46,7 +46,7 @@ public sealed partial class MainWindow
         bool slots = _scene.CurrentBoardScreen == BoardScreen.Slots;
         bool roulette = _scene.CurrentBoardScreen == BoardScreen.Roulette;
         bool boardGame = blackjack || monopoly || globe || slots || roulette;
-        BoardGamePreviewTitle.Text = roulette ? "VICE ROYALE  ·  ROULETTE  ·  click to place chips  ·  virtual credits" :
+        BoardGamePreviewTitle.Text = roulette ? "VICE ROYALE  ·  ROULETTE  ·  click to place chips" :
             slots ? "DRAGON SLOTS  ·  click a button to play  ·  virtual credits" :
             globe ? "GLOBE  ·  zoom Earth in and out" : monopoly ? "CROWN & DEED  ·  click the table to play" :
             "BLACKJACK  ·  click the table to play  ·  virtual chips";
@@ -75,7 +75,7 @@ public sealed partial class MainWindow
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
         SetStatus(_scene.HasBoardMediaClip
-            ? "Photo Copy: place an object above the controls and lift your hand. Select Swirl or Copy; Exit returns to the menu."
+            ? "Photo Copy: place an object and lift your hand. Hold the up arrow to reveal EXIT, SWIRL and COPY."
             : "Photo Copy selected. Scan the board before taking a photo.");
     }
 

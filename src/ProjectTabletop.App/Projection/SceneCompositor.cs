@@ -626,7 +626,7 @@ public sealed partial class SceneCompositor : IDisposable
     {
         // Four-finger aiming is visible on each board. Red pinch feedback stays
         // confined to the gesture tester.
-        if (_boardSetup || _calibrationTarget >= 0 || MonopolyEntranceActive || HasGlobeDrawerAnimation(_globeClock())) return;
+        if (_boardSetup || _calibrationTarget >= 0 || MonopolyEntranceActive || HasBoardControlDrawerAnimation()) return;
         var now = MonotonicClock.UtcNow;
         if (_boardMediaClip is not { } clip || _boardCameraMap is null ||
             _handTips.Length == 0 || _handFrameTime > now ||

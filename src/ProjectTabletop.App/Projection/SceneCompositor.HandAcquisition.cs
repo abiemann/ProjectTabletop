@@ -90,7 +90,7 @@ public sealed partial class SceneCompositor
             var animating = blackjack && HasBlackjackCardAnimation(now) ||
                 _boardSession.Screen == BoardScreen.Monopoly &&
                     (MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock())) ||
-                HasGlobeDrawerAnimation(_globeClock());
+                HasBoardControlDrawerAnimation();
             var state = CurrentAcquisitionState();
             var buttons = _boardSession.Buttons;
             if (_acquisitionScene != state || !_acquisitionButtons.SequenceEqual(buttons))
@@ -353,6 +353,8 @@ public sealed partial class SceneCompositor
             MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()) ||
             GetCrownDeedDevelopmentFrame(_monopolyClock())?.Active == true)) return null;
         if (slots && rendered.SlotsRevision != _boardSession.SlotsState.Revision) return null;
+        if (photoCopy && (rendered.PhotoUiRevision != _boardSession.Revision ||
+            HasPhotoCopyDrawerAnimation(_blackjackClock()))) return null;
         if (roulette && rendered.RouletteRevision != _boardSession.RouletteState.Revision) return null;
         if (_boardSession.Screen == BoardScreen.Menu &&
             (_boardSession.MenuScrolling || rendered.MenuFrame != MenuVisualFrame(_blackjackClock()))) return null;
@@ -409,10 +411,8 @@ public sealed partial class SceneCompositor
                     // Swirl stamps, object lighting and status text change independently
                     // and must never look like an arriving hand.
                     drawing.Clear(paint ? PaintColor(3, 5, 12) : AppPalette.PhotoCopyBackground);
-                    using var small = new CanvasTextFormat { FontFamily = "Segoe UI", FontSize = 20 };
-                    foreach (var button in _boardSession.Buttons)
-                        if (paint) DrawPaintButton(drawing, button, false, []);
-                        else DrawPhotoCopyButton(drawing, button, false, small, []);
+                    if (photoCopy) DrawPhotoCopyControls(drawing, _boardSession.Buttons, [], [], _blackjackClock());
+                    else foreach (var button in _boardSession.Buttons) DrawPaintButton(drawing, button, false, []);
                 }
                 else
                 {
@@ -479,7 +479,7 @@ public sealed partial class SceneCompositor
             now >= _acquisitionLightUntil || _acquisitionLight is not { } light ||
             _acquisitionScene != CurrentAcquisitionState() ||
             !_acquisitionButtons.SequenceEqual(_boardSession.Buttons) ||
-            HasGlobeDrawerAnimation(_globeClock()) ||
+            HasBoardControlDrawerAnimation() ||
             _boardSession.Screen == BoardScreen.Blackjack && HasBlackjackCardAnimation(now) ||
             _boardSession.Screen == BoardScreen.Monopoly &&
                 (MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()))) return;

@@ -33,7 +33,7 @@ public sealed class RouletteGame
     private long _roundNumber;
     private int? _outcome, _pocketIndex;
     private RouletteBetTarget? _selectedBet;
-    private string _status = "Place your chips. Virtual credits only.";
+    private string _status = "Place your chips.";
     private RouletteSnapshot? _snapshot;
 
     public RouletteGame(int? seed = null, decimal startingBalance = StartingBalance)
@@ -118,7 +118,7 @@ public sealed class RouletteGame
                 break;
             case "roulette-refill":
                 _balance = StartingBalance;
-                _status = "1,000 virtual credits restored";
+                _status = "1,000 credits restored";
                 break;
         }
         Changed();

@@ -21,7 +21,8 @@ public sealed partial class SceneCompositor
     private BoardSurfaceState? _renderedBoardState;
 
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
-        int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long BlackjackRevision, long BlackjackFlightRevision,
+        int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long PhotoUiRevision, int PhotoDrawerFrame, double PhotoAspect,
+        long BlackjackRevision, long BlackjackFlightRevision,
         long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long MonopolyRevision, long MonopolyDiceRevision,
         long MonopolySessionRevision, int MonopolyDrawerFrame, long MonopolyEntranceRevision, int MonopolyEntranceFrame, long CrownDeedDevelopmentFrame,
         long GlobeRevision, long GlobeFrame, long GlobeSessionRevision, long SlotsRevision, double SlotsAspect, int MenuFrame,
@@ -143,6 +144,7 @@ public sealed partial class SceneCompositor
         var flights = GetBlackjackFlights(blackjackNow);
         var deal = GetBlackjackDealFrame(blackjackNow);
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
+        if (photoCopy) _boardSession.TickPhotoCopy(blackjackNow);
         var paint = _boardSession.Screen == BoardScreen.Paint;
         var paintNow = _paintClock();
         var globeNow = _globeClock();
@@ -170,6 +172,9 @@ public sealed partial class SceneCompositor
             photoCopy ? PhotoCopyStampCount(now) : 0,
             photoCopy ? PhotoCopyDisplayStatus(now) : null,
             photoCopy ? _photoCopyRevision : 0,
+            photoCopy ? _boardSession.Revision : 0,
+            photoCopy ? PhotoCopyDrawerVisualFrame(blackjackNow) : 0,
+            photoCopy ? PaintBoardAspect() : 0,
             _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision : 0,
             _blackjackFlightRevision, paint ? PaintVisualRevision(paintNow) : 0,
             paint ? GetPaintSaveStatus(paintNow) : null, paint && _boardSession.PaintSaveEnabled,
@@ -257,13 +262,14 @@ public sealed partial class SceneCompositor
             }
             else
             {
+                if (photoCopy)
+                    DrawPhotoCopyControls(surface, _boardSession.Buttons,
+                        handsFresh ? _boardSession.HoveredButtonIds : [], selectionFeedback, blackjackNow);
                 foreach (var button in _boardSession.Buttons)
                     if (_boardSession.Screen == BoardScreen.Settings && button.Destination == BoardScreen.HandTracking)
                         DrawMenuButton(surface, button, handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id),
                             label, small, selectionFeedback);
-                    else if (photoCopy)
-                        DrawPhotoCopyButton(surface, button, handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id),
-                            small, selectionFeedback);
+                    else if (photoCopy) continue;
                     else if (paint)
                         DrawPaintButton(surface, button, handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id),
                             selectionFeedback);
@@ -369,16 +375,6 @@ public sealed partial class SceneCompositor
                 InterpolationMode = CanvasImageInterpolation.Linear, BorderMode = EffectBorderMode.Soft
             };
             ds.DrawImage(water);
-        }
-        if (_boardSession.Screen == BoardScreen.Monopoly &&
-            DrawCrownDeedWindowsLayer(ds.Device, monopolyNow) is { } windowsLayer)
-        {
-            using var windows = new Transform3DEffect
-            {
-                Source = windowsLayer, TransformMatrix = matrix,
-                InterpolationMode = CanvasImageInterpolation.Linear, BorderMode = EffectBorderMode.Soft
-            };
-            ds.DrawImage(windows);
         }
         using var perspective = new Transform3DEffect
         {

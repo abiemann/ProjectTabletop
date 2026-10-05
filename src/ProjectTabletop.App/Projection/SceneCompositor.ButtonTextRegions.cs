@@ -15,13 +15,13 @@ public sealed partial class SceneCompositor
         if (_boardSession.Screen == BoardScreen.Slots) return SlotButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Menu && button.Id == "settings") return SettingsCogTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Menu && IsMenuScrollHandle(button))
-            return ButtonInkRegion(button, GlobeDrawerArrowInk(MenuArrowAppearance(button), PaintBoardAspect()), 0, 0);
+            return ButtonInkRegion(button, DrawerArrowInk(MenuArrowAppearance(button), PaintBoardAspect()), 0, 0);
         if (_boardSession.Screen == BoardScreen.Globe)
         {
-            if (IsGlobeDrawerHandle(button))
-                return ButtonInkRegion(button, GlobeDrawerArrowInk(button, PaintBoardAspect()), 0, 0);
-            var rectangle = GlobeButtonTextRectangle(button);
-            using var format = GlobeButtonTextFormat(button);
+            if (IsBoardDrawerHandle(button))
+                return ButtonInkRegion(button, DrawerArrowInk(button, PaintBoardAspect()), 0, 0);
+            var rectangle = DrawerButtonTextRectangle(button);
+            using var format = DrawerButtonTextFormat(button);
             using var layout = new CanvasTextLayout(device, button.Label, format,
                 (float)rectangle.Width, (float)rectangle.Height);
             return ButtonInkRegion(button, layout.DrawBounds, rectangle.X, rectangle.Y);
@@ -46,9 +46,11 @@ public sealed partial class SceneCompositor
         }
         if (_boardSession.Screen == BoardScreen.PhotoCopy)
         {
-            var rectangle = PhotoCopyButtonTextRectangle(button);
-            using var format = PhotoCopyButtonTextFormat();
-            using var layout = new CanvasTextLayout(device, button.Label, format,
+            if (IsBoardDrawerHandle(button))
+                return ButtonInkRegion(button, DrawerArrowInk(button, PaintBoardAspect()), 0, 0);
+            var rectangle = DrawerButtonTextRectangle(button);
+            using var format = DrawerButtonTextFormat(button);
+            using var layout = new CanvasTextLayout(device, DrawerButtonCaption(button), format,
                 (float)rectangle.Width, (float)rectangle.Height);
             return ButtonInkRegion(button, layout.DrawBounds, rectangle.X, rectangle.Y);
         }
