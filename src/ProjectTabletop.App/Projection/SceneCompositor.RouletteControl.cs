@@ -74,14 +74,4 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private void DrawRouletteMenuPreview(CanvasDrawingSession ds, float span)
-    {
-        // Real roulette geometry gives the new menu card the same jewellery
-        // detail as its table, without prerendered letters or a fake wheel.
-        ds.Clear(ThemeColor(8, 28, 35));
-        var game = new RouletteGame(7).Snapshot;
-        DrawRouletteWheel(ds, game, DateTimeOffset.UnixEpoch, new(span * .70f, span * .52f), 1, span / 390);
-        DrawRouletteChip(ds, new(span * .35f, span * .80f), span * .08f, 25, 1, false);
-        DrawRouletteChip(ds, new(span * .20f, span * .76f), span * .075f, 5, 1, false);
-    }
 }

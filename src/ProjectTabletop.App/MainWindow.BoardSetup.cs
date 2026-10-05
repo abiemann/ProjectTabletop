@@ -55,6 +55,10 @@ public sealed partial class MainWindow
 
     private const int BoardSetupSpotCount = BoardRegistration.SpotCount;
     private const int CenterCheckSpotIndex = BoardSetupSpotCount - 1;
+    // The five dark dots target one second of presentation time. The white
+    // field is already settled; each next dot still needs a real observation.
+    private static readonly TimeSpan RegistrationSpotSettle = TimeSpan.FromSeconds(1) / BoardSetupSpotCount;
+    private static readonly TimeSpan RegistrationSpotRetry = TimeSpan.FromMilliseconds(32);
 
     private enum BoardSetupPhase { Inactive, Switching, ScanAmbient, ScanWhite, ShowCorners, MeasureSpots, GridReady, Failed }
 
@@ -102,6 +106,11 @@ public sealed partial class MainWindow
             }
             if (request != _boardSetupRequestVersion || _closing) return;
             RequireProjectionOutput();
+
+            // Menu art is already generated offline. Finish its asynchronous
+            // decode before scanning so the reveal's first frame is ready.
+            await _scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
+            if (request != _boardSetupRequestVersion || _closing) return;
 
             Volatile.Write(ref _boardSetupActive, true);
             ClearBoardPreview();
@@ -250,12 +259,19 @@ public sealed partial class MainWindow
         if (phase is not (BoardSetupPhase.ScanAmbient or BoardSetupPhase.ScanWhite or
                           BoardSetupPhase.ShowCorners or BoardSetupPhase.MeasureSpots)) return;
         var phaseStarted = Interlocked.Read(ref _boardPhaseStartedTick);
-        // Let the projector and Android Webcam exposure settle after each scene change.
-        var settle = phase == BoardSetupPhase.ShowCorners ? SetupCornersSettle : TimeSpan.FromMilliseconds(900);
+        // Full-field exposure changes need longer settling than a small dark
+        // dot moving across an already steady white field.
+        var settle = phase switch
+        {
+            BoardSetupPhase.ShowCorners => SetupCornersSettle,
+            BoardSetupPhase.MeasureSpots => RegistrationSpotSettle,
+            _ => TimeSpan.FromMilliseconds(900)
+        };
         if (phaseStarted == 0 || Stopwatch.GetElapsedTime(phaseStarted, tick) < settle)
             return;
         var previous = Interlocked.Read(ref _lastBoardDetectTick);
-        if (previous != 0 && Stopwatch.GetElapsedTime(previous, tick) < TimeSpan.FromMilliseconds(200))
+        var retry = phase == BoardSetupPhase.MeasureSpots ? RegistrationSpotRetry : TimeSpan.FromMilliseconds(200);
+        if (previous != 0 && Stopwatch.GetElapsedTime(previous, tick) < retry)
             return;
         if (Interlocked.CompareExchange(ref _detecting, 1, 0) != 0) return;
         Interlocked.Exchange(ref _lastBoardDetectTick, tick);

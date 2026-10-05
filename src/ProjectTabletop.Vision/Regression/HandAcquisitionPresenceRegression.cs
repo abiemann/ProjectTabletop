@@ -430,6 +430,59 @@ internal static class HandAcquisitionPresenceRegression
         }
     }
 
+    private static void ControlReferenceMetadata(byte[] empty, PixelPoint[] polygon,
+        HandAcquisitionSceneImage scene)
+    {
+        // Reuse the opaque, generated-caption fixture and its synthetic camera
+        // projection. A malformed plate map must never become a learned camera
+        // baseline, retain old text evidence, or poison a later valid scene.
+        HandTrackingBounds[] plates = [new(.06, .88, .14, .075), new(.80, .88, .14, .075)];
+        var valid = scene with { BoardControlReferenceRegions = plates };
+        var tracker = new HandAcquisitionPresenceTracker();
+        int milliseconds = 0;
+        AssertReady(Feed(valid), "initial explicit plate metadata");
+        foreach (var (name, invalidPlates) in new (string, HandTrackingBounds[])[]
+        {
+            ("count mismatch", [plates[0]]),
+            ("nonfinite rectangle", [plates[0] with { Width = double.NaN }, plates[1]]),
+            ("out-of-board rectangle", [plates[0] with { X = .95 }, plates[1]]),
+            ("uncontained candidate", [plates[0] with { X = .09, Width = .11 }, plates[1]]),
+            ("swapped control pairing", [plates[1], plates[0]])
+        })
+        {
+            var invalid = valid with { BoardControlReferenceRegions = invalidPlates };
+            AssertRejected(Feed(invalid), name);
+            AssertRejected(Feed(invalid), name + " repeated");
+            AssertReady(Feed(valid), name + " explicit metadata recovery");
+            AssertRejected(Feed(invalid), name + " after recovery");
+            AssertReady(Feed(scene), name + " legacy null metadata recovery");
+        }
+        // Older callers may omit both reference lists. Their candidate pixels
+        // remain the appearance witnesses after an explicitly mapped scene.
+        AssertReady(Feed(valid), "explicit metadata before legacy reference reset");
+        AssertReady(Feed(scene with { BoardReferenceRegions = null }),
+            "legacy null reference-region recovery");
+        Console.WriteLine("Control reference metadata regression: five malformed maps fail closed; " +
+            "explicit and legacy null metadata recover on the same tracker.");
+
+        HandAcquisitionPresenceResult Feed(HandAcquisitionSceneImage expected)
+        {
+            var now = Epoch.AddMilliseconds(milliseconds);
+            milliseconds += 100;
+            return tracker.Update(scene.Width, scene.Height, scene.Width * 4, empty, polygon,
+                expected, now, now);
+        }
+        static void AssertRejected(HandAcquisitionPresenceResult result, string description) =>
+            Require(!result.BaselineReady && result.Hints.Count == 0 && result.TextPatterns is null &&
+                result.Reason == "invalid-rendered-scene",
+                $"Invalid control reference metadata did not fail closed ({description}).");
+        static void AssertReady(HandAcquisitionPresenceResult result, string description) =>
+            Require(result.BaselineReady && result.Hints.Count == 0 && result.TextPatterns is { Count: 2 } &&
+                result.TextPatterns.All(pattern => pattern.LabelIntact && !pattern.ShapeCorrupted &&
+                    pattern.ConfirmationFrames == 0),
+                $"Clean generated captions did not recover after plate metadata changed ({description}).");
+    }
+
     private static void RenderedCompactControls()
     {
         const int size = 1000;
@@ -449,6 +502,7 @@ internal static class HandAcquisitionPresenceRegression
         var scene = new HandAcquisitionSceneImage(size, size, expected,
             [.0010861301462467192, 0, -.04306506098490942, 0, .0010861301462467192,
                 -.04306506098490942, 0, 0, 1], controls, controls, text);
+        ControlReferenceMetadata(empty, polygon, scene);
         foreach (bool warm in new[] { false, true })
         {
             var tracker = new HandAcquisitionPresenceTracker();

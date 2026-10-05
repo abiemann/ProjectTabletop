@@ -8,18 +8,46 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
+    private static bool IsVectorArrowHandle(BoardButton button) =>
+        IsBoardDrawerHandle(button) || IsMenuScrollHandle(button) || IsMonopolyDrawerHandle(button);
+
+    private Rect BoardVectorArrowInk(BoardButton button) => IsMonopolyDrawerHandle(button)
+        ? MonopolyDrawerArrowInk(button, PaintBoardAspect())
+        : DrawerArrowInk(IsMenuScrollHandle(button) ? MenuArrowAppearance(button) : button, PaintBoardAspect());
+
+    private static HandTrackingBounds BoardButtonPlateRegion(BoardButton button) =>
+        new(button.Bounds.X + .012, button.Bounds.Y + .012,
+            button.Bounds.Width - .024, button.Bounds.Height - .024);
+
+    private HandTrackingBounds BoardButtonSearchRegion(BoardButton button)
+    {
+        if (_boardSession.Screen == BoardScreen.Roulette && button.Id.StartsWith("roulette-chip-", StringComparison.Ordinal))
+            return RouletteChipSearchRegion(button);
+        var plate = BoardButtonPlateRegion(button);
+        if (!IsVectorArrowHandle(button)) return plate;
+        var ink = BoardVectorArrowInk(button);
+        // A compact chevron must be measured against its actual shape, rather
+        // than the much larger pill. Twelve logical pixels retain the bounded
+        // eight-pixel registration search plus its blur/ink margin. The full
+        // opaque plate remains a separate lighting reference; its hit bounds,
+        // rendering and seven-percent evidence floors are unchanged.
+        const double margin = 12;
+        double left = Math.Max(plate.X, (ink.X - margin) / BoardSurfaceSize);
+        double top = Math.Max(plate.Y, (ink.Y - margin) / BoardSurfaceSize);
+        double right = Math.Min(plate.X + plate.Width, (ink.Right + margin) / BoardSurfaceSize);
+        double bottom = Math.Min(plate.Y + plate.Height, (ink.Bottom + margin) / BoardSurfaceSize);
+        return new(left, top, right - left, bottom - top);
+    }
+
     private HandTrackingBounds BoardButtonTextRegion(CanvasDevice device, BoardButton button)
     {
+        if (IsVectorArrowHandle(button)) return ButtonInkRegion(button, BoardVectorArrowInk(button), 0, 0);
         if (_boardSession.Screen == BoardScreen.Roulette) return RouletteButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Paint) return PaintButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Slots) return SlotButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Menu && button.Id == "settings") return SettingsCogTextRegion(device, button);
-        if (_boardSession.Screen == BoardScreen.Menu && IsMenuScrollHandle(button))
-            return ButtonInkRegion(button, DrawerArrowInk(MenuArrowAppearance(button), PaintBoardAspect()), 0, 0);
         if (_boardSession.Screen == BoardScreen.Globe)
         {
-            if (IsBoardDrawerHandle(button))
-                return ButtonInkRegion(button, DrawerArrowInk(button, PaintBoardAspect()), 0, 0);
             var rectangle = DrawerButtonTextRectangle(button);
             using var format = DrawerButtonTextFormat(button);
             using var layout = new CanvasTextLayout(device, button.Label, format,
@@ -28,8 +56,6 @@ public sealed partial class SceneCompositor
         }
         if (_boardSession.Screen == BoardScreen.Monopoly)
         {
-            if (IsMonopolyDrawerHandle(button))
-                return ButtonInkRegion(button, MonopolyDrawerArrowInk(button, PaintBoardAspect()), 0, 0);
             var rectangle = MonopolyButtonTextRectangle(button);
             using var format = MonopolyButtonTextFormat(button);
             using var layout = new CanvasTextLayout(device, button.Label, format,
@@ -46,8 +72,6 @@ public sealed partial class SceneCompositor
         }
         if (_boardSession.Screen == BoardScreen.PhotoCopy)
         {
-            if (IsBoardDrawerHandle(button))
-                return ButtonInkRegion(button, DrawerArrowInk(button, PaintBoardAspect()), 0, 0);
             var rectangle = DrawerButtonTextRectangle(button);
             using var format = DrawerButtonTextFormat(button);
             using var layout = new CanvasTextLayout(device, DrawerButtonCaption(button), format,

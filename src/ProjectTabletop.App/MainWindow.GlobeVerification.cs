@@ -23,6 +23,7 @@ public sealed partial class MainWindow
         Directory.CreateDirectory(directory);
         var images = new List<string>();
         var tested = new List<string>();
+        var compactArrowChecks = new List<object>();
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
         using var scene = new SceneCompositor(blackjackClock: () => now, globeClock: () => now);
         scene.SetDisplayAspect(width / (double)height);
@@ -161,6 +162,7 @@ public sealed partial class MainWindow
             movingDrawerBlocksActionsAndAcquisition = true, hiddenDrawerActionsRejected = true,
             controls = tested, nativeActualCaptionMasks = true, twoFreshFramesAndSevenPercentRequired = true,
             vectorChevronTemplates = true, intactChevronRejectsLargePillObstruction = true,
+            compactArrowChecks,
             native1080pChevronAcquisitionWithBroadSkinFingers = true,
             emptyCameraOpticsAndIntactChevronRemainQuiet = true,
             rotatingEarthCannotTriggerButtonLighting = true, offButtonActivityCannotStartSpotlight = true,
@@ -263,7 +265,10 @@ public sealed partial class MainWindow
                 }
 
                 if (button.Id is "globe-drawer-open" or "globe-drawer-close")
+                {
                     CheckIntactChevron(button, index, trigger, empty, ready);
+                    CheckCompactArrowSensitivity(button, index, empty);
+                }
 
                 byte[] outside = Draw();
                 var offButton = CameraPoint(.5, .43);
@@ -539,6 +544,95 @@ public sealed partial class MainWindow
                 now += TimeSpan.FromMilliseconds(33);
             }
         }
+        void CheckCompactArrowSensitivity(BoardButton button, int index, byte[] clean)
+        {
+            var hold = scene.GetHoldButtonContext(now);
+            Require(hold is not null, "The compact arrow fixture lacks its actual hold reference.");
+            var expected = hold!.ExpectedScene;
+            var search = expected.BoardSearchRegions![index];
+            var trigger = expected.BoardTriggerRegions![index];
+            var bounds = button.Bounds;
+            var plate = new HandTrackingBounds(bounds.X + .012, bounds.Y + .012,
+                bounds.Width - .024, bounds.Height - .024);
+            Require(search.Width * search.Height < plate.Width * plate.Height / 2 &&
+                    search.X >= plate.X && search.Y >= plate.Y &&
+                    search.X + search.Width <= plate.X + plate.Width + 1e-12 &&
+                    search.Y + search.Height <= plate.Y + plate.Height + 1e-12 &&
+                    trigger.X >= search.X && trigger.Y >= search.Y &&
+                    trigger.X + trigger.Width <= search.X + search.Width + 1e-12 &&
+                    trigger.Y + trigger.Height <= search.Y + search.Height + 1e-12 &&
+                    expected.BoardReferenceRegions!.Contains(plate),
+                "Arrow sensitivity changed its hit plate, clipped its ink, or lost its independent full-glass reference.");
+
+            // Damage one side of the actual arrow, preserving its opposite tip.
+            // This patch is too small to meet the old whole-pill 7% floor;
+            // qualification must come from genuinely changed arrow pixels.
+            byte[] partial = (byte[])clean.Clone();
+            var topLeft = CameraPoint(trigger.X, trigger.Y);
+            var bottomRight = CameraPoint(trigger.X + trigger.Width * .80, trigger.Y + trigger.Height);
+            int left = (int)Math.Ceiling(topLeft.X), top = (int)Math.Ceiling(topLeft.Y);
+            int patchWidth = (int)Math.Floor(bottomRight.X) - left;
+            int patchHeight = (int)Math.Floor(bottomRight.Y) - top;
+            var plateStart = CameraPoint(plate.X, plate.Y);
+            var plateEnd = CameraPoint(plate.X + plate.Width, plate.Y + plate.Height);
+            double oldPlateFraction = patchWidth * patchHeight /
+                ((plateEnd.X - plateStart.X) * (plateEnd.Y - plateStart.Y));
+            Require(oldPlateFraction is > 0 and < .07,
+                "The partial-arrow fixture covers enough full pill to bypass the intended sensitivity regression.");
+            Fill(partial, left, top, patchWidth, patchHeight, 18, 31, 221);
+
+            byte[] bright = (byte[])clean.Clone();
+            for (int y = (int)Math.Ceiling(plateStart.Y); y < (int)Math.Floor(plateEnd.Y); y++)
+            for (int x = (int)Math.Ceiling(plateStart.X); x < (int)Math.Floor(plateEnd.X); x++)
+            for (int channel = 0; channel < 3; channel++)
+            {
+                int offset = (y * width + x) * 4 + channel;
+                bright[offset] = (byte)Math.Round(clean[offset] * .80 + 12);
+            }
+            var tracker = new HandAcquisitionPresenceTracker();
+            var clear = Observe(clean);
+            Require(clear.BaselineReady && hold.ClearedButtons(clear).Contains(button.Id) &&
+                    hold.HeldButtons(clear).Count == 0,
+                "The compact 16:9 arrow does not provide a valid, readable native clear reference.");
+            Require(Apply(clear).Count == 0, "A clear arrow activated a hold.");
+            HandAcquisitionPresenceResult broken = clear;
+            for (int frame = 0; frame < 4; frame++)
+            {
+                now += TimeSpan.FromMilliseconds(100);
+                broken = Observe(partial);
+                if (!hold.HeldButtons(broken).Contains(button.Id))
+                {
+                    File.WriteAllText(Path.Combine(directory, button.Id + "-compact-sensitivity-failure.json"),
+                        System.Text.Json.JsonSerializer.Serialize(new { search, trigger, plate, oldPlateFraction, broken },
+                            new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                    File.WriteAllBytes(Path.Combine(directory, button.Id + "-compact-partial.bgra"), partial);
+                    File.WriteAllBytes(Path.Combine(directory, button.Id + "-compact-clean.bgra"), clean);
+                    throw new InvalidOperationException("Partly broken native arrow did not qualify its compact optical region: " +
+                        System.Text.Json.JsonSerializer.Serialize(broken));
+                }
+                Require(Apply(broken).Count == 0, "A partial arrow press activated before one second.");
+            }
+            Require(scene.CurrentHoldProgress.Any(progress => progress.ButtonId == button.Id && progress.Progress > 0),
+                "Actual partial-arrow damage did not start hold progress.");
+            now += TimeSpan.FromMilliseconds(100);
+            var intactBrightness = Observe(bright);
+            Require(hold.HeldButtons(intactBrightness).Count == 0 &&
+                    hold.ClearedButtons(intactBrightness).Contains(button.Id) &&
+                    Apply(intactBrightness).Count == 0 &&
+                    scene.CurrentHoldProgress.All(progress => progress.ButtonId != button.Id),
+                "A brightness change under intact arrow lettering failed to cancel its partial hold immediately: " +
+                System.Text.Json.JsonSerializer.Serialize(intactBrightness));
+            compactArrowChecks.Add(new { button.Id, search, trigger, plate, oldPlateFraction,
+                broken = broken.TextPatterns!.Single(pattern => pattern.ControlRegion == index),
+                intactBrightness = intactBrightness.TextPatterns!.Single(pattern => pattern.ControlRegion == index),
+                partialArrowQualified = true, intactBrightnessImmediatelyClears = true,
+                fullPlateReferencePreserved = true, nativeAspect = width / (double)height });
+
+            HandAcquisitionPresenceResult Observe(byte[] pixels) => tracker.Update(width, height, width * 4, pixels,
+                hold.SearchPolygon, expected, now, now);
+            IReadOnlyList<string> Apply(HandAcquisitionPresenceResult result) =>
+                scene.ObserveHoldButtons(hold, hold.HeldButtons(result), now, hold.ClearedButtons(result));
+        }
         async Task CheckNativeCameraChevron()
         {
             const int cameraWidth = 1920, cameraHeight = 1080;
@@ -623,6 +717,7 @@ public sealed partial class MainWindow
                             expectedCameraToBoard = expected.CameraToBoard,
                             boardSearchRegions = expected.BoardSearchRegions,
                             boardReferenceRegions = expected.BoardReferenceRegions,
+                            boardControlReferenceRegions = expected.BoardControlReferenceRegions,
                             boardTriggerRegions = expected.BoardTriggerRegions,
                             expected.AllowsLocalForegroundContext,
                             cleanImage = cameraPrefix + "-empty.png", occupiedImage = occupiedName + ".png",

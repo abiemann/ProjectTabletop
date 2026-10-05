@@ -161,6 +161,7 @@ public sealed partial class SceneCompositor
     }
 
     private bool AcquisitionBoardReady => !_disposed && !_boardSession.MenuScrolling && _boardSession.Buttons.Count > 0 &&
+        (_boardSession.Screen is not (BoardScreen.Menu or BoardScreen.Settings) || _menuPreviewReady) &&
         !_blackOutput && !_boardSetup && !IsBoardRevealActive && _calibrationTarget < 0 &&
         _boardMediaClip is not null && _boardCameraMap is not null && _boardSurfaceMap is not null;
 
@@ -425,38 +426,42 @@ public sealed partial class SceneCompositor
             }
             var pixels = _acquisitionReferenceTarget.GetPixelBytes();
             _acquisitionReferenceError = null;
-            var regions = _boardSession.Buttons.Select(button =>
-                roulette && button.Id.StartsWith("roulette-chip-", StringComparison.Ordinal)
-                    ? RouletteChipSearchRegion(button)
-                    : new HandTrackingBounds(button.Bounds.X + .012, button.Bounds.Y + .012,
-                    button.Bounds.Width - .024, button.Bounds.Height - .024)).ToArray();
+            var regions = _boardSession.Buttons.Select(BoardButtonSearchRegion).ToArray();
+            // Arrow damage is normalized to its compact glyph neighbourhood.
+            // The original full, opaque pill independently constrains exposure
+            // and camera colour; those extra reference pixels cannot qualify
+            // an arriving hand or extend the arrow's optical search region.
+            var controlReferences = _boardSession.Buttons.Select((button, index) =>
+                IsVectorArrowHandle(button) ? BoardButtonPlateRegion(button) : regions[index]).ToArray();
             // One Back button is not enough to fit the camera's color response
             // when fingers cover most of it. Include fixed, opaque UI nearby as
             // a lighting reference, without allowing it to suggest a search light.
             IReadOnlyList<HandTrackingBounds>? referenceRegions = _boardSession.Screen switch
             {
                 BoardScreen.HandTracking => [new(.40, .065, .53, .04)],
-                BoardScreen.Settings => [new(.40, .065, .53, .04), .. regions],
+                BoardScreen.Settings => [new(.40, .065, .53, .04), .. controlReferences],
                 // The plain Paint title and surrounding artwork have no opaque
                 // panel. Use the generated button interiors as lighting anchors.
-                BoardScreen.Paint => regions,
-                BoardScreen.Globe => regions,
-                BoardScreen.Slots => regions,
-                BoardScreen.Roulette => regions,
+                BoardScreen.Paint => controlReferences,
+                BoardScreen.Globe => controlReferences,
+                BoardScreen.PhotoCopy => controlReferences,
+                BoardScreen.Slots => controlReferences,
+                BoardScreen.Roulette => controlReferences,
                 // Fixed deed plaques and gold trim constrain the camera response
                 // when a hand covers the only gold action panel. These bands
                 // calibrate colour only; searches remain inside the controls.
-                BoardScreen.Monopoly => [.. regions,
+                BoardScreen.Monopoly => [.. controlReferences,
                     new(.18, .045, .64, .12), new(.18, .835, .64, .12)],
                 BoardScreen.Blackjack => [new(.05, .24, .90, .50), new(.31, .05, .63, .095)],
-                _ => null
+                _ => _boardSession.Buttons.Any(IsVectorArrowHandle) ? controlReferences : null
             };
             return new((int)BoardSurfaceSize, (int)BoardSurfaceSize, pixels, cameraToBoard,
                 BoardSearchRegions: regions, BoardReferenceRegions: referenceRegions,
                 BoardTriggerRegions: _boardSession.Buttons
                     .Select(button => BoardButtonTextRegion(_acquisitionReferenceTarget.Device, button)).ToArray(),
                 AllowsLocalForegroundContext: _boardSession.Screen is BoardScreen.Menu or BoardScreen.Settings or
-                    BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.Monopoly);
+                    BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.Monopoly,
+                BoardControlReferenceRegions: controlReferences);
         }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or
             InvalidOperationException or ObjectDisposedException)

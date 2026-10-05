@@ -2,7 +2,6 @@ using System.Numerics;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Brushes;
 using Microsoft.Graphics.Canvas.Geometry;
-using ProjectTabletop.App.Projection.PaintFluid;
 using ProjectTabletop.Interaction;
 using Windows.Foundation;
 using Windows.UI;
@@ -11,36 +10,63 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
-    // Each menu tile previews its destination with that board's own artwork.
-    // The preview is sharp on the right and fades into the glass across the
-    // panel's diagonal sheen band. Images render once at native board density.
-    private const float MenuPreviewUnits = 160;
-    private readonly Dictionary<BoardScreen, CanvasRenderTarget> _menuPreviews = [];
-    private bool _menuGlobePreviewDeferred;
+    private MenuThumbnailImages? _menuPreviewImages;
+    private bool _menuPreviewReady;
+
+    internal sealed record MenuPreviewDiagnostics(bool Ready, int LoadedCount, string? Error);
+
+    internal MenuPreviewDiagnostics GetMenuPreviewDiagnostics()
+    {
+        lock (_gate) return new(_menuPreviewImages?.IsReady == true,
+            _menuPreviewImages?.LoadedCount ?? 0, _menuPreviewImages?.Error);
+    }
+
+    internal Task EnsureMenuPreviewResourcesAsync(CanvasDevice device)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return GetMenuPreviewImages(device).EnsureReadyAsync();
+        }
+    }
+
+    private MenuThumbnailImages GetMenuPreviewImages(CanvasDevice device)
+    {
+        if (_menuPreviewImages is null || _menuPreviewImages.Device != device)
+        {
+            _menuPreviewImages?.Dispose();
+            _menuPreviewImages = new(device);
+            _menuPreviewReady = false;
+            InvalidateMenuPreviewSurface();
+        }
+        return _menuPreviewImages;
+    }
 
     private void PrepareMenuPreviews(CanvasDevice device)
     {
-        bool menu = _boardSession.Screen == BoardScreen.Menu;
-        // Board setup precedes the menu, leaving time for the shared Earth
-        // textures to load before the Globe tile's first preview.
-        if (_boardSetup || menu) GetGlobeRenderer(device);
-        // A menu first drawn without Earth keeps that tile until the menu is
-        // left or rescanned, so the camera's rendered reference stays valid.
-        if (_boardSetup || !menu) _menuGlobePreviewDeferred = false;
+        bool ready = GetMenuPreviewImages(device).IsReady;
+        if (ready == _menuPreviewReady) return;
+        _menuPreviewReady = ready;
+        InvalidateMenuPreviewSurface();
+    }
+
+    private void InvalidateMenuPreviewSurface()
+    {
+        _renderedBoardState = null;
+        _acquisitionScene = null;
+        _acquisitionExpectedScene = null;
     }
 
     private void DrawMenuPreview(CanvasDrawingSession ds, Rect rect, Rect inside, float radius, BoardScreen screen)
     {
-        // Matches DrawGlassPanel's sheen: .52–.76 of the width at the top and
-        // .28–.52 at the bottom. The fade runs perpendicular to that band.
-        var bounds = new Rect(rect.X + rect.Width * .28, rect.Y, rect.Width * .72, rect.Height);
-        var image = MenuPreviewImage(ds, screen, bounds);
+        if (!_menuPreviewReady) return;
+        var image = _menuPreviewImages?.Image(screen);
         if (image is null) return;
+        // Keep the original diagonal sheen and rounded panel clip. Only the
+        // destination artwork is baked; captions and hold rims remain live.
+        var bounds = new Rect(rect.X + rect.Width * .28, rect.Y, rect.Width * .72, rect.Height);
         var along = Vector2.Normalize(new((float)(-rect.Width * .24), (float)rect.Height));
         var normal = new Vector2(-along.Y, along.X) * -1;
-        // The isolated dragon starts farther right than an opaque board scene.
-        // Carry the same diagonal falloff across its plume rather than through
-        // empty alpha, keeping the head and neck clear at the right edge.
         float startFraction = screen == BoardScreen.Slots ? .50f : .40f;
         float fadeWidth = screen == BoardScreen.Slots ? .32f : .24f;
         var start = new Vector2((float)(rect.X + rect.Width * startFraction), (float)(rect.Y + rect.Height / 2));
@@ -54,295 +80,40 @@ public sealed partial class SceneCompositor
             new() { Position = 1, Color = Color.FromArgb(255, 255, 255, 255) }
         ]) { StartPoint = start, EndPoint = start + normal * distance };
         using var clip = CanvasGeometry.CreateRoundedRectangle(ds.Device, inside, radius, radius);
-        using (ds.CreateLayer(fade, clip))
-            ds.DrawImage(image, bounds, new Rect(0, 0, image.Size.Width, image.Size.Height));
+        using (ds.CreateLayer(fade, clip)) DrawMenuThumbnail(ds, image, bounds);
     }
 
-    private CanvasRenderTarget? MenuPreviewImage(CanvasDrawingSession ds, BoardScreen screen, Rect bounds)
+    private static void DrawMenuThumbnail(CanvasDrawingSession ds, CanvasBitmap image, Rect bounds)
     {
-        // Physical pixels are square in the board raster, so rendering at the
-        // destination's native size keeps chips, dice and Earth round.
+        // Physical board pixels are square even when logical board units are
+        // not. Scale uniformly by physical height, and crop from the right,
+        // preserving round Earth, chips, dice, and the dragon's proportions.
         var transform = ds.Transform;
-        int width = Math.Clamp((int)Math.Ceiling(bounds.Width * new Vector2(transform.M11, transform.M12).Length()), 16, 2048);
-        int height = Math.Clamp((int)Math.Ceiling(bounds.Height * new Vector2(transform.M21, transform.M22).Length()), 16, 2048);
-        if (_menuPreviews.TryGetValue(screen, out var cached))
+        double xScale = new Vector2(transform.M11, transform.M12).Length();
+        double yScale = new Vector2(transform.M21, transform.M22).Length();
+        if (xScale <= 0 || yScale <= 0 || bounds.Height <= 0) return;
+        double sourceWidth = bounds.Width * xScale / (bounds.Height * yScale) * image.Size.Height;
+        if (sourceWidth <= image.Size.Width)
         {
-            if (cached.Device == ds.Device && cached.SizeInPixels.Width == width && cached.SizeInPixels.Height == height)
-                return cached;
-            cached.Dispose();
-            _menuPreviews.Remove(screen);
+            ds.DrawImage(image, bounds,
+                new Rect(image.Size.Width - sourceWidth, 0, sourceWidth, image.Size.Height),
+                1, CanvasImageInterpolation.HighQualityCubic);
+            return;
         }
-        if (screen == BoardScreen.Globe && (_menuGlobePreviewDeferred || !GetGlobeRenderer(ds.Device).IsReady))
-        {
-            _menuGlobePreviewDeferred = true;
-            return null;
-        }
-        if (screen is not (BoardScreen.HandTracking or BoardScreen.PhotoCopy or BoardScreen.Blackjack or
-            BoardScreen.Paint or BoardScreen.Monopoly or BoardScreen.Globe or BoardScreen.Slots or BoardScreen.Roulette)) return null;
-        var image = new CanvasRenderTarget(ds.Device, width, height, 96);
-        PaintFluidSimulation? fluid = null;
-        try
-        {
-            using (var drawing = image.CreateDrawingSession())
-            {
-                float unit = height / MenuPreviewUnits;
-                drawing.Transform = Matrix3x2.CreateScale(unit);
-                float span = width / unit;
-                switch (screen)
-                {
-                    case BoardScreen.HandTracking: DrawHandTrackingPreview(drawing, span); break;
-                    case BoardScreen.PhotoCopy: DrawPhotoCopyPreview(drawing, span); break;
-                    case BoardScreen.Blackjack: DrawBlackjackPreview(drawing, span); break;
-                    case BoardScreen.Paint: fluid = DrawPaintPreview(drawing, span); break;
-                    case BoardScreen.Monopoly: DrawMonopolyPreview(drawing, span); break;
-                    case BoardScreen.Globe: DrawGlobePreview(drawing, span); break;
-                    case BoardScreen.Slots: DrawSlotsMenuPreview(drawing, span); break;
-                    case BoardScreen.Roulette: DrawRouletteMenuPreview(drawing, span); break;
-                }
-            }
-        }
-        catch (NotSupportedException)
-        {
-            // An adapter without floating-point fields cannot run Paint either.
-            image.Dispose();
-            return null;
-        }
-        finally { fluid?.Dispose(); }
-        _menuPreviews[screen] = image;
-        return image;
+        // Extremely wide boards extend only the image's quiet left background;
+        // the focal artwork retains the same physical scale and right anchor.
+        double width = bounds.Width * image.Size.Width / sourceWidth;
+        var art = new Rect(bounds.Right - width, bounds.Y, width, bounds.Height);
+        ds.DrawImage(image, new Rect(bounds.X, bounds.Y, art.X - bounds.X, bounds.Height),
+            new Rect(0, 0, 1, image.Size.Height));
+        ds.DrawImage(image, art, new Rect(0, 0, image.Size.Width, image.Size.Height),
+            1, CanvasImageInterpolation.HighQualityCubic);
     }
 
     private void DisposeMenuPreviews()
     {
-        foreach (var image in _menuPreviews.Values) image.Dispose();
-        _menuPreviews.Clear();
-    }
-
-    // Preview scenes use a local space 160 units high; `span` is its width.
-    // Focal content sits inside the fully sharp right-hand region.
-    private static void DrawHandTrackingPreview(CanvasDrawingSession ds, float span)
-    {
-        ds.Clear(AppPalette.Background);
-        var center = new Vector2(span - 82, 84);
-        for (float x = center.X % 32; x < span; x += 32)
-            ds.DrawLine(x, 0, x, MenuPreviewUnits, AppPalette.GridLine, Math.Abs(x - center.X) < 1 ? 2 : 1);
-        for (float y = 84 % 32; y < MenuPreviewUnits; y += 32)
-            ds.DrawLine(0, y, span, y, AppPalette.GridLine, Math.Abs(y - 84) < 1 ? 2 : 1);
-        using var light = new CanvasRadialGradientBrush(ds.Device,
-        [
-            new() { Position = 0, Color = ThemeColor(236, 241, 246) },
-            new() { Position = .62f, Color = ThemeColor(214, 223, 232) },
-            new() { Position = 1, Color = ThemeColor(214, 223, 232, 0) }
-        ]) { Center = center, RadiusX = 70, RadiusY = 70 };
-        ds.FillCircle(center, 70, light);
-        // A palm-down hand with its four fingers grouped, as boards expect.
-        (Vector2 Base, Vector2 Tip)[] fingers =
-        [
-            (new(-17, 12), new(-21, -28)), (new(-5, 10), new(-7, -38)),
-            (new(7, 10), new(7, -35)), (new(18, 13), new(20, -22))
-        ];
-        (Vector2 Base, Vector2 Tip) thumb = (new(-24, 32), new(-44, 8));
-        using var round = new CanvasStrokeStyle { StartCap = CanvasCapStyle.Round, EndCap = CanvasCapStyle.Round };
-        DrawHand(new Vector2(3, 4), null, ThemeColor(40, 52, 68, 70));
-        using var skin = new CanvasLinearGradientBrush(ds.Device, ThemeColor(226, 184, 156), ThemeColor(191, 142, 114))
-        { StartPoint = center + new Vector2(0, -40), EndPoint = center + new Vector2(0, 60) };
-        DrawHand(Vector2.Zero, skin, default);
-        foreach (var finger in fingers)
-        {
-            var direction = Vector2.Normalize(finger.Tip - finger.Base);
-            var nail = center + finger.Tip - direction * 4.5f;
-            ds.FillEllipse(nail, 3.6f, 4.4f, ThemeColor(241, 214, 198));
-            ds.DrawLine(center + finger.Base + direction * 12 - new Vector2(3, 0),
-                center + finger.Base + direction * 12 + new Vector2(3, 0), ThemeColor(168, 120, 96, 150), .8f);
-        }
-        for (int index = 0; index < fingers.Length; index++)
-        {
-            var marker = center + fingers[index].Tip;
-            var ring = index == 1 ? ThemeColor(233, 190, 83) : AppPalette.IndicatorOn;
-            ds.DrawCircle(marker, 7.5f, ring, 2.2f);
-            if (index == 1) ds.FillCircle(marker, 2.4f, ring);
-        }
-
-        void DrawHand(Vector2 offset, ICanvasBrush? brush, Color color)
-        {
-            var origin = center + offset;
-            using var palm = CanvasGeometry.CreateRoundedRectangle(ds.Device,
-                new Rect(origin.X - 26, origin.Y + 8, 52, 70), 20, 20);
-            if (brush is null) ds.FillGeometry(palm, color); else ds.FillGeometry(palm, brush);
-            foreach (var (from, to) in fingers.Append(thumb))
-                if (brush is null) ds.DrawLine(origin + from, origin + to, color, from == thumb.Base ? 13 : 11.6f, round);
-                else ds.DrawLine(origin + from, origin + to, brush, from == thumb.Base ? 13 : 11.6f, round);
-        }
-    }
-
-    private static void DrawPhotoCopyPreview(CanvasDrawingSession ds, float span)
-    {
-        ds.Clear(AppPalette.PhotoCopyBackground);
-        var center = new Vector2(span - 86, 80);
-        // A patch of Swirl's square spiral: copies turn their tops inward.
-        for (int row = -2; row <= 2; row++)
-        for (int column = -4; column <= 2; column++)
-        {
-            if (row == 0 && column == 0) continue;
-            var position = center + new Vector2(column * 46, row * 42);
-            if (position.X < span - 210) continue;
-            var inward = center - position;
-            DrawCopy(position, MathF.Atan2(inward.X, -inward.Y), 1.02f);
-        }
-        // The grey surface falls into shadow beneath the tile's captions.
-        using var shade = new CanvasRadialGradientBrush(ds.Device,
-        [
-            new() { Position = .30f, Color = ThemeColor(18, 20, 24, 0) },
-            new() { Position = 1, Color = ThemeColor(18, 20, 24, 170) }
-        ]) { Center = center, RadiusX = 250, RadiusY = 170 };
-        ds.FillRectangle(new Rect(0, 0, span, MenuPreviewUnits), shade);
-        using var glow = new CanvasRadialGradientBrush(ds.Device,
-            ThemeColor(255, 255, 255, 170), ThemeColor(255, 255, 255, 0))
-        { Center = center, RadiusX = 44, RadiusY = 44 };
-        ds.FillCircle(center, 44, glow);
-        DrawCopy(center, -.16f, 1.3f);
-
-        void DrawCopy(Vector2 position, float angle, float scale)
-        {
-            var previous = ds.Transform;
-            ds.Transform = Matrix3x2.CreateScale(scale) * Matrix3x2.CreateRotation(angle) *
-                Matrix3x2.CreateTranslation(position) * previous;
-            try
-            {
-                ds.FillRoundedRectangle(new Rect(-10, -13, 23, 31), 3, 3, ThemeColor(20, 20, 20, 70));
-                using var cover = new CanvasLinearGradientBrush(ds.Device, ThemeColor(52, 128, 84), ThemeColor(24, 84, 54))
-                { StartPoint = new(-12, -16), EndPoint = new(12, 16) };
-                ds.FillRoundedRectangle(new Rect(-12, -16, 24, 32), 3, 3, cover);
-                ds.FillRectangle(new Rect(-12, -14, 3.5, 28), ThemeColor(18, 62, 40));
-                ds.FillRoundedRectangle(new Rect(-5, -11, 12, 7), 1.2f, 1.2f, ThemeColor(236, 229, 205));
-                ds.DrawLine(7.5f, -16, 7.5f, 16, ThemeColor(24, 24, 24), 2);
-            }
-            finally { ds.Transform = previous; }
-        }
-    }
-
-    private static void DrawBlackjackPreview(CanvasDrawingSession ds, float span)
-    {
-        // The table's own felt, viewed inside its rail around the dealer arc.
-        float scale = MenuPreviewUnits / 330;
-        var previous = ds.Transform;
-        ds.Transform = Matrix3x2.CreateTranslation(-(940 - span / scale), -430) * Matrix3x2.CreateScale(scale) * previous;
-        DrawCasinoFelt(ds);
-        ds.Transform = previous;
-
-        DrawChip(new Vector2(span - 176, 124), ThemeColor(147, 60, 70), "50");
-        DrawChip(new Vector2(span - 150, 134), ThemeColor(37, 93, 153), "10");
-        DrawCard(new BlackjackCard(1, BlackjackSuit.Spades), new Vector2(span - 104, 82), -11);
-        DrawCard(new BlackjackCard(13, BlackjackSuit.Hearts), new Vector2(span - 58, 78), 9);
-
-        void DrawCard(BlackjackCard card, Vector2 center, float degrees)
-        {
-            var saved = ds.Transform;
-            ds.Transform = Matrix3x2.CreateRotation(degrees * MathF.PI / 180, center) * saved;
-            try { DrawCasinoCard(ds, card, new Rect(center.X - 31, center.Y - 42.5f, 62, 85)); }
-            finally { ds.Transform = saved; }
-        }
-        void DrawChip(Vector2 center, Color body, string value)
-        {
-            var saved = ds.Transform;
-            ds.Transform = Matrix3x2.CreateScale(.56f, center) * saved;
-            try { DrawCasinoChip(ds, center, 32, body, value, false); }
-            finally { ds.Transform = saved; }
-        }
-    }
-
-    // A short run of the real fluid simulation. The caller disposes it after
-    // the preview's drawing session has finished using its fields.
-    private static PaintFluidSimulation DrawPaintPreview(CanvasDrawingSession ds, float span)
-    {
-        int fieldHeight = 96, fieldWidth = Math.Clamp((int)MathF.Round(fieldHeight * span / MenuPreviewUnits), 32, 512);
-        var fluid = new PaintFluidSimulation(ds.Device, fieldWidth, fieldHeight, fieldWidth / (double)fieldHeight);
-        // Positions are units from the right edge; radii are fractions of height.
-        (float FromRight, float Y, float Radius, int Pigment)[] drops =
-        [
-            (30, .20f, .10f, 0), (70, .34f, .09f, 1), (112, .18f, .08f, 2), (52, .62f, .10f, 3),
-            (96, .72f, .09f, 6), (140, .50f, .08f, 5), (22, .88f, .08f, 4), (16, .48f, .07f, 7),
-            (84, .04f, .07f, 6), (126, .92f, .07f, 0), (170, .30f, .07f, 1), (60, .96f, .06f, 2),
-            (180, .78f, .06f, 3), (44, .42f, .06f, 5)
-        ];
-        for (int index = 0; index < drops.Length; index++)
-            fluid.AddDrop(new(1 - drops[index].FromRight / span, drops[index].Y), drops[index].Radius,
-                PaintPigments[drops[index].Pigment], 1, 101 + index * 37);
-        // Four seconds lets the mounds relax into overlapping coats.
-        for (int step = 0; step < 60; step++) fluid.Advance(1 / 15.0);
-        fluid.Draw(ds, new Rect(0, 0, span, MenuPreviewUnits));
-        return fluid;
-    }
-
-    private static void DrawMonopolyPreview(CanvasDrawingSession ds, float span)
-    {
-        // A native miniature of Crown & Deed's oval boulevard and city skyline.
-        // Small physical shapes stay crisp at the tile's cached native density.
-        ds.Clear(ThemeColor(9, 25, 22));
-        var center = new Vector2(span - 88, 94);
-        ds.FillEllipse(center + new Vector2(0, 7), 86, 48, ThemeColor(3, 10, 9));
-        ds.FillEllipse(center, 85, 48, ThemeColor(43, 45, 29));
-        ds.DrawEllipse(center, 85, 48, ThemeColor(202, 164, 88), 1.3f);
-        ds.FillEllipse(center - new Vector2(0, 2), 77, 40, ThemeColor(15, 53, 42));
-        ds.DrawEllipse(center - new Vector2(0, 2), 77, 40, ThemeColor(122, 119, 66), .7f);
-        ds.DrawEllipse(center - new Vector2(0, 2), 68, 33, ThemeColor(215, 186, 114), .8f);
-        for (int index = 0; index < 40; index++)
-        {
-            float angle = MathF.PI / 2 + index * MathF.Tau / 40;
-            var radial = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
-            ds.DrawLine(center - new Vector2(0, 2) + radial * new Vector2(70, 35),
-                center - new Vector2(0, 2) + radial * new Vector2(75, 39),
-                ThemeColor(209, 183, 117, 180), .65f);
-        }
-
-        House(-48, -13, 14, 24, ThemeColor(113, 139, 113));
-        House(-28, -23, 15, 32, ThemeColor(197, 172, 116));
-        House(-7, -30, 18, 43, ThemeColor(150, 164, 131));
-        House(17, -18, 15, 29, ThemeColor(211, 191, 143));
-        House(38, -8, 14, 24, ThemeColor(131, 157, 130));
-        House(-35, 12, 16, 24, ThemeColor(204, 186, 137));
-        House(-10, 18, 19, 29, ThemeColor(151, 174, 145));
-        House(18, 17, 16, 23, ThemeColor(197, 171, 118));
-        DrawMonopolyDie(ds, new Rect(span - 46, 118, 18, 18), 5, MonopolyIvory, MonopolyInk);
-        DrawMonopolyDie(ds, new Rect(span - 24, 125, 16, 16), 2, MonopolyIvory, MonopolyInk);
-
-        void House(float x, float y, float width, float height, Color stone)
-        {
-            var foot = center + new Vector2(x, y);
-            ds.FillEllipse(foot + new Vector2(width / 2 + 2, 2), width * .66f, 3.2f, ThemeColor(2, 15, 12, 160));
-            ds.FillRectangle(new Rect(foot.X, foot.Y - height, width, height), stone);
-            ds.FillRectangle(new Rect(foot.X + width * .72f, foot.Y - height, width * .28f, height), ThemeColor(76, 99, 79));
-            using var roof = new CanvasPathBuilder(ds.Device);
-            roof.BeginFigure(new Vector2(foot.X - 2, foot.Y - height));
-            roof.AddLine(new Vector2(foot.X + width / 2, foot.Y - height - width * .44f));
-            roof.AddLine(new Vector2(foot.X + width + 2, foot.Y - height));
-            roof.EndFigure(CanvasFigureLoop.Closed);
-            using var roofGeometry = CanvasGeometry.CreatePath(roof);
-            ds.FillGeometry(roofGeometry, ThemeColor(44, 74, 65));
-            ds.DrawGeometry(roofGeometry, ThemeColor(205, 173, 99), .65f);
-            ds.DrawLine(foot.X, foot.Y - height + 2, foot.X, foot.Y, ThemeColor(230, 208, 150), .6f);
-            for (float row = foot.Y - height + 5; row < foot.Y - 4; row += 7)
-                for (float column = foot.X + 3; column < foot.X + width * .7f; column += 5)
-                    ds.FillRectangle(new Rect(column, row, 2.2, 3.2), ThemeColor(246, 218, 139));
-            ds.FillRectangle(new Rect(foot.X + width * .36f, foot.Y - 6, width * .22f, 6), ThemeColor(23, 49, 39));
-        }
-    }
-
-    private void DrawGlobePreview(CanvasDrawingSession ds, float span)
-    {
-        ds.Clear(ThemeColor(2, 5, 11));
-        // The Globe shader draws its sphere and sky in a 1000-unit frame.
-        const float zoom = .3f, radius = 66;
-        float scale = radius / (335 * zoom);
-        var center = new Vector2(span - 80, 80);
-        var previous = ds.Transform;
-        ds.Transform = Matrix3x2.CreateTranslation(-500, -500) * Matrix3x2.CreateScale(scale) *
-            Matrix3x2.CreateTranslation(center) * previous;
-        try
-        {
-            GetGlobeRenderer(ds.Device).Draw(ds, zoom, (float)_boardSession.GlobeHomeRotationDegrees, 1,
-                (float)_boardSession.GlobeHomeLatitudeDegrees);
-        }
-        finally { ds.Transform = previous; }
+        _menuPreviewImages?.Dispose();
+        _menuPreviewImages = null;
+        _menuPreviewReady = false;
     }
 }

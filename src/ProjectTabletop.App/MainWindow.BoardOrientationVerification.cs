@@ -19,10 +19,12 @@ public sealed partial class MainWindow
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen,
             _scene.HasBoardMediaClip, _scene.GetBoardFacingDegrees());
         const int width = 1600, height = 900, cameraSize = 1000;
-        var now = DateTimeOffset.UtcNow.AddMinutes(1);
+        // Presentation can advance deterministically; actual camera samples and
+        // navigation barriers must share the production monotonic input clock.
+        var now = MonotonicClock.UtcNow.AddMinutes(1);
         var globeStartedAt = now;
         var globeNow = globeStartedAt;
-        var monopolyNow = DateTimeOffset.UtcNow;
+        var monopolyNow = MonotonicClock.UtcNow;
         Vector2[] physicalCorners = [new(.10f, .14f), new(.90f, .14f), new(.90f, .86f), new(.10f, .86f)];
         Point2[] unit = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
         BoardScreen[] boards = [BoardScreen.Menu, BoardScreen.HandTracking, BoardScreen.PhotoCopy,
@@ -42,6 +44,7 @@ public sealed partial class MainWindow
         {
             using var scene = NewScene(quarterTurn, out var cameraMap, out double inset);
             await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
+            await scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
             var expectedSurface = SurfaceMap(inset, halfTurn: false);
             Require(scene.GetBoardFacingDegrees() == 0,
                 "A rotated camera replaced the configured projector-space board facing.");
@@ -93,9 +96,10 @@ public sealed partial class MainWindow
                 for (int first = 0; first < 4; first++)
                 {
                     using var scene = new SceneCompositor(new BlackjackGame(seed: 173),
-                        blackjackClock: () => now, paintClock: () => now, globeClock: () => globeNow,
+                        paintClock: () => now, globeClock: () => globeNow,
                         monopolyClock: () => monopolyNow);
                     await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
+                    await scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
                     scene.SetDisplayAspect((double)width / height);
                     Require(scene.GetBoardFacingDegrees() is null,
                         "The first-scan fixture unexpectedly had a saved facing direction.");
@@ -130,6 +134,7 @@ public sealed partial class MainWindow
 
         using var turned = NewScene(0, out var originalCameraMap, out double originalInset);
         await turned.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
+        await turned.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
         turned.ShowBoardMenu();
         var upright = Draw(turned);
         var oldRaster = turned.GetBoardResolutionDiagnostics();
@@ -186,7 +191,7 @@ public sealed partial class MainWindow
         var paintButton = turned.CurrentBoardButtons.Single(button => button.Id == "paint");
         await Hover(turned, rescannedCameraMap, halfTurnSurface, paintButton);
         await Task.Delay(2);
-        var sourceTime = DateTimeOffset.UtcNow;
+        var sourceTime = MonotonicClock.UtcNow;
         var point = CameraPoint(rescannedCameraMap, halfTurnSurface, paintButton);
         turned.SetHandCursors([new HandCursor(new(point.X, point.Y), sourceTime.AddSeconds(1), 880001)], sourceTime);
         Require(turned.CurrentBoardScreen == BoardScreen.Paint,
@@ -194,7 +199,7 @@ public sealed partial class MainWindow
         var exit = turned.CurrentBoardButtons.Single(button => button.Id == "menu");
         await Hover(turned, rescannedCameraMap, halfTurnSurface, exit);
         await Task.Delay(2);
-        sourceTime = DateTimeOffset.UtcNow;
+        sourceTime = MonotonicClock.UtcNow;
         point = CameraPoint(rescannedCameraMap, halfTurnSurface, exit);
         turned.SetHandCursors([new HandCursor(new(point.X, point.Y), sourceTime.AddSeconds(1), 880002)], sourceTime);
         Require(turned.CurrentBoardScreen == BoardScreen.Menu,
@@ -216,7 +221,7 @@ public sealed partial class MainWindow
 
         SceneCompositor NewScene(int cameraQuarterTurn, out Homography map, out double inset)
         {
-            var result = new SceneCompositor(new BlackjackGame(seed: 173), blackjackClock: () => now,
+            var result = new SceneCompositor(new BlackjackGame(seed: 173),
                 paintClock: () => now, globeClock: () => globeNow, monopolyClock: () => monopolyNow);
             result.SetDisplayAspect((double)width / height);
             result.SetBoardFacingDegrees(0);
@@ -266,7 +271,7 @@ public sealed partial class MainWindow
                 case BoardScreen.Monopoly:
                     // Keep the completed barrier behind real camera timestamps;
                     // the unrelated Paint clock deliberately runs in the future.
-                    monopolyNow = DateTimeOffset.UtcNow.AddMilliseconds(-5075);
+                    monopolyNow = MonotonicClock.UtcNow.AddMilliseconds(-5075);
                     scene.ShowMonopoly();
                     monopolyNow += TimeSpan.FromMilliseconds(4975);
                     scene.TickMonopoly(monopolyNow);
@@ -297,13 +302,13 @@ public sealed partial class MainWindow
         {
             await Task.Delay(2);
             var point = CameraPoint(map, surface, button);
-            var time = DateTimeOffset.UtcNow;
+            var time = MonotonicClock.UtcNow;
             scene.SetHandCursors([new HandCursor(new(point.X, point.Y), DateTimeOffset.MinValue)], time);
             if (button.IsHold)
             {
                 // Hold buttons ignore fingertip cursors; their camera evidence uses
                 // the hold detector's own camera-to-board mapping instead.
-                var hold = scene.GetHoldButtonContext(scene.CurrentBoardScreen == BoardScreen.Globe ? globeNow : now);
+                var hold = scene.GetHoldButtonContext(scene.CurrentBoardScreen == BoardScreen.Globe ? globeNow : MonotonicClock.UtcNow);
                 var matrix = hold?.ExpectedScene.CameraToBoard;
                 double divisor = matrix is null ? double.NaN : matrix[6] * point.X + matrix[7] * point.Y + matrix[8];
                 Require(scene.HoveredBoardButtons.Count == 0 && matrix is not null &&

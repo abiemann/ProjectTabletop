@@ -15,6 +15,8 @@ Globe bundles the unmodified 8192 × 4096 land/ocean/sea-ice texture and
 NASA Goddard Space Flight Center, Reto Stöckli; visualization by Robert Simmon;
 based on MODIS Science Team data, with USGS and NOAA surface/topography data.
 The satellite composites describe 2001 observations, not current weather.
+The pregenerated Globe menu thumbnail is rendered from the same imagery and
+retains these credits.
 
 Source: [NASA's The Blue Marble](https://science.nasa.gov/earth/earth-observatory/the-blue-marble-2181/).
 Original [surface PNG](https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57730/land_ocean_ice_8192.png)

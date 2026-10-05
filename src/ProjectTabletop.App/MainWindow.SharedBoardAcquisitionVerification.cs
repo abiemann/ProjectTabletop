@@ -34,6 +34,7 @@ public sealed partial class MainWindow
             .Select(rank => new BlackjackCard(rank, BlackjackSuit.Clubs)));
         using var scene = new SceneCompositor(game, blackjackClock: () => now, globeClock: () => globeNow);
         await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
+        await scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96);
         scene.SetDisplayAspect(1);
         scene.SetBoardSetup(true);

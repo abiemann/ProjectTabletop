@@ -11,11 +11,12 @@ public sealed partial class HandAcquisitionPresenceTracker
         IReadOnlyList<CaptionReflectanceEvidence> reflected, List<HandAcquisitionLocalFitResult> diagnostics)
     {
         var result = new List<LocalControlEvidence>();
-        if (_scene?.BoardSearchRegions is null || _controlRegions is null || _templateReferenceMask is null ||
+        if (_scene?.BoardSearchRegions is null || _controlRegions is null || _referenceControlRegions is null ||
+            _controlReferenceBounds is null || _templateReferenceMask is null ||
             _templateEdges is null || _sampleBoardAreas is null || _textPatterns is null) return result;
         int availableTraining = fitAllowed.Count(value => value);
         var controlTraining = Enumerable.Range(0, fitAllowed.Length).Where(index => fitAllowed[index])
-            .GroupBy(index => _controlRegions[index]).ToDictionary(group => group.Key, group => group.Count());
+            .GroupBy(index => _referenceControlRegions[index]).ToDictionary(group => group.Key, group => group.Count());
         foreach (var observation in observations)
         {
             if ((!observation.StrongCorruption && !observation.Clean) ||
@@ -42,11 +43,11 @@ public sealed partial class HandAcquisitionPresenceTracker
                 if (!thinCaption && (changedArea / _controlBoardAreas![region] < MinimumControlCoverage ||
                     changedTriggerArea / _controlTriggerBoardAreas![region] < MinimumControlCoverage)) continue;
             }
-            var control = _scene.BoardSearchRegions[region];
+            var control = _controlReferenceBounds[region];
             List<int>[] margins = [[], [], [], []];
             for (int index = 0; index < allowed.Length; index++)
             {
-                if (!allowed[index] || _controlRegions[index] != region || _templateEdges[index] ||
+                if (!_templateSampleMask![index] || _referenceControlRegions[index] != region || _templateEdges[index] ||
                     !BoardPosition(_scene, _locations[index], out double u, out double v) ||
                     _textPatterns.IsGeneratedCaptionSupport(region, u, v, out _)) continue;
                 double x = (u - control.X) / control.Width, y = (v - control.Y) / control.Height;
@@ -75,7 +76,7 @@ public sealed partial class HandAcquisitionPresenceTracker
                 var witnessSet = witness.ToHashSet();
                 bool[] independent = Enumerable.Range(0, allowed.Length).Select(index =>
                     _templateReferenceMask[index] && !_templateEdges[index] &&
-                    (_controlRegions[index] == region ? witnessSet.Contains(index) : fitAllowed[index])).ToArray();
+                    (_referenceControlRegions[index] == region ? witnessSet.Contains(index) : fitAllowed[index])).ToArray();
                 trainingCount = independent.Count(value => value);
                 var fit = Fit(reference, current, independent);
                 if (fit is null) { failure = "insufficient-independent-native-samples"; continue; }
@@ -125,7 +126,11 @@ public sealed partial class HandAcquisitionPresenceTracker
         for (int x = (int)Math.Floor(trigger.X * 1000) - 8; x <= (trigger.X + trigger.Width) * 1000 + 8; x++)
             if (_textPatterns.IsGeneratedCaptionSupport(region, x / 1000.0, y / 1000.0, out _)) support++;
         if (support == 0) return false;
-        bool thin = support / 1_000_000.0 / _controlBoardAreas[region] < MinimumControlCoverage;
+        // Thinness describes ink on its physical lighting plate, independent
+        // of a tighter candidate ROI. This only requests margin validation;
+        // all actual foreground floors still use the compact candidate area.
+        var plate = _controlReferenceBounds![region];
+        bool thin = support / 1_000_000.0 / (plate.Width * plate.Height) < MinimumControlCoverage;
         _thinCaptionSupport[region] = thin;
         return thin;
     }

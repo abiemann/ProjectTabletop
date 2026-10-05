@@ -192,6 +192,7 @@ public sealed partial class MainWindow
         var images = new List<string>();
         using var fixture = new RouletteNativeFixture(1000, 1000, new RouletteGame(1));
         var scene = fixture.Scene;
+        await scene.EnsureMenuPreviewResourcesAsync(fixture.Target.Device);
         var board = (BoardSession)typeof(SceneCompositor).GetField("_boardSession", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(scene)!;
         scene.ShowBoardMenu();

@@ -1,0 +1,230 @@
+{
+  "recipeVersion": 1,
+  "generation": "Offline native Win2D using the project\u0027s existing artwork, geometry and shaders; never run during app startup.",
+  "width": 2304,
+  "height": 512,
+  "logicalWidth": 720,
+  "logicalHeight": 160,
+  "framing": "Scale uniformly by destination height; align the right edge and crop the left; never stretch.",
+  "globe": {
+    "rotationDegrees": 58.29723737777772,
+    "latitudeDegrees": 34.05222222222222,
+    "imagery": "NASA Blue Marble; credits and source URLs in THIRD_PARTY_NOTICES.md"
+  },
+  "paint": {
+    "fieldWidth": 432,
+    "fieldHeight": 96,
+    "updates": 60,
+    "fixedStepsPerUpdate": 4,
+    "shaderPassesPerStep": 14,
+    "seed": "101 \u002B dropIndex * 37"
+  },
+  "assets": [
+    {
+      "board": "HandTracking",
+      "file": "hand-tracking.png",
+      "width": 2304,
+      "height": 512,
+      "sha256": "33ad7745feb72eb6b164127a7532269985f8ad53f5f50cdeebbd2d141b647c78",
+      "bytes": 108719,
+      "pngColorType": 6,
+      "alpha": {
+        "transparent": 0,
+        "translucent": 0,
+        "opaque": 1179648,
+        "exteriorVerified": false
+      }
+    },
+    {
+      "board": "PhotoCopy",
+      "file": "photo-copy.png",
+      "width": 2304,
+      "height": 512,
+      "sha256": "5b2f1ba0325dc3d273cb2f920c759dbd66e5ea8311fe3fafff15048271a013aa",
+      "bytes": 231919,
+      "pngColorType": 6,
+      "alpha": {
+        "transparent": 0,
+        "translucent": 0,
+        "opaque": 1179648,
+        "exteriorVerified": false
+      }
+    },
+    {
+      "board": "Blackjack",
+      "file": "blackjack.png",
+      "width": 2304,
+      "height": 512,
+      "sha256": "e75287499bcdef6bd371afb781d66fe1f189f0bf2d2eaad1413e4dd31f450cad",
+      "bytes": 275254,
+      "pngColorType": 6,
+      "alpha": {
+        "transparent": 0,
+        "translucent": 0,
+        "opaque": 1179648,
+        "exteriorVerified": false
+      }
+    },
+    {
+      "board": "Paint",
+      "file": "paint.png",
+      "width": 2304,
+      "height": 512,
+      "sha256": "91879a6d6d6ad7cb6e7333693414f93bda786e579977ed031c6a223f504c227f",
+      "bytes": 230494,
+      "pngColorType": 6,
+      "alpha": {
+        "transparent": 0,
+        "translucent": 0,
+        "opaque": 1179648,
+        "exteriorVerified": false
+      }
+    },
+    {
+      "board": "Monopoly",
+      "file": "crown-deed.png",
+      "width": 2304,
+      "height": 512,
+      "sha256": "9ba938603a57f0357192cf1fabfc629ba5c5e431fe41c2e221c77d7e0590d6b2",
+      "bytes": 76411,
+      "pngColorType": 6,
+      "alpha": {
+        "transparent": 0,
+        "translucent": 0,
+        "opaque": 1179648,
+        "exteriorVerified": false
+      }
+    },
+    {
+      "board": "Globe",
+      "file": "globe.png",
+      "width": 2304,
+      "height": 512,
+      "sha256": "d317fc52e75fdb8507ee13bc1cb78739224cd5df9e7a6f6ff6728ccff74816b9",
+      "bytes": 327362,
+      "pngColorType": 6,
+      "alpha": {
+        "transparent": 0,
+        "translucent": 0,
+        "opaque": 1179648,
+        "exteriorVerified": false
+      }
+    },
+    {
+      "board": "Slots",
+      "file": "dragon-slots.png",
+      "width": 2304,
+      "height": 512,
+      "sha256": "30d1cdc95daeaaa9fda06cf6bdbc666239ccc7316f2f39001ae1ed4e3e1441f8",
+      "bytes": 550812,
+      "pngColorType": 6,
+      "alpha": {
+        "transparent": 993972,
+        "translucent": 184163,
+        "opaque": 1513,
+        "exteriorVerified": true
+      }
+    },
+    {
+      "board": "Roulette",
+      "file": "roulette.png",
+      "width": 2304,
+      "height": 512,
+      "sha256": "14c4855095ae6f9cfe3ec32f20b40066ec8abff5475953fd434602c31f827cab",
+      "bytes": 279684,
+      "pngColorType": 6,
+      "alpha": {
+        "transparent": 0,
+        "translucent": 0,
+        "opaque": 1179648,
+        "exteriorVerified": false
+      }
+    }
+  ],
+  "sources": [
+    {
+      "file": "src/ProjectTabletop.App/AppPalette.cs",
+      "sha256": "5ced1f49d8fd60b6714ca0f9c3aaf9afba7f522c27e57973a5146002bfccc292"
+    },
+    {
+      "file": "src/ProjectTabletop.App/GlobeRendering/Assets/earth-clouds-2048.jpg",
+      "sha256": "daddaad84d7a33bbbc86cdda3f591099f57cee8607b7bcf3b67eb7e4f7a1c793"
+    },
+    {
+      "file": "src/ProjectTabletop.App/GlobeRendering/Assets/earth-day-8192.png",
+      "sha256": "aaddcd967a9f09fb2d7ef50ff452bebfcf10192c520465d5eb1ad8446c716e98"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/GlobeRendering/EarthSurfaceShader.cs",
+      "sha256": "bcc7fa37c7d07051f9940528685f419e804be0e11221e6c30b4703984693809f"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/GlobeRendering/GlobeSurfaceRenderer.cs",
+      "sha256": "df94cdc5f76d82408e128aa8c076e917b28f1454fcd77b136a43086b365c49fd"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/PaintFluid/PaintFluidShaders.cs",
+      "sha256": "7aec550bbf9903234313decb972ffe79e2f10539a4ccc9ff83aad198d17d5982"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/PaintFluid/PaintFluidSimulation.cs",
+      "sha256": "4b08cd9479214d556c2d314f41f8ff0e04fd887628ce9f003e2a6a4513a112a5"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/RouletteRendering/RouletteWoodShader.cs",
+      "sha256": "71b0b55a9109824f7df9885bf9bdcde1821b40266702eafc66c2a08dd4b97f71"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.Blackjack.cs",
+      "sha256": "fdd86ec66a91e77b16f22bf1fcbb3ffe2f6fd37a1f24a326687645d8b7dfa55c"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.Monopoly.cs",
+      "sha256": "997544f1ac18fc8ff3628ef2aeeb323baf20be6e41ea61342c8edd8aa02025fd"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.Paint.cs",
+      "sha256": "fc3a15b3f8da47401c982448d6fe1bc0601499ac4410d7ba433cc854e9d0bb7f"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.Roulette.cs",
+      "sha256": "8e379bb7360a4744c0e0bc0effbdee5a734aa80d5b47f94a2277568f29fd017d"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.RouletteMaterials.cs",
+      "sha256": "75301865dab7a17d803999878ed51e5d3d200db4d5cbc01b8c0972e4f6b08f56"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.RouletteMotion.cs",
+      "sha256": "f73acfb986a64c4c5b5c791556bfb9a4149278e2fc8bef8b92ee0d19f1a89b3a"
+    },
+    {
+      "file": "src/ProjectTabletop.App/SlotsRendering/Assets/slot-menu-dragon.png",
+      "sha256": "2b095dad8ece77f3bfad2d24ca9dcca6b5727fac693e4d02b2160b7a73e4538a"
+    },
+    {
+      "file": "src/ProjectTabletop.Interaction/GlobeHome.cs",
+      "sha256": "189edcc6599b689bc820e82ed2b5737b12a24e7b4ec3e812414669382cd868b9"
+    },
+    {
+      "file": "tools/MenuPreviewGenerator/Generate.ps1",
+      "sha256": "6f801877cb3a08b80badb87c680c792f731d911f77f2348579f26ed100820b24"
+    },
+    {
+      "file": "tools/MenuPreviewGenerator/MenuPreviewGenerator.csproj",
+      "sha256": "857557a0837eff30da601cacd1fcb313d6970106b9aa1dbab75122d6b35abba9"
+    },
+    {
+      "file": "tools/MenuPreviewGenerator/PreviewRecipes.Native.cs",
+      "sha256": "b60d0d01635eb21c64cd5c6b49b548ca26ecc79b9a8b775c3c329cf445292601"
+    },
+    {
+      "file": "tools/MenuPreviewGenerator/PreviewRecipes.cs",
+      "sha256": "9ce3ce0f24d27708ab0984ce3f35d055c274a41bb52b5a9fc6f80732409dfb32"
+    },
+    {
+      "file": "tools/MenuPreviewGenerator/Program.cs",
+      "sha256": "1002c119fd56937283ada263f5b924164eff5088c908bfe75603572b93820e0f"
+    }
+  ]
+}

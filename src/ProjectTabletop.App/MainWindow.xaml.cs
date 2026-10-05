@@ -14,8 +14,7 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow : Window
 {
-    // Globe opens on the central meridian of this PC's standard time zone
-    // (15 degrees per hour), unaffected by daylight saving.
+    // Globe approaches the captured starting view on each fresh launch.
     private readonly SceneCompositor _scene = new(globe: CreateHomeGlobe());
     private readonly CameraCaptureService _camera = new();
     private readonly object _visionGate = new();
@@ -59,15 +58,10 @@ public sealed partial class MainWindow : Window
             : Path.GetFullPath(configured);
     }
 
-    // Earth starts facing the local time zone's tz reference city; zones without
-    // one fall back to their UTC offset's longitude on the equator.
-    private static ProjectTabletop.Interaction.GlobeState CreateHomeGlobe()
-    {
-        var city = ProjectTabletop.Interaction.GlobeHome.ReferenceCity(TimeZoneInfo.Local,
-            System.Globalization.RegionInfo.CurrentRegion.TwoLetterISORegionName);
-        return city is { } home ? new(home.Longitude, home.Latitude)
-            : new(Math.Clamp(TimeZoneInfo.Local.BaseUtcOffset.TotalHours * 15, -180, 180));
-    }
+    // Each launch approaches the user's captured resting view, independently
+    // of the machine's time zone, then continues its normal automatic spin.
+    private static ProjectTabletop.Interaction.GlobeState CreateHomeGlobe() =>
+        ProjectTabletop.Interaction.GlobeHome.CreateDefault();
 
     public MainWindow()
     {
@@ -91,6 +85,7 @@ public sealed partial class MainWindow : Window
         SyncVisionSettingsControls();
         _ = TryLoadAutosavedVisionAsync();
         _ = InitializeMonopolySaveAsync();
+        _ = WarmMenuPreviewResourcesAsync();
         _ = WarmGlobeResourcesAsync();
         StartControlHost();
     }

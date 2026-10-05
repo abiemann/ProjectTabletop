@@ -30,9 +30,10 @@ public sealed partial class MainWindow
         using var scene = NewScene();
         using var dpiScene = NewScene();
         using var legacyScene = NewScene();
-        // The menu's Globe tile previews Earth; load it before comparing scenes.
+        // Load the shipped thumbnail atlas before comparing stationary scenes.
         await Task.WhenAll(scene.EnsureGlobeResourcesAsync(device), dpiScene.EnsureGlobeResourcesAsync(device),
-            legacyScene.EnsureGlobeResourcesAsync(device));
+            legacyScene.EnsureGlobeResourcesAsync(device), scene.EnsureMenuPreviewResourcesAsync(device),
+            dpiScene.EnsureMenuPreviewResourcesAsync(device), legacyScene.EnsureMenuPreviewResourcesAsync(device));
         var menuButtons = scene.CurrentBoardButtons.ToArray();
 
         Draw(scene, native, width, height);
@@ -107,7 +108,8 @@ public sealed partial class MainWindow
         {
             using var mapped = NewScene(corners);
             using var scaledMapped = NewScene(corners);
-            await Task.WhenAll(mapped.EnsureGlobeResourcesAsync(device), scaledMapped.EnsureGlobeResourcesAsync(device));
+            await Task.WhenAll(mapped.EnsureGlobeResourcesAsync(device), scaledMapped.EnsureGlobeResourcesAsync(device),
+                mapped.EnsureMenuPreviewResourcesAsync(device), scaledMapped.EnsureMenuPreviewResourcesAsync(device));
             var reference = ReferenceMap(corners);
             Draw(mapped, native, width, height);
             var mappedPixels = native.GetPixelBytes();

@@ -5,13 +5,17 @@ public sealed partial class HandAcquisitionPresenceTracker
     private CaptionReflectanceEvidence? LocalizedCaptionReflectance(double[] reference, double[] current,
         int region, bool[] foreground, PhotometricFit fit, Dictionary<int, double[]> offsets, double threshold)
     {
-        if (_scene?.BoardSearchRegions is null || _controlRegions is null ||
+        if (_scene?.BoardSearchRegions is null || _controlRegions is null || _referenceControlRegions is null ||
+            _controlReferenceBounds is null ||
             _sampleBoardAreas is null || _textPatterns is null) return null;
-        var control = _scene.BoardSearchRegions[region];
+        var control = _controlReferenceBounds[region];
         List<int>[] margins = [[], [], [], []];
         for (int index = 0; index < foreground.Length; index++)
         {
-            if (_controlRegions[index] != region || _templateEdges![index] ||
+            // Local witnesses may use opaque candidate pixels even when an
+            // explicit global lighting anchor deliberately excludes that plate.
+            // This does not add them to the global camera-colour training mask.
+            if (!_templateSampleMask![index] || _referenceControlRegions[index] != region || _templateEdges![index] ||
                 !BoardPosition(_scene, _locations[index], out double u, out double v) ||
                 _textPatterns.IsGeneratedCaptionSupport(region, u, v, out _)) continue;
             double x = (u - control.X) / control.Width, y = (v - control.Y) / control.Height;

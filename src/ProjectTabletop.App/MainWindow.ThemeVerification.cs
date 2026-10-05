@@ -15,13 +15,14 @@ public sealed partial class MainWindow
 {
     // Theme snapshots use an isolated compositor. They never navigate the live
     // board, consume a real pinch, or enter camera recognition.
-    private async Task<object> VerifyThemeAsync()
+    private async Task<object> VerifyThemeAsync(bool includeLaptopSnapshot = true)
     {
         const int size = 1200;
-        var globeNow = DateTimeOffset.UtcNow.AddMinutes(1);
-        var monopolyNow = DateTimeOffset.UtcNow;
+        var globeNow = MonotonicClock.UtcNow.AddMinutes(1);
+        var monopolyNow = MonotonicClock.UtcNow;
         using var scene = new SceneCompositor(globeClock: () => globeNow, monopolyClock: () => monopolyNow);
         await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
+        await scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
         scene.SetDisplayAspect(1);
         scene.SetBoardSetup(true);
         var inset = scene.SetDetectedBoardGrid([new(.015f, .015f), new(.985f, .015f), new(.985f, .985f), new(.015f, .985f)],
@@ -34,7 +35,7 @@ public sealed partial class MainWindow
         var images = new List<object>();
 
         await Save("main-menu");
-        var hoverTime = DateTimeOffset.UtcNow;
+        var hoverTime = MonotonicClock.UtcNow;
         scene.SetHandCursors([new(BoardPoint(.28, .33), DateTimeOffset.MinValue)], hoverTime);
         if (!scene.HoveredBoardButtons.SequenceEqual(["slots"]))
             throw new InvalidOperationException("The theme hover fixture did not select Dragon Slots.");
@@ -61,7 +62,7 @@ public sealed partial class MainWindow
             scene.ShowBoardMenu();
             await Task.Delay(2); // A new selection must follow external navigation.
             BoardButton button = new BoardSession().Buttons.Single(item => item.Destination == screen);
-            var time = DateTimeOffset.UtcNow;
+            var time = MonotonicClock.UtcNow;
             monopolyNow = time.AddMilliseconds(-5075);
             scene.SetHandCursors([new(BoardPoint(button.Bounds.X + button.Bounds.Width / 2,
                 button.Bounds.Y + button.Bounds.Height / 2), time.AddSeconds(1), ++eventId)], time);
@@ -76,8 +77,8 @@ public sealed partial class MainWindow
             }
             await Save(screen.ToString().ToLowerInvariant());
         }
-        images.Add(await SaveLaptopThemeSnapshotAsync(directory));
-        return new { passed = true, neutralGreyCaptureField = true, directory, images };
+        if (includeLaptopSnapshot) images.Add(await SaveLaptopThemeSnapshotAsync(directory));
+        return new { passed = true, neutralGreyCaptureField = true, includeLaptopSnapshot, directory, images };
 
         PixelPoint BoardPoint(double u, double v) => new(.015 + .97 * (inset / 2 + u * (1 - inset)),
             .015 + .97 * (inset / 2 + v * (1 - inset)));

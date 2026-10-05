@@ -5,6 +5,7 @@ internal static class GlobeBoardRegression
     public static void Run()
     {
         CheckEntranceAndRotation();
+        CheckFixedOpeningView();
         CheckDrawerAndSmoothControls();
         CheckNavigationAndPinches();
         CheckFourFingerSelection();
@@ -266,6 +267,38 @@ internal static class GlobeBoardRegression
             City(GlobeHome.ReferenceCity(TimeZoneInfo.FindSystemTimeZoneById("AUS Eastern Standard Time")), -33.8667, 151.2167) &&
             GlobeHome.ReferenceCity(TimeZoneInfo.FindSystemTimeZoneById("UTC-11")) is null,
             "Time zones did not resolve to their tz reference cities.");
+    }
+
+    private static void CheckFixedOpeningView()
+    {
+        var globe = GlobeHome.CreateDefault();
+        var board = new BoardSession(globe: globe);
+        board.ShowGlobe(Time(0));
+        GlobeSnapshot first = board.GetGlobeSnapshot(Time(0));
+        GlobeSnapshot middle = board.GetGlobeSnapshot(Time(1500));
+        GlobeSnapshot arrived = board.GetGlobeSnapshot(Time(3000));
+        long revision = globe.Revision;
+        Require(Near(first.RotationDegrees, 55.29723737777772) && Near(first.Zoom, .06) &&
+            Near(middle.RotationDegrees, 56.79723737777772) && Near(middle.IntroProgress, .5) &&
+            middle.Zoom > first.Zoom && middle.Zoom < arrived.Zoom &&
+            Near(arrived.RotationDegrees, 58.29723737777772) && Near(arrived.ViewLatitudeDegrees, 34.05222222222222) &&
+            Near(arrived.Zoom, 1.5) && Near(arrived.TargetZoom, 1.5) && Near(arrived.IntroProgress, 1),
+            "The fixed three-second approach did not reach the user's captured Globe view.");
+        Require(Near(board.GetGlobeSnapshot(Time(4000)).RotationDegrees, 59.29723737777772) &&
+            Near(board.GetGlobeSnapshot(Time(363000)).RotationDegrees, arrived.RotationDegrees) &&
+            board.GetGlobeSnapshot(Time(3000)) == arrived && globe.Revision == revision,
+            "The captured Globe view changed the continuous spin or sampling mutated its state.");
+
+        // A later launch restores this view, even after zoom and spin have moved it.
+        Require(globe.HandleAction("globe-zoom-in", Time(5000)), "The fixed-view Globe rejected zoom.");
+        board.ShowMenu(Time(20000));
+        board.ShowGlobe(Time(21000));
+        GlobeSnapshot reopened = board.GetGlobeSnapshot(Time(24000));
+        Require(Near(reopened.RotationDegrees, arrived.RotationDegrees) &&
+            Near(reopened.ViewLatitudeDegrees, arrived.ViewLatitudeDegrees) &&
+            Near(reopened.Zoom, arrived.Zoom) && Near(reopened.TargetZoom, arrived.TargetZoom) &&
+            !board.GlobeDrawerOpen,
+            "Reopening Globe did not restore the captured view and closed drawer.");
     }
 
     private static void CheckDrawerAndSmoothControls()

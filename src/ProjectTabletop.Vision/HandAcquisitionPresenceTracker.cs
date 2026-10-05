@@ -13,11 +13,15 @@ namespace ProjectTabletop.Vision;
 /// <param name="AllowsLocalForegroundContext">The generated image also describes the static
 /// surroundings of controls. After a control qualifies, connected local foreground may
 /// fit its temporary light; those extra pixels cannot qualify acquisition.</param>
+/// <param name="BoardControlReferenceRegions">Optional index-aligned opaque control plates
+/// containing the corresponding search regions. Their reference pixels belong to that
+/// control's camera-appearance fit, never its foreground or press evidence.</param>
 public sealed record HandAcquisitionSceneImage(int Width, int Height, byte[] Bgra,
     IReadOnlyList<double> CameraToBoard, IReadOnlyList<HandTrackingBounds>? BoardSearchRegions = null,
     IReadOnlyList<HandTrackingBounds>? BoardReferenceRegions = null,
     IReadOnlyList<HandTrackingBounds>? BoardTriggerRegions = null,
-    bool AllowsLocalForegroundContext = false);
+    bool AllowsLocalForegroundContext = false,
+    IReadOnlyList<HandTrackingBounds>? BoardControlReferenceRegions = null);
 
 /// <summary>Fresh generated-letter structure evidence, independent of panel palette fitting.
 /// Coverage counts measured changed glyph/halo pixels against the complete paired rectangles.</summary>
@@ -62,6 +66,7 @@ public sealed partial class HandAcquisitionPresenceTracker
     // Dense betting boards need more than 32 independent captions. Keep all
     // three supplied region collections bounded before allocating templates.
     private const int MaximumSceneRegions = 64;
+    private const int MinimumTemplateSamples = 80;
     // A live four-finger capture covered 7.2–9.0% of its control with residual
     // evidence; empty-table nuisance stayed below 0.36%. Normalize per control,
     // not by camera resolution or the number of buttons on a board.
@@ -84,6 +89,8 @@ public sealed partial class HandAcquisitionPresenceTracker
     private bool[]? _templateSampleMask;
     private double[]?[]? _edgeColors;
     private int[]? _controlRegions;
+    private int[]? _referenceControlRegions;
+    private HandTrackingBounds[]? _controlReferenceBounds;
     private double[]? _sampleBoardAreas;
     private double[]? _controlBoardAreas;
     private int[]? _controlTriggerRegions;
@@ -378,7 +385,8 @@ public sealed partial class HandAcquisitionPresenceTracker
     {
         _polygon = []; _locations = []; _mask = [];
         _baseline = _expected = null; _templateEdges = _templateMask = _templateReferenceMask = _templateSampleMask = null;
-        _edgeColors = null; _controlRegions = null; _sampleBoardAreas = _controlBoardAreas = null; _scene = null;
+        _edgeColors = null; _controlRegions = _referenceControlRegions = null; _controlReferenceBounds = null;
+        _sampleBoardAreas = _controlBoardAreas = null; _scene = null;
         _controlTriggerRegions = null; _controlTriggerBoardAreas = null;
         _unobstructedFit = null; _unobstructedColorOffsets = null;
         _textPatterns = null;
@@ -416,6 +424,13 @@ public sealed partial class HandAcquisitionPresenceTracker
                 !CaptionContainsSample(scene, polygon, trigger, SamplingScale(polygon, 192, cameraWidth, cameraHeight),
                     cameraWidth, cameraHeight))) return 384;
         if (scene?.BoardSearchRegions is not { Count: 1 }) return 192;
+        // A small arrow with a separate full-plate reference still needs the
+        // same minimum native sample count as every other candidate. Probe the
+        // existing coarse grid geometrically before the independent-reference
+        // shortcut; never lower the template floor or enlarge its search box.
+        if (scene.CameraToBoard is { Count: 9 } && scene.CameraToBoard.All(double.IsFinite) &&
+            ValidRegions(scene.BoardSearchRegions) &&
+            !HasMinimumSearchSamples(scene, polygon, cameraWidth, cameraHeight)) return 384;
         var control = scene.BoardSearchRegions[0];
         if (references.Any(region => region.X < control.X || region.Y < control.Y ||
             region.X + region.Width > control.X + control.Width + 1e-12 ||
@@ -430,6 +445,33 @@ public sealed partial class HandAcquisitionPresenceTracker
         double referenceSamples = width * height / (scale * scale) *
             references.Sum(region => region.Width * region.Height);
         return referenceSamples * .20 < 100 ? 384 : 192;
+    }
+
+    private static bool HasMinimumSearchSamples(HandAcquisitionSceneImage scene,
+        IReadOnlyList<PixelPoint> polygon, int cameraWidth, int cameraHeight)
+    {
+        if (polygon.Count > 16 || polygon.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y))) return false;
+        double left = Math.Clamp(polygon.Min(point => point.X), 0, cameraWidth);
+        double top = Math.Clamp(polygon.Min(point => point.Y), 0, cameraHeight);
+        double right = Math.Clamp(polygon.Max(point => point.X), 0, cameraWidth);
+        double bottom = Math.Clamp(polygon.Max(point => point.Y), 0, cameraHeight);
+        double scale = SamplingScale(polygon, 192, cameraWidth, cameraHeight);
+        int columns = (int)Math.Ceiling((right - left) / scale);
+        int rows = (int)Math.Ceiling((bottom - top) / scale);
+        int selected = 0;
+        // No camera or rendered pixels are read. This bounded geometry probe
+        // stops at the existing 80-cell floor and uses the exact native sample
+        // footprint, including rounding protection, used by ConfigureTemplate.
+        for (int row = 0; row < rows; row++)
+        for (int column = 0; column < columns; column++)
+        {
+            var point = new PixelPoint(left + (column + .5) * scale, top + (row + .5) * scale);
+            if (BoardPosition(scene, point, out double u, out double v) &&
+                WithinRegions(scene.BoardSearchRegions, u, v) && Inside(point, polygon) &&
+                WithinSampleRegions(scene, point, scene.BoardSearchRegions, scale) &&
+                ++selected >= MinimumTemplateSamples) return true;
+        }
+        return false;
     }
 
     private static bool CaptionContainsSample(HandAcquisitionSceneImage scene, IReadOnlyList<PixelPoint> polygon,
@@ -527,7 +569,8 @@ public sealed partial class HandAcquisitionPresenceTracker
         _textCorruptionTimes = null;
         _templateEdges = _templateMask = _templateReferenceMask = _templateSampleMask = null;
         _edgeColors = null;
-        _controlRegions = null; _sampleBoardAreas = _controlBoardAreas = null;
+        _controlRegions = _referenceControlRegions = null; _controlReferenceBounds = null;
+        _sampleBoardAreas = _controlBoardAreas = null;
         _controlTriggerRegions = null; _controlTriggerBoardAreas = null;
         if (scene is null || scene.Width is <= 1 or > 16384 || scene.Height is <= 1 or > 16384 ||
             scene.Bgra is null || scene.Bgra.Length < scene.Width * (long)scene.Height * 4 ||
@@ -535,7 +578,11 @@ public sealed partial class HandAcquisitionPresenceTracker
         var regions = scene.BoardSearchRegions;
         var referenceRegions = scene.BoardReferenceRegions;
         var triggerRegions = scene.BoardTriggerRegions;
+        var controlReferenceRegions = scene.BoardControlReferenceRegions;
         if (!ValidRegions(regions) || !ValidRegions(referenceRegions)) return;
+        if (controlReferenceRegions is not null && (!ValidRegions(controlReferenceRegions) || regions is null ||
+            controlReferenceRegions.Count != regions.Count || Enumerable.Range(0, regions.Count).Any(index =>
+                !Contains(controlReferenceRegions[index], regions[index])))) return;
         if (triggerRegions is not null && (!ValidRegions(triggerRegions) || regions is null ||
             triggerRegions.Count != regions.Count || Enumerable.Range(0, regions.Count).Any(index =>
                 triggerRegions[index].X < regions[index].X || triggerRegions[index].Y < regions[index].Y ||
@@ -568,7 +615,7 @@ public sealed partial class HandAcquisitionPresenceTracker
                 { edges[index] = true; break; }
             }
         }
-        if (mapped < _validCount * .75 || selected < 80 || referenceSelected < 80) return;
+        if (mapped < _validCount * .75 || selected < MinimumTemplateSamples || referenceSelected < MinimumTemplateSamples) return;
         _expected = expected; _templateEdges = edges; _templateMask = regions is null ? null : templateMask;
         _templateReferenceMask = referenceRegions is null ? null : referenceMask;
         if (triggerRegions is not null)
@@ -583,6 +630,10 @@ public sealed partial class HandAcquisitionPresenceTracker
                 .Select(index => templateMask[index] || referenceMask[index]).ToArray();
             _edgeColors = new double[]?[_mask.Length];
             _controlRegions = Enumerable.Repeat(-1, _mask.Length).ToArray();
+            _referenceControlRegions = Enumerable.Repeat(-1, _mask.Length).ToArray();
+            _controlReferenceBounds = (controlReferenceRegions ?? regions).ToArray();
+            var ownedReferenceRegions = _controlReferenceBounds.Select(bounds =>
+                (IReadOnlyList<HandTrackingBounds>)new[] { bounds }).ToArray();
             _sampleBoardAreas = new double[_mask.Length];
             _controlBoardAreas = regions.Select(region => region.Width * region.Height).ToArray();
             if (triggerRegions is not null)
@@ -593,6 +644,12 @@ public sealed partial class HandAcquisitionPresenceTracker
             double[] color = new double[3];
             for (int index = 0; index < _mask.Length; index++)
             {
+                if (templateMask[index] || referenceMask[index])
+                    _sampleBoardAreas[index] = BoardSampleArea(scene, _locations[index]);
+                if (referenceMask[index])
+                    for (int region = 0; region < regions.Count; region++)
+                        if (WithinSampleRegions(scene, _locations[index], ownedReferenceRegions[region]))
+                        { _referenceControlRegions[index] = region; break; }
                 if (!templateMask[index]) continue;
                 var colors = new List<double>(75);
                 var point = _locations[index];
@@ -602,7 +659,10 @@ public sealed partial class HandAcquisitionPresenceTracker
                     var bounds = regions[region];
                     if (u < bounds.X || u > bounds.X + bounds.Width || v < bounds.Y || v > bounds.Y + bounds.Height) continue;
                     _controlRegions[index] = region;
-                    _sampleBoardAreas[index] = BoardSampleArea(scene, point);
+                    // Candidate ownership takes precedence if caller-supplied
+                    // plate references overlap. Reference ownership never
+                    // changes the compact candidate mask or its evidence area.
+                    _referenceControlRegions[index] = region;
                     if (triggerRegions is not null && WithinSampleRegions(scene, point, [triggerRegions[region]]))
                         _controlTriggerRegions![index] = region;
                     break;
@@ -619,6 +679,11 @@ public sealed partial class HandAcquisitionPresenceTracker
         }
     }
 
+    private static bool Contains(HandTrackingBounds outer, HandTrackingBounds inner) =>
+        inner.X >= outer.X - 1e-12 && inner.Y >= outer.Y - 1e-12 &&
+        inner.X + inner.Width <= outer.X + outer.Width + 1e-12 &&
+        inner.Y + inner.Height <= outer.Y + outer.Height + 1e-12;
+
     private static bool ValidRegions(IReadOnlyList<HandTrackingBounds>? regions) => regions is null ||
         regions.Count is >= 1 and <= MaximumSceneRegions && regions.All(region =>
             double.IsFinite(region.X) && double.IsFinite(region.Y) &&
@@ -631,13 +696,16 @@ public sealed partial class HandAcquisitionPresenceTracker
             v >= region.Y && v <= region.Y + region.Height);
 
     private bool WithinSampleRegions(HandAcquisitionSceneImage scene, PixelPoint point,
-        IReadOnlyList<HandTrackingBounds>? regions)
+        IReadOnlyList<HandTrackingBounds>? regions) => WithinSampleRegions(scene, point, regions, _scale);
+
+    private static bool WithinSampleRegions(HandAcquisitionSceneImage scene, PixelPoint point,
+        IReadOnlyList<HandTrackingBounds>? regions, double scale)
     {
         if (regions is null) return true;
         // Sample() averages four native pixels. All of that footprint must lie
         // inside the stable region, otherwise animation just beyond its boundary
         // can leak into a candidate. One pixel covers integer sample rounding.
-        double radius = _scale * .25 + 1;
+        double radius = scale * .25 + 1;
         for (int dy = -1; dy <= 1; dy += 2)
         for (int dx = -1; dx <= 1; dx += 2)
             if (!BoardPosition(scene, new(point.X + dx * radius, point.Y + dy * radius), out double u, out double v) ||
@@ -741,7 +809,7 @@ public sealed partial class HandAcquisitionPresenceTracker
         IReadOnlyList<HandAcquisitionTextPatterns.Observation> observations, bool[] fitAllowed)
     {
         var result = new List<CaptionReflectanceEvidence>();
-        if (_controlRegions is null || _templateReferenceMask is null) return result;
+        if (_controlRegions is null || _referenceControlRegions is null || _templateReferenceMask is null) return result;
         foreach (var candidate in measured.Where(evidence =>
             evidence.Coverage >= MinimumControlCoverage && evidence.TriggerCoverage >= MinimumControlCoverage &&
             evidence.InkFraction >= .5 && observations.Any(observation => observation.Region == evidence.Region &&
@@ -753,8 +821,8 @@ public sealed partial class HandAcquisitionPresenceTracker
                 .Select(observation => observation.Region).ToHashSet();
             if (independentLabels.Count == 0) continue;
             bool[] independent = Enumerable.Range(0, fitAllowed.Length).Select(index =>
-                fitAllowed[index] && _templateReferenceMask[index] && _controlRegions[index] != candidate.Region &&
-                (_controlRegions[index] < 0 || independentLabels.Contains(_controlRegions[index]))).ToArray();
+                fitAllowed[index] && _templateReferenceMask[index] && _referenceControlRegions[index] != candidate.Region &&
+                (_referenceControlRegions[index] < 0 || independentLabels.Contains(_referenceControlRegions[index]))).ToArray();
             var fit = Fit(reference, current, independent);
             if (fit is null || fit.MedianError > 18) continue;
             var offsets = ColorResiduals(reference, current, independent, fit.Coefficients);
@@ -788,7 +856,7 @@ public sealed partial class HandAcquisitionPresenceTracker
     private void ExcludeObstructedTextControls(IReadOnlyList<HandAcquisitionTextPatterns.Observation> observations,
         bool[] fitAllowed)
     {
-        if (_controlRegions is null) return;
+        if (_referenceControlRegions is null) return;
         // A short caption can lose its shape while supplying little glyph area.
         // Keep that panel out of camera-colour training so a broad obstruction
         // cannot teach its new colour as the expected board. This creates no
@@ -798,7 +866,7 @@ public sealed partial class HandAcquisitionPresenceTracker
             .Select(observation => observation.Region).ToHashSet();
         if (obstructed.Count == 0) return;
         bool[] independent = Enumerable.Range(0, fitAllowed.Length)
-            .Select(index => fitAllowed[index] && !obstructed.Contains(_controlRegions[index])).ToArray();
+            .Select(index => fitAllowed[index] && !obstructed.Contains(_referenceControlRegions[index])).ToArray();
         if (independent.Count(value => value) >= 80) independent.CopyTo(fitAllowed, 0);
     }
 
@@ -832,7 +900,7 @@ public sealed partial class HandAcquisitionPresenceTracker
     private void ExcludeObstructedReferenceControls(double[] reference, double[] current, bool[] fitAllowed)
     {
         if (_unobstructedFit is null || _unobstructedColorOffsets is null || _templateReferenceMask is null ||
-            _controlRegions is null || _controlBoardAreas is null) return;
+            _controlRegions is null || _referenceControlRegions is null || _controlBoardAreas is null) return;
         var obstructed = new HashSet<int>();
         double threshold = Math.Clamp(_unobstructedFit.MedianError * 3.5 + 10, 24, 52);
         for (int region = 0; region < _controlBoardAreas.Length; region++)
@@ -855,7 +923,7 @@ public sealed partial class HandAcquisitionPresenceTracker
         // before excluding a candidate, so this never creates a blind fit.
         if (obstructed.Count == 0) return;
         bool[] independent = Enumerable.Range(0, fitAllowed.Length)
-            .Select(index => fitAllowed[index] && !obstructed.Contains(_controlRegions[index])).ToArray();
+            .Select(index => fitAllowed[index] && !obstructed.Contains(_referenceControlRegions[index])).ToArray();
         if (independent.Count(value => value) < 80) return;
         independent.CopyTo(fitAllowed, 0);
     }
@@ -869,9 +937,9 @@ public sealed partial class HandAcquisitionPresenceTracker
         // free x/y gradient can explain away the occupied panel and invent
         // foreground on an untouched one. Independent reference panels retain
         // the full model; compact self-references fit color/exposure only.
-        bool spatialCompensation = _templateReferenceMask is null || _controlRegions is null ||
+        bool spatialCompensation = _templateReferenceMask is null || _referenceControlRegions is null ||
             _controlBoardAreas is null || _controlBoardAreas.Sum() >= .08 ||
-            training.Count(index => _controlRegions[index] < 0) >= 80;
+            training.Count(index => _referenceControlRegions[index] < 0) >= 80;
         int[] retained = training;
         double[][] coefficients = new double[3][];
         double median = 0;

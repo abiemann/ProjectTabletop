@@ -32,10 +32,10 @@ public sealed partial class MainWindow
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
         using var preview = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), 800, 800, 96);
         using var scene = NewScene();
-        // In the app, board setup lasts long enough for Earth's textures to
-        // load before the menu first appears; its Globe tile is then kept. Load
-        // them first here too, or the race leaves the fixture's tile empty.
+        // Production preloads the shipped thumbnail atlas before registration.
+        // Prepare it before the fixture's first menu frame as well.
         await scene.EnsureGlobeResourcesAsync(target.Device);
+        await scene.EnsureMenuPreviewResourcesAsync(target.Device);
         byte[] finalDot = Draw(scene);
         Require(White(finalDot, 0, 0) && Black(finalDot, width / 2, height / 2),
             "The reveal fixture did not begin on the last white-field center dot.");
@@ -101,9 +101,9 @@ public sealed partial class MainWindow
             baseline.SetBoardSetup(true);
             baseline.SetDetectedBoardGrid(corners, cameraMap);
             baseline.SetBoardSetup(false);
-            // The menu's Globe tile appears once Earth's textures load in the
-            // background; load both before comparing so neither is mid-load.
-            await Task.WhenAll(scene.EnsureGlobeResourcesAsync(target.Device), baseline.EnsureGlobeResourcesAsync(target.Device));
+            // Load the same shipped thumbnails before comparing the two scenes.
+            await Task.WhenAll(scene.EnsureGlobeResourcesAsync(target.Device), baseline.EnsureGlobeResourcesAsync(target.Device),
+                scene.EnsureMenuPreviewResourcesAsync(target.Device), baseline.EnsureMenuPreviewResourcesAsync(target.Device));
             Draw(scene); Draw(baseline);
             final = Draw(scene);
             byte[] expected = Draw(baseline);
