@@ -556,7 +556,9 @@ public sealed partial class MonopolyGame
         _state.DebtPlayerId = null;
         _state.DebtCreditorId = null;
         _state.DebtContinuation = "finish";
-        ProcessPayments();
+        // Eliminating the final opponent ends the game before the recipient's
+        // new mortgage-transfer obligations can require further liquidation.
+        if (!CheckWinner()) ProcessPayments();
     }
 
     private bool CheckWinner()
@@ -569,7 +571,12 @@ public sealed partial class MonopolyGame
         _state.Status = $"{alive[0].Name} wins the game!";
         _state.Auction = null;
         _state.PendingPropertyIndex = null;
+        _state.SelectedPropertyIndex = null;
         _state.PendingBankAuctions.Clear();
+        _state.Payments.Clear();
+        _state.DebtAmount = 0;
+        _state.DebtPlayerId = null;
+        _state.DebtCreditorId = null;
         return true;
     }
 

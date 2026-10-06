@@ -30,6 +30,9 @@ public sealed partial class MainWindow
             Homography.FromFourPoints([new(0, 0), new(width, 0), new(width, height), new(0, height)],
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
         scene.SetBoardSetup(false); scene.ShowMonopoly();
+        await scene.EnsureCrownDeedResourcesAsync(CanvasDevice.GetSharedDevice());
+        Require(scene.GetMonopolyEntranceFrame(now) is { Active: true, ElapsedMilliseconds: 0 },
+            "The drawer fixture did not start its entrance after artwork loading.");
         now += TimeSpan.FromMilliseconds(4975); scene.TickMonopoly(now);
         await Capture("landing-closed");
         Require(!scene.MonopolyDrawerOpen && Button("mp-exit").Label == "^", "The landing drawer lacks its closed upward caret.");
@@ -116,7 +119,7 @@ public sealed partial class MainWindow
         {
             Draw(); scene.GetHandAcquisitionContext(now); now += TimeSpan.FromMilliseconds(600); Draw();
             var context = scene.GetHandAcquisitionContext(now);
-            Require(context is { ObserveMotion: true, ExpectedScene: not null }, "The stationary drawer did not provide a clean reference.");
+            Require(context is { ObserveMotion: true, ExpectedScene: not null }, "The stationary drawer did not provide a clean reference: " + JsonSerializer.Serialize(scene.GetHandAcquisitionDiagnostics()));
             var clean = Draw();
             var empty = new HandAcquisitionPresenceTracker().Update(width, height, width * 4, clean,
                 context!.SearchPolygon, context.ExpectedScene, now, now);

@@ -181,7 +181,7 @@ public sealed partial class MainWindow
                 drawing.Transform = Matrix3x2.CreateScale(rasterWidth / 1000f, rasterHeight / 1000f);
                 typeof(SceneCompositor).GetMethod("DrawMonopolyBoard", BindingFlags.Instance | BindingFlags.NonPublic)!
                     .Invoke(scene, [drawing, scene.MonopolyState, scene.CurrentBoardButtons, Array.Empty<string>(),
-                        Array.Empty<BoardFingerSelectionFeedback>(), scene.MonopolyPreviewAspect, false, false, false, 1f, null, false]);
+                        Array.Empty<BoardFingerSelectionFeedback>(), scene.MonopolyPreviewAspect, false, false, false, 1f, null]);
             }
             Require(board.GetPixelBytes().SequenceEqual(baseline.GetPixelBytes()),
                 "The final entrance frame differs from the independent unanimated native board.");

@@ -6,19 +6,22 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
+    private long _visionLoadVersion;
+
     private string AutoProfileDirectory => Path.Combine(_appDataDirectory, "VisionAutosave");
 
     private async Task TryLoadAutosavedVisionAsync()
     {
         if (!File.Exists(Path.Combine(AutoProfileDirectory, "vision-profile.json"))) return;
         VisionEngine? loaded = null;
+        var version = _visionLoadVersion;
         try
         {
             var initial = _vision;
             loaded = await Task.Run(() => VisionEngine.Load(AutoProfileDirectory));
             lock (_visionGate)
             {
-                if (_closing || !ReferenceEquals(_vision, initial) || _vision.Captures.Count != 0)
+                if (_closing || version != _visionLoadVersion || !ReferenceEquals(_vision, initial) || _vision.Captures.Count != 0)
                 {
                     loaded.Dispose();
                     return;
@@ -36,7 +39,7 @@ public sealed partial class MainWindow
         catch (Exception ex)
         {
             loaded?.Dispose();
-            if (!_closing) SetStatus("Could not load saved vision profile: " + ex.Message);
+            if (!_closing && version == _visionLoadVersion) SetStatus("Could not load saved vision profile: " + ex.Message);
         }
     }
 
@@ -49,6 +52,8 @@ public sealed partial class MainWindow
             SetStatus("Capture a frame, enter a piece ID, mark at least three outline points, and mark its front.");
             return;
         }
+        if (_closing) return;
+        var version = ++_visionLoadVersion;
         try
         {
             var outline = _pieceOutline.ToArray();
@@ -57,6 +62,7 @@ public sealed partial class MainWindow
             {
                 lock (_visionGate)
                 {
+                    if (_closing || version != Interlocked.Read(ref _visionLoadVersion)) throw new OperationCanceledException();
                     var result = _vision.AddLabeledCapture(pieceId, frame.Width, frame.Height,
                         frame.Stride, frame.Bgra, outline, front);
                     // Persist the complete original camera frame and annotations immediately.
@@ -64,7 +70,8 @@ public sealed partial class MainWindow
                     return result;
                 }
             });
-            _scene.SetDetections(Array.Empty<PieceDetection>(), DateTimeOffset.MinValue);
+            if (_closing || version != _visionLoadVersion) return;
+            ClearVisionDetections();
             AddPieceChoice(pieceId);
             _pieceOutline.Clear();
             _pieceFront = null;
@@ -76,11 +83,16 @@ public sealed partial class MainWindow
             SetStatus($"Saved full-resolution snapshot {info.CaptureId} with labels to {AutoProfileDirectory}. " +
                 "Outline another piece in this snapshot, or resume live view. Train after collecting several views.");
         }
-        catch (Exception ex) { SetStatus("Could not add labeled snapshot: " + ex.Message); }
+        catch (Exception ex)
+        {
+            if (!_closing && version == _visionLoadVersion) SetStatus("Could not add labeled snapshot: " + ex.Message);
+        }
     }
 
     private async void Train_Click(object sender, RoutedEventArgs e)
     {
+        if (_closing) return;
+        var version = ++_visionLoadVersion;
         try
         {
             TrainingStatusText.Text = "Training shape recognition locally…";
@@ -88,11 +100,14 @@ public sealed partial class MainWindow
             {
                 lock (_visionGate)
                 {
+                    if (_closing || version != Interlocked.Read(ref _visionLoadVersion)) throw new OperationCanceledException();
                     var result = _vision.Train();
                     _vision.Save(AutoProfileDirectory);
                     return result;
                 }
             });
+            if (_closing || version != _visionLoadVersion) return;
+            ClearVisionDetections();
             UpdateTrainingStatus();
             SetStatus($"Trained {report.PieceCount} piece IDs from {report.CaptureCount} snapshots. " +
                 $"Leave-one-out identity accuracy on those captures: {report.LeaveOneOutIdentityAccuracy:P0}. " +
@@ -100,6 +115,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
+            if (_closing || version != _visionLoadVersion) return;
             UpdateTrainingStatus();
             SetStatus("Shape training failed: " + ex.Message);
         }
@@ -120,23 +136,38 @@ public sealed partial class MainWindow
     private async void LoadModels_Click(object sender, RoutedEventArgs e)
     {
         var directory = await PickProfileDirectoryAsync();
-        if (directory is null) return;
+        if (directory is null || _closing) return;
+        var version = ++_visionLoadVersion;
+        VisionEngine? loaded = null;
         try
         {
-            var loaded = await Task.Run(() => VisionEngine.Load(directory));
+            loaded = await Task.Run(() => VisionEngine.Load(directory));
             lock (_visionGate)
             {
+                if (_closing || version != _visionLoadVersion)
+                {
+                    loaded.Dispose();
+                    loaded = null;
+                    return;
+                }
                 var old = _vision;
                 _vision = loaded;
                 old.Dispose();
             }
-            foreach (var pieceId in loaded.PieceIds) AddPieceChoice(pieceId);
+            var active = loaded;
+            loaded = null;
+            foreach (var pieceId in active.PieceIds) AddPieceChoice(pieceId);
             SyncVisionSettingsControls();
             ClearVisionDetections();
             UpdateTrainingStatus();
             SetStatus("Loaded vision profile from " + directory);
         }
-        catch (Exception ex) { SetStatus("Vision profile load failed: " + ex.Message); }
+        catch (Exception ex)
+        {
+            loaded?.Dispose();
+            if (!_closing && version == _visionLoadVersion)
+                SetStatus("Vision profile load failed: " + ex.Message);
+        }
     }
 
     private async Task<string?> PickProfileDirectoryAsync()

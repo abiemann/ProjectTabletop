@@ -1,5 +1,6 @@
 #if DEBUG
 using System.Text.Json;
+using ProjectTabletop.App.Camera;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
@@ -9,9 +10,10 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
-    // Isolated scene only: never sends synthetic gestures to the actual board.
-    private static object VerifyHandTrackingInput()
+    // Queue checks keep workers disabled; synthetic gestures use isolated scenes.
+    private object VerifyHandTrackingInput()
     {
+        VerifyHandInputQueueReset();
         foreach (bool resetInput in new[] { false, true })
         {
             using var scene = new SceneCompositor();
@@ -80,6 +82,7 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException("An off-target pointing position clicked under the curled fingertip.");
         }
         return new { passed = true, freshQueuedPinchAccepted = true, resetRejectsOldInput = true,
+            handAndPaintQueuesRejectPreResetFrames = true, queueResetBoundaryPreservesFreshFrames = true,
             pointingTargetRetained = true, offTargetCurlRejected = true,
             exactPinchSelectionRouteRetained = true, rejectedObservationsNeverFabricateOrOverwriteSelection = true };
 
@@ -92,6 +95,48 @@ public sealed partial class MainWindow
                     [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
             scene.SetBoardSetup(false);
             return scene;
+        }
+    }
+
+    private void VerifyHandInputQueueReset()
+    {
+        lock (_handGate)
+        {
+            var originalCutoff = _handInputNotBefore;
+            bool originalEnabled = _handTrackingEnabled;
+            var originalHandTask = _handDetectionTask;
+            var originalPaintTask = _paintDetectionTask;
+            var originalHandTick = _lastHandDetectionTick;
+            var originalPaintTick = _lastPaintDetectionTick;
+            bool originalHandDetecting = _handDetecting;
+            int originalPaintDetecting = _paintDetecting;
+            try
+            {
+                // Disable inference even if a regression removes the timestamp check.
+                // An old frame is otherwise fresh, and receives the current generation
+                // if admitted, matching a delivery callback that crossed a reset.
+                _handTrackingEnabled = false;
+                var now = MonotonicClock.UtcNow;
+                _handInputNotBefore = now;
+                var old = new CameraFrame(1, 1, 4, [0, 0, 0, 255], now.AddTicks(-1));
+                foreach (var frame in new[] { old, old with { Timestamp = now }, old with { Timestamp = now.AddTicks(1) } })
+                {
+                    var expected = frame == old ? InputFrameQueueResult.PredatesReset : InputFrameQueueResult.Skipped;
+                    if (QueueHandDetection(frame, System.Diagnostics.Stopwatch.GetTimestamp()) != expected ||
+                        QueuePaintDetection(frame, System.Diagnostics.Stopwatch.GetTimestamp()) != expected)
+                        throw new InvalidOperationException("A hand or Paint queue admitted pre-reset pixels or rejected the reset boundary.");
+                }
+                if (!ReferenceEquals(originalHandTask, _handDetectionTask) ||
+                    !ReferenceEquals(originalPaintTask, _paintDetectionTask) ||
+                    originalHandTick != _lastHandDetectionTick || originalPaintTick != _lastPaintDetectionTick ||
+                    originalHandDetecting != _handDetecting || originalPaintDetecting == 0 && _paintDetecting != 0)
+                    throw new InvalidOperationException("A rejected hand or Paint frame changed inference bookkeeping.");
+            }
+            finally
+            {
+                _handInputNotBefore = originalCutoff;
+                _handTrackingEnabled = originalEnabled;
+            }
         }
     }
 

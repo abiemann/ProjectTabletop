@@ -33,10 +33,13 @@ public sealed partial class MainWindow
     private volatile bool _handTrackingEnabled = true;
     private bool _handDetecting;
     private long _handGeneration;
+    private DateTimeOffset _handInputNotBefore;
     private long _lastHandDetectionTick;
     private string? _handTrackingError;
     private string? _handLatencyWarning;
     private HandDetectionDiagnostics? _lastHandDetection;
+
+    private enum InputFrameQueueResult { Skipped, PredatesReset, Queued }
 
     private sealed record HandPreview(HandCursor[] Cursors, HandCursor[] VisualCursors,
         int Width, int Height, DateTimeOffset Timestamp);
@@ -146,6 +149,8 @@ public sealed partial class MainWindow
     // can finish, but cannot publish into the new camera/registration generation.
     private void ClearHandTracking([CallerMemberName] string reason = "")
     {
+        _calibrationResults.Invalidate();
+        ResetPieceDetections();
         lock (_handGate)
         {
             _handGeneration++;
@@ -160,32 +165,35 @@ public sealed partial class MainWindow
             _scene.InvalidatePhotoCopyCapture();
             _scene.SetPaintInputAvailable(false);
             LogHandTrackingEvent("tracking_reset", new { reason });
-            _handVideoNotBefore = MonotonicClock.UtcNow;
+            _handInputNotBefore = _handVideoNotBefore = MonotonicClock.UtcNow;
             _handVideoRecorder?.Stop("tracking_reset:" + reason);
         }
         if (_initialized && !_closing)
             DispatcherQueue.TryEnqueue(() => { if (!_closing) CameraCanvas.Invalidate(); });
     }
 
-    private void QueueHandDetection(CameraFrame frame, long tick)
+    private InputFrameQueueResult QueueHandDetection(CameraFrame frame, long tick)
     {
         lock (_handGate)
         {
+            // Delivery can cross a reset before joining this gate. Do not assign
+            // those earlier pixels to the generation captured below.
+            if (frame.Timestamp < _handInputNotBefore) return InputFrameQueueResult.PredatesReset;
             if (_closing || !_cameraWanted || !_camera.IsRunning || _cameraOperation.CurrentCount == 0 ||
                 Volatile.Read(ref _cameraHealthWarning) ||
                 !_handTrackingEnabled || _handTrackingError is not null ||
-                IsBoardScanMeasuring || _handDetecting) return;
+                IsBoardScanMeasuring || _handDetecting) return InputFrameQueueResult.Skipped;
             var interval = _handPreview is { Cursors.Length: > 0 } preview &&
                 frame.Timestamp - preview.Timestamp <= HandMarkerLifetime
                 ? TrackedHandInterval : HandDetectionInterval;
             if (_lastHandDetectionTick != 0 &&
-                Stopwatch.GetElapsedTime(_lastHandDetectionTick, tick) < interval) return;
+                Stopwatch.GetElapsedTime(_lastHandDetectionTick, tick) < interval) return InputFrameQueueResult.Skipped;
             var acquisitionContext = _scene.GetHandAcquisitionContext(frame.Timestamp);
             // These frames cannot show the new search light yet and would only
             // repeat the failed unlit search, delaying the first lit frame.
             if (acquisitionContext?.IlluminatedHint is not null &&
                 frame.Timestamp - acquisitionContext.IlluminationStartedAt < HandAcquisitionPresenceTracker.SearchLightSettling)
-                return;
+                return InputFrameQueueResult.Skipped;
             var holdContext = _scene.GetHoldButtonContext(frame.Timestamp);
             _lastHandDetectionTick = tick;
             _handDetecting = true;
@@ -334,6 +342,7 @@ public sealed partial class MainWindow
                 }
                 finally { lock (_handGate) _handDetecting = false; }
             });
+            return InputFrameQueueResult.Queued;
         }
     }
 

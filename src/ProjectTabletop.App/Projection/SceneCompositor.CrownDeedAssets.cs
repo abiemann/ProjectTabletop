@@ -83,7 +83,6 @@ public sealed partial class SceneCompositor
 
     private void DisposeCrownDeedResources()
     {
-        DisposeCrownDeedWater();
         DisposeMonopolyEntranceLayers();
         DisposeCrownDeedPieces();
         _crownDeedCityBitmap = null;

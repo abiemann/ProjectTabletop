@@ -1,5 +1,6 @@
 using System.Numerics;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Windowing;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Vision;
 
@@ -7,6 +8,8 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
+    private readonly AsyncResultGate _calibrationResults = new();
+
     private string CalibrationPath => Path.Combine(_appDataDirectory, "calibration.json");
 
     private void PieceHeightNumberBox_ValueChanged(object sender,
@@ -38,6 +41,7 @@ public sealed partial class MainWindow
             CalibrationStatusText.Text = "Measure the four board-plane points first.";
             return;
         }
+        _calibrationResults.Invalidate();
         _calibration = null;
         _scene.SetTopPlaneMap(null);
         _topCameraPoints.Clear();
@@ -123,6 +127,7 @@ public sealed partial class MainWindow
 
     private void ApplyCalibration(CalibrationSession session)
     {
+        _calibrationResults.Invalidate();
         _calibration = session;
         _scene.SetTopPlaneMap(point =>
         {
@@ -134,6 +139,7 @@ public sealed partial class MainWindow
 
     private void InvalidateCalibration(string reason)
     {
+        _calibrationResults.Invalidate();
         _calibration = null;
         _annotationMode = AnnotationMode.None;
         _boardCameraPoints.Clear();
@@ -150,12 +156,21 @@ public sealed partial class MainWindow
             CalibrationStatusText.Text = "Measure both the board and raised top before saving calibration.";
             return;
         }
+        var generation = _calibrationResults.Capture();
+        var calibration = _calibration;
         try
         {
-            await CalibrationSessionStore.SaveAsync(CalibrationPath, _calibration);
-            CalibrationStatusText.Text = "Calibration saved to " + CalibrationPath;
+            await CalibrationSessionStore.SaveAsync(CalibrationPath, calibration);
+            CompleteStatus("Calibration saved to " + CalibrationPath);
         }
-        catch (Exception ex) { CalibrationStatusText.Text = "Calibration save failed: " + ex.Message; }
+        catch (Exception ex) { CompleteStatus("Calibration save failed: " + ex.Message); }
+
+        void CompleteStatus(string status) => _calibrationResults.TryApply(generation, () =>
+        {
+            if (_closing || !ReferenceEquals(calibration, _calibration)) return false;
+            CalibrationStatusText.Text = status;
+            return true;
+        });
     }
 
     private async void LoadCalibration_Click(object sender, RoutedEventArgs e)
@@ -171,24 +186,56 @@ public sealed partial class MainWindow
             CalibrationStatusText.Text = "Start the matching webcam and select the projector display before loading calibration.";
             return;
         }
+        _calibrationResults.Invalidate();
+        var generation = _calibrationResults.Capture();
+        var cameraVersion = Interlocked.Read(ref _cameraOperationVersion);
+        var output = _output;
         try
         {
             var session = await CalibrationSessionStore.LoadAsync(CalibrationPath);
-            if (!session.MatchesHardware(camera.Device.Id, frame.Width, frame.Height,
-                    display.Id, display.Width, display.Height))
+            if (SelectedDisplay is not { } selectedDisplay) return;
+            // DisplayChoice retains picker bounds; query Windows again to detect
+            // a resolution change on the same display while the file was read.
+            var liveDisplay = DisplayArea.GetFromDisplayId(selectedDisplay.DisplayId);
+            if (liveDisplay is null) return;
+            _calibrationResults.TryApply(generation, () =>
             {
-                CalibrationStatusText.Text = "Saved calibration does not match camera or projector mode. Recalibrate.";
-                return;
-            }
-            PieceHeightNumberBox.Value = session.PieceTopHeightMillimeters;
-            ApplyCalibration(session);
-            _boardCameraPoints.Clear();
-            _boardCameraPoints.AddRange(session.BoardPlane.CameraPoints.Select(point => new PixelPoint(point.X, point.Y)));
-            _topCameraPoints.Clear();
-            _topCameraPoints.AddRange(session.PieceTopPlane.CameraPoints.Select(point => new PixelPoint(point.X, point.Y)));
-            CalibrationStatusText.Text = "Saved calibration loaded. Recalibrate if the camera, board, " +
-                "projector, lens correction, or piece height moved.";
+                // Read live hardware after the await. A camera restart (even to the
+                // same device), output replacement, new calibration or close makes
+                // the earlier request obsolete.
+                if (_closing || !_cameraWanted || !_camera.IsRunning || _cameraOperation.CurrentCount == 0 ||
+                    cameraVersion != Interlocked.Read(ref _cameraOperationVersion) ||
+                    !ReferenceEquals(output, _output) || output is null || !output.IsFullScreen ||
+                    SelectedCamera is not { } currentCamera || SelectedDisplay is not { } currentDisplay ||
+                    currentDisplay.Id != selectedDisplay.Id ||
+                    _camera.ActiveDeviceId != currentCamera.Device.Id || _camera.LatestFrame is not { } currentFrame ||
+                    _outputDisplayId != currentDisplay.Id || output.ActualDisplayId != currentDisplay.Id)
+                    return false;
+                if (!session.MatchesHardware(currentCamera.Device.Id, currentFrame.Width, currentFrame.Height,
+                        currentDisplay.Id, liveDisplay.OuterBounds.Width, liveDisplay.OuterBounds.Height))
+                {
+                    CalibrationStatusText.Text = "Saved calibration does not match camera or projector mode. Recalibrate.";
+                    return false;
+                }
+                PieceHeightNumberBox.Value = session.PieceTopHeightMillimeters;
+                ApplyCalibration(session);
+                _boardCameraPoints.Clear();
+                _boardCameraPoints.AddRange(session.BoardPlane.CameraPoints.Select(point => new PixelPoint(point.X, point.Y)));
+                _topCameraPoints.Clear();
+                _topCameraPoints.AddRange(session.PieceTopPlane.CameraPoints.Select(point => new PixelPoint(point.X, point.Y)));
+                CalibrationStatusText.Text = "Saved calibration loaded. Recalibrate if the camera, board, " +
+                    "projector, lens correction, or piece height moved.";
+                return true;
+            });
         }
-        catch (Exception ex) { CalibrationStatusText.Text = "Calibration load failed: " + ex.Message; }
+        catch (Exception ex)
+        {
+            _calibrationResults.TryApply(generation, () =>
+            {
+                if (_closing) return false;
+                CalibrationStatusText.Text = "Calibration load failed: " + ex.Message;
+                return true;
+            });
+        }
     }
 }

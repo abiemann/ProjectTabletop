@@ -23,6 +23,7 @@ public sealed partial class MainWindow
     private static readonly TimeSpan[] CameraReconnectBackoff =
         [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(60)];
     private readonly SemaphoreSlim _cameraOperation = new(1, 1);
+    private readonly AsyncResultGate _pieceDetectionResults = new();
     private CameraFrame? _cameraHealthSample;
     private DateTimeOffset _cameraStartedAtUtc;
     private DateTimeOffset _cameraImageChangedAtUtc;
@@ -268,9 +269,6 @@ public sealed partial class MainWindow
             ClearBoardPreview();
             _frozenFrame = null;
             Volatile.Write(ref _latestCameraFrame, null);
-            Volatile.Write(ref _latestDetections, Array.Empty<PieceDetection>());
-            _scene.SetDetections(Array.Empty<PieceDetection>(), DateTimeOffset.MinValue);
-            _visionError = null;
             CameraCanvas.Invalidate();
             await _camera.StartAsync(choice.Device.Id);
             if (version != _cameraOperationVersion || !_cameraWanted || _closing) return false;
@@ -319,7 +317,6 @@ public sealed partial class MainWindow
             ClearBoardPreview();
             _frozenFrame = null;
             Volatile.Write(ref _latestCameraFrame, null);
-            _scene.SetDetections(Array.Empty<PieceDetection>(), DateTimeOffset.MinValue);
             CameraCanvas.Invalidate();
             CameraStatusText.Text = "Camera stopped.";
             _visionError = null;
@@ -334,9 +331,7 @@ public sealed partial class MainWindow
         var version = Interlocked.Read(ref _cameraOperationVersion);
         ClearHandTracking();
         _scene.ClearBoardMediaClip();
-        _scene.SetDetections(Array.Empty<PieceDetection>(), DateTimeOffset.MinValue);
         Volatile.Write(ref _latestCameraFrame, null);
-        Volatile.Write(ref _latestDetections, Array.Empty<PieceDetection>());
         DispatcherQueue.TryEnqueue(() =>
         {
             if (_closing || !_cameraWanted || _camera.IsRunning ||
@@ -362,6 +357,7 @@ public sealed partial class MainWindow
 
     private void Camera_FrameReceived(object? sender, CameraFrame frame)
     {
+        var pieceGeneration = _pieceDetectionResults.Capture();
         if (_closing || !_cameraWanted || _cameraOperation.CurrentCount == 0 ||
             _camera.ActiveDeviceId != _cameraWantedDeviceId) return;
         Volatile.Write(ref _latestCameraFrame, frame);
@@ -383,21 +379,67 @@ public sealed partial class MainWindow
 
         QueuePaintDetection(frame, now);
         QueueHandDetection(frame, now);
-        bool trained;
-        lock (_visionGate) trained = _vision.IsTrained;
-        if (!trained || Interlocked.CompareExchange(ref _detecting, 1, 0) != 0) return;
+        QueuePieceDetection(frame, pieceGeneration);
+    }
+
+    private void ResetPieceDetections()
+    {
+        _pieceDetectionResults.Invalidate(() =>
+        {
+            Volatile.Write(ref _latestDetections, Array.Empty<PieceDetection>());
+            _scene.SetDetections(Array.Empty<PieceDetection>(), DateTimeOffset.MinValue);
+            _visionError = null;
+        });
+    }
+
+    private void QueuePieceDetection(CameraFrame frame, long generation)
+    {
+        VisionEngine vision;
+        lock (_visionGate)
+        {
+            if (!_vision.IsTrained) return;
+            vision = _vision;
+        }
+        bool Current() => !_closing && _cameraWanted && _camera.IsRunning &&
+            _cameraOperation.CurrentCount != 0 && _camera.ActiveDeviceId == _cameraWantedDeviceId &&
+            !Volatile.Read(ref _boardSetupActive) && !Volatile.Read(ref _cameraHealthWarning) &&
+            ReferenceEquals(vision, Volatile.Read(ref _vision));
+        if (!_pieceDetectionResults.TryApply(generation, () =>
+            Current() && Interlocked.CompareExchange(ref _detecting, 1, 0) == 0)) return;
         _ = Task.Run(() =>
         {
             try
             {
                 IReadOnlyList<PieceDetection> detections;
-                lock (_visionGate) detections = _vision.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra);
-                Volatile.Write(ref _latestDetections, detections);
-                _scene.SetDetections(detections, frame.Timestamp);
-                _visionError = null;
-                DispatcherQueue.TryEnqueue(() => { if (!_closing && _frozenFrame is null) CameraCanvas.Invalidate(); });
+                lock (_visionGate)
+                {
+                    if (generation != _pieceDetectionResults.Capture() || !Current()) return;
+                    detections = vision.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra);
+                }
+                bool published = _pieceDetectionResults.TryApply(generation, () =>
+                {
+                    if (!Current()) return false;
+                    Volatile.Write(ref _latestDetections, detections);
+                    _scene.SetDetections(detections, frame.Timestamp);
+                    _visionError = null;
+                    return true;
+                });
+                if (published)
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (!_closing && _frozenFrame is null &&
+                            generation == _pieceDetectionResults.Capture()) CameraCanvas.Invalidate();
+                    });
             }
-            catch (Exception ex) { _visionError = "Shape detection failed: " + ex.Message; }
+            catch (Exception ex)
+            {
+                _pieceDetectionResults.TryApply(generation, () =>
+                {
+                    if (!Current()) return false;
+                    _visionError = "Shape detection failed: " + ex.Message;
+                    return true;
+                });
+            }
             finally { Interlocked.Exchange(ref _detecting, 0); }
         });
     }

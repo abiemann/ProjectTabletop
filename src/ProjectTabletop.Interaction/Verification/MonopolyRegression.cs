@@ -16,6 +16,7 @@ internal static class MonopolyRegression
         CheckAuction();
         CheckBuildingAndMortgages();
         CheckDebtAndBankruptcy();
+        CheckBankruptcyMortgageTransfers();
         CheckCardsAndEliminatedAi();
         CheckSaveValidationAndIsolation();
         CheckAiAndSeededGames();
@@ -237,6 +238,89 @@ internal static class MonopolyRegression
         Require(recovery.Snapshot.Phase == MonopolyPhase.AwaitingEndTurn && recovery.Snapshot.ActivePlayer!.Money == 100 &&
             Property(recovery, 22).Mortgaged && recovery.Snapshot.DebtAmount == 0,
             "Mortgage proceeds did not settle the tax debt once and resume the turn.");
+    }
+
+    private static void CheckBankruptcyMortgageTransfers()
+    {
+        var finalOpponent = TransferGame(humans: 2, recoveryAssets: false);
+        Act(finalOpponent, "mp-bankrupt");
+        Require(finalOpponent.Snapshot.Phase == MonopolyPhase.GameOver && finalOpponent.Snapshot.WinnerId == 2 &&
+            finalOpponent.Snapshot.Players[1].Money == 0 && finalOpponent.Snapshot.Players.Count(p => !p.Bankrupt) == 1 &&
+            finalOpponent.Snapshot.Properties.Count(p => p.OwnerId == 2 && p.Mortgaged) == 4,
+            "Eliminating the last opponent failed to finish before unaffordable mortgage-transfer interest.");
+        CheckSettledWinner(finalOpponent);
+        RoundTrip(finalOpponent);
+        var finished = finalOpponent.Snapshot;
+        Require(!finalOpponent.HandleAction("mp-bankrupt", Next()) && !finalOpponent.Tick(Next()) &&
+            ReferenceEquals(finished, finalOpponent.Snapshot), "The surviving winner could go bankrupt after game completion.");
+
+        var recovery = TransferGame(humans: 3, recoveryAssets: true);
+        Act(recovery, "mp-bankrupt");
+        Require(recovery.Snapshot.Phase == MonopolyPhase.Debt && recovery.Snapshot.WinnerId is null &&
+            recovery.Snapshot.DebtPlayerId == 2 && recovery.Snapshot.DebtCreditorId is null && recovery.Snapshot.DebtAmount == 40 &&
+            recovery.Snapshot.Players.Count(p => !p.Bankrupt) == 2 && !recovery.Snapshot.AvailableActions.Contains("mp-bankrupt"),
+            "Mortgage-transfer interest must remain payable while multiple players survive.");
+        RoundTrip(recovery);
+        Act(recovery, "mp-manage"); Act(recovery, "mp-mortgage");
+        Require(recovery.Snapshot.Phase == MonopolyPhase.ManageProperties && recovery.Snapshot.DebtAmount == 40 &&
+            recovery.Snapshot.Players[1].Money == 30, "A partial mortgage incorrectly settled transfer interest.");
+        Act(recovery, "mp-property-next"); Act(recovery, "mp-mortgage");
+        Require(recovery.Snapshot.Phase == MonopolyPhase.AwaitingEndTurn && recovery.Snapshot.DebtPlayerId is null &&
+            recovery.Snapshot.Players[1].Money == 20 && recovery.Snapshot.Properties.Count(p => p.OwnerId == 2 && p.Mortgaged) == 6,
+            "The off-turn recipient failed to settle transfer interest exactly once using mortgage proceeds.");
+        RoundTrip(recovery);
+        Act(recovery, "mp-end-turn");
+        Require(recovery.Snapshot.Phase == MonopolyPhase.AwaitingRoll && recovery.Snapshot.ActivePlayer!.Id == 2,
+            "Resolving transfer interest did not resume play with the next surviving player.");
+
+        var cascading = TransferGame(humans: 3, recoveryAssets: false);
+        Act(cascading, "mp-bankrupt");
+        Require(cascading.Snapshot.Phase == MonopolyPhase.Debt && cascading.Snapshot.AvailableActions.Contains("mp-bankrupt"),
+            "An insolvent mortgage recipient could not declare bankruptcy while another opponent survives.");
+        Act(cascading, "mp-bankrupt");
+        Require(cascading.Snapshot.Phase == MonopolyPhase.GameOver && cascading.Snapshot.WinnerId == 3 &&
+            cascading.Snapshot.Players.Take(2).All(p => p.Bankrupt) &&
+            cascading.Snapshot.Properties.All(p => p.OwnerId is null && !p.Mortgaged),
+            "Cascading bank bankruptcy failed to return the estates and declare the remaining winner.");
+        CheckSettledWinner(cascading);
+        RoundTrip(cascading);
+
+        MonopolyGame TransferGame(int humans, bool recoveryAssets)
+        {
+            var game = new MonopolyGame(seed: 13);
+            Act(game, "mp-start-game"); Act(game, "mp-ai-minus");
+            for (int human = 1; human < humans; human++) Act(game, "mp-human-plus");
+            Act(game, "mp-start");
+            Change(game, data =>
+            {
+                data.Players[0].Money = data.Players[1].Money = 0;
+                data.Phase = MonopolyPhase.Debt;
+                data.DebtAmount = 100; data.DebtPlayerId = 1; data.DebtCreditorId = 2;
+                data.Payments = [new() { PlayerId = 1, CreditorId = 2, Amount = 100 }];
+                data.Properties.Single(p => p.SpaceIndex == 1).OwnerId = 2;
+                if (recoveryAssets) data.Properties.Single(p => p.SpaceIndex == 3).OwnerId = 2;
+                foreach (var property in data.Properties.Where(p => p.SpaceIndex is 5 or 16 or 25 or 35))
+                {
+                    property.OwnerId = 1; property.Mortgaged = true;
+                }
+            });
+            return game;
+        }
+        void CheckSettledWinner(MonopolyGame game)
+        {
+            var data = Data(game);
+            Require(data.Payments.Count == 0 && data.DebtAmount == 0 && data.DebtPlayerId is null &&
+                data.DebtCreditorId is null && data.Auction is null && data.PendingBankAuctions.Count == 0 &&
+                data.PendingPropertyIndex is null && data.SelectedPropertyIndex is null,
+                "A completed bankruptcy game retained outstanding debt, auctions or property decisions.");
+        }
+        void RoundTrip(MonopolyGame game)
+        {
+            string save = game.ExportSave();
+            var restored = new MonopolyGame(seed: 13); restored.LoadSave(save, Next());
+            Require(restored.ExportSave() == save && restored.Snapshot.AvailableActions.SequenceEqual(game.Snapshot.AvailableActions),
+                "A bankruptcy or mortgage-transfer save failed to round trip without changing available actions.");
+        }
     }
 
     private static void CheckSaveValidationAndIsolation()

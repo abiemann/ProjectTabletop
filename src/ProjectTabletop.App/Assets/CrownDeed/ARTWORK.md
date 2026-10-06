@@ -14,7 +14,7 @@ Create a gorgeous highly detailed premium painted/3D hybrid aerial map of a fict
 
 The renderer places forty equal parcels around an oval boulevard, uses a new fictional district order, and builds lit architectural meshes over the city illustration. The image contains no brands, property labels, game tiles, or player tokens. It is intentionally opaque and is copied into build and publish output.
 
-Canal animation uses a code-authored shader and water-only outlines traced from this same image, with stationary cutouts for boats, bridges and shoreline details. Refraction and warm lamp reflections render beneath the board foreground; the original image pixels and SHA-256 remain unchanged.
+The canals retain their original painted water and golden reflections. All experimental water animation was removed on 2026-10-06 at the user's request. The original city PNG is unchanged.
 
 Architectural windows retain the original painting's steady warm lights. The experimental window shader, lighting schedules and glass cutouts were removed on 2026-10-05; no city-image pixels were changed. The traced pane coordinates remain only for native checks that verify the restored artwork.
 

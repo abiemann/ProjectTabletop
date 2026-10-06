@@ -119,15 +119,10 @@ public sealed partial class SceneCompositor
                 surface.Transform = BoardRasterTransform(_monopolyPreviewTarget);
                 DrawMonopolyBoard(surface, state, _boardSession.Buttons, hovered, feedback, aspect,
                     hideDiceDisplay: dicePresented, rolling: HasMonopolyDiceAnimation(now),
-                    drawerOpen: _boardSession.MonopolyDrawerOpen, drawerProgress: MonopolyDrawerProgress(now), entrance: entrance,
-                    renderCityAnimations: false);
+                    drawerOpen: _boardSession.MonopolyDrawerOpen, drawerProgress: MonopolyDrawerProgress(now), entrance: entrance);
                 _monopolyPreviewState = key;
             }
             var rendered = _monopolyPreviewTarget!;
-            if (DrawCrownDeedWaterLayer(ds.Device, now, aspect) is { } waterLayer)
-                ds.DrawImage(waterLayer,
-                    new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight),
-                    new Rect(0, 0, waterLayer.SizeInPixels.Width, waterLayer.SizeInPixels.Height));
             ds.DrawImage(rendered,
                 new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight),
                 new Rect(0, 0, rendered.SizeInPixels.Width, rendered.SizeInPixels.Height));

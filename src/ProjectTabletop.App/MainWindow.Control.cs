@@ -70,6 +70,8 @@ public sealed partial class MainWindow
                 return await SaveLaptopThemeSnapshotAsync(settingsSnapshots, ProjectionOutputPanel);
             case "verify_projection_window":
                 return await VerifyProjectionWindowAsync();
+            case "verify_async_results":
+                return await VerifyAsyncResultsAsync();
             case "verify_hand_tracking_input":
                 return VerifyHandTrackingInput();
             case "verify_hand_pose_feedback":
@@ -119,8 +121,6 @@ public sealed partial class MainWindow
                 return await VerifyMonopolyEntranceAsync();
             case "verify_crown_deed_development":
                 return await VerifyMonopolyDevelopmentAsync();
-            case "verify_crown_deed_water":
-                return await VerifyCrownDeedWaterAsync();
             case "verify_crown_deed_windows":
                 return await VerifyCrownDeedWindowsAsync();
             case "verify_crown_deed_pieces":

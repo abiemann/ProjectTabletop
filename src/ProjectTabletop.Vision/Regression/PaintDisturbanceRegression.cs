@@ -15,11 +15,12 @@ internal static class PaintDisturbanceRegression
         NonlinearProjectionAndGroupedFingers();
         NonlinearChangingPigmentAndDelay();
         CurvedAmbientFieldAndDrySupport();
+        ShiftedCurvedAmbientFields();
         AspectPerspectiveAndStride();
         TimeRevisionAndReferenceBarriers();
         Console.WriteLine("Paint disturbance regression: stationary four-finger and generic-object input, " +
             "measured area cutoff, ignored controls, photometric/noise rejection, delayed rendered-frame matching, " +
-            "nonlinear/clipped optical projection and dark grouped fingers, own-animation rejection, bounded drop cadence, " +
+            "nonlinear/clipped optical projection, curved illumination and dark grouped fingers, own-animation rejection, bounded drop cadence, " +
             "native aspect/perspective/stride, and stale/revision barriers passed.");
     }
 
@@ -313,6 +314,36 @@ internal static class PaintDisturbanceRegression
             string.Join("\n", failures));
     }
 
+    private static void ShiftedCurvedAmbientFields()
+    {
+        byte[] expected = RenderWetPaint();
+        foreach (PixelPoint center in new[] { new PixelPoint(.29, .57), new PixelPoint(.70, .62) })
+        {
+            var optics = new PaintOptics("shifted curved ambient", 1.65, .28, 2.0, 1.1, -.7, .8,
+                CorrectColors: true, CurvedAmbient: true, AmbientCenter: center);
+            byte[] empty = OpticalCamera(expected, optics);
+            byte[] fingers = OpticalCamera(expected, optics, fingers: true, fingerCenter: center);
+            var tracker = new PaintDisturbanceTracker();
+            foreach (int time in new[] { 1000, 1125, 1250 })
+            {
+                var result = Feed(tracker, empty, expected, time);
+                Require(result.ReferenceReady && result.CandidateCount == 0 && result.Drops.Count == 0,
+                    $"An empty shifted ambient trough at {center} became input: {result}.");
+            }
+            tracker.Reset();
+            var first = Feed(tracker, fingers, expected, 1500);
+            var confirmed = Feed(tracker, fingers, expected, 1625);
+            Require(first.ReferenceReady && first.CandidateCount == 1 && first.Drops.Count == 0 &&
+                confirmed.ConfirmedCandidateCount == 1 && confirmed.Drops.Count == 1 &&
+                Math.Abs(confirmed.Drops[0].BoardCenter.X - center.X) < .025 &&
+                Math.Abs(confirmed.Drops[0].BoardCenter.Y - center.Y) < .03,
+                $"The smooth field learned cold grouped fingers at {center}: first={first}, confirmed={confirmed}.");
+            var removed = Feed(tracker, empty, expected, 1750);
+            Require(removed.ReferenceReady && removed.CandidateCount == 0 && removed.Drops.Count == 0,
+                $"Removing fingers from a shifted ambient trough at {center} left input: {removed}.");
+        }
+    }
+
     private static void AspectPerspectiveAndStride()
     {
         byte[] expected = Render(0);
@@ -434,7 +465,8 @@ internal static class PaintDisturbanceRegression
     }
 
     private sealed record PaintOptics(string Name, double Exposure, double Ambient, double CameraGamma,
-        double ShiftX, double ShiftY, double BlurPixels, bool CorrectColors = false, bool CurvedAmbient = false);
+        double ShiftX, double ShiftY, double BlurPixels, bool CorrectColors = false, bool CurvedAmbient = false,
+        PixelPoint? AmbientCenter = null);
 
     private static byte[] RenderWetPaint(bool paintedBackground = false)
     {
@@ -508,8 +540,9 @@ internal static class PaintDisturbanceRegression
                     occupied |= Math.Pow((u - centerU) / .007, 2) + Math.Pow((v - closestV) / .007, 2) <= 1;
                 }
             double reflectance = occupied ? .26 : 1;
+            PixelPoint ambientCenter = optics.AmbientCenter ?? new(.50, .24);
             double ambient = optics.CurvedAmbient ? optics.Ambient - .205 * Math.Exp(
-                -Math.Pow((u - .50) / .20, 2) - Math.Pow((v - .24) / .42, 2)) : optics.Ambient;
+                -Math.Pow((u - ambientCenter.X) / .20, 2) - Math.Pow((v - ambientCenter.Y) / .42, 2)) : optics.Ambient;
             ambient *= 1 + .08 * u - .05 * v;
             double noise = (((x * 17 + y * 31) % 17) / 8.0 - 1) * 1.5;
             double capturedB = Capture((ambient * .95 + optics.Exposure * (b * .86 + g * .05)) * reflectance, noise);

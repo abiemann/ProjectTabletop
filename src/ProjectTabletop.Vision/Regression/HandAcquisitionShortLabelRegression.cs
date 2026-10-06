@@ -6,7 +6,7 @@ internal static class HandAcquisitionShortLabelRegression
 {
     public static void Run()
     {
-        // Lossless generated Win2D controls and a synthetic four-strip obstruction.
+        // Neutral lossless Win2D controls and a synthetic four-strip obstruction.
         // The short gold caption contributes under 7% glyph area; the actual
         // foreground covers most of its panel. No user camera pixels are stored.
         const int width = 3840, height = 2160;

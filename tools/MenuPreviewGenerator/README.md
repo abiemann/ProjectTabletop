@@ -29,7 +29,7 @@ production Blackjack, Crown & Deed, Roulette, Globe and Paint rendering helpers
 through reflection. It loads only the menu dragon asset for Dragon Slots. Paint
 uses the existing 96-pixel-high simulation, seeded drops and settling sequence.
 Crown & Deed renders its real city painting, all forty property parcels, settled
-shops, silver pieces and a frozen canal-reflection frame into a 2400-square board.
+shops, silver pieces and the original painted water into a 2400-square board.
 The saved thumbnail crops the palace and domed waterfront district, keeping the
 curved gold property rail visible at a scale that preserves the architectural
 detail. It contains no landing controls or duplicated title. Its before images

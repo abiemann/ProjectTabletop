@@ -35,15 +35,16 @@ public sealed partial class MainWindow
             : "Paint selected. Scan the board to start painting.");
     }
 
-    private void QueuePaintDetection(CameraFrame frame, long tick)
+    private InputFrameQueueResult QueuePaintDetection(CameraFrame frame, long tick)
     {
         lock (_handGate)
         {
+            if (frame.Timestamp < _handInputNotBefore) return InputFrameQueueResult.PredatesReset;
             if (_closing || !_handTrackingEnabled || IsBoardScanMeasuring ||
                 Volatile.Read(ref _cameraHealthWarning) || Volatile.Read(ref _paintDetecting) != 0 ||
-                _lastPaintDetectionTick != 0 && Stopwatch.GetElapsedTime(_lastPaintDetectionTick, tick) < TimeSpan.FromMilliseconds(125)) return;
+                _lastPaintDetectionTick != 0 && Stopwatch.GetElapsedTime(_lastPaintDetectionTick, tick) < TimeSpan.FromMilliseconds(125)) return InputFrameQueueResult.Skipped;
             var context = _scene.GetPaintDisturbanceContext();
-            if (context is null) return;
+            if (context is null) return InputFrameQueueResult.Skipped;
             _paintDetecting = 1;
             _lastPaintDetectionTick = tick;
             long generation = _handGeneration;
@@ -84,6 +85,7 @@ public sealed partial class MainWindow
                 }
                 finally { Interlocked.Exchange(ref _paintDetecting, 0); }
             });
+            return InputFrameQueueResult.Queued;
         }
     }
 }

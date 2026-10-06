@@ -289,14 +289,16 @@ public sealed class PaintDisturbanceTracker
             stable.Max(index => _boardPoints[index].X) - stable.Min(index => _boardPoints[index].X) < .65 ||
             stable.Max(index => _boardPoints[index].Y) - stable.Min(index => _boardPoints[index].Y) < .65)
             return []; // No retained camera baseline or local substitute when dry support is insufficient.
-        const int count = 6;
+        // A quadratic surface cannot follow a smooth local illumination trough:
+        // its remaining dark patch looks exactly like a stationary obstruction.
+        // Fourth-order, orthogonal terms resolve that broad curvature without
+        // introducing a field at the much smaller scale of grouped fingers.
+        const int count = 15;
         var features = new double[((_mask.Length + 10) / 11) * count];
         foreach (int index in stable)
         {
-            double u = _boardPoints[index].X - .5, v = _boardPoints[index].Y - .5;
             int offset = index / 11 * count;
-            features[offset] = 1; features[offset + 1] = u; features[offset + 2] = v;
-            features[offset + 3] = u * u; features[offset + 4] = u * v; features[offset + 5] = v * v;
+            AmbientFeatures(_boardPoints[index], features.AsSpan(offset, count));
         }
         int[] retained = stable;
         double[][] coefficients = new double[3][];
@@ -341,17 +343,39 @@ public sealed class PaintDisturbanceTracker
                 .Select(item => item.Index).ToArray();
         }
         var result = new double[current.Length];
+        Span<double> localFeatures = stackalloc double[count];
         for (int index = 0; index < _mask.Length; index++)
         {
             if (!_mask[index]) continue;
-            double u = _boardPoints[index].X - .5, v = _boardPoints[index].Y - .5;
+            AmbientFeatures(_boardPoints[index], localFeatures);
             for (int channel = 0; channel < 3; channel++)
             {
                 var field = coefficients[channel];
-                result[index * 3 + channel] = field[1] * u + field[2] * v + field[3] * u * u + field[4] * u * v + field[5] * v * v;
+                for (int feature = 1; feature < count; feature++)
+                    result[index * 3 + channel] += field[feature] * localFeatures[feature];
             }
         }
         return result;
+    }
+
+    private static void AmbientFeatures(PixelPoint point, Span<double> features)
+    {
+        double u = 2 * point.X - 1, v = 2 * point.Y - 1;
+        Span<double> horizontal = stackalloc double[5], vertical = stackalloc double[5];
+        horizontal[0] = vertical[0] = 1;
+        horizontal[1] = u; vertical[1] = v;
+        // Legendre terms avoid the poorly conditioned small powers of UV offsets.
+        for (int degree = 2; degree <= 4; degree++)
+        {
+            horizontal[degree] = ((2 * degree - 1) * u * horizontal[degree - 1] -
+                (degree - 1) * horizontal[degree - 2]) / degree;
+            vertical[degree] = ((2 * degree - 1) * v * vertical[degree - 1] -
+                (degree - 1) * vertical[degree - 2]) / degree;
+        }
+        int index = 0;
+        for (int degree = 0; degree <= 4; degree++)
+            for (int horizontalDegree = 0; horizontalDegree <= degree; horizontalDegree++)
+                features[index++] = horizontal[horizontalDegree] * vertical[degree - horizontalDegree];
     }
 
     private Fit? FitCamera(double[] expected, double[] current, double[] scoreWeights, double scoreWeight, bool applyAmbient = true)

@@ -249,7 +249,7 @@ public sealed partial class SceneCompositor
                     handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback,
                     PaintBoardAspect(), hideDiceDisplay: monopolyDicePresented,
                     rolling: HasMonopolyDiceAnimation(monopolyNow), drawerOpen: _boardSession.MonopolyDrawerOpen,
-                    drawerProgress: MonopolyDrawerProgress(monopolyNow), entrance: monopolyEntrance, renderCityAnimations: false);
+                    drawerProgress: MonopolyDrawerProgress(monopolyNow), entrance: monopolyEntrance);
             }
             else if (slots)
                 DrawSlotsMachine(surface, _boardSession.SlotsState, _boardSession.Buttons, PaintBoardAspect());
@@ -372,16 +372,6 @@ public sealed partial class SceneCompositor
             0, 0, 1, 0,
             (float)(output.Width * h[2] + output.X * h[8]),
             (float)(output.Height * h[5] + output.Y * h[8]), 0, (float)h[8]);
-        if (_boardSession.Screen == BoardScreen.Monopoly &&
-            DrawCrownDeedWaterLayer(ds.Device, monopolyNow, PaintBoardAspect()) is { } waterLayer)
-        {
-            using var water = new Transform3DEffect
-            {
-                Source = waterLayer, TransformMatrix = matrix,
-                InterpolationMode = CanvasImageInterpolation.Linear, BorderMode = EffectBorderMode.Soft
-            };
-            ds.DrawImage(water);
-        }
         using var perspective = new Transform3DEffect
         {
             Source = _boardApplicationTarget,

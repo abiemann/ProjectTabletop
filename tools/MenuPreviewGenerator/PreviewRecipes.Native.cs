@@ -130,8 +130,6 @@ internal sealed partial class PreviewRecipes
             "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedBuildings.cs",
             "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedPieces.cs",
             "src/ProjectTabletop.App/Projection/CrownDeedPieceSources.cs",
-            "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedWater.cs",
-            "src/ProjectTabletop.App/Projection/CrownDeedRendering/CrownDeedWaterShader.cs",
             "src/ProjectTabletop.Interaction/MonopolyBoard.cs",
             "src/ProjectTabletop.Interaction/MonopolyGame.cs",
             "src/ProjectTabletop.Interaction/MonopolyModels.cs",
@@ -162,7 +160,7 @@ internal sealed partial class PreviewRecipes
             crownDeed = new { composition = "Close-up of the native lamplit city, property boulevard and silver pieces.",
                 boardRaster = 2400, crop = new { x = 0, y = 0, width = 1000, height = 350 },
                 snapshot = "Fixed representative game; hat on Amber Exchange, car on Festival Dues, three shops on each Crown Quarter property.",
-                waterTimeSeconds = 0 },
+                water = "Original still city artwork" },
             roulette = new { composition = "Full bowl and spindle framed to the thumbnail height.",
                 wheelFromRight = 102, wheelY = 77, wheelScale = .48 },
             globe = new { rotationDegrees = GlobeHome.DefaultRestingRotationDegrees, latitudeDegrees = GlobeHome.DefaultViewLatitudeDegrees,
@@ -230,7 +228,7 @@ internal sealed partial class PreviewRecipes
         {
             using var drawing = board.CreateDrawingSession();
             drawing.Transform = Matrix3x2.CreateScale(2.4f);
-            Call(scene, "DrawMonopolyFrame", drawing, false, true, 1d);
+            Call(scene, "DrawMonopolyFrame", drawing);
             foreach (var space in MonopolyGame.Spaces)
                 Call(scene, "DrawMonopolySpace", drawing, space, snapshot, 1d, 1f);
             return board;

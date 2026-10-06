@@ -29,6 +29,7 @@ public sealed partial class MainWindow
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
         using var scene = new SceneCompositor(monopoly: new MonopolyGame(seed: 27, initialRolls: [new(1, 2)]),
             blackjackClock: () => now, monopolyClock: () => now);
+        await scene.EnsureCrownDeedResourcesAsync(CanvasDevice.GetSharedDevice());
         scene.SetDisplayAspect(width / (double)height);
         scene.SetBoardSetup(true);
         double inset = scene.SetDetectedBoardGrid([new(.035f, .035f), new(.965f, .035f),
@@ -108,6 +109,7 @@ public sealed partial class MainWindow
         Require(scene.CompleteMonopolySave(retryId, success: true) && scene.CurrentBoardScreen == BoardScreen.Menu,
             "A completed disk save did not exit to the menu.");
         using var resumed = new SceneCompositor(monopolyClock: () => now);
+        await resumed.EnsureCrownDeedResourcesAsync(CanvasDevice.GetSharedDevice());
         Require(resumed.LoadMonopolySave((await MonopolySaveStore.LoadAsync(savePath))!), "A persisted Monopoly game could not be loaded.");
         resumed.ShowMonopoly();
         now += TimeSpan.FromMilliseconds(4975);
@@ -423,9 +425,8 @@ public sealed partial class MainWindow
                         Require(ButtonPixelsEqual(initial, pixels, controls, viewport.Width, viewport.Height),
                             "Building motion changed stationary control captions or their surfaces.");
                         captionChecks++;
-                        // Canal reflections have their own independently verified
-                        // motion layer. Construction must leave the static city,
-                        // neighbouring deeds and fixed UI in this foreground alone.
+                        // Construction must leave the original city artwork,
+                        // neighbouring deeds and fixed UI unchanged.
                         var foreground = (CanvasRenderTarget)typeof(SceneCompositor)
                             .GetField("_monopolyPreviewTarget", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scene)!;
                         var foregroundPixels = foreground.GetPixelBytes();

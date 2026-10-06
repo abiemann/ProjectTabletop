@@ -172,6 +172,8 @@ public sealed partial class MainWindow : Window
         if (!_initialized) return;
         if (SelectedDisplay is not { } display)
         {
+            ClearHandTracking();
+            InvalidateCalibration("Projection display removed. Recalibrate both planes.");
             _scene.ClearBoardMediaClip();
             ProjectionSettingsDisplayChanged();
             return;
@@ -232,6 +234,8 @@ public sealed partial class MainWindow : Window
     {
         if (_closing) return;
         _closing = true;
+        _calibrationResults.Invalidate();
+        ResetPieceDetections();
         DisposeDisplayAudio();
         _photocopierSound.Dispose();
         _statusTimer.Stop();

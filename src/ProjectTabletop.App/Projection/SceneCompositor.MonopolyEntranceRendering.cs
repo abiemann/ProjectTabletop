@@ -62,24 +62,17 @@ public sealed partial class SceneCompositor
     private void DrawMonopolyEntrance(CanvasDrawingSession ds, MonopolySnapshot game,
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
         IReadOnlyList<BoardFingerSelectionFeedback> feedback, double aspect,
-        bool hideDice, bool rolling, bool drawer, float drawerProgress, MonopolyEntranceFrame frame,
-        bool renderCityAnimations = true)
+        bool hideDice, bool rolling, bool drawer, float drawerProgress, MonopolyEntranceFrame frame)
     {
         if (frame.LandedTiles >= 40 && frame.CenterProgress >= 1)
         {
             // The last contact frame and the normal cached board are identical.
-            DrawMonopolyBoard(ds, game, buttons, hovered, feedback, aspect, hideDice, rolling, drawer, drawerProgress,
-                renderCityAnimations: renderCityAnimations);
+            DrawMonopolyBoard(ds, game, buttons, hovered, feedback, aspect, hideDice, rolling, drawer, drawerProgress);
             return;
         }
         EnsureMonopolyEntranceLayers(ds.Device, game, buttons, hovered, feedback, aspect,
             hideDice, rolling, drawer, drawerProgress);
         ds.Clear(Colors.Transparent);
-        if (renderCityAnimations)
-        {
-            var now = _monopolyClock();
-            DrawCrownDeedWater(ds, now, aspect);
-        }
         DrawMonopolyEntranceImage(ds, _monopolyEntranceBaseTarget!, new Rect(0, 0, 1000, 1000));
 
         // Cast all moving shadows before the pieces. Each transparent parcel
@@ -142,7 +135,7 @@ public sealed partial class SceneCompositor
         {
             using var drawing = _monopolyEntranceBaseTarget!.CreateDrawingSession();
             drawing.Transform = BoardRasterTransform(_monopolyEntranceBaseTarget);
-            DrawMonopolyFrame(drawing, entranceBase: true, renderCityAnimations: false);
+            DrawMonopolyFrame(drawing);
             _monopolyEntranceBaseReady = true;
         }
         var tileKey = (game.Revision, aspect);

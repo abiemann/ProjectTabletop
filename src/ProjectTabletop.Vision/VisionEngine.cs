@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using OpenCvSharp;
@@ -313,8 +315,9 @@ public sealed partial class VisionEngine : IDisposable
         foreach (StoredCapture capture in _captures)
         {
             capture.PngFileName = "captures/" + capture.CaptureId + ".png";
-            File.WriteAllBytes(Path.Combine(directory, "captures", capture.CaptureId + ".png"),
-                Convert.FromBase64String(capture.PngBase64));
+            byte[] png = Convert.FromBase64String(capture.PngBase64);
+            WriteFileAtomically(Path.Combine(directory, "captures", capture.CaptureId + ".png"),
+                temporary => File.WriteAllBytes(temporary, png));
         }
         var state = new StoredState
         {
@@ -326,11 +329,41 @@ public sealed partial class VisionEngine : IDisposable
             FeatureMean = IsTrained ? _featureMean : null,
             FeatureDeviation = IsTrained ? _featureDeviation : null
         };
-        File.WriteAllText(Path.Combine(directory, ProfileFileName), JsonSerializer.Serialize(state,
-            new JsonSerializerOptions { WriteIndented = true }));
+        // Captures are immutable and the classifier is recoverable. Publish the
+        // authoritative annotations last, only after their files are complete.
         string svmPath = Path.Combine(directory, SvmFileName);
-        if (_svm is not null) _svm.Save(svmPath);
+        if (_svm is not null) WriteFileAtomically(svmPath, temporary =>
+        {
+            _svm.Save(temporary);
+            state.SvmSha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(temporary)));
+        });
         else if (File.Exists(svmPath)) File.Delete(svmPath);
+        byte[] json = JsonSerializer.SerializeToUtf8Bytes(state,
+            new JsonSerializerOptions { WriteIndented = true });
+        WriteFileAtomically(Path.Combine(directory, ProfileFileName),
+            temporary => File.WriteAllBytes(temporary, json));
+    }
+
+    private static void WriteFileAtomically(string path, Action<string> write)
+    {
+        // Keep the format extension for OpenCV's YAML writer and stay on the
+        // destination volume so publication replaces the file in one rename.
+        string temporary = Path.Combine(Path.GetDirectoryName(path)!,
+            $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp{Path.GetExtension(path)}");
+        try
+        {
+            write(temporary);
+            using (var stream = new FileStream(temporary, FileMode.Open, FileAccess.Write, FileShare.None))
+                stream.Flush(flushToDisk: true);
+            if (File.Exists(path)) File.Replace(temporary, path, destinationBackupFileName: null);
+            else File.Move(temporary, path);
+        }
+        finally
+        {
+            try { File.Delete(temporary); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     public static VisionEngine Load(string directory)
@@ -380,25 +413,37 @@ public sealed partial class VisionEngine : IDisposable
         // An SVM's numeric labels depend on class order, and its inputs depend
         // on the normalization used during fitting. Never combine a saved
         // classifier with different reconstructed descriptors or class labels.
-        if (!state.TrainedClassIds!.SequenceEqual(_classIds, StringComparer.Ordinal) ||
+        // Legacy profiles have no binding between their annotations and cache.
+        // Rebuild them once per load; their next save writes the cache digest.
+        if (string.IsNullOrEmpty(state.SvmSha256) ||
+            !state.TrainedClassIds!.SequenceEqual(_classIds, StringComparer.Ordinal) ||
             !MatchingNormalization(state.FeatureMean, _featureMean!) ||
             !MatchingNormalization(state.FeatureDeviation, _featureDeviation!)) return false;
         string path = Path.Combine(directory, SvmFileName);
         if (!File.Exists(path)) return false;
-        var classifier = SVM.Load(path);
+        SVM? classifier = null;
         try
         {
+            byte[] cached = File.ReadAllBytes(path);
+            if (!string.Equals(state.SvmSha256, Convert.ToHexString(SHA256.HashData(cached)),
+                StringComparison.OrdinalIgnoreCase)) return false;
+            // Parse the exact verified snapshot. Reopening the shared pathname
+            // could load a different classifier if another save replaced it.
+            classifier = SVM.LoadFromString(Encoding.UTF8.GetString(cached));
             if (!classifier.IsTrained() || classifier.Type != SVM.Types.CSvc ||
                 classifier.KernelType != SVM.KernelTypes.Rbf ||
-                classifier.GetVarCount() != _featureMean!.Length)
-            {
-                classifier.Dispose();
-                return false;
-            }
+                classifier.GetVarCount() != _featureMean!.Length) return false;
             _svm = classifier;
+            classifier = null; // The engine now owns the native classifier.
             return true;
         }
-        catch { classifier.Dispose(); throw; }
+        catch (Exception error) when (error is OpenCVException or IOException or UnauthorizedAccessException)
+        {
+            // This is only a cache. Damaged or unreadable YAML must not discard
+            // the intact captures and annotations used to rebuild it.
+            return false;
+        }
+        finally { classifier?.Dispose(); }
     }
 
     private static bool MatchingNormalization(double[]? saved, double[] current)
@@ -546,9 +591,13 @@ public sealed partial class VisionEngine : IDisposable
     private static Mat ToGray(Mat image)
     {
         var gray = new Mat();
-        Cv2.CvtColor(image, gray, image.Channels() == 4
-            ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
-        return gray;
+        try
+        {
+            Cv2.CvtColor(image, gray, image.Channels() == 4
+                ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
+            return gray;
+        }
+        catch { gray.Dispose(); throw; }
     }
 
     private sealed record TrainedCapture(StoredCapture Capture, VisionFeatures Features, double FrontAngleDegrees);
@@ -573,6 +622,7 @@ public sealed partial class VisionEngine : IDisposable
         public List<StoredCapture> Captures { get; set; } = [];
         public string? BackgroundPngBase64 { get; set; }
         public string[]? TrainedClassIds { get; set; }
+        public string? SvmSha256 { get; set; }
         public double[]? FeatureMean { get; set; }
         public double[]? FeatureDeviation { get; set; }
     }

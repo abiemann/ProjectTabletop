@@ -75,15 +75,15 @@ public sealed partial class SceneCompositor
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
         IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback, double boardAspect = 1, bool hideDiceDisplay = false,
         bool rolling = false, bool drawerOpen = false, float drawerProgress = 1,
-        MonopolyEntranceFrame? entrance = null, bool renderCityAnimations = true)
+        MonopolyEntranceFrame? entrance = null)
     {
         if (entrance is { Active: true } frame)
         {
             DrawMonopolyEntrance(ds, game, buttons, hovered, selectionFeedback, boardAspect,
-                hideDiceDisplay, rolling, drawerOpen, drawerProgress, frame, renderCityAnimations);
+                hideDiceDisplay, rolling, drawerOpen, drawerProgress, frame);
             return;
         }
-        DrawMonopolyFrame(ds, renderCityAnimations: renderCityAnimations, boardAspect: boardAspect);
+        DrawMonopolyFrame(ds);
         var development = GetCrownDeedDevelopmentFrame(_monopolyClock());
         for (int index = 0; index < MonopolyGame.Spaces.Count; index++)
             DrawMonopolySpace(ds, MonopolyGame.Spaces[index], game, boardAspect,
@@ -132,22 +132,13 @@ public sealed partial class SceneCompositor
         return PrepareCrownDeedResources(device) ? _crownDeedCityBitmap : null;
     }
 
-    private void DrawMonopolyFrame(CanvasDrawingSession ds, bool entranceBase = false,
-        bool renderCityAnimations = true, double boardAspect = 1)
+    private void DrawMonopolyFrame(CanvasDrawingSession ds)
     {
         ds.Clear(ThemeColor(10, 24, 25));
         if (EnsureCrownDeedCity(ds.Device) is { } city)
         {
             ds.DrawImage(city, new Rect(0, 0, 1000, 1000),
                 new Rect(0, 0, city.SizeInPixels.Width, city.SizeInPixels.Height));
-            // Only canal water is cut out for its live layer. Architectural
-            // windows retain the original painting at every presentation time.
-            ClearCrownDeedWater(ds);
-            if (renderCityAnimations)
-            {
-                var now = _monopolyClock();
-                DrawCrownDeedWater(ds, now, boardAspect);
-            }
         }
         // A continuous granite boulevard connects the equal-sized deed plaques.
         ds.DrawEllipse(new Vector2(500, 500), 434, 408, ThemeColor(6, 19, 20, 225), 99);
@@ -163,31 +154,21 @@ public sealed partial class SceneCompositor
                 i % 4 == 0 ? MonopolyGold : ThemeColor(216, 185, 120, 80));
         }
         DrawMonopolyCenterDecoration(ds);
-        DrawMonopolyRailTitle(ds);
-    }
-
-    private static void DrawMonopolyFelt(CanvasDrawingSession ds, Rect bounds)
-    {
-        // Used only by the cached entrance center; the real paving shows through.
-        using var clip = CanvasGeometry.CreateEllipse(ds.Device, new Vector2(500, 500), 376, 350);
-        using var layer = ds.CreateLayer(1, clip);
-        ds.FillEllipse(new Vector2(500, 500), 376, 350, ThemeColor(8, 36, 30, 215));
     }
 
     private static void DrawMonopolyCenterDecoration(CanvasDrawingSession ds)
     {
-        // A physical central plaza gives stationary lettering dependable contrast.
+        // This opaque physical surface owns the central oval. The painted
+        // city has a different plaza outline and compass, which must not show
+        // through the felt or shift its trim near the navigation handle.
         using var stone = new CanvasRadialGradientBrush(ds.Device,
         [
-            new() { Position = 0, Color = ThemeColor(17, 49, 42, 215) },
-            new() { Position = 1, Color = ThemeColor(5, 27, 25, 235) }
+            new() { Position = 0, Color = ThemeColor(17, 49, 42) },
+            new() { Position = 1, Color = ThemeColor(5, 27, 25) }
         ]) { Center = new(500, 475), RadiusX = 379, RadiusY = 353 };
         ds.FillEllipse(new Vector2(500, 500), 379, 353, stone);
         ds.DrawEllipse(new Vector2(500, 500), 372, 346, ThemeColor(218, 193, 123, 60), .8f);
     }
-
-    private static void DrawMonopolyRailTitle(CanvasDrawingSession ds) =>
-        MonopolyText(ds, "P R O J E C T   T A B L E T O P", new Rect(252, 14, 496, 24), 13, MonopolyGold);
 
     private static void DrawMonopolyRailCaptions(CanvasDrawingSession ds, bool rolling,
         IReadOnlyList<BoardFingerSelectionFeedback> feedback) =>
@@ -376,8 +357,7 @@ public sealed partial class SceneCompositor
             MonopolyText(ds, "WELCOME TO OVAL BOULEVARD", new Rect(236, 354, 528, 21), 14, MonopolyGold);
             MonopolyText(ds, "CROWN & DEED", new Rect(212, 382, 576, 68), 53, MonopolyIvory, "Georgia", true);
             DrawMonopolyRule(ds, 458, 135);
-            MonopolyText(ds, "Build your fortune. Shape the city.", new Rect(250, 651, 500, 31), 19, MonopolyIvory);
-            MonopolyText(ds, "Human players and AI opponents share one beautiful board.", new Rect(242, 687, 516, 42), 16, MonopolyMuted, wrap: true);
+            MonopolyText(ds, "Build your fortune. Shape the city.", new Rect(250, 679, 500, 31), 19, MonopolyIvory);
             return;
         }
         MonopolyText(ds, "CROWN & DEED", new Rect(280, 232, 440, 42),

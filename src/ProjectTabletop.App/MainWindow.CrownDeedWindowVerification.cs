@@ -11,8 +11,8 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
-    // The original city supplies every window. Exercise the complete native
-    // composition while only the independent canal layer advances with time.
+    // The original city supplies the windows and still water. Verify that
+    // advancing time preserves the complete stationary native composition.
     private async Task<object> VerifyCrownDeedWindowsAsync()
     {
         const BindingFlags instance = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -32,7 +32,7 @@ public sealed partial class MainWindow
         var images = new List<object>();
         var samples = new List<object>();
         int sameClockChecks = 0, staticWindowChecks = 0, sourceArtworkChecks = 0, cacheChecks = 0, stateChecks = 0;
-        int waterMotionChecks = 0, phaseChecks = 0, originalPanePixelChecks = 0;
+        int staticArtworkChecks = 0, phaseChecks = 0, originalPanePixelChecks = 0;
         var now = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero);
         foreach (var view in new[] { (Name: "measured", Width: 2777, Height: 2160),
             (Name: "wide", Width: 1920, Height: 1080), (Name: "square", Width: 1280, Height: 1280),
@@ -82,19 +82,17 @@ public sealed partial class MainWindow
                 CheckWindows(firstProjector, projected, projectorProbes);
                 Require(ReferenceEquals(foreground, Field<CanvasRenderTarget>(scene, "_monopolyPreviewTarget")) &&
                     Equals(foregroundKey, Raw(scene, "_monopolyPreviewState")) && staticForeground.SequenceEqual(foreground.GetPixelBytes()),
-                    "Water time repainted the static city/window foreground.");
+                    "Clock advancement repainted the static city artwork.");
                 cacheChecks++;
                 Require(ReferenceEquals(snapshot, scene.MonopolyState) && scene.MonopolyState.Revision == gameRevision &&
                     scene.CurrentBoardButtons.SequenceEqual(buttons),
-                    "Static-window or water drawing changed the landing game state.");
+                    "Static artwork drawing changed the landing game state.");
                 stateChecks++;
+                Require(firstPreview.SequenceEqual(current) && firstProjector.SequenceEqual(projected),
+                    "The original still-water city artwork changed on the stationary landing screen.");
+                staticArtworkChecks += 2;
                 if (seconds == 18)
-                {
-                    Require(!firstPreview.SequenceEqual(current) && !firstProjector.SequenceEqual(projected),
-                        "Removing random window switching also stopped the live canals on the landing screen.");
-                    waterMotionChecks += 2;
-                    await Capture(preview, view.Name + "-landing-water-18s");
-                }
+                    await Capture(preview, view.Name + "-landing-static-artwork-18s");
             }
             Require(scene.ActivateMonopolyButton("mp-start-game"), "The static-window fixture could not enter setup.");
             CheckWindows(firstPreview, Draw(scene, preview, false), previewProbes);
@@ -119,15 +117,18 @@ public sealed partial class MainWindow
             byte[] first = Draw(scene, target, false);
             var probes = Probes(1254, 1254, Matrix3x2.CreateScale(1.254f));
             now = began.AddMilliseconds(250);
-            CheckWindows(first, Draw(scene, target, false), probes);
-            Require(Field<CanvasRenderTarget>(scene, "_crownDeedWaterTarget") is not null, "The entrance lost its water layer.");
+            byte[] current = Draw(scene, target, false);
+            CheckWindows(first, current, probes);
+            Require(first.SequenceEqual(current), "The original city artwork moved before the first deed arrived.");
+            staticArtworkChecks++;
             await Capture(target, "entrance-original-windows");
         }
         string reportPath = Path.Combine(directory, "static-window-samples.json");
         await File.WriteAllTextAsync(reportPath, JsonSerializer.Serialize(samples, new JsonSerializerOptions { WriteIndented = true }));
         return new { passed = true, apertureCount = panes.Length, animatedWindowCount = 0, originalCityArtworkRestored = true,
             fourAspects = true, sameClockChecks, staticWindowChecks, sourceArtworkChecks, cacheChecks, stateChecks,
-            waterMotionChecks, phaseChecks, originalPanePixelChecks, liveServicesConstructed = false, directory, reportPath, images };
+            staticArtworkChecks, phaseChecks, originalPanePixelChecks, originalWaterArtworkRestored = true,
+            liveServicesConstructed = false, directory, reportPath, images };
 
         SceneCompositor Fixture(int width, int height, out double inset)
         {

@@ -40,6 +40,8 @@ public sealed partial class MainWindow
         }
         var mode = (SegmentationMode)modeIndex;
         double minimumArea = VisionMinimumAreaBox.Value;
+        if (_closing) return;
+        var version = ++_visionLoadVersion;
         _visionSettingsBusy = true;
         ApplyVisionSettingsButton.IsEnabled = false;
         CaptureEmptyBoardButton.IsEnabled = false;
@@ -49,6 +51,7 @@ public sealed partial class MainWindow
             {
                 lock (_visionGate)
                 {
+                    if (_closing || version != Interlocked.Read(ref _visionLoadVersion)) throw new OperationCanceledException();
                     if (mode == SegmentationMode.BackgroundDifference && !_vision.HasEmptyBoardReference)
                         throw new InvalidOperationException("Capture an empty board with a fixed projected image first.");
                     var settings = _vision.Settings;
@@ -64,18 +67,25 @@ public sealed partial class MainWindow
                     return retrain;
                 }
             });
+            if (_closing || version != _visionLoadVersion) return;
             ClearVisionDetections();
             UpdateTrainingStatus();
             SetStatus(retrained
                 ? "Vision tuning saved. Existing labeled captures were retrained for the new pattern cutoff."
                 : "Vision tuning saved. Check live detections against real cards.");
         }
-        catch (Exception ex) { SetStatus("Vision tuning failed: " + ex.Message); }
+        catch (Exception ex)
+        {
+            if (!_closing && version == _visionLoadVersion) SetStatus("Vision tuning failed: " + ex.Message);
+        }
         finally
         {
             _visionSettingsBusy = false;
-            ApplyVisionSettingsButton.IsEnabled = true;
-            CaptureEmptyBoardButton.IsEnabled = true;
+            if (!_closing)
+            {
+                ApplyVisionSettingsButton.IsEnabled = true;
+                CaptureEmptyBoardButton.IsEnabled = true;
+            }
         }
     }
 
@@ -88,6 +98,8 @@ public sealed partial class MainWindow
             SetStatus("Start the selected webcam and wait for a frame before capturing the empty board.");
             return;
         }
+        if (_closing) return;
+        var version = ++_visionLoadVersion;
         _visionSettingsBusy = true;
         ApplyVisionSettingsButton.IsEnabled = false;
         CaptureEmptyBoardButton.IsEnabled = false;
@@ -97,28 +109,35 @@ public sealed partial class MainWindow
             {
                 lock (_visionGate)
                 {
+                    if (_closing || version != Interlocked.Read(ref _visionLoadVersion)) throw new OperationCanceledException();
                     _vision.SetEmptyBoardReference(frame.Width, frame.Height, frame.Stride, frame.Bgra);
                     _vision.Settings.SegmentationMode = SegmentationMode.BackgroundDifference;
                     _vision.Save(AutoProfileDirectory);
                 }
             });
+            if (_closing || version != _visionLoadVersion) return;
             SyncVisionSettingsControls();
             ClearVisionDetections();
             SetStatus("Empty-board reference saved and difference mode selected. Keep the projected image fixed; moving video will appear as motion to the detector.");
         }
-        catch (Exception ex) { SetStatus("Could not save empty-board reference: " + ex.Message); }
+        catch (Exception ex)
+        {
+            if (!_closing && version == _visionLoadVersion) SetStatus("Could not save empty-board reference: " + ex.Message);
+        }
         finally
         {
             _visionSettingsBusy = false;
-            ApplyVisionSettingsButton.IsEnabled = true;
-            CaptureEmptyBoardButton.IsEnabled = true;
+            if (!_closing)
+            {
+                ApplyVisionSettingsButton.IsEnabled = true;
+                CaptureEmptyBoardButton.IsEnabled = true;
+            }
         }
     }
 
     private void ClearVisionDetections()
     {
-        Volatile.Write(ref _latestDetections, Array.Empty<PieceDetection>());
-        _scene.SetDetections(Array.Empty<PieceDetection>(), DateTimeOffset.MinValue);
+        ResetPieceDetections();
         CameraCanvas.Invalidate();
     }
 

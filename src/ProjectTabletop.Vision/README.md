@@ -234,10 +234,23 @@ service.
    for meaningful regression testing.
 
 Loading a trained profile reconstructs the exemplar descriptors used for pose
-fitting and unknown rejection, then reuses its saved SVM when class order,
-normalization, classifier type and feature dimensions match. A missing or
-incompatible SVM is fitted once. Loading does not train a throwaway classifier or
-compute an unused training report. Run the persistence regression with:
+fitting and unknown rejection, then reuses its saved SVM when its SHA-256 digest,
+class order, normalization, classifier type and feature dimensions match the saved
+profile. Loading parses the exact cache bytes whose digest was verified, so a
+concurrent replacement cannot substitute another classifier. A missing, damaged,
+unreadable or incompatible SVM cache is fitted once from the intact saved captures.
+Older version-1 profiles without a cache digest also rebuild once per load; their
+next save adds the digest and permits compatible cache reuse.
+Invalid authoritative annotations or capture images still fail loading; partial
+native resources are disposed. Loading does not train a throwaway classifier or
+compute an unused training report. Saves stage captures and the classifier cache
+in temporary files on the destination volume, flush them, and replace each file
+atomically. The authoritative JSON is published last, so a failed write preserves
+the previous profile instead of truncating it. This is file-level replacement,
+not a transaction across several files; an interrupted save can leave unused new
+captures or a newer classifier cache. The old profile's digest rejects that cache
+and rebuilds its own classifier from its original captures. Run the persistence
+regression with:
 
 ```powershell
 dotnet run --project src/ProjectTabletop.Vision/Regression/ProjectTabletop.Vision.Regression.csproj -- --vision-persistence

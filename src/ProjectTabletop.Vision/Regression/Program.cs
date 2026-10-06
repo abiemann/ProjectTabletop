@@ -268,6 +268,7 @@ FourFingerPoseRegression.Run();
 HandVisualSmoothingRegression.Run();
 HandSpotlightRegression.Run();
 HandSpotlightSmoothingRegression.Run();
+PaintDisturbanceRegression.Run();
 PhotoCopyRegression.Run();
 PhotoObjectRegression.Run();
 PhotoObjectTargetRegression.Run();
