@@ -8,7 +8,7 @@ The build job compiles Release x64, runs the xUnit regression groups, publishes 
 
 The smoke test silently installs into an isolated directory, checks the installed payload, starts the actual Release app with separate app data, navigates the boards, renders a Blackjack preview, shuts down, uninstalls and verifies that user data survives. It never starts a camera or projector. The hosted runner has development tools and system components; this is not a substitute for acceptance on an ordinary clean Windows 11 PC.
 
-Package validation requires the application's compiled XAML (`.xbf`) files and resource index (`.pri`) alongside the executable. These resources must be included in the published payload for installed startup.
+Package validation requires the application's compiled XAML (`.xbf`) files and resource index (`.pri`) alongside the executable. These resources must be included in the published payload for installed startup. The smoke test explicitly selects Blackjack before capturing its preview and checks pixel content, so a blank PNG cannot satisfy the rendering gate.
 
 Passing runs upload the setup, `SHA256SUMS.txt` and a payload manifest as an Actions artifact. Test results and install/startup evidence are separate artifacts, retained for 14 days. Tag runs publish the installer to a GitHub Release only after all gates succeed. A failed upload leaves a draft; retrying may replace assets in that draft, but an already published release is never overwritten.
 
