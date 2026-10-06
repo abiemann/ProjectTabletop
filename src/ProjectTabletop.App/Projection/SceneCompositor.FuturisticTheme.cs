@@ -100,6 +100,11 @@ public sealed partial class SceneCompositor
         Action<Rect, float>? interior = null)
     {
         DrawGlassPanel(ds, rect, hovered, interior);
+        DrawPrecisionButtonMarker(ds, rect, hovered);
+    }
+
+    private static void DrawPrecisionButtonMarker(CanvasDrawingSession ds, Rect rect, bool hovered)
+    {
         var lamp = new Rect(rect.X + 11, rect.Y + rect.Height / 2 - 21, 3, 42);
         if (hovered)
             ds.FillRoundedRectangle(new Rect(lamp.X - 4, lamp.Y - 3, 11, 48), 5, 5,

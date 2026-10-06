@@ -19,9 +19,10 @@ public sealed partial class SceneCompositor
     {
         var rect = new Rect(button.Bounds.X * BoardSurfaceSize, button.Bounds.Y * BoardSurfaceSize,
             button.Bounds.Width * BoardSurfaceSize, button.Bounds.Height * BoardSurfaceSize);
-        // A quiet secondary control: no status bar, bevel, sheen or shadow.
+        // A quiet secondary control with the shared precision marker; no bevel, sheen or shadow.
         ds.DrawRoundedRectangle(rect, 19, 19,
             hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 1.25f);
+        DrawPrecisionButtonMarker(ds, rect, hovered);
         var center = new Vector2((float)rect.X + 58, (float)(rect.Y + rect.Height / 2));
         float aspect = (float)PaintBoardAspect();
         var previous = ds.Transform;
@@ -30,7 +31,7 @@ public sealed partial class SceneCompositor
         try
         {
             using var cog = SettingsCogGeometry(ds.Device, center, 30);
-            // Cyan to steel blue: the violet accent is reserved for the "06 / BOARDS"
+            // Cyan to steel blue: the violet accent is reserved for the "07 / BOARDS"
             // caption, which verification uses as the menu's registration marker.
             using var metal = new CanvasLinearGradientBrush(ds.Device, AppPalette.IndicatorOn, ThemeColor(38, 104, 160))
             { StartPoint = center - new Vector2(30, 30), EndPoint = center + new Vector2(30, 30) };
