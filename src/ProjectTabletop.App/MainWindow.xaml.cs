@@ -66,6 +66,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _scene.LicensesRequested += () => DispatcherQueue.TryEnqueue(() => _ = ShowLicensesAsync());
         AppPalette.ApplyTitleBar(AppWindow.TitleBar);
         InitializeHandDetectionLogging();
         _camera.FrameReceived += Camera_FrameReceived;

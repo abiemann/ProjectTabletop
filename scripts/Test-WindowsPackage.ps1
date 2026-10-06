@@ -8,6 +8,7 @@ Set-StrictMode -Version Latest
 $root = (Resolve-Path -LiteralPath $Directory).Path
 $repo = Split-Path $PSScriptRoot -Parent
 foreach ($path in @('ProjectTabletop.App.exe', 'ProjectTabletop.App.dll', 'Microsoft.ui.xaml.dll',
+        'ProjectTabletop.App.pri', 'App.xbf', 'MainWindow.xbf', 'ProjectionWindow.xbf',
         'OpenCvSharpExtern.dll', 'coreclr.dll', 'hostfxr.dll', 'hostpolicy.dll',
         'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll',
         'ControlMcp/ProjectTabletop.ControlMcp.exe', 'ControlMcp/coreclr.dll',

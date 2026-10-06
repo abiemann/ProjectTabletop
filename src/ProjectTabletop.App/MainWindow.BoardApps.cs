@@ -45,6 +45,8 @@ public sealed partial class MainWindow
         bool globe = _scene.CurrentBoardScreen == BoardScreen.Globe;
         bool slots = _scene.CurrentBoardScreen == BoardScreen.Slots;
         bool roulette = _scene.CurrentBoardScreen == BoardScreen.Roulette;
+        SettingsToolsPanel.Visibility = _scene.CurrentBoardScreen == BoardScreen.Settings
+            ? Visibility.Visible : Visibility.Collapsed;
         bool boardGame = blackjack || monopoly || globe || slots || roulette;
         BoardGamePreviewTitle.Text = roulette ? "VICE ROYALE  ·  ROULETTE  ·  click to place chips" :
             slots ? "DRAGON SLOTS  ·  click a button to play  ·  virtual credits" :

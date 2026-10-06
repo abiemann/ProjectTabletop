@@ -27,8 +27,8 @@ public sealed partial class MainWindow
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
         SetStatus(_scene.HasBoardMediaClip
-            ? "Settings ready. Open the Hand-Tracking tester from here; Back returns to the menu."
-            : "Settings selected. Start board setup to project it.");
+            ? "Settings ready. Open Hand-Tracking or Licenses; license documents open on the laptop. Back returns to the menu."
+            : "Settings selected. Licenses and notices are available here on the laptop; start board setup to project Settings.");
     }
 
     // A compact view for control clients; the full grid is in capture_slots_preview.

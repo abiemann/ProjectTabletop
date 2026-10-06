@@ -33,4 +33,33 @@
     <Content Include="Assets\CrownDeed\Pieces\*.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\MenuPreviews\*.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+  <!-- The unpackaged WinUI build copies these generated resources to bin, but
+       the SDK's publish item list does not include them automatically. Keep
+       direct dotnet publish and the release scripts on the same resource path. -->
+  <Target Name="IncludeTabletopWinUIResourcesInPublish"
+          BeforeTargets="ComputeFilesToPublish"
+          DependsOnTargets="Prep_ComputeProcessXamlFiles"
+          Condition="'$(WindowsPackageType)' == 'None'">
+    <AssignTargetPath Files="@(GeneratedXamlSrc)" RootFolder="$(XamlGeneratedOutputPath)">
+      <Output TaskParameter="AssignedFiles" ItemName="_TabletopPublishXaml" />
+    </AssignTargetPath>
+    <Error Condition="'@(_TabletopPublishXaml)' == ''"
+           Text="No generated WinUI XAML resources were found for publication." />
+    <Error Condition="!Exists('%(_TabletopPublishXaml.Identity)')"
+           Text="Generated WinUI resource is missing: %(_TabletopPublishXaml.Identity)" />
+    <Error Condition="'$(ProjectPriFullPath)' == '' or !Exists('$(ProjectPriFullPath)')"
+           Text="The generated WinUI resource index is missing: $(ProjectPriFullPath)" />
+    <ItemGroup>
+      <ResolvedFileToPublish Include="@(_TabletopPublishXaml)">
+        <RelativePath>%(_TabletopPublishXaml.TargetPath)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+      <ResolvedFileToPublish Include="$(ProjectPriFullPath)">
+        <RelativePath>$(ProjectPriFileName)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
 </Project>

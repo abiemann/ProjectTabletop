@@ -44,7 +44,10 @@ public sealed partial class SceneCompositor
         _boardSession.MonopolyRollOccurred += OnMonopolyRoll;
         _boardSession.MonopolyDevelopmentOccurred += OnMonopolyDevelopment;
         _boardSession.BoardOpened += OnBoardOpened;
+        _boardSession.LicensesRequested += () => LicensesRequested?.Invoke();
     }
+
+    public event Action? LicensesRequested;
 
     public BoardScreen CurrentBoardScreen
     {
@@ -327,6 +330,7 @@ public sealed partial class SceneCompositor
                     DrawGlassPanel(surface, new Rect(390, 55, 550, 105));
                     surface.DrawText("Settings", 414, 69, AppPalette.Text, body);
                     surface.DrawText("Tools for checking and tuning the table", 414, 113, AppPalette.IndicatorOn, small);
+                    surface.DrawText("License documents open on the laptop.", 540, 430, AppPalette.MutedText, small);
                 }
                 else if (_boardSession.Screen == BoardScreen.HandTracking)
                 {

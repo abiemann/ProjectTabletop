@@ -82,7 +82,8 @@ public sealed partial class BoardSession
     private static readonly IReadOnlyList<BoardButton> SettingsButtons = Array.AsReadOnly(new[]
     {
         new BoardButton("menu", "Back", new(.06, .055, .30, .105), BoardScreen.Menu),
-        new BoardButton("hand-tracking", "Hand-Tracking", new(.08, .25, .40, .16), BoardScreen.HandTracking)
+        new BoardButton("hand-tracking", "Hand-Tracking", new(.08, .25, .40, .16), BoardScreen.HandTracking),
+        new BoardButton("licenses", "Licenses", new(.52, .25, .40, .16), BoardScreen.Settings)
     });
     // The tester is reached from Settings, so its back button returns there.
     private static readonly IReadOnlyList<BoardButton> HandTrackingButtons = Array.AsReadOnly(new[]
@@ -108,6 +109,8 @@ public sealed partial class BoardSession
     public long NavigationRevision { get; private set; }
     /// <summary>Raised once after a board opens, including menu gestures and reopening the same board.</summary>
     public event Action<BoardScreen>? BoardOpened;
+    /// <summary>Open the local license viewer while retaining the Settings board.</summary>
+    public event Action? LicensesRequested;
     public string Title => Screen switch
     {
         BoardScreen.Menu => "Project Tabletop",

@@ -116,7 +116,20 @@ internal static class BoardInteractionRegression
                 Require(session.Buttons.Single() is { Id: "menu", Destination: BoardScreen.Settings } &&
                     Update(session, time + 40, Over(session.Buttons[0], ++eventId, time + 40))?.Current == BoardScreen.Settings,
                     "The tester's back button did not return to Settings.");
-                Require(Update(session, time + 60, Over(session.Buttons[0], ++eventId, time + 60))?.Current == BoardScreen.Menu,
+                var licenses = session.Buttons.Single(item => item.Id == "licenses");
+                int licenseRequests = 0;
+                session.LicensesRequested += () => licenseRequests++;
+                var settingsRevision = session.NavigationRevision;
+                var licenseGesture = Over(licenses, ++eventId, time + 60);
+                Require(Update(session, time + 60, licenseGesture) is { Current: BoardScreen.Settings, ButtonId: "licenses" } &&
+                    licenseRequests == 1 && session.NavigationRevision == settingsRevision,
+                    "The Settings license action did not open once while preserving Settings.");
+                Require(Update(session, time + 80, licenseGesture) is null && licenseRequests == 1,
+                    "A held license gesture reopened its dialog.");
+                Require(session.ActivateButton("licenses", Time(time + 100)) && licenseRequests == 2 &&
+                    session.Screen == BoardScreen.Settings && session.NavigationRevision == settingsRevision,
+                    "A pointer license action navigated away from Settings or failed to open.");
+                Require(Update(session, time + 120, Over(session.Buttons[0], ++eventId, time + 120))?.Current == BoardScreen.Menu,
                     "Settings' back button did not return to the launcher.");
             }
             else

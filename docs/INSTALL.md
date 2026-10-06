@@ -20,6 +20,8 @@ Select the projector and open its output. Select the overhead camera, allow came
 
 Blackjack, Crown & Deed, Globe and other available laptop previews can be explored without opening projector output. Read the [README](https://github.com/abiemann/ProjectTabletop/blob/main/README.md) for each board's controls and capture behavior.
 
+Open **Settings**, then select **Licenses and notices** in the laptop Settings panel, or select **Licenses** on the projected Settings board. Both open the readable license viewer on the laptop. Choose a document to view and copy its text. **Open selected file** opens the original document, and **Open all dependency notices** opens the installed license collection. Hand-model licenses and credits are included in the same selector. The laptop Settings panel works without a camera or projector.
+
 ## Your files and privacy
 
 - Settings, calibration, saved games, logs and local diagnostic recordings: `%LOCALAPPDATA%\ProjectTabletop`.

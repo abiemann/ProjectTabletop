@@ -120,7 +120,13 @@ public sealed partial class BoardSession
             // Every visible action needs an open, settled current control row.
             if (button.Id != PhotoCopyShutter.Id && (!PhotoCopyDrawerOpen || !_photoCopyDrawer.OpeningReady)) return false;
         }
-        if (button.Id == "paint-save")
+        bool licensesRequested = Screen == BoardScreen.Settings && button.Id == "licenses";
+        if (licensesRequested)
+        {
+            // The application owns the readable dialog. This is an action on
+            // Settings, not navigation; preserve the board and its references.
+        }
+        else if (button.Id == "paint-save")
         {
             if (Screen != BoardScreen.Paint || !PaintSaveEnabled) return false;
             // Save reports an action while preserving the active canvas and its
@@ -168,6 +174,7 @@ public sealed partial class BoardSession
         if (openedBoard) BoardOpened?.Invoke(Screen);
         if (hit is not null) BlackjackHitOccurred?.Invoke(hit);
         if (deal is not null) BlackjackDealOccurred?.Invoke(deal);
+        if (licensesRequested) LicensesRequested?.Invoke();
         return true;
     }
 
