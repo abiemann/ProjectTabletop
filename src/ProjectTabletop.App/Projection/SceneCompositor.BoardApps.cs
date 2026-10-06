@@ -26,12 +26,13 @@ public sealed partial class SceneCompositor
         long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long CrownDeedRevision, long CrownDeedDiceRevision,
         long CrownDeedSessionRevision, int CrownDeedDrawerFrame, long CrownDeedEntranceRevision, int CrownDeedEntranceFrame, long CrownDeedDevelopmentFrame,
         long GlobeRevision, long GlobeFrame, long GlobeSessionRevision, long SlotsRevision, double SlotsAspect, int MenuFrame,
-        long RouletteRevision, double RouletteAspect, string? RouletteHover);
+        long RouletteRevision, double RouletteAspect, string? RouletteHover, long WaterRevision);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
         Func<DateTimeOffset>? boardRevealClock = null, Func<DateTimeOffset>? paintClock = null,
         CrownDeedGame? crownDeed = null, Func<DateTimeOffset>? crownDeedClock = null,
-        GlobeState? globe = null, Func<DateTimeOffset>? globeClock = null, SlotGame? slots = null, RouletteGame? roulette = null)
+        GlobeState? globe = null, Func<DateTimeOffset>? globeClock = null, SlotGame? slots = null, RouletteGame? roulette = null,
+        Func<DateTimeOffset>? waterClock = null)
     {
         _boardSession = new BoardSession(blackjack, crownDeed, globe, slots, roulette);
         _blackjackClock = blackjackClock ?? (() => MonotonicClock.UtcNow);
@@ -39,6 +40,7 @@ public sealed partial class SceneCompositor
         _paintClock = paintClock ?? (() => MonotonicClock.UtcNow);
         _crownDeedClock = crownDeedClock ?? blackjackClock ?? (() => MonotonicClock.UtcNow);
         _globeClock = globeClock ?? blackjackClock ?? (() => MonotonicClock.UtcNow);
+        _waterClock = waterClock ?? (() => MonotonicClock.UtcNow);
         _boardSession.BlackjackHitOccurred += OnBlackjackHit;
         _boardSession.BlackjackDealOccurred += OnBlackjackDeal;
         _boardSession.CrownDeedRollOccurred += OnCrownDeedRoll;
@@ -48,6 +50,7 @@ public sealed partial class SceneCompositor
     }
 
     public event Action? LicensesRequested;
+    public event Action<BoardScreen>? BoardOpened;
 
     public BoardScreen CurrentBoardScreen
     {
@@ -137,6 +140,7 @@ public sealed partial class SceneCompositor
         }
         SyncPhotoCopySession();
         SyncPaintSession();
+        SyncWaterGardenSession();
         ReserveProjectedBoardPixels(ds, output, preview);
         if (EnsureBoardRenderTarget(ref _boardApplicationTarget, ds.Device)) _renderedBoardState = null;
 
@@ -154,6 +158,8 @@ public sealed partial class SceneCompositor
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
         if (photoCopy) _boardSession.TickPhotoCopy(blackjackNow);
         var paint = _boardSession.Screen == BoardScreen.Paint;
+        var water = _boardSession.Screen == BoardScreen.WaterGarden;
+        var waterNow = _waterClock();
         var paintNow = _paintClock();
         var globeNow = _globeClock();
         var globe = _boardSession.Screen == BoardScreen.Globe;
@@ -198,7 +204,8 @@ public sealed partial class SceneCompositor
             globe ? _boardSession.Revision : 0,
             slots ? _boardSession.SlotsState.Revision : 0, slots ? PaintBoardAspect() : 0, MenuVisualFrame(blackjackNow),
             roulette ? _boardSession.RouletteState.Revision : 0, roulette ? PaintBoardAspect() : 0,
-            roulette && handsFresh ? string.Join('|', _boardSession.HoveredButtonIds) : null);
+            roulette && handsFresh ? string.Join('|', _boardSession.HoveredButtonIds) : null,
+            water ? WaterGardenVisualRevision(waterNow) : 0);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
@@ -215,7 +222,7 @@ public sealed partial class SceneCompositor
                 DrawPhotoCopyObjectSpotlight(surface);
             }
             else if (_boardSession.Screen is not (BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.CrownDeed or
-                BoardScreen.Globe or BoardScreen.Slots or BoardScreen.Roulette))
+                BoardScreen.Globe or BoardScreen.Slots or BoardScreen.Roulette or BoardScreen.WaterGarden))
                 DrawMetalBackdrop(surface, drawFooterDivider: _boardSession.Screen != BoardScreen.Menu,
                     drawDarkInsetFrame: _boardSession.Screen != BoardScreen.Menu);
             using var heading = new CanvasTextFormat
@@ -253,6 +260,10 @@ public sealed partial class SceneCompositor
                     PaintBoardAspect(), hideDiceDisplay: crownDeedDicePresented,
                     rolling: HasCrownDeedDiceAnimation(crownDeedNow), drawerOpen: _boardSession.CrownDeedDrawerOpen,
                     drawerProgress: CrownDeedDrawerProgress(crownDeedNow), entrance: crownDeedEntrance);
+            }
+            else if (water)
+            {
+                DrawCachedWaterGarden(surface, waterNow, selectionFeedback);
             }
             else if (slots)
                 DrawSlotsMachine(surface, _boardSession.SlotsState, _boardSession.Buttons, PaintBoardAspect());
@@ -449,6 +460,7 @@ public sealed partial class SceneCompositor
             BoardScreen.PhotoCopy => "Copy hands and objects",
             BoardScreen.Blackjack => "Play against the dealer",
             BoardScreen.Paint => "Liquid colour & metallic ink",
+            BoardScreen.WaterGarden => "Still water. Gentle ripples.",
             BoardScreen.CrownDeed => "Build your fortune. Shape the city.",
             BoardScreen.Globe => "Zoom and rotate Earth",
             BoardScreen.Roulette => "Place your chips and spin",

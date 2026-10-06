@@ -23,7 +23,7 @@ public sealed partial class SceneCompositor
         IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback)
     {
         ds.DrawText("PROJECT TABLETOP", 80, 51, AppPalette.MutedText, small);
-        ds.DrawText("07  /  BOARDS", 470, 54, AppPalette.AccentSecondary, small);
+        ds.DrawText("08  /  BOARDS", 470, 54, AppPalette.AccentSecondary, small);
         ds.DrawText("Choose a board", 76, 99, AppPalette.Text, heading);
         var viewport = BoardSession.MenuCardViewport;
         using (ds.CreateLayer(1, new Rect(viewport.X * BoardSurfaceSize, viewport.Y * BoardSurfaceSize,

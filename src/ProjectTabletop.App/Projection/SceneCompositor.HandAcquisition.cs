@@ -338,11 +338,12 @@ public sealed partial class SceneCompositor
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
         var paint = _boardSession.Screen == BoardScreen.Paint;
         var globe = _boardSession.Screen == BoardScreen.Globe;
+        var water = _boardSession.Screen == BoardScreen.WaterGarden;
         var slots = _boardSession.Screen == BoardScreen.Slots;
         bool roulette = _boardSession.Screen == BoardScreen.Roulette;
         if (_boardApplicationTarget is null || _renderedBoardState is not { } rendered ||
             rendered.Screen != _boardSession.Screen) return null;
-        if (!photoCopy && !globe && !roulette && (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
+        if (!photoCopy && !globe && !roulette && !water && (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
         if (_boardSession.Screen == BoardScreen.Blackjack &&
             (rendered.BlackjackRevision != _boardSession.BlackjackState.Revision ||
             rendered.BlackjackFlightRevision != _blackjackFlightRevision ||
@@ -397,6 +398,13 @@ public sealed partial class SceneCompositor
                     // buttons may explain camera interference, as on Globe.
                     DrawSlotControlsReference(drawing);
                 }
+                else if (water)
+                {
+                    // Animated water cannot supply stationary letter evidence.
+                    // The opaque stone controls are rendered identically here.
+                    drawing.Clear(Colors.Black);
+                    DrawWaterGardenControls(drawing, _boardSession.Buttons, [], []);
+                }
                 else if (globe)
                 {
                     // The sphere rotates independently. Only fixed, opaque controls
@@ -443,6 +451,7 @@ public sealed partial class SceneCompositor
                 // The plain Paint title and surrounding artwork have no opaque
                 // panel. Use the generated button interiors as lighting anchors.
                 BoardScreen.Paint => controlReferences,
+                BoardScreen.WaterGarden => controlReferences,
                 BoardScreen.Globe => controlReferences,
                 BoardScreen.PhotoCopy => controlReferences,
                 BoardScreen.Slots => controlReferences,

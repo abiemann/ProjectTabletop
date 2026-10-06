@@ -38,10 +38,10 @@ internal static class MenuScrollRegression
     {
         var board = new BoardSession();
         var firstPage = board.Buttons.Select(button => (button.Id, button.Bounds)).ToArray();
-        Require(board.GetMenuCards(At(0)).Count == 7 && board.Buttons.Select(button => button.Id).SequenceEqual(
-            ["slots", "photo-copy", "blackjack", "crown-deed", "globe", "settings", "menu-scroll-down"]) &&
-            board.Buttons.All(button => !button.Bounds.Contains(.72, .53)),
-            "The first page must retain five cards with Paint's previous position empty.");
+        Require(board.GetMenuCards(At(0)).Count == 8 && board.Buttons.Select(button => button.Id).SequenceEqual(
+            ["slots", "photo-copy", "blackjack", "water-garden", "crown-deed", "globe", "settings", "menu-scroll-down"]) &&
+            Button(board, "water-garden").Bounds == new BoardRect(.52, .45, .40, .16),
+            "The first page must contain six cards with Water Garden beside Blackjack.");
         var arrow = Button(board, "menu-scroll-down");
         Require(board.Update([Pinch(arrow, 1, 1300)], At(1300), At(1300)) is
             { ButtonId: "menu-scroll-down", Gesture: BoardSelectionGesture.Pinch } && board.MenuScrolling && board.MenuScrolled,
@@ -82,7 +82,7 @@ internal static class MenuScrollRegression
         board.ShowMenu(At(2200));
         Require(!board.MenuScrolled && !board.MenuScrolling &&
             board.Buttons.Select(button => (button.Id, button.Bounds)).SequenceEqual(firstPage),
-            "Returning to the menu did not restore the five first-page cards and their positions.");
+            "Returning to the menu did not restore the six first-page cards and their positions.");
     }
 
     private static void CheckArrowReleaseAndReverse()

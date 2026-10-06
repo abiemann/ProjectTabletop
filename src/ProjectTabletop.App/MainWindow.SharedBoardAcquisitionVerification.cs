@@ -32,10 +32,11 @@ public sealed partial class MainWindow
         var globeNow = now;
         var game = new BlackjackGame(41, new[] { 2, 6, 2, 10, 2, 2, 3, 4 }
             .Select(rank => new BlackjackCard(rank, BlackjackSuit.Clubs)));
-        using var scene = new SceneCompositor(game, blackjackClock: () => now, globeClock: () => globeNow);
+        using var scene = new SceneCompositor(game, blackjackClock: () => now, globeClock: () => globeNow,
+            waterClock: () => now);
         await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
         await scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
-        foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.CrownDeed })
+        foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.CrownDeed, BoardScreen.WaterGarden })
             await scene.EnsureBoardArtworkResourcesAsync(CanvasDevice.GetSharedDevice(), screen);
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96);
         scene.SetDisplayAspect(1);
@@ -84,6 +85,7 @@ public sealed partial class MainWindow
                 VerifyButtons("Globe drawer");
             }
         }
+        scene.ShowWaterGarden(); VerifyButtons("Water Garden");
         scene.ShowBlackjack(); VerifyButtons("Blackjack betting");
         Require(scene.CurrentBoardButtons.Any(button => button.Id == "bj-reset" && button.Label == "Your Chips" &&
                     button.Bounds == new BoardRect(.742, .055, .198, .09)) &&
@@ -131,6 +133,8 @@ public sealed partial class MainWindow
             rouletteBetsChipsAndHoldsCovered = selectedBoard is null or BoardScreen.Roulette,
             menuScrollArrowUsesSharedCaptionEvidence = selectedBoard is null or BoardScreen.Menu,
             intactReflectiveSpinCaptionChecked = selectedBoard is null or BoardScreen.Slots,
+            waterGardenCaptionCorruptionAndIntactReflectanceChecked =
+                tested.Count(label => label.StartsWith("Water Garden/", StringComparison.Ordinal)) == 2,
             liveHardwareUnchanged = true };
 
         void VerifyButtons(string label)
@@ -438,6 +442,12 @@ public sealed partial class MainWindow
         // button. The covered caption must keep reading as held through it.
         void CheckHeldThroughRim(BoardButton button, byte[] empty, byte[] occupied)
         {
+            bool waterControl = scene.CurrentBoardScreen == BoardScreen.WaterGarden;
+            var rimTopLeft = CameraPoint(button.Bounds.X - .025, button.Bounds.Y - .025);
+            var rimBottomRight = CameraPoint(button.Bounds.X + button.Bounds.Width + .025,
+                button.Bounds.Y + button.Bounds.Height + .025);
+            bool RimPixel(int p) => !waterControl || p % size >= rimTopLeft.X && p % size <= rimBottomRight.X &&
+                p / size >= rimTopLeft.Y && p / size <= rimBottomRight.Y;
             var savedGlobe = globeNow;
             globeNow = now;
             var hold = scene.GetHoldButtonContext(now);
@@ -469,11 +479,13 @@ public sealed partial class MainWindow
             {
                 difference[channel] = new double[size * size];
                 for (int p = 0; p < size * size; p++)
-                    difference[channel][p] = rimOnly[p * 4 + channel] - empty[p * 4 + channel];
+                    // Ambient water beyond the control is not rim feedback.
+                    difference[channel][p] = RimPixel(p) ? rimOnly[p * 4 + channel] - empty[p * 4 + channel] : 0;
                 for (int pass = 0; pass < 2; pass++) difference[channel] = BoxBlur(difference[channel], 5);
             }
             for (int p = 0; p < size * size; p++)
-                if (rimOnly[p * 4] != empty[p * 4] || rimOnly[p * 4 + 1] != empty[p * 4 + 1] || rimOnly[p * 4 + 2] != empty[p * 4 + 2])
+                if (RimPixel(p) && (rimOnly[p * 4] != empty[p * 4] || rimOnly[p * 4 + 1] != empty[p * 4 + 1] ||
+                    rimOnly[p * 4 + 2] != empty[p * 4 + 2]))
                     rimPixels++;
             var withRim = (byte[])occupied.Clone();
             for (int p = 0; p < size * size; p++)
@@ -530,6 +542,52 @@ public sealed partial class MainWindow
                 }
                 Require(pressGame.Snapshot.SpinNumber == 1 && pressGame.Balance == SlotGame.StartingBalance - pressGame.Bet,
                     "The broken-lettering fixture did not produce exactly one isolated paid spin.");
+            }
+            if (waterControl)
+            {
+                int region = hold!.ButtonIds.ToList().IndexOf(button.Id);
+                Require(lastPresence!.TextPatterns!.Single(pattern => pattern.ControlRegion == region) is
+                    { LabelIntact: false, ShapeCorrupted: true, ConfirmationFrames: >= 1 },
+                    button.Label + " obstruction did not break the rendered Water Garden letters.");
+                var readable = ReadableCaptionTint(empty, hold.ExpectedScene, region);
+                for (int frame = 0; frame <= 12; frame++)
+                {
+                    Require(!Feed(readable).Contains(button.Id),
+                        "Intact recolored Water Garden lettering became held evidence on " + button.Label + ".");
+                    var pattern = lastPresence!.TextPatterns!.Single(item => item.ControlRegion == region);
+                    Require(pattern is { LabelIntact: true, ShapeCorrupted: false,
+                            CaptionReflectanceChanged: true, ConfirmationFrames: >= 1 } &&
+                            pattern.CaptionReflectanceCoverage >= .07 && pattern.CaptionReflectanceTriggerCoverage >= .07,
+                        button.Label + " did not preserve its letter shapes under qualifying recoloring: " +
+                        System.Text.Json.JsonSerializer.Serialize(pattern));
+                    Require(hold.ClearedButtons(lastPresence).Contains(button.Id) &&
+                            scene.CurrentHoldProgress.All(progress => progress.ButtonId != button.Id),
+                        "Readable Water Garden letters did not immediately cancel partial " + button.Label + " progress.");
+                }
+
+                // Reuse the actual rendered pixels with a separate interaction
+                // session so testing a full Exit cannot close the optical fixture.
+                var pressBoard = new BoardSession();
+                pressBoard.ShowWaterGarden(now);
+                var clear = tracker.Update(size, size, size * 4, empty,
+                    hold.SearchPolygon, hold.ExpectedScene, now, now);
+                Require(pressBoard.ObserveHeldButtons(hold.HeldButtons(clear), now, now,
+                        hold.ClearedButtons(clear)).Count == 0,
+                    "A readable Water Garden caption began an isolated press.");
+                now += TimeSpan.FromMilliseconds(100);
+                for (int frame = 0; frame <= 10; frame++)
+                {
+                    var broken = tracker.Update(size, size, size * 4, occupied,
+                        hold.SearchPolygon, hold.ExpectedScene, now, now);
+                    var activated = pressBoard.ObserveHeldButtons(hold.HeldButtons(broken), now, now,
+                        hold.ClearedButtons(broken));
+                    Require(frame < 10 ? activated.Count == 0 : activated.SequenceEqual([button.Id]),
+                        "Broken Water Garden lettering did not activate " + button.Label + " after its own full second.");
+                    now += TimeSpan.FromMilliseconds(100);
+                }
+                Require(button.Id == "menu" ? pressBoard.Screen == BoardScreen.Menu :
+                        pressBoard.Screen == BoardScreen.WaterGarden && pressBoard.WaterGardenResetRevision == 2,
+                    "The isolated rendered-caption press did not perform " + button.Label + " exactly once.");
             }
             Feed(empty);
             Require(scene.CurrentHoldProgress.All(progress => progress.ButtonId != button.Id),

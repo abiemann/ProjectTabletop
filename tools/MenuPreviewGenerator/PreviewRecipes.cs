@@ -170,6 +170,25 @@ internal sealed partial class PreviewRecipes
         return fluid;
     }
 
+    private IDisposable DrawWaterGardenPreview(CanvasDrawingSession ds, float span)
+    {
+        double aspect = span / MenuPreviewUnits;
+        var type = _app.GetType("ProjectTabletop.App.Projection.WaterGarden.WaterGardenSimulation", true)!;
+        var water = (IDisposable)Activator.CreateInstance(type, ds.Device, 512,
+            Math.Max(64, (int)Math.Round(512 / aspect)), aspect)!;
+        Call(water, "AddDisturbance", new Vector2(1 - 95 / span, .52f), .05f, .006f);
+        for (int step = 0; step < 36; step++) Call(water, "Advance", 1 / 60.0);
+        Call(water, "Draw", ds, new Rect(0, 0, span, MenuPreviewUnits));
+        var layout = _app.GetType("ProjectTabletop.App.Projection.WaterGarden.WaterGardenRockLayout", true)!;
+        var (far, near) = ((Rect, Rect))layout.GetMethod("GetPlacements")!.Invoke(null,
+            [aspect, _waterRocks.Size.Width / _waterRocks.Size.Height])!;
+        foreach (var bounds in new[] { far, near })
+            ds.DrawImage(_waterRocks, new Rect(bounds.X * span, bounds.Y * MenuPreviewUnits,
+                bounds.Width * span, bounds.Height * MenuPreviewUnits),
+                new Rect(0, 0, _waterRocks.Size.Width, _waterRocks.Size.Height));
+        return water;
+    }
+
     private void DrawLegacyCrownDeedPreview(CanvasDrawingSession ds, float span)
     {
         // A native miniature of Crown & Deed's oval boulevard and city skyline.

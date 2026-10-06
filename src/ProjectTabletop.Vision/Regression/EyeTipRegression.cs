@@ -11,9 +11,52 @@ internal static class EyeTipRegression
         CheckNonMarkers();
         CheckFiniteRingBoundaryAndScaling();
         CheckCandidateBoundAndStride();
+        CheckProjectedClutter();
         CheckTemporalTracking();
         Console.WriteLine("Eye tip regression: native small pupil, elliptical perspective, illumination, glint, " +
-            "hollow/low-contrast rejection, bounded candidates, padded rows, fresh confirmation, loss and ambiguity passed.");
+            "hollow/low-contrast rejection, bounded candidates, projected clutter exclusion, padded rows, fresh confirmation, loss and ambiguity passed.");
+    }
+
+    private static void CheckProjectedClutter()
+    {
+        const int width = 640, height = 420;
+        byte[] rendered = Frame(width, height, 105);
+        for (int row = 0; row < 4; row++)
+        for (int column = 0; column < 7; column++)
+            Eye(rendered, width, height, 45 + column * 78, 40 + row * 76, 6, 6, 0, 225, 20);
+        var reference = new EyeTipProjectionFrame(width, height, rendered,
+            [1.0 / width, 0, 0, 0, 1.0 / height, 0, 0, 0, 1], Epoch);
+        var options = new EyeTipDetectionOptions(5, ProjectionFrames: [reference], FrameTime: Epoch);
+        Require(EyeTipDetector.Detect(width, height, width * 4, rendered, options).Candidates.Count == 0,
+            "Projected eye-like pebble patterns became physical stick tips.");
+
+        byte[] occupied = rendered.ToArray();
+        Eye(occupied, width, height, 320, 365, 5, 4.5, .1, 162, 65);
+        Require(!EyeTipDetector.Detect(width, height, width * 4, occupied).Candidates.Any(item =>
+            Distance(item.Center, new(320, 365)) < 3), "Fixture must crowd the weaker real marker out of the original top eight.");
+        var selected = EyeTipDetector.Detect(width, height, width * 4, occupied, options);
+        Require(selected.Candidates.Count == 1 && Distance(selected.Candidates[0].Center, new(320, 365)) < 3,
+            "Projection exclusion lost a stationary physical eye behind higher-scoring projected clutter.");
+        Require(EyeTipDetector.Detect(width, height, width * 4, occupied,
+            new EyeTipDetectionOptions(PreferredCenter: new(320, 365))).Candidates.Any(item =>
+                Distance(item.Center, new(320, 365)) < 3),
+            "A clicked pupil was truncated before learning could inspect it.");
+
+        // Camera exposure and a two-pixel registration error do not turn printed eyes physical.
+        byte[] shifted = Frame(width, height, 104);
+        for (int y = 0; y < height - 2; y++)
+        for (int x = 0; x < width - 2; x++)
+        for (int channel = 0; channel < 3; channel++)
+            shifted[((y + 2) * width + x + 2) * 4 + channel] =
+                (byte)(rendered[(y * width + x) * 4 + channel] * .8 + 20);
+        Require(EyeTipDetector.Detect(width, height, width * 4, shifted, options).Candidates.Count == 0,
+            "Exposure or small registration changes defeated projected-marker exclusion.");
+        Require(EyeTipDetector.Detect(width, height, width * 4, occupied,
+            options with { FrameTime = Epoch.AddSeconds(2) }).Candidates.Count == 0,
+            "Stale projected reference silently enabled ambiguous physical input.");
+        Require(EyeTipDetector.Detect(width, height, width * 4, occupied,
+            options with { ProjectionFrames = [] }).Reason == "waiting-for-projected-eye-reference",
+            "Pending projection reference fell back to unfiltered marks.");
     }
 
     private static void CheckSmallNativeMarker()

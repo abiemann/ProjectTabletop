@@ -45,15 +45,22 @@ public sealed partial class MainWindow
         bool globe = _scene.CurrentBoardScreen == BoardScreen.Globe;
         bool slots = _scene.CurrentBoardScreen == BoardScreen.Slots;
         bool roulette = _scene.CurrentBoardScreen == BoardScreen.Roulette;
+        bool water = _scene.CurrentBoardScreen == BoardScreen.WaterGarden;
         SettingsToolsPanel.Visibility = _scene.CurrentBoardScreen == BoardScreen.Settings
             ? Visibility.Visible : Visibility.Collapsed;
-        bool boardGame = blackjack || crownDeed || globe || slots || roulette;
-        BoardGamePreviewTitle.Text = roulette ? "VICE ROYALE  ·  ROULETTE  ·  click to place chips" :
+        bool boardGame = blackjack || crownDeed || globe || slots || roulette || water;
+        BoardGamePreviewTitle.Text = water ? "WATER GARDEN  ·  eye-tip stick makes ripples  ·  click controls" :
+            roulette ? "VICE ROYALE  ·  ROULETTE  ·  click to place chips" :
             slots ? "DRAGON SLOTS  ·  click a button to play  ·  virtual credits" :
             globe ? "GLOBE  ·  zoom Earth in and out" : crownDeed ? "CROWN & DEED  ·  click the table to play" :
             "BLACKJACK  ·  click the table to play  ·  virtual chips";
         BlackjackPreviewPanel.Visibility = boardGame ? Visibility.Visible : Visibility.Collapsed;
-        CameraPreviewPanel.Visibility = ProjectionPreviewPanel.Visibility = boardGame ? Visibility.Collapsed : Visibility.Visible;
+        // Water keeps the camera beside its interactive preview so Learn eye tip
+        // remains usable and the user can see whether the sticker is acquired.
+        Microsoft.UI.Xaml.Controls.Grid.SetRow(BlackjackPreviewPanel, water ? 1 : 0);
+        Microsoft.UI.Xaml.Controls.Grid.SetRowSpan(BlackjackPreviewPanel, water ? 1 : 2);
+        CameraPreviewPanel.Visibility = water || !boardGame ? Visibility.Visible : Visibility.Collapsed;
+        ProjectionPreviewPanel.Visibility = boardGame ? Visibility.Collapsed : Visibility.Visible;
         BoardAppStatusText.Text = _scene.CurrentBoardTitle + ". " +
             (IsBoardScanMeasuring ? "Board alignment is in progress." :
              blackjack ? _scene.BlackjackState.Status :
@@ -61,6 +68,7 @@ public sealed partial class MainWindow
              roulette ? _scene.RouletteState.Status :
              crownDeed ? _scene.CrownDeedState.Status :
              globe ? "Earth spins slowly. Open the ^ drawer for Zoom + and Zoom -; its Exit returns to the menu." :
+             water ? "Move the calibrated eye-tip stick close to the board. Hold Calm Water or Exit for a second, or click those controls here." :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :
              _scene.CurrentBoardScreen == BoardScreen.PhotoCopy ? _scene.PhotoCopyStatus :

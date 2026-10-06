@@ -23,6 +23,7 @@ public class InteractionTests
     [Fact] public void ResetAndExternalNavigation() => BoardInteractionRegression.CheckResetAndExternalNavigation();
     [Fact] public void PhotoCopyNavigation() => BoardInteractionRegression.CheckPhotoCopyNavigation();
     [Fact] public void PaintBoard() => PaintBoardRegression.Run();
+    [Fact] public void WaterGardenBoard() => WaterGardenBoardRegression.Run();
     [Fact] public void AnchoredSelection() => BoardInteractionRegression.CheckAnchoredSelection();
     [Fact] public void AnchorFreshnessAndConsumption() => BoardInteractionRegression.CheckAnchorFreshnessAndConsumption();
     [Fact] public void AnchorNavigationAndReset() => BoardInteractionRegression.CheckAnchorNavigationAndReset();

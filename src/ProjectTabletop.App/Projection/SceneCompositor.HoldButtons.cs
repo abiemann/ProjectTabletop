@@ -160,6 +160,7 @@ public sealed partial class SceneCompositor
         _ when button.Id.StartsWith("slot-", StringComparison.Ordinal) => 18,
         _ when button.Id.StartsWith("bj-", StringComparison.Ordinal) => 13,
         _ when button.Id.StartsWith("globe-", StringComparison.Ordinal) => 15,
+        _ when button.Id.StartsWith("water-garden-", StringComparison.Ordinal) => 15,
         _ when button.Id.StartsWith("photo-", StringComparison.Ordinal) || button.Id == "capture-again" ||
             button.Id == "menu" && button.IsHold => 15,
         _ => 19
@@ -175,7 +176,12 @@ public sealed partial class SceneCompositor
         _holdFeedbackKey = null;
     }
 
-    private DateTimeOffset HoldClock() => _boardSession.Screen == BoardScreen.Globe ? _globeClock() : _blackjackClock();
+    private DateTimeOffset HoldClock() => _boardSession.Screen switch
+    {
+        BoardScreen.Globe => _globeClock(),
+        BoardScreen.WaterGarden => _waterClock(),
+        _ => _blackjackClock()
+    };
 
     private bool OnHoldButton(PixelPoint camera)
     {

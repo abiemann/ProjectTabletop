@@ -25,9 +25,15 @@ Captions, diagonal glass falloff and physical rounded clips remain live menu
 rendering; they are not baked into the artwork.
 
 Recipes preserve the established board previews. The offline CLI calls the actual
-production Blackjack, Crown & Deed, Roulette, Globe and Paint rendering helpers
+production Blackjack, Crown & Deed, Roulette, Globe, Paint and Water Garden rendering helpers
 through reflection. It loads only the menu dragon asset for Dragon Slots. Paint
 uses the existing 96-pixel-high simulation, seeded drops and settling sequence.
+Water Garden uses its native perspective basin, wave solver, moss-rock artwork,
+procedural pebble bed and five tiny yellow rubber ducks. The ducks use original
+analytic geometry and GPU buoyancy, with reflections in the water; no extra image
+asset or dependency is needed. Its fixed oblique camera reveals the raised slate
+rim, water depth and larger foreground rocks, with one off-centre disturbance
+allowed to spread and move the ducks before capturing the surface.
 Crown & Deed renders its real city painting, all forty property parcels, settled
 shops, silver pieces and the original painted water into a 2400-square board.
 The saved thumbnail crops the palace and domed waterfront district, keeping the

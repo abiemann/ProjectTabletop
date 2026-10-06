@@ -18,12 +18,17 @@ public static class EyeTipDetector
     private const int RingSamples = 24;
     private static readonly int[] Thresholds = [40, 70, 105, 145, 185];
 
-    public static EyeTipDetectionResult Detect(int width, int height, int stride, byte[] bgra)
+    public static EyeTipDetectionResult Detect(int width, int height, int stride, byte[] bgra,
+        EyeTipDetectionOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(bgra);
         if (width is <= 0 or > 16384 || height is <= 0 or > 16384 || stride < width * 4L ||
             bgra.Length < (height - 1L) * stride + width * 4L)
             throw new ArgumentException("Invalid BGRA dimensions, stride, or buffer length.");
+        options?.Validate();
+        EyeTipProjectionMatcher? projection = options?.ProjectionFrames is null ? null :
+            new(options.ProjectionFrames, options.FrameTime == default ? DateTimeOffset.UtcNow : options.FrameTime);
+        if (projection is { Ready: false }) return new([], "waiting-for-projected-eye-reference");
 
         using Mat source = Mat.FromPixelData(height, width, MatType.CV_8UC4, bgra, stride);
         using Mat reduced = new();
@@ -57,6 +62,9 @@ public static class EyeTipDetector
             {
                 double area = Math.Abs(Cv2.ContourArea(contour));
                 if (area < 10 || area > 20000) continue;
+                double rawRadius = Math.Sqrt(area / Math.PI * scaleX * scaleY);
+                if (options?.ExpectedRadiusPixels is { } expectedRadius &&
+                    (rawRadius < expectedRadius * .60 || rawRadius > expectedRadius * 1.65)) continue;
                 Rect bounds = Cv2.BoundingRect(contour);
                 if (bounds.X <= 1 || bounds.Y <= 1 || bounds.Right >= workingWidth - 1 ||
                     bounds.Bottom >= workingHeight - 1 || bounds.Width > 200 || bounds.Height > 200) continue;
@@ -124,7 +132,7 @@ public static class EyeTipDetector
                 double score = .30 * Math.Clamp(contrast / 115, 0, 1) + .25 * ringCoverage +
                     .25 * Math.Clamp(circularity, 0, 1) + .20 * darkFill;
                 var observation = new EyeTipObservation(new(cx * scaleX, cy * scaleY),
-                    Math.Sqrt(area / Math.PI * scaleX * scaleY), score, contrast, ringCoverage);
+                    rawRadius, score, contrast, ringCoverage);
                 int duplicate = candidates.FindIndex(previous =>
                     Distance(previous.Center, observation.Center) <= Math.Max(3 * scaleX,
                         Math.Min(previous.RadiusPixels, observation.RadiusPixels) * .8));
@@ -132,7 +140,14 @@ public static class EyeTipDetector
                 else if (observation.Score > candidates[duplicate].Score) candidates[duplicate] = observation;
             }
         }
-        EyeTipObservation[] best = candidates.OrderByDescending(item => item.Score).Take(8).ToArray();
+        // Preserve the clicked/associated marker before bounding work. Projection clutter can
+        // score higher than a real pupil, so the rendered-scene veto precedes the final top eight.
+        IEnumerable<EyeTipObservation> ranked = options?.PreferredCenter is { } preferred ?
+            candidates.OrderBy(item => Distance(item.Center, preferred)).ThenByDescending(item => item.Score) :
+            candidates.OrderByDescending(item => item.Score);
+        EyeTipObservation[] best = ranked.Take(options is null ? 8 : 128)
+            .Where(item => projection is null || projection.IsPhysicalCandidate(item, pixels,
+                workingWidth, workingHeight, scaleX, scaleY)).Take(8).ToArray();
         return new(best, best.Length == 0 ? "no-eye-marker" : best.Length == 1 ? "eye-candidate" : "multiple-eye-candidates");
     }
 

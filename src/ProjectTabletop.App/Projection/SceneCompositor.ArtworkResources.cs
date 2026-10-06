@@ -14,6 +14,7 @@ public sealed partial class SceneCompositor
         BoardScreen.Slots => _slotArtworkAttempted,
         BoardScreen.Roulette => _rouletteArtworkPublished,
         BoardScreen.CrownDeed => CrownDeedResourcesReady,
+        BoardScreen.WaterGarden => _waterArtworkPublished,
         _ => true
     };
 
@@ -22,6 +23,7 @@ public sealed partial class SceneCompositor
         BoardScreen.Slots => EnsureSlotResourcesAsync(device),
         BoardScreen.Roulette => EnsureRouletteResourcesAsync(device),
         BoardScreen.CrownDeed => EnsureCrownDeedResourcesAsync(device),
+        BoardScreen.WaterGarden => EnsureWaterGardenResourcesAsync(device),
         _ => Task.CompletedTask
     };
 
@@ -30,6 +32,7 @@ public sealed partial class SceneCompositor
         BoardScreen.Slots => PrepareSlotResources(device),
         BoardScreen.Roulette => PrepareRouletteResources(device),
         BoardScreen.CrownDeed => PrepareCrownDeedResources(device),
+        BoardScreen.WaterGarden => PrepareWaterGardenResources(device),
         _ => true
     };
 

@@ -67,6 +67,7 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         _scene.LicensesRequested += () => DispatcherQueue.TryEnqueue(() => _ = ShowLicensesAsync());
+        _scene.BoardOpened += BoardOpenedForStickTracking;
         AppPalette.ApplyTitleBar(AppWindow.TitleBar);
         InitializeHandDetectionLogging();
         _camera.FrameReceived += Camera_FrameReceived;

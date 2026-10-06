@@ -18,7 +18,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Generator build failed.' }
 New-Item -ItemType Directory -Force -Path $stageDirectory, $comparisonDirectory, $assetDirectory | Out-Null
 # Stage the application runtime privately; never copy into or launch the app.
 Get-ChildItem -LiteralPath $appBuildDirectory -Force | Copy-Item -Destination $stageDirectory -Recurse -Force
-$generatorOutput = Join-Path $PSScriptRoot 'bin/Debug/net10.0-windows10.0.26100.0'
+$generatorOutput = Join-Path $PSScriptRoot 'bin/Debug/net10.0-windows10.0.26100.0/win-x64'
 Get-ChildItem -LiteralPath $generatorOutput -Filter 'MenuPreviewGenerator.*' | Copy-Item -Destination $stageDirectory -Force
 & (Join-Path $stageDirectory 'MenuPreviewGenerator.exe') $repositoryRoot $assetDirectory $comparisonDirectory
 if ($LASTEXITCODE -ne 0) { throw 'Offline preview generation failed.' }

@@ -219,9 +219,9 @@ public sealed partial class MainWindow
         byte[] initial = await Capture("menu-top");
         var initialButtons = scene.CurrentBoardButtons.Select(button => (button.Id, button.Bounds)).ToArray();
         Check(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
-            ["slots", "photo-copy", "blackjack", "crown-deed", "globe", "settings", "menu-scroll-down"]) &&
-            scene.CurrentBoardButtons.All(button => !button.Bounds.Contains(.72, .53)),
-            "The initial menu does not retain five cards, Paint's empty former position and a separate scroll handle.");
+            ["slots", "photo-copy", "blackjack", "water-garden", "crown-deed", "globe", "settings", "menu-scroll-down"]) &&
+            scene.CurrentBoardButtons.Single(button => button.Id == "water-garden").Bounds.Contains(.72, .53),
+            "The initial menu does not show six cards with Water Garden beside Blackjack and a separate scroll handle.");
         scene.GetHandAcquisitionContext(fixture.Now);
         fixture.Now += TimeSpan.FromMilliseconds(600);
         fixture.Draw();
@@ -283,7 +283,7 @@ public sealed partial class MainWindow
         Check(!board.MenuScrolled && !board.MenuScrolling &&
             scene.CurrentBoardButtons.Select(button => (button.Id, button.Bounds)).SequenceEqual(initialButtons) &&
             fixture.RegionUnchanged(initial, returned, BoardSession.MenuCardViewport),
-            "The up-arrow precision gesture did not restore all five initial cards, their positions and their native pixels.");
+            "The up-arrow precision gesture did not restore all six initial cards, their positions and their native pixels.");
         Check(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "Isolated menu-scroll verification changed live hardware or navigation.");

@@ -1,5 +1,5 @@
 {
-  "recipeVersion": 3,
+  "recipeVersion": 4,
   "generation": "Offline native Win2D using the project\u0027s existing artwork, geometry and shaders; never run during app startup.",
   "width": 2304,
   "height": 512,
@@ -16,7 +16,7 @@
       "height": 350
     },
     "snapshot": "Fixed representative game; hat on Amber Exchange, car on Festival Dues, three shops on each Crown Quarter property.",
-    "waterTimeSeconds": 0
+    "water": "Original still city artwork"
   },
   "roulette": {
     "composition": "Full bowl and spindle framed to the thumbnail height.",
@@ -36,6 +36,10 @@
     "fixedStepsPerUpdate": 4,
     "shaderPassesPerStep": 14,
     "seed": "101 \u002B dropIndex * 37"
+  },
+  "waterGarden": {
+    "composition": "Native clear-water surface over original procedural river stones.",
+    "attribution": "Evan Wallace WebGL Water, MIT; see THIRD_PARTY_NOTICES.md"
   },
   "assets": [
     {
@@ -99,12 +103,27 @@
       }
     },
     {
+      "board": "WaterGarden",
+      "file": "water-garden.png",
+      "width": 2304,
+      "height": 512,
+      "sha256": "82e772c393eb2d6cb049f59db3061fcd50827ca182c5effd5f220495fddf093b",
+      "bytes": 1698457,
+      "pngColorType": 6,
+      "alpha": {
+        "transparent": 0,
+        "translucent": 0,
+        "opaque": 1179648,
+        "exteriorVerified": false
+      }
+    },
+    {
       "board": "CrownDeed",
       "file": "crown-deed.png",
       "width": 2304,
       "height": 512,
-      "sha256": "d9d2cd7718a6df70766d22b3d73e7aef0c03b09a595739bbca3a4b9876f850cd",
-      "bytes": 1312025,
+      "sha256": "f0cb8a42aad3e29386928c504d1b0db96f8c9d42aabe4d4f47bedfe85ed5e9c5",
+      "bytes": 1199405,
       "pngColorType": 6,
       "alpha": {
         "transparent": 0,
@@ -201,6 +220,10 @@
       "sha256": "71670bfaafdc36a2342e7800d058f87a676a9fa9ccda05d51270df8bdcce9919"
     },
     {
+      "file": "src/ProjectTabletop.App/Assets/WaterGarden/moss-rocks.png",
+      "sha256": "85c5f3209c14d5c384ddbf47c09a867a3b9e90a6c01c40f954d932a76c67fba0"
+    },
+    {
       "file": "src/ProjectTabletop.App/GlobeRendering/Assets/earth-clouds-2048.jpg",
       "sha256": "daddaad84d7a33bbbc86cdda3f591099f57cee8607b7bcf3b67eb7e4f7a1c793"
     },
@@ -211,10 +234,6 @@
     {
       "file": "src/ProjectTabletop.App/Projection/CrownDeedPieceSources.cs",
       "sha256": "ecbc3c3ebec0dbc6325c672e53dd892bcb2b4dca8d50b7d0ccd234516dcc5319"
-    },
-    {
-      "file": "src/ProjectTabletop.App/Projection/CrownDeedRendering/CrownDeedWaterShader.cs",
-      "sha256": "e49d02c3c7a157662cebf919fa063e33645aad07386b3ea706077a501f2cef4e"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/GlobeRendering/EarthSurfaceShader.cs",
@@ -241,24 +260,20 @@
       "sha256": "fdd86ec66a91e77b16f22bf1fcbb3ffe2f6fd37a1f24a326687645d8b7dfa55c"
     },
     {
+      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeed.cs",
+      "sha256": "9214766455270ea665ae0ceba8187347b0c1181edd271c02d9621b6ba9e4e621"
+    },
+    {
       "file": "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedAssets.cs",
-      "sha256": "eab13b15ec65292b29d9c7d0296cd341cca04fa6491d8ee4245a217e017d07cd"
+      "sha256": "80d1df6c307a2d422031a84e527d749adae746d2b2344df8012581e566e3e979"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedBuildings.cs",
-      "sha256": "f0fcf93fe7f2aa1e0417dc82ef6e7178393fec6ab8dc3fcc7c05349b8bd06816"
+      "sha256": "fcadfdcf88c0c360045f8f4aa58fca28fec9b20f44ef785330826dde1db1cd70"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedPieces.cs",
-      "sha256": "cc65f627af7a4e59683d050a4224b42a202014421e48cfd1ac637b68a0fb42d6"
-    },
-    {
-      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedWater.cs",
-      "sha256": "5bbf10aa15cc06fe3aab097f5c83885ccaa5f95cc647ee0d074a73dda723e4d1"
-    },
-    {
-      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeed.cs",
-      "sha256": "2e4ae68c7a14f8f6fe308f3d6ca58607eaf6ace50adbe84856a4449c21df7988"
+      "sha256": "7e3dadb4b2cc7b3723a50d6b305ff0430852f275df651d1df09ebae4c028f485"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/SceneCompositor.Paint.cs",
@@ -277,40 +292,72 @@
       "sha256": "01da2226c6ce3d92c63b6150e663e234149010e500a9abc76dd273bd211b50a7"
     },
     {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/PebbleBedShader.cs",
+      "sha256": "c7dbbe675f29abcac6d707e223ffaa13c9bef9abd432dcc6ff5e52c4c736f766"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterDuckDynamicsShader.cs",
+      "sha256": "f0f741a37728984f2606632203d39e8535844f01309d02cfce892ae04e98e978"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterDuckRendering.cs",
+      "sha256": "7ba534912cb7d2e7c5c1f8c5fce2839f0c5d5adbd4bcc6596c9586f6b4d5b189"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterGardenRockLayout.cs",
+      "sha256": "9134ad248742037927ad688675d293fb71397baed24844a214af47ab4649bea8"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterGardenSimulation.cs",
+      "sha256": "0f3c339dfc502c6d9aee09e805fec0dbaf00ae2f71f0af928846c1af337ffdca"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterGardenView.cs",
+      "sha256": "55acb34335cd7ffe1e6bb3daa4d20219791c4ae72dabcde7e83e6d5fee0ac875"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterSimulationShaders.cs",
+      "sha256": "109a198fcd03238e487f2b603be9d460392450110785d572e89d153074197a09"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterSurfaceShader.cs",
+      "sha256": "c474fdc45521fd81792d7e2ce357696192f0758fc4fb3cf91f7d8d9e5cab0de8"
+    },
+    {
       "file": "src/ProjectTabletop.App/SlotsRendering/Assets/slot-menu-dragon.png",
       "sha256": "2b095dad8ece77f3bfad2d24ca9dcca6b5727fac693e4d02b2160b7a73e4538a"
     },
     {
-      "file": "src/ProjectTabletop.Interaction/GlobeHome.cs",
-      "sha256": "189edcc6599b689bc820e82ed2b5737b12a24e7b4ec3e812414669382cd868b9"
-    },
-    {
       "file": "src/ProjectTabletop.Interaction/CrownDeedBoard.cs",
-      "sha256": "1048203b2663272ac5ff51e12fab78efc6032b0d80c3ac84d267687dfd0a4324"
+      "sha256": "d29e7020763b931974d1b8009a73a17f451cb8af06b1e51ae630e4dbb8fe9c3a"
     },
     {
       "file": "src/ProjectTabletop.Interaction/CrownDeedGame.cs",
-      "sha256": "c46395845d7b4fd443126022c23008df2ab2dfbdc02e585daeeb21abfbdd489c"
+      "sha256": "c856bf295d0b8ef36a48ff5b4b9c7a16ef81f22679fc42661af1ea677e6b6f52"
     },
     {
       "file": "src/ProjectTabletop.Interaction/CrownDeedModels.cs",
-      "sha256": "4e8797175e0d5e1c22ef2ddde6adba19fec8684d7fc8c93293a928e4e8698a60"
+      "sha256": "b7133c8a549145ca8bd35366b9deaed64a76b85824a5f0e58daaef210a545537"
+    },
+    {
+      "file": "src/ProjectTabletop.Interaction/GlobeHome.cs",
+      "sha256": "37357b89a271375e214d6917c4a9aa56caff25a1225319d3d1c5c3c207c90a12"
     },
     {
       "file": "tools/MenuPreviewGenerator/Generate.ps1",
-      "sha256": "6f801877cb3a08b80badb87c680c792f731d911f77f2348579f26ed100820b24"
+      "sha256": "9bfeb949fe20355d92ddbf0eaca668e40d6b3add4f9164871771f82be1db53a0"
     },
     {
       "file": "tools/MenuPreviewGenerator/MenuPreviewGenerator.csproj",
-      "sha256": "857557a0837eff30da601cacd1fcb313d6970106b9aa1dbab75122d6b35abba9"
+      "sha256": "7f4d9356739a7e5f1b3afce459ffe533ef31283c35f91b182be26575d95b0721"
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.Native.cs",
-      "sha256": "013ffc50f28004cf556a21fd81232bdca2d545d7a6bbc67a6d6427615a1a4593"
+      "sha256": "36d3e9ffff97b8a1b8d94044a6cef26ce3b8c17cfa771bd17c98b0fe164c7ac1"
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.cs",
-      "sha256": "b6682a776e073c68dcf149e956c702ce604ea0f542f22e0ec91edb60fd2a4ad4"
+      "sha256": "e13221cd35ad716980bb0be9f3118cab665f9ddc3ad496ba92610d7e8e03b988"
     },
     {
       "file": "tools/MenuPreviewGenerator/Program.cs",

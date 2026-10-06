@@ -63,9 +63,53 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## WebGL Water by Evan Wallace
+
+Source: [evanw/webgl-water](https://github.com/evanw/webgl-water), commit
+[`73eda8be832b649367b25ea5690c1f0181bb56ad`](https://github.com/evanw/webgl-water/tree/73eda8be832b649367b25ea5690c1f0181bb56ad).
+The upstream [`water.js`](https://github.com/evanw/webgl-water/blob/73eda8be832b649367b25ea5690c1f0181bb56ad/water.js)
+and [`renderer.js`](https://github.com/evanw/webgl-water/blob/73eda8be832b649367b25ea5690c1f0181bb56ad/renderer.js)
+headers identify Evan Wallace's 2011 copyright and MIT license.
+
+Water Garden adapts the height-field wave update, disturbance and surface-normal
+approach into native C#/Direct2D GPU shaders. Its basin, environment and water
+shading are created for ProjectTabletop, with approximate caustic lighting rather
+than the upstream refracted-mesh caustics renderer. The upstream WebGL application,
+JavaScript runtime, pool-tile image and skybox images are not bundled.
+
+The garden's moss-rock cluster is original artwork generated for ProjectTabletop
+with OpenAI's built-in image-generation tool. Its prompts and provenance are in
+[`ARTWORK.md`](https://github.com/abiemann/ProjectTabletop/blob/main/src/ProjectTabletop.App/Assets/WaterGarden/ARTWORK.md).
+It does not use pixels or branding from the reference garden video or upstream
+WebGL Water imagery.
+
+```text
+MIT License
+
+Copyright 2011 Evan Wallace
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## ComputeSharp
 
-The Paint and Globe GPU shaders use [ComputeSharp](https://github.com/Sergio0694/ComputeSharp)
+The Paint, Globe and Water Garden GPU shaders use [ComputeSharp](https://github.com/Sergio0694/ComputeSharp)
 3.2.0 through `ComputeSharp.D2D1.WinUI` and its `ComputeSharp.D2D1` dependency.
 Their upstream revision is
 [`9a7c9e0c755bf68447f7293e5729547750fe6be3`](https://github.com/Sergio0694/ComputeSharp/tree/9a7c9e0c755bf68447f7293e5729547750fe6be3).

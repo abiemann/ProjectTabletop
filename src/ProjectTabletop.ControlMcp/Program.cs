@@ -20,7 +20,7 @@ if (args.Length == 0)
 
 if (args.Length < 2 || args[0] != "--once" || args.Length > 3)
 {
-    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|set_stick_tracking|learn_stick_tip|get_stick_tip|capture_stick_tip|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|show_crown_deed|show_globe|show_slots|show_settings|show_paint|blackjack_action|crown_deed_action|globe_action|slots_action|slots_demo|capture_blackjack_preview|capture_crown_deed_preview|capture_globe_preview|capture_slots_preview|shutdown> [JSON object]");
+    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|set_stick_tracking|learn_stick_tip|learn_color_tip|get_stick_tip|capture_stick_tip|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|show_crown_deed|show_globe|show_slots|show_settings|show_paint|blackjack_action|crown_deed_action|globe_action|slots_action|slots_demo|capture_blackjack_preview|capture_crown_deed_preview|capture_globe_preview|capture_slots_preview|shutdown> [JSON object]");
     return 2;
 }
 
@@ -48,7 +48,7 @@ static async Task RunMcpAsync()
             new McpServerToolCreateOptions
             {
                 Name = "set_stick_tracking",
-                Description = "Enable or disable eye-sticker stick-tip tracking in the camera preview."
+                Description = "Enable or disable the learned coloured-tip or eye-sticker tracking in the camera preview."
             });
     static McpServerTool LearnStickTipTool() =>
         McpServerTool.Create((Func<double, double, Task<string>>)LearnStickTipAsync,
@@ -57,12 +57,26 @@ static async Task RunMcpAsync()
                 Name = "learn_stick_tip",
                 Description = "Learn the detected black pupil with a white surround nearest x/y in the current raw camera image; coordinates are camera pixels."
             });
+    static McpServerTool LearnColorTipTool() =>
+        McpServerTool.Create((Func<double, double, Task<string>>)LearnColorTipAsync,
+            new McpServerToolCreateOptions
+            {
+                Name = "learn_color_tip",
+                Description = "Learn a coloured pin or stick marker by clicking inside its colour at x/y in the current raw camera image; coordinates are camera pixels."
+            });
     static McpServerTool BlackjackActionTool() =>
         McpServerTool.Create((Func<string, Task<string>>)BlackjackActionAsync,
             new McpServerToolCreateOptions
             {
                 Name = "blackjack_action",
                 Description = "Activate an enabled Blackjack button by id, such as bj-deal, bj-hit, bj-stand, bj-double, bj-split, bj-bet-25 or bj-reset. Uses virtual credits only."
+            });
+    static McpServerTool WaterGardenActionTool() =>
+        McpServerTool.Create((Func<string, Task<string>>)WaterGardenActionAsync,
+            new McpServerToolCreateOptions
+            {
+                Name = "water_garden_action",
+                Description = "Activate a Water Garden control: water-garden-calm resets the water; menu returns to the launcher."
             });
     static McpServerTool CrownDeedActionTool() =>
         McpServerTool.Create((Func<string, Task<string>>)CrownDeedActionAsync,
@@ -114,13 +128,17 @@ static async Task RunMcpAsync()
             HandTrackingTool(),
             StickTrackingTool(),
             LearnStickTipTool(),
-            Tool("get_stick_tip", "Read eye-sticker calibration, current candidates, and fresh confirmed stick-tip position in raw camera pixels."),
-            Tool("capture_stick_tip", "Save the current camera image with eye-sticker tracking annotations as a local PNG."),
+            LearnColorTipTool(),
+            Tool("get_stick_tip", "Read the learned marker mode, calibration, current candidates, and fresh confirmed stick-tip position in raw camera pixels."),
+            Tool("capture_stick_tip", "Save the current camera image with stick-tip tracking annotations as a local PNG."),
             Tool("show_test_grid", "Show the board-clipped test grid on the projector."),
             Tool("show_board_menu", "Show the board app menu and enable hand tracking for pinch selection."),
             Tool("show_hand_tracking_test", "Open the built-in Hand-Tracking gesture test and enable hand tracking."),
             Tool("show_photo_copy", "Open Photo Copy on grey output: bottom controls offer Exit, Swirl and Copy. Swirl repeats an object photo and becomes Clear; Copy immediately saves a PNG with a photocopier sound."),
             Tool("show_paint", "Open GPU fluid Paint: physical disturbances deposit slowly settling coats of paint and metallic particles. Exit and Save float at the bottom sides; only interference with their text enables a local button light. Canvas hand spotlights stay disabled."),
+            Tool("show_water_garden", "Open Water Garden: shallow clear water and a pebble bed with ripples driven by a learned coloured tip or eye sticker. Camera and projector are not started by this command."),
+            Tool("get_water_garden", "Read Water Garden simulation and fresh calibrated stick input diagnostics."),
+            WaterGardenActionTool(),
             Tool("show_blackjack", "Open the virtual-chip Blackjack table and laptop preview without opening projector output or starting the camera."),
             BlackjackActionTool(),
             Tool("show_crown_deed", "Open Crown & Deed, the oval property board with human/AI player setup and a clickable laptop preview, without starting camera or projector."),
@@ -155,8 +173,14 @@ static Task<string> SetStickTrackingAsync(bool enabled) =>
 static Task<string> LearnStickTipAsync(double x, double y) =>
     CallToolAsync("learn_stick_tip", JsonSerializer.SerializeToElement(new { x, y }));
 
+static Task<string> LearnColorTipAsync(double x, double y) =>
+    CallToolAsync("learn_color_tip", JsonSerializer.SerializeToElement(new { x, y }));
+
 static Task<string> BlackjackActionAsync(string id) =>
     CallToolAsync("blackjack_action", JsonSerializer.SerializeToElement(new { id }));
+
+static Task<string> WaterGardenActionAsync(string id) =>
+    CallToolAsync("water_garden_action", JsonSerializer.SerializeToElement(new { id }));
 
 static Task<string> CrownDeedActionAsync(string id) =>
     CallToolAsync("crown_deed_action", JsonSerializer.SerializeToElement(new { id }));

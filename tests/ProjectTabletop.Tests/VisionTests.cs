@@ -34,6 +34,7 @@ public class VisionTests
     [Fact] public void HandSpotlightSmoothing() => HandSpotlightSmoothingRegression.Run();
     [Fact] public void PaintDisturbance() => PaintDisturbanceRegression.Run();
     [Fact] public void EyeTipDetectionAndTracking() => EyeTipRegression.Run();
+    [Fact] public void ColorTipDetectionAndTracking() => ColorTipRegression.Run();
     [Fact] public void PhotoCopy() => PhotoCopyRegression.Run();
     [Fact] public void PhotoObject() => PhotoObjectRegression.Run();
     [Fact] public void PhotoObjectTarget() => PhotoObjectTargetRegression.Run();

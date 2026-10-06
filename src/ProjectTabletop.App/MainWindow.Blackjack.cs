@@ -21,7 +21,9 @@ public sealed partial class MainWindow
 
     private void BlackjackPreview_Draw(ICanvasAnimatedControl sender, CanvasAnimatedDrawEventArgs args)
     {
-        if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Roulette)
+        if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.WaterGarden)
+            _scene.DrawWaterGardenPreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
+        else if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Roulette)
             _scene.DrawRoulettePreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
         else if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Slots)
             _scene.DrawSlotsPreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
@@ -41,13 +43,14 @@ public sealed partial class MainWindow
         bool globe = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Globe;
         bool slots = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Slots;
         bool roulette = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Roulette;
-        double aspect = roulette ? _scene.RoulettePreviewAspect : slots ? _scene.SlotsPreviewAspect : globe ? _scene.GlobePreviewAspect :
+        bool water = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.WaterGarden;
+        double aspect = water ? _scene.WaterGardenPreviewAspect : roulette ? _scene.RoulettePreviewAspect : slots ? _scene.SlotsPreviewAspect : globe ? _scene.GlobePreviewAspect :
             crownDeed ? _scene.CrownDeedPreviewAspect : 1;
         double drawWidth = Math.Min(width, height * aspect), drawHeight = drawWidth / aspect;
         if (drawWidth <= 0 || drawHeight <= 0) return;
         double u = (point.Position.X - (width - drawWidth) / 2) / drawWidth;
         double v = (point.Position.Y - (height - drawHeight) / 2) / drawHeight;
-        if (roulette ? _scene.ActivateRouletteAt(u, v) : slots ? _scene.ActivateSlotsAt(u, v) : globe ? _scene.ActivateGlobeAt(u, v) :
+        if (water ? _scene.ActivateWaterGardenAt(u, v) : roulette ? _scene.ActivateRouletteAt(u, v) : slots ? _scene.ActivateSlotsAt(u, v) : globe ? _scene.ActivateGlobeAt(u, v) :
             crownDeed ? _scene.ActivateCrownDeedAt(u, v) : _scene.ActivateBlackjackAt(u, v))
         {
             if (crownDeed) QueueCrownDeedSave();

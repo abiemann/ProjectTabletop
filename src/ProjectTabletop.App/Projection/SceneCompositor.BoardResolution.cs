@@ -162,6 +162,7 @@ public sealed partial class SceneCompositor
         _projectorPixelWidth = _projectorPixelHeight = 0;
         _boardApplicationTarget?.Dispose();
         _boardApplicationTarget = null;
+        DisposeEyeProjectionReference();
         _renderedBoardState = null;
         _blackjackFlightTarget?.Dispose();
         _blackjackFlightTarget = null;
@@ -169,6 +170,7 @@ public sealed partial class SceneCompositor
         _blackjackPreviewTarget = null;
         _blackjackPreviewRevision = -1;
         ResetPaint();
+        DisposeWaterGardenResources();
         // A first launch can wait for calibration. Keep its unseen hint pending;
         // resetting an already visible painting still leaves the board blank.
         if (unseenPaintIntroduction && _boardSession.Screen == BoardScreen.Paint) SchedulePaintIntroduction();

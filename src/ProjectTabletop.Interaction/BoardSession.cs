@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, CrownDeed, Globe, Media, Slots, Settings, Roulette }
+public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, CrownDeed, Globe, Media, Slots, Settings, Roulette, WaterGarden }
 
 /// <summary>A rectangle in the board's normalized, perspective-corrected coordinate system.</summary>
 public readonly record struct BoardRect(double X, double Y, double Width, double Height)
@@ -118,6 +118,7 @@ public sealed partial class BoardSession
         BoardScreen.PhotoCopy => "Photo Copy",
         BoardScreen.Blackjack => "Blackjack",
         BoardScreen.Paint => "Paint",
+        BoardScreen.WaterGarden => "Water Garden",
         BoardScreen.CrownDeed => "Crown & Deed",
         BoardScreen.Globe => "Globe",
         BoardScreen.Media => "Media",
@@ -131,6 +132,7 @@ public sealed partial class BoardSession
         BoardScreen.Menu => CurrentMenuButtons(),
         BoardScreen.PhotoCopy => CurrentPhotoCopyButtons(),
         BoardScreen.Paint => CurrentPaintButtons(),
+        BoardScreen.WaterGarden => WaterGardenButtons,
         BoardScreen.Blackjack => BlackjackButtons(),
         BoardScreen.CrownDeed => CrownDeedButtons(),
         BoardScreen.Globe => CurrentGlobeButtons(),
@@ -258,6 +260,7 @@ public sealed partial class BoardSession
         Screen = screen;
         Revision++;
         NavigationRevision++;
+        if (screen == BoardScreen.WaterGarden) WaterGardenResetRevision++;
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

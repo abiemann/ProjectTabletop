@@ -41,6 +41,7 @@ public sealed partial class SceneCompositor
 
     private void OnBoardOpened(BoardScreen screen)
     {
+        BoardOpened?.Invoke(screen);
         CancelCrownDeedDevelopment();
         CancelCrownDeedEntrance();
         if (screen != BoardScreen.CrownDeed) return;

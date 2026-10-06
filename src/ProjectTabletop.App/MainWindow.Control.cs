@@ -91,6 +91,10 @@ public sealed partial class MainWindow
                     ? acquisitionBoard.GetString() : null);
             case "verify_paint":
                 return await VerifyPaintAsync();
+            case "verify_water_garden":
+                return await VerifyWaterGardenAsync();
+            case "capture_water_garden_motion":
+                return await CaptureWaterGardenMotionAsync();
             case "capture_paint_diagnostics":
                 return await SavePaintDiagnosticsAsync();
             case "verify_paint_save":
@@ -129,6 +133,8 @@ public sealed partial class MainWindow
                 return await VerifyRouletteAsync();
             case "verify_menu_scroll":
                 return await VerifyMenuScrollAsync();
+            case "verify_menu_thumbnails":
+                return await VerifyMenuThumbnailsAsync();
             case "verify_slots_motion":
                 return await VerifySlotsMotionAsync();
             case "verify_slots_hatching":
@@ -215,6 +221,7 @@ public sealed partial class MainWindow
                     lastHandDetection = _lastHandDetection,
                     handDetectionLog = _handDetectionLog?.Status,
                     paint = _scene.GetPaintDiagnostics(),
+                    waterGarden = _scene.GetWaterGardenDiagnostics(),
                     paintInput = _scene.GetPaintInputDiagnostics(),
                     paintSaveStatus = _scene.GetPaintSaveStatus(MonotonicClock.UtcNow),
                     lastSavedPaintPath = _lastSavedPaintPath,
@@ -270,6 +277,11 @@ public sealed partial class MainWindow
                     !parameters.TryGetProperty("y", out var stickY) || stickY.ValueKind != JsonValueKind.Number || !stickY.TryGetDouble(out double eyeY))
                     throw new ArgumentException("Provide numeric x and y in raw camera pixels.");
                 return await LearnEyeTipAsync(eyeX, eyeY);
+            case "learn_color_tip":
+                if (!parameters.TryGetProperty("x", out var colorTipX) || colorTipX.ValueKind != JsonValueKind.Number || !colorTipX.TryGetDouble(out double colorX) ||
+                    !parameters.TryGetProperty("y", out var colorTipY) || colorTipY.ValueKind != JsonValueKind.Number || !colorTipY.TryGetDouble(out double colorY))
+                    throw new ArgumentException("Provide numeric x and y in raw camera pixels.");
+                return await LearnColorTipAsync(colorX, colorY);
             case "capture_stick_tip":
                 return await CaptureStickTipAsync();
             case "start_board_scan":
@@ -317,6 +329,17 @@ public sealed partial class MainWindow
                 ShowPaint();
                 return new { boardApp = _scene.CurrentBoardScreen.ToString(),
                     boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
+            case "show_water_garden":
+                ShowWaterGarden();
+                return new { boardApp = _scene.CurrentBoardScreen.ToString(),
+                    boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
+            case "get_water_garden":
+                return _scene.GetWaterGardenDiagnostics();
+            case "water_garden_action":
+                if (!parameters.TryGetProperty("id", out var waterAction) || waterAction.ValueKind != JsonValueKind.String)
+                    throw new ArgumentException("Provide a Water Garden button id.");
+                return new { accepted = _scene.ActivateWaterGardenButton(waterAction.GetString()!),
+                    waterGarden = _scene.GetWaterGardenDiagnostics() };
             case "show_blackjack":
                 ShowBlackjack();
                 return new { boardApp = _scene.CurrentBoardScreen.ToString(), blackjack = _scene.BlackjackState };

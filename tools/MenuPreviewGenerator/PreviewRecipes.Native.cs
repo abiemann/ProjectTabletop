@@ -16,7 +16,7 @@ internal sealed partial class PreviewRecipes
     private static readonly (BoardScreen Screen, string Stem)[] Boards =
     [
         (BoardScreen.HandTracking, "hand-tracking"), (BoardScreen.PhotoCopy, "photo-copy"),
-        (BoardScreen.Blackjack, "blackjack"), (BoardScreen.Paint, "paint"),
+        (BoardScreen.Blackjack, "blackjack"), (BoardScreen.Paint, "paint"), (BoardScreen.WaterGarden, "water-garden"),
         (BoardScreen.CrownDeed, "crown-deed"), (BoardScreen.Globe, "globe"),
         (BoardScreen.Slots, "dragon-slots"), (BoardScreen.Roulette, "roulette")
     ];
@@ -24,6 +24,7 @@ internal sealed partial class PreviewRecipes
     private readonly Type _sceneType;
     private readonly IDisposable _scene;
     private readonly CanvasBitmap _dragon;
+    private readonly CanvasBitmap _waterRocks;
     private readonly CanvasRenderTarget _crownDeedBoard;
     private readonly object _globe;
     private readonly PaletteColors Palette;
@@ -31,9 +32,10 @@ internal sealed partial class PreviewRecipes
     private readonly Color CrownDeedIvory, CrownDeedInk;
 
     private PreviewRecipes(Assembly app, IDisposable scene, CanvasBitmap dragon, object globe,
-        CanvasRenderTarget crownDeedBoard)
+        CanvasRenderTarget crownDeedBoard, CanvasBitmap waterRocks)
     {
         _app = app; _scene = scene; _dragon = dragon; _globe = globe; _crownDeedBoard = crownDeedBoard;
+        _waterRocks = waterRocks;
         _sceneType = scene.GetType();
         Palette = new(app.GetType("ProjectTabletop.App.AppPalette", true)!);
         PaintPigments = (Vector3[])_sceneType.GetField("PaintPigments", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
@@ -58,8 +60,10 @@ internal sealed partial class PreviewRecipes
         using var dragon = await CanvasBitmap.LoadAsync(device,
             Path.Combine(AppContext.BaseDirectory, "SlotsRendering", "Assets", "slot-menu-dragon.png"), 96).AsTask();
         using var crownDeedBoard = RenderCrownDeedBoard(device, scene);
+        using var waterRocks = await CanvasBitmap.LoadAsync(device,
+            Path.Combine(AppContext.BaseDirectory, "Assets", "WaterGarden", "moss-rocks.png"), 96).AsTask();
         await crownDeedBoard.SaveAsync(Path.Combine(comparisons, "crown-deed-native-board.png"), CanvasBitmapFileFormat.Png).AsTask();
-        var recipes = new PreviewRecipes(app, scene, dragon, globe, crownDeedBoard);
+        var recipes = new PreviewRecipes(app, scene, dragon, globe, crownDeedBoard, waterRocks);
         var assets = new List<object>();
         var comparisonRecords = new List<object>();
         foreach (var (screen, stem) in Boards)
@@ -140,12 +144,14 @@ internal sealed partial class PreviewRecipes
             "src/ProjectTabletop.App/Projection/RouletteRendering/RouletteWoodShader.cs",
             "src/ProjectTabletop.Interaction/GlobeHome.cs",
             "src/ProjectTabletop.App/SlotsRendering/Assets/slot-menu-dragon.png",
+            "src/ProjectTabletop.App/Assets/WaterGarden/moss-rocks.png",
             "src/ProjectTabletop.App/GlobeRendering/Assets/earth-day-8192.png",
             "src/ProjectTabletop.App/GlobeRendering/Assets/earth-clouds-2048.jpg"
         ];
         var sources = sourceFiles.Concat(Directory.GetFiles(Path.Combine(root, "src/ProjectTabletop.App/Assets/CrownDeed"), "*.png", SearchOption.AllDirectories)
                 .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/')))
             .Concat(Directory.GetFiles(Path.Combine(root, "src/ProjectTabletop.App/Projection/PaintFluid"), "*.cs")
+                .Concat(Directory.GetFiles(Path.Combine(root, "src/ProjectTabletop.App/Projection/WaterGarden"), "*.cs"))
                 .Concat(Directory.GetFiles(Path.Combine(root, "src/ProjectTabletop.App/Projection/GlobeRendering"), "*.cs"))
                 .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/')))
             .Distinct().OrderBy(path => path, StringComparer.Ordinal)
@@ -153,7 +159,7 @@ internal sealed partial class PreviewRecipes
         var options = new JsonSerializerOptions { WriteIndented = true };
         await File.WriteAllTextAsync(Path.Combine(output, "manifest.json"), JsonSerializer.Serialize(new
         {
-            recipeVersion = 3,
+            recipeVersion = 4,
             generation = "Offline native Win2D using the project's existing artwork, geometry and shaders; never run during app startup.",
             width = ImageWidth, height = ImageHeight, logicalWidth = CanonicalSpan, logicalHeight = MenuPreviewUnits,
             framing = "Scale uniformly by destination height; align the right edge and crop the left; never stretch.",
@@ -167,12 +173,14 @@ internal sealed partial class PreviewRecipes
                 imagery = "NASA Blue Marble; credits and source URLs in THIRD_PARTY_NOTICES.md" },
             paint = new { fieldWidth = 432, fieldHeight = 96, updates = 60, fixedStepsPerUpdate = 4, shaderPassesPerStep = 14,
                 seed = "101 + dropIndex * 37" },
+            waterGarden = new { composition = "Native clear-water surface over original procedural river stones.",
+                attribution = "Evan Wallace WebGL Water, MIT; see THIRD_PARTY_NOTICES.md" },
             assets, sources
         }, options) + Environment.NewLine);
         await File.WriteAllTextAsync(Path.Combine(comparisons, "comparisons.json"), JsonSerializer.Serialize(new
         {
             productionAssemblySha256 = Hash(app.Location), noMainWindowCameraOutputOrPipeConstructed = true,
-            exactProductionBoardHelpers = true, recipeVersion = 3, comparisons = comparisonRecords
+            exactProductionBoardHelpers = true, recipeVersion = 4, comparisons = comparisonRecords
         }, options) + Environment.NewLine);
     }
 
@@ -193,6 +201,7 @@ internal sealed partial class PreviewRecipes
                     case BoardScreen.PhotoCopy: DrawPhotoCopyPreview(drawing, span); break;
                     case BoardScreen.Blackjack: DrawBlackjackPreview(drawing, span); break;
                     case BoardScreen.Paint: fluid = DrawPaintPreview(drawing, span); break;
+                    case BoardScreen.WaterGarden: fluid = DrawWaterGardenPreview(drawing, span); break;
                     case BoardScreen.CrownDeed:
                         if (legacy) DrawLegacyCrownDeedPreview(drawing, span);
                         else DrawCrownDeedPreview(drawing, span);

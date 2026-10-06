@@ -11,6 +11,7 @@ public sealed partial class BoardSession
         new BoardButton("slots", "Dragon Slots", new(.08, .25, .40, .16), BoardScreen.Slots),
         new BoardButton("photo-copy", "Photo Copy", new(.52, .25, .40, .16), BoardScreen.PhotoCopy),
         new BoardButton("blackjack", "Blackjack", new(.08, .45, .40, .16), BoardScreen.Blackjack),
+        new BoardButton("water-garden", "Water Garden", new(.52, .45, .40, .16), BoardScreen.WaterGarden),
         new BoardButton("crown-deed", "Crown & Deed", new(.08, .65, .40, .16), BoardScreen.CrownDeed),
         new BoardButton("globe", "Globe", new(.52, .65, .40, .16), BoardScreen.Globe),
         new BoardButton("roulette", "Roulette", new(.08, .85, .40, .16), BoardScreen.Roulette),
@@ -33,7 +34,7 @@ public sealed partial class BoardSession
         return MenuPageStep * (_menuScrolled ? eased : 1 - eased);
     }
 
-    /// <summary>All seven cards for drawing inside MenuCardViewport, including moving, clipped cards.
+    /// <summary>All eight cards for drawing inside MenuCardViewport, including moving, clipped cards.
     /// Use Buttons for input; partially visible or moving cards are never targets.</summary>
     public IReadOnlyList<BoardButton> GetMenuCards(DateTimeOffset now) =>
         MenuCards.Select(button => MoveMenuCard(button, GetMenuScrollOffset(now), !MenuScrolling)).ToArray();

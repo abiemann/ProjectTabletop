@@ -7,7 +7,7 @@ internal static class BoardInteractionRegression
     {
         var session = new BoardSession();
         Require(session.Screen == BoardScreen.Menu, "The board did not start at the menu.");
-        string[] names = ["Dragon Slots", "Photo Copy", "Blackjack", "Crown & Deed", "Globe", "Settings"];
+        string[] names = ["Dragon Slots", "Photo Copy", "Blackjack", "Water Garden", "Crown & Deed", "Globe", "Settings"];
         Require(session.Buttons.Where(button => button.Destination != BoardScreen.Menu).Select(button => button.Label).SequenceEqual(names), "Menu order or labels differ from the requested menu.");
         Require(session.Buttons.Single(button => button.Id == "settings") is { Destination: BoardScreen.Settings } &&
             session.Buttons.All(button => button.Destination != BoardScreen.HandTracking),
@@ -91,20 +91,24 @@ internal static class BoardInteractionRegression
                         .SequenceEqual(["menu"]) && session.Screen == BoardScreen.Menu,
                     "Photo Copy's drawer Exit did not return to the launcher.");
             }
-            else if (button.Destination == BoardScreen.Slots)
+            else if (button.Destination is BoardScreen.Slots or BoardScreen.WaterGarden)
             {
                 // These boards use single-action holds on the viewer's edge row.
-                const string exitId = "slot-exit";
+                string exitId = button.Destination == BoardScreen.Slots ? "slot-exit" : "menu";
                 Require(session.Buttons.All(item => item.Hold == BoardButtonHold.Once) && session.Buttons[0].Id == exitId,
-                    "The board's bottom controls are not long-press buttons led by Exit.");
+                    button.Destination + " bottom controls are not long-press buttons led by Exit.");
                 Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is null &&
-                    session.Screen == button.Destination, "A pinch selected the board's long-press Exit.");
-                for (int held = 30; held < 1030; held += 250)
-                    Require(session.ObserveHeldButtons([exitId], Time(time + held), Time(time + held)).Count == 0,
-                        "The board's Exit acted before a full second.");
-                Require(session.ObserveHeldButtons([exitId], Time(time + 1030), Time(time + 1030))
+                    session.Screen == button.Destination, "A pinch selected " + button.Destination + "'s long-press Exit.");
+                // A previous board's Exit may share this ID and physical area.
+                // Observe its full release before starting a new caption hold.
+                session.ObserveHeldButtons([], Time(time + 25), Time(time + 25), [exitId]);
+                session.ObserveHeldButtons([], Time(time + 400), Time(time + 400), [exitId]);
+                for (int held = 450; held < 1450; held += 250)
+                    Require(session.ObserveHeldButtons([exitId], Time(time + held), Time(time + held), []).Count == 0,
+                        button.Destination + "'s Exit acted before a full second.");
+                Require(session.ObserveHeldButtons([exitId], Time(time + 1450), Time(time + 1450), [])
                         .SequenceEqual([exitId]) && session.Screen == BoardScreen.Menu,
-                    "A one-second hold on the board's Exit did not return to the launcher.");
+                    "A one-second hold on " + button.Destination + "'s Exit did not return to the launcher.");
             }
             else if (button.Destination == BoardScreen.Settings)
             {

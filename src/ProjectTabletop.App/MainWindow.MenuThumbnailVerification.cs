@@ -26,7 +26,7 @@ public sealed partial class MainWindow
         var timings = new List<object>();
         var pagingComparisons = new List<object>();
         int retainedCacheChecks = 0, uninitializedGameResourceChecks = 0;
-        string[] boardResources = ["_paintFluid", "_paintFluidDevice", "_globeRenderer",
+        string[] boardResources = ["_paintFluid", "_paintFluidDevice", "_globeRenderer", "_waterSimulation", "_waterDevice", "_waterImages",
             "_slotArtwork", "_slotBackdrop", "_slotImages", "_slotArtworkDevice",
             "_rouletteBackdrop", "_rouletteBurlBitmap", "_rouletteWoodShader", "_rouletteMaterialDevice",
             "_rouletteMotionTarget", "_rouletteFixedBowl", "_rouletteForegroundRim"];
@@ -44,8 +44,8 @@ public sealed partial class MainWindow
             using var target = new CanvasRenderTarget(device, dimensions.Width, dimensions.Height, 96);
             byte[] initial = await Capture(target, dimensions.Width, dimensions.Height, dimensions.Name + "-cold-first-page");
             var ready = scene.GetMenuPreviewDiagnostics();
-            Require(ready.Ready && ready.LoadedCount == 8 && ready.Error is null,
-                "The menu did not load all seven board thumbnails and the Settings hand preview: " + ready.Error);
+            Require(ready.Ready && ready.LoadedCount == 9 && ready.Error is null,
+                "The menu did not load all eight board thumbnails and the Settings hand preview: " + ready.Error);
             object atlas = atlasField.GetValue(scene) ?? throw new InvalidOperationException("The ready menu has no image atlas.");
             CheckResourcesAndCache();
             Require(initial.AsSpan().SequenceEqual(Draw(target, dimensions.Width, dimensions.Height)),
@@ -167,7 +167,7 @@ public sealed partial class MainWindow
                 Require(typeof(SceneCompositor).GetField("_slotArtworkAttempted", BindingFlags.Instance | BindingFlags.NonPublic)!
                     .GetValue(scene) is false, "Menu rendering attempted to load the slot game's artwork.");
                 Require(ReferenceEquals(atlas, atlasField.GetValue(scene)) && scene.GetMenuPreviewDiagnostics() is
-                    { Ready: true, LoadedCount: 8, Error: null }, "Menu paging, navigation or resizing replaced its image atlas.");
+                    { Ready: true, LoadedCount: 9, Error: null }, "Menu paging, navigation or resizing replaced its image atlas.");
                 retainedCacheChecks++;
             }
 
@@ -197,7 +197,7 @@ public sealed partial class MainWindow
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "Isolated thumbnail verification changed live hardware or navigation.");
-        return new { passed = true, directory, images, timings, pagingComparisons, loadedThumbnails = 8,
+        return new { passed = true, directory, images, timings, pagingComparisons, loadedThumbnails = 9,
             retainedCacheChecks, uninitializedGameResourceChecks, stableStationaryCameraReference = true,
             denseDpiGeometryPreserved = true, liveHardwareUnchanged = true };
 

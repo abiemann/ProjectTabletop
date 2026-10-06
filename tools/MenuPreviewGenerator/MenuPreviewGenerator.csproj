@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
     <AppBuildDirectory Condition="'$(AppBuildDirectory)' == ''">$(MSBuildThisFileDirectory)..\..\src\ProjectTabletop.App\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64</AppBuildDirectory>
     <AppManifestPath Condition="'$(AppManifestPath)' == ''">$(MSBuildThisFileDirectory)..\..\src\ProjectTabletop.App\obj\x64\Debug\net10.0-windows10.0.26100.0\win-x64\Manifests\app.manifest</AppManifestPath>
     <ApplicationManifest>$(AppManifestPath)</ApplicationManifest>

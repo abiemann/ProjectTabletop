@@ -1,6 +1,39 @@
 using OpenCvSharp;
 using ProjectTabletop.Vision;
 
+if (args is ["--color-tip"] or ["--colour-tip"])
+{
+    ColorTipRegression.Run();
+    return;
+}
+if (args is ["--color-tip-profile-frame", var colorFrame, var colorProfile])
+{
+    ColorTipRegression.ReplayProfile(colorFrame, colorProfile);
+    return;
+}
+if (args is ["--color-tip-probe", var colorProbeFrame, var colorProbeProfile, var colorProbeX, var colorProbeY])
+{
+    ColorTipRegression.Probe(colorProbeFrame, colorProbeProfile,
+        double.Parse(colorProbeX, System.Globalization.CultureInfo.InvariantCulture),
+        double.Parse(colorProbeY, System.Globalization.CultureInfo.InvariantCulture));
+    return;
+}
+if (args is ["--color-tip-profile-frame", var colorProjectedFrame, var colorProjectedProfile, var colorProjection, var colorProjectionMap])
+{
+    ColorTipRegression.ReplayProfile(colorProjectedFrame, colorProjectedProfile, colorProjection, colorProjectionMap);
+    return;
+}
+if (args.Length > 0 && args[0] == "--color-tip-frame")
+{
+    ColorTipRegression.Replay(args[1..]);
+    return;
+}
+if (args.Length > 0 && args[0] == "--eye-tip-projected-frame")
+{
+    EyeTipProjectedFrameReplay.Run(args[1..]);
+    return;
+}
+
 if (args is ["--eye-tip"])
 {
     EyeTipRegression.Run();
@@ -231,6 +264,7 @@ HandSpotlightSmoothingRegression.Run();
 PaintDisturbanceRegression.Run();
 PhotoCopyRegression.Run();
 EyeTipRegression.Run();
+ColorTipRegression.Run();
 PhotoObjectRegression.Run();
 PhotoObjectTargetRegression.Run();
 if (args.Length == 1)

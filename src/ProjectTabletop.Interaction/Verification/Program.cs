@@ -20,6 +20,7 @@ BoardInteractionRegression.CheckFreshness();
 BoardInteractionRegression.CheckResetAndExternalNavigation();
 BoardInteractionRegression.CheckPhotoCopyNavigation();
 PaintBoardRegression.Run();
+WaterGardenBoardRegression.Run();
 BoardInteractionRegression.CheckAnchoredSelection();
 BoardInteractionRegression.CheckAnchorFreshnessAndConsumption();
 BoardInteractionRegression.CheckAnchorNavigationAndReset();
