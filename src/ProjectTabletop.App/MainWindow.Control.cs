@@ -257,6 +257,21 @@ public sealed partial class MainWindow
                 return new { handTrackingEnabled = HandTrackingEnabled,
                     handTrackingStatus = HandTrackingControlStatus, handCount = TrackedHandCount,
                     handExecuteActive = ExecutingHandCount > 0 };
+            case "get_stick_tip":
+                return GetStickTipStatus();
+            case "set_stick_tracking":
+                if (!parameters.TryGetProperty("enabled", out var stickEnabled) ||
+                    stickEnabled.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    throw new ArgumentException("Provide enabled as a JSON boolean.");
+                SetStickTrackingEnabled(stickEnabled.GetBoolean());
+                return GetStickTipStatus();
+            case "learn_stick_tip":
+                if (!parameters.TryGetProperty("x", out var stickX) || stickX.ValueKind != JsonValueKind.Number || !stickX.TryGetDouble(out double eyeX) ||
+                    !parameters.TryGetProperty("y", out var stickY) || stickY.ValueKind != JsonValueKind.Number || !stickY.TryGetDouble(out double eyeY))
+                    throw new ArgumentException("Provide numeric x and y in raw camera pixels.");
+                return await LearnEyeTipAsync(eyeX, eyeY);
+            case "capture_stick_tip":
+                return await CaptureStickTipAsync();
             case "start_board_scan":
                 await StartBoardSetupAsync();
                 return new { status = BoardSetupControlStatus };

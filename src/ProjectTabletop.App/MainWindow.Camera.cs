@@ -52,6 +52,7 @@ public sealed partial class MainWindow
     private void SuspendBoardScanForCameraOutage()
     {
         ClearHandTracking();
+        ResetEyeTipTracking("waiting-for-fresh-camera-frame");
         var hadMediaClip = _scene.HasBoardMediaClip;
         _scene.ClearBoardMediaClip();
         if (hadMediaClip && !Volatile.Read(ref _boardSetupActive))
@@ -220,6 +221,7 @@ public sealed partial class MainWindow
             _selectedCameraId == selected.Device.Id) return;
         _selectedCameraId = selected.Device.Id;
         ClearHandTracking();
+        ResetEyeTipTracking("camera-changed", selected.Device.Id);
         _scene.ClearBoardMediaClip();
         if (_cameraWantedDeviceId is not null && _cameraWantedDeviceId != selected.Device.Id)
         {
@@ -261,6 +263,7 @@ public sealed partial class MainWindow
         {
             if (_closing || !_cameraWanted || version != _cameraOperationVersion) return false;
             ClearHandTracking();
+            ResetEyeTipTracking("camera-restarted", choice.Device.Id);
             _scene.ClearBoardMediaClip();
             ResetCameraHealth(preserveBoardScanSuspension:
                 _boardScanSuspendedForCameraOutage && Volatile.Read(ref _boardSetupActive));
@@ -303,6 +306,7 @@ public sealed partial class MainWindow
     {
         _cameraWanted = false;
         ClearHandTracking();
+        ResetEyeTipTracking("camera-stopped");
         _cameraWantedDeviceId = null;
         Interlocked.Increment(ref _cameraOperationVersion);
         _cameraReconnectAttempts = 0;
@@ -330,6 +334,7 @@ public sealed partial class MainWindow
         if (_camera.IsRunning) return;
         var version = Interlocked.Read(ref _cameraOperationVersion);
         ClearHandTracking();
+        ResetEyeTipTracking("camera-stopped");
         _scene.ClearBoardMediaClip();
         Volatile.Write(ref _latestCameraFrame, null);
         DispatcherQueue.TryEnqueue(() =>
@@ -361,6 +366,7 @@ public sealed partial class MainWindow
         if (_closing || !_cameraWanted || _cameraOperation.CurrentCount == 0 ||
             _camera.ActiveDeviceId != _cameraWantedDeviceId) return;
         Volatile.Write(ref _latestCameraFrame, frame);
+        QueueEyeTipDetection(frame);
         QueueHandTrackingVideoFrame(frame);
         var now = Stopwatch.GetTimestamp();
         if (_lastPreviewTick == 0 || Stopwatch.GetElapsedTime(_lastPreviewTick, now) >= TimeSpan.FromMilliseconds(40))
@@ -503,7 +509,9 @@ public sealed partial class MainWindow
     private void CameraCanvas_PointerPressed(object sender,
         Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
-        var frame = _frozenFrame ?? Volatile.Read(ref _latestCameraFrame);
+        // Learning must inspect the pupil the user actually saw, even when a
+        // newer camera frame arrived after the last preview draw.
+        var frame = IsLearningEyeTip ? _bitmapFrame : _frozenFrame ?? Volatile.Read(ref _latestCameraFrame);
         if (frame is null) return;
         var point = e.GetCurrentPoint(CameraCanvas).Position;
         var rect = CameraImageRect(frame, (float)CameraCanvas.ActualWidth, (float)CameraCanvas.ActualHeight);
@@ -511,6 +519,12 @@ public sealed partial class MainWindow
             return;
         var cameraPoint = new PixelPoint((point.X - rect.X) / rect.Width * frame.Width,
                                          (point.Y - rect.Y) / rect.Height * frame.Height);
+
+        if (TryLearnEyeTipFromPreview(frame, cameraPoint))
+        {
+            e.Handled = true;
+            return;
+        }
 
         switch (_annotationMode)
         {
@@ -579,6 +593,7 @@ public sealed partial class MainWindow
         {
             DrawBoardPreview(ds, frame, rect);
             DrawHandPreview(ds, frame, rect);
+            DrawEyeTipPreview(ds, frame, rect);
             if (!Volatile.Read(ref _boardSetupActive)) foreach (var detection in Volatile.Read(ref _latestDetections))
             {
                 var corners = detection.Outline.Select(View).ToArray();

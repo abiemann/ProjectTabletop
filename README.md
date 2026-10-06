@@ -125,6 +125,14 @@ Full-screen projector output stays above ordinary desktop windows so a laptop wi
 
 The vision profile and labeled camera snapshots default to `%LOCALAPPDATA%\ProjectTabletop\VisionAutosave`; unannotated captures go to `%LOCALAPPDATA%\ProjectTabletop\RawSnapshots`; calibration is saved to `%LOCALAPPDATA%\ProjectTabletop\calibration.json`. Set `PROJECT_TABLETOP_DATA_DIR` to another folder before launch to redirect these files. The app loads its autosaved vision profile at startup; the UI can also save or load a profile from a chosen folder.
 
+## Stick-tip tracking
+
+A stick with an eye sticker can be calibrated in the laptop's **Hand interaction** panel. Start the camera, keep the sticker facing the camera near the board, choose **Learn eye tip**, then click the black pupil in the camera preview. The detector looks for a compact dark pupil surrounded by a bright ring. The learned size is saved separately for each camera; use **Forget** to clear it and learn again after changing the sticker or camera position.
+
+Enable **Stick eye-tip tracking** to follow the marker in the camera preview. A green ring indicates a confirmed observation; losing sight of the sticker clears the tracked position. Keep the pupil and its white surround visible, including while moving the stick. Similar printed dots can look like the marker, and the camera does not measure whether the tip is touching the board. This calibration currently supplies camera-preview tracking; a water board and stick-driven board actions are not implemented.
+
+Local control provides `set_stick_tracking` (boolean `enabled`), `learn_stick_tip` (`x` and `y` in raw camera pixels), `get_stick_tip`, and `capture_stick_tip` (an annotated camera PNG). Status includes calibration, candidate positions, confirmation and frame timing. Calibration and captures stay in the local app data directory.
+
 ## Fingertip tracking
 
 Normal board operation uses **palm-down hands**, with the back of the hand and fingernails facing the overhead camera. Recognition must acquire naturally grouped fingers directly, followed by the deliberate sideways-index selection gesture. Showing the inner palm or spreading the fingers first is not a required preparation step. A palm-facing-camera Properties gesture is only a possible future feature. The implementation's "palm" terminology refers to the wrist/knuckle region used to locate and orient a hand; it does not require the inner palm to be visible. The user has reported that first recognition improves after spreading the fingers; that extra step is an unresolved recognition issue, not the intended interaction.

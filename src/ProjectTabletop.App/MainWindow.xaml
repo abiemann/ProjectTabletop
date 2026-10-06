@@ -149,6 +149,14 @@
                             </StackPanel>
                         </Border>
                         <Button Content="Save raw camera PNG" Click="SaveRawSnapshot_Click" />
+                        <Border Height="1" Background="{StaticResource TabletopPanelBorderBrush}" />
+                        <ToggleSwitch x:Name="StickTrackingToggle" Header="Stick eye-tip tracking" IsOn="False" Toggled="StickTrackingToggle_Toggled" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Learn eye tip" Click="LearnEyeTip_Click" />
+                            <Button Content="Forget" Click="ForgetEyeTip_Click" />
+                        </StackPanel>
+                        <TextBlock x:Name="EyeTipStatusText" Text="Off. Learn the eye sticker before tracking." TextWrapping="Wrap" />
+                        <TextBlock Text="Face the black pupil and white surround toward the camera, then learn its size. A green circle confirms the tip in the camera preview. The stick does not control the board yet." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                     </StackPanel>
                 </Border>
 

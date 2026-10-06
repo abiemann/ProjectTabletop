@@ -20,7 +20,7 @@ if (args.Length == 0)
 
 if (args.Length < 2 || args[0] != "--once" || args.Length > 3)
 {
-    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|show_crown_deed|show_globe|show_slots|show_settings|show_paint|blackjack_action|crown_deed_action|globe_action|slots_action|slots_demo|capture_blackjack_preview|capture_crown_deed_preview|capture_globe_preview|capture_slots_preview|shutdown> [JSON object]");
+    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|set_stick_tracking|learn_stick_tip|get_stick_tip|capture_stick_tip|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|show_crown_deed|show_globe|show_slots|show_settings|show_paint|blackjack_action|crown_deed_action|globe_action|slots_action|slots_demo|capture_blackjack_preview|capture_crown_deed_preview|capture_globe_preview|capture_slots_preview|shutdown> [JSON object]");
     return 2;
 }
 
@@ -42,6 +42,20 @@ static async Task RunMcpAsync()
             {
                 Name = "set_hand_tracking",
                 Description = "Enable or disable hand tracking, camera fingertip markers, and white hand spotlights on the registered board."
+            });
+    static McpServerTool StickTrackingTool() =>
+        McpServerTool.Create((Func<bool, Task<string>>)SetStickTrackingAsync,
+            new McpServerToolCreateOptions
+            {
+                Name = "set_stick_tracking",
+                Description = "Enable or disable eye-sticker stick-tip tracking in the camera preview."
+            });
+    static McpServerTool LearnStickTipTool() =>
+        McpServerTool.Create((Func<double, double, Task<string>>)LearnStickTipAsync,
+            new McpServerToolCreateOptions
+            {
+                Name = "learn_stick_tip",
+                Description = "Learn the detected black pupil with a white surround nearest x/y in the current raw camera image; coordinates are camera pixels."
             });
     static McpServerTool BlackjackActionTool() =>
         McpServerTool.Create((Func<string, Task<string>>)BlackjackActionAsync,
@@ -98,6 +112,10 @@ static async Task RunMcpAsync()
             Tool("open_output", "Open the projector output on the selected display."),
             BackgroundMediaTool(),
             HandTrackingTool(),
+            StickTrackingTool(),
+            LearnStickTipTool(),
+            Tool("get_stick_tip", "Read eye-sticker calibration, current candidates, and fresh confirmed stick-tip position in raw camera pixels."),
+            Tool("capture_stick_tip", "Save the current camera image with eye-sticker tracking annotations as a local PNG."),
             Tool("show_test_grid", "Show the board-clipped test grid on the projector."),
             Tool("show_board_menu", "Show the board app menu and enable hand tracking for pinch selection."),
             Tool("show_hand_tracking_test", "Open the built-in Hand-Tracking gesture test and enable hand tracking."),
@@ -130,6 +148,12 @@ static Task<string> SetBackgroundMediaAsync(string path) =>
 
 static Task<string> SetHandTrackingAsync(bool enabled) =>
     CallToolAsync("set_hand_tracking", JsonSerializer.SerializeToElement(new { enabled }));
+
+static Task<string> SetStickTrackingAsync(bool enabled) =>
+    CallToolAsync("set_stick_tracking", JsonSerializer.SerializeToElement(new { enabled }));
+
+static Task<string> LearnStickTipAsync(double x, double y) =>
+    CallToolAsync("learn_stick_tip", JsonSerializer.SerializeToElement(new { x, y }));
 
 static Task<string> BlackjackActionAsync(string id) =>
     CallToolAsync("blackjack_action", JsonSerializer.SerializeToElement(new { id }));
