@@ -213,7 +213,8 @@ public sealed partial class SceneCompositor
             }
             else if (_boardSession.Screen is not (BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.Monopoly or
                 BoardScreen.Globe or BoardScreen.Slots or BoardScreen.Roulette))
-                DrawMetalBackdrop(surface, drawFooterDivider: _boardSession.Screen != BoardScreen.Menu);
+                DrawMetalBackdrop(surface, drawFooterDivider: _boardSession.Screen != BoardScreen.Menu,
+                    drawDarkInsetFrame: _boardSession.Screen != BoardScreen.Menu);
             using var heading = new CanvasTextFormat
             {
                 FontFamily = "Segoe UI",

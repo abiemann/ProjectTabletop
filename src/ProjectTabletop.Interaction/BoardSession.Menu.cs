@@ -48,7 +48,7 @@ public sealed partial class BoardSession
                 button.Bounds.Y + button.Bounds.Height <= MenuCardViewport.Y + MenuCardViewport.Height).ToList();
         buttons.Add(new("settings", "Settings", SettingsCogBounds, BoardScreen.Settings, Enabled: !MenuScrolling));
         buttons.Add(new(_menuScrolled ? "menu-scroll-up" : "menu-scroll-down", _menuScrolled ? "^" : "v",
-            MenuScrollButtonBounds, BoardScreen.Menu, Enabled: !MenuScrolling, Hold: BoardButtonHold.Once));
+            MenuScrollButtonBounds, BoardScreen.Menu, Enabled: !MenuScrolling));
         return buttons.AsReadOnly();
     }
 
@@ -85,9 +85,6 @@ public sealed partial class BoardSession
         _ignoreFramesThrough = Later(_ignoreFramesThrough, now);
         HoveredButtonIds = Array.Empty<string>();
         InvalidateFingerSelection(now);
-        // Keep the arrow's spent place so holding down cannot immediately act
-        // on the up arrow that replaces it. Its caption must be clear again.
-        ResetHoldCaptionEvidence();
     }
 
     private void ClearMenuScroll(DateTimeOffset now)

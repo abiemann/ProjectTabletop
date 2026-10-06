@@ -41,7 +41,13 @@ public sealed partial class SceneCompositor
             bool hovered = button.Enabled && handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id);
             if (button.Id == "settings") DrawSettingsCogButton(ds, button, hovered, selectionFeedback);
             else if (IsMenuScrollHandle(button))
+            {
                 DrawBoardDrawerHandle(ds, MenuArrowAppearance(button), hovered, PaintBoardAspect());
+                var bounds = button.Bounds;
+                DrawPrecisionButtonMarker(ds, new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
+                    bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize), hovered);
+                DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, ThemeColor(24, 104, 124));
+            }
         }
         ds.DrawText("Aim with four fingers together.", 80, 907, AppPalette.MutedText, small);
         ds.DrawText("Move your index sideways to open.", 80, 937, AppPalette.MutedText, small);

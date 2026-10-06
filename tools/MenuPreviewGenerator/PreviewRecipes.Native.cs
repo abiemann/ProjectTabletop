@@ -139,10 +139,12 @@ internal sealed partial class PreviewRecipes
         var options = new JsonSerializerOptions { WriteIndented = true };
         await File.WriteAllTextAsync(Path.Combine(output, "manifest.json"), JsonSerializer.Serialize(new
         {
-            recipeVersion = 1,
+            recipeVersion = 2,
             generation = "Offline native Win2D using the project's existing artwork, geometry and shaders; never run during app startup.",
             width = ImageWidth, height = ImageHeight, logicalWidth = CanonicalSpan, logicalHeight = MenuPreviewUnits,
             framing = "Scale uniformly by destination height; align the right edge and crop the left; never stretch.",
+            roulette = new { composition = "Full bowl and spindle framed to the thumbnail height.",
+                wheelFromRight = 102, wheelY = 77, wheelScale = .48 },
             globe = new { rotationDegrees = GlobeHome.DefaultRestingRotationDegrees, latitudeDegrees = GlobeHome.DefaultViewLatitudeDegrees,
                 imagery = "NASA Blue Marble; credits and source URLs in THIRD_PARTY_NOTICES.md" },
             paint = new { fieldWidth = 432, fieldHeight = 96, updates = 60, fixedStepsPerUpdate = 4, shaderPassesPerStep = 14,
@@ -152,7 +154,7 @@ internal sealed partial class PreviewRecipes
         await File.WriteAllTextAsync(Path.Combine(comparisons, "comparisons.json"), JsonSerializer.Serialize(new
         {
             productionAssemblySha256 = Hash(app.Location), noMainWindowCameraOutputOrPipeConstructed = true,
-            exactProductionBoardHelpers = true, recipeVersion = 1, comparisons = comparisonRecords
+            exactProductionBoardHelpers = true, recipeVersion = 2, comparisons = comparisonRecords
         }, options) + Environment.NewLine);
     }
 
@@ -215,16 +217,27 @@ internal sealed partial class PreviewRecipes
     private void DrawRoulettePreview(CanvasDrawingSession drawing, float span, bool legacy)
     {
         drawing.Clear(ThemeColor(8, 28, 35));
-        float recipeSpan = legacy ? span : RouletteCompositionSpan;
+        float recipeSpan = RouletteCompositionSpan;
         var previous = drawing.Transform;
         drawing.Transform = Matrix3x2.CreateTranslation(span - recipeSpan, 0) * previous;
         try
         {
             var game = new RouletteGame(7).Snapshot;
-            CallBoard("DrawRouletteWheel", drawing, game, DateTimeOffset.UnixEpoch,
-                new Vector2(recipeSpan * .70f, recipeSpan * .52f), 1d, recipeSpan / 390);
-            CallBoard("DrawRouletteChip", drawing, new Vector2(recipeSpan * .35f, recipeSpan * .80f), recipeSpan * .08f, 25m, 1d, false, false);
-            CallBoard("DrawRouletteChip", drawing, new Vector2(recipeSpan * .20f, recipeSpan * .76f), recipeSpan * .075f, 5m, 1d, false, false);
+            if (legacy)
+            {
+                // Retain the previously shipped thumbnail for before/after comparisons.
+                CallBoard("DrawRouletteWheel", drawing, game, DateTimeOffset.UnixEpoch,
+                    new Vector2(recipeSpan * .70f, recipeSpan * .52f), 1d, recipeSpan / 390);
+                CallBoard("DrawRouletteChip", drawing, new Vector2(recipeSpan * .35f, recipeSpan * .80f), recipeSpan * .08f, 25m, 1d, false, false);
+                CallBoard("DrawRouletteChip", drawing, new Vector2(recipeSpan * .20f, recipeSpan * .76f), recipeSpan * .075f, 5m, 1d, false, false);
+            }
+            else
+            {
+                // Frame the full wheel against the 160-unit HEIGHT. A width-based
+                // center/scale hid the spindle below the tile and left its top empty.
+                CallBoard("DrawRouletteWheel", drawing, game, DateTimeOffset.UnixEpoch,
+                    new Vector2(recipeSpan - 102, 77), 1d, .48f);
+            }
         }
         finally { drawing.Transform = previous; }
     }

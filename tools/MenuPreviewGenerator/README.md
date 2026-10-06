@@ -28,8 +28,10 @@ Recipes preserve the established board previews. The offline CLI calls the actua
 production Blackjack, Crown & Deed, Roulette, Globe and Paint rendering helpers
 through reflection. It loads only the menu dragon asset for Dragon Slots. Paint
 uses the existing 96-pixel-high simulation, seeded drops and settling sequence.
-Roulette's composition is fixed to its established 16:9 size and anchored right,
-so changing the board aspect crops its image instead of resizing the wheel.
+Roulette's complete bowl and spindle fill the thumbnail's height, without
+foreground chips. Its composition stays anchored right, so
+changing the board aspect crops the quiet left background instead of resizing
+the wheel. Roulette's before images retain the previous rim-only framing.
 The Globe uses the fixed captured opening pose and NASA imagery already credited
 in `THIRD_PARTY_NOTICES.md`.
 

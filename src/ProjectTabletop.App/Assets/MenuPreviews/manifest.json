@@ -1,11 +1,17 @@
 {
-  "recipeVersion": 1,
+  "recipeVersion": 2,
   "generation": "Offline native Win2D using the project\u0027s existing artwork, geometry and shaders; never run during app startup.",
   "width": 2304,
   "height": 512,
   "logicalWidth": 720,
   "logicalHeight": 160,
   "framing": "Scale uniformly by destination height; align the right edge and crop the left; never stretch.",
+  "roulette": {
+    "composition": "Full bowl and spindle framed to the thumbnail height.",
+    "wheelFromRight": 102,
+    "wheelY": 77,
+    "wheelScale": 0.48
+  },
   "globe": {
     "rotationDegrees": 58.29723737777772,
     "latitudeDegrees": 34.05222222222222,
@@ -130,8 +136,8 @@
       "file": "roulette.png",
       "width": 2304,
       "height": 512,
-      "sha256": "14c4855095ae6f9cfe3ec32f20b40066ec8abff5475953fd434602c31f827cab",
-      "bytes": 279684,
+      "sha256": "d31020344e68cbac46f2800d494bf43716e26d8ce5ea9f24e8eaf52dd8cf2dfb",
+      "bytes": 463980,
       "pngColorType": 6,
       "alpha": {
         "transparent": 0,
@@ -216,7 +222,7 @@
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.Native.cs",
-      "sha256": "88f115cee7f56d55edf5097f91db2a474575b19825146c8fc81572a896f294d0"
+      "sha256": "38818f588470b437b413ed3306b68f349e0ed1713dd1552e1efdeef0e998dce0"
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.cs",
