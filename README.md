@@ -1,14 +1,16 @@
 # ProjectTabletop
 
-ProjectTabletop is a local Windows C# app for an interactive projected tabletop. A laptop window handles camera selection, board setup, fingertip tracking, media, and calibration. A separate window sends the scene to the projector. After board setup, a menu of seven boards appears on the board, with a **Settings** cog in its upper-right corner. Bring four extended fingers together, aim with the middle fingertip, then move your index finger sideways to select, or point and pinch; a white spotlight follows each detected hand on boards other than Paint. **Dragon Slots** is a five-reel, 40-line dragon slot machine played with virtual credits and long-press controls. **Settings** holds the built-in **Hand-Tracking** gesture test. **Photo Copy** locks a light onto an object on its grey surface. **Swirl** repeats its photograph inward across the board; **Copy** immediately saves a transparent PNG with a photocopier sound. It can also copy the other hand. **Blackjack** opens a playable casino table against the computer dealer, with virtual credits and projected cards. **Paint** turns physical disturbances into slowly settling layers of paint and metallic particles, with canvas hand spotlights disabled and text-triggered button lighting. **Crown & Deed** offers an oval property-trading board for human and AI players, with resumable local games. **Globe** presents a detailed, slowly rotating Earth with zoom controls in a drawer rising from the bottom. **Roulette** opens Vice Royale, a European single-zero table with virtual credits. Each board has a menu-return control. External game launching is not implemented. Patterned-card recognition and per-card overlays remain available for later work; real-card recognition and alignment still need testing.
+ProjectTabletop is a local Windows C# app for an interactive projected tabletop. A laptop window handles camera selection, board setup, fingertip tracking, media, and calibration. A separate window sends the scene to the projector.
 
 ## Quick start
 
 <img src="docs/images/projector-webcam-setup.jpg" alt="Projector and webcam aimed down at the same board on the floor" width="480">
 
-1. **Position the projector.** Aim it down at the board on the floor.
-2. **Position the webcam.** Aim it at the same location. The webcam preview should show the entire board, with a small margin around all its edges.
-3. **Adjust the picture.** Set the projector's brightness to its minimum setting, then increase saturation to taste.
+1. **Position the projector.** Aim it down at the floor. Position both the projector and webcam about 110 cm (43 inches) above the ground.
+2. **Position the board.** Center the board within the projector's image.
+3. **Position the webcam.** Aim it at the same location. The webcam preview should show the entire board, with a small margin around all its edges.
+4. **Adjust the picture.** Set the projector's brightness to its minimum setting, then increase saturation to taste.
+5. **Start the app's board setup.** Click **Start camera**, then **Open output**, then **Start board setup**.
 
 ## Install on Windows
 
