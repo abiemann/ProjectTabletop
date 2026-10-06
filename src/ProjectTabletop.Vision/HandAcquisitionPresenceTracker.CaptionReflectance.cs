@@ -7,7 +7,7 @@ public sealed partial class HandAcquisitionPresenceTracker
     {
         if (_scene?.BoardSearchRegions is null || _controlRegions is null || _referenceControlRegions is null ||
             _controlReferenceBounds is null ||
-            _sampleBoardAreas is null || _textPatterns is null) return null;
+            _sampleBoardAreas is null || _textPatterns is null || _templateMask is null) return null;
         var control = _controlReferenceBounds[region];
         List<int>[] margins = [[], [], [], []];
         for (int index = 0; index < foreground.Length; index++)
@@ -53,6 +53,12 @@ public sealed partial class HandAcquisitionPresenceTracker
             }
             double witnessArea = witness.Sum(index => _sampleBoardAreas[index]);
             if (witnessArea < control.Width * control.Height * .12) continue;
+            // A changed reference elsewhere can move the global camera-colour
+            // fit without changing this control at all. Require fresh local
+            // chroma against the visible opposite margins themselves before a
+            // fitted caption residual can claim a new reflecting surface.
+            // These witnesses constrain appearance; they supply no hand area.
+            if (!HasLocalChromaticChange(region, witness.ToArray(), reference, current, _templateMask)) continue;
             bool[] localized = new bool[foreground.Length];
             for (int index = 0; index < localized.Length; index++)
             {

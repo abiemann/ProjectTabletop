@@ -8,6 +8,18 @@ if (args is ["--hand-caption-resolution"])
     return;
 }
 
+if (args is ["--hand-coherent-shape"])
+{
+    HandAcquisitionCoherentShapeRegression.Run();
+    return;
+}
+
+if (args is ["--hand-reflectance-fit"])
+{
+    HandAcquisitionReflectanceFitRegression.Run();
+    return;
+}
+
 if (args is ["--hand-acquisition-compact-native-replay", var compactNativeSnapshot])
 {
     HandAcquisitionCompactControlRegression.ReplayNative(compactNativeSnapshot);

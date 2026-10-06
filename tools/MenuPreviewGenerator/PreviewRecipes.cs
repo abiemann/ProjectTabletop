@@ -170,7 +170,7 @@ internal sealed partial class PreviewRecipes
         return fluid;
     }
 
-    private void DrawMonopolyPreview(CanvasDrawingSession ds, float span)
+    private void DrawLegacyMonopolyPreview(CanvasDrawingSession ds, float span)
     {
         // A native miniature of Crown & Deed's oval boulevard and city skyline.
         // Small physical shapes stay crisp at the tile's cached native density.

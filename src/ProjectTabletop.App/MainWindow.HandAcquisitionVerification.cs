@@ -244,7 +244,7 @@ public sealed partial class MainWindow
         now += TimeSpan.FromMilliseconds(600);
         ready = scene.GetHandAcquisitionContext(now)!;
         await Task.Delay(5);
-        var sourceTime = DateTimeOffset.UtcNow;
+        var sourceTime = MonotonicClock.UtcNow;
         scene.SetHandCursors([new HandCursor(BoardPoint(.5, .5), sourceTime.AddSeconds(1), 999)
             { TrackingId = 79 }], sourceTime);
         Require(scene.GetHandLightingDiagnostics().SuppressedHandIds.Contains(79), "The fixture did not suppress an executed hand.");

@@ -313,6 +313,7 @@ internal sealed class HandAcquisitionTextPatterns
             // adjacent local losses at the same registered optics, not by letting
             // each sector independently move until it finds another letter.
             var sectors = new double[6];
+            var informative = new bool[6];
             var severe = new bool[6];
             var sectorEvidence = new int[6][];
             int glyphLeft = template.Evidence.Min(index => index % template.Width);
@@ -336,6 +337,7 @@ internal sealed class HandAcquisitionTextPatterns
                 double bb = sumBB - sumB * sumB / indices.Length;
                 double ab = sumAB - sumA * sumB / indices.Length;
                 if (aa / indices.Length < 9) { sectors[sector] = 1; continue; }
+                informative[sector] = true;
                 sectors[sector] = bb > 1e-8 ? ab / Math.Sqrt(aa * bb) : 0;
                 severe[sector] = sectors[sector] < .40;
             }
@@ -351,6 +353,19 @@ internal sealed class HandAcquisitionTextPatterns
                 clean = false;
                 stronglyCorrupted = true;
             }
+            // Uniform camera softness or optical stroke spreading can lower
+            // the whole-caption match while every measured part of its shape
+            // remains coherent. That is an uncertain optical fit, not evidence
+            // of broken letters. Keep the stronger clean/registration floor;
+            // do not learn this weaker appearance as an unobstructed caption.
+            // Empty or damaged sectors cannot qualify this veto, and real
+            // localized shape loss retains its independent area requirement.
+            if (!clean && stronglyCorrupted && best >= .70 &&
+                localCoverage < HandAcquisitionPresenceTracker.MinimumControlCoverage &&
+                informative.Count(value => value) >= 4 &&
+                Enumerable.Range(0, sectors.Length).Where(sector => informative[sector])
+                    .All(sector => sectors[sector] >= .65))
+                stronglyCorrupted = false;
             if (best >= .82 && clean)
             {
                 template.CleanCorrelation = Math.Max(template.CleanCorrelation, best);

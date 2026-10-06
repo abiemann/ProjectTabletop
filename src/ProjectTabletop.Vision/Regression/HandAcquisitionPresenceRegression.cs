@@ -28,6 +28,8 @@ internal static class HandAcquisitionPresenceRegression
         HandAcquisitionShortLabelRegression.Run();
         HandAcquisitionCaptionResolutionRegression.Run();
         HandAcquisitionCompactControlRegression.Run();
+        HandAcquisitionCoherentShapeRegression.Run();
+        HandAcquisitionReflectanceFitRegression.Run();
         HandAcquisitionLocalContextRegression.Run();
         HandAcquisitionReachingRegression.Run();
         HandAcquisitionHintRegression.Run();

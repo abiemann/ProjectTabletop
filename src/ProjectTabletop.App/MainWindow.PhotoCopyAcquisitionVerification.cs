@@ -184,7 +184,7 @@ public sealed partial class MainWindow
                 ready.ExpectedScene!.BoardSearchRegions is { Count: 1 },
             "The closed drawer reused its previous open-row camera reference.");
         await Task.Delay(5);
-        var sourceTime = DateTimeOffset.UtcNow;
+        var sourceTime = MonotonicClock.UtcNow;
         scene.SetHandCursors([new(CameraPoint(.5, .5), sourceTime.AddSeconds(1), 99001)
             { TrackingId = 991 }], sourceTime);
         Require(scene.GetHandLightingDiagnostics().SuppressedHandIds.Contains(991),

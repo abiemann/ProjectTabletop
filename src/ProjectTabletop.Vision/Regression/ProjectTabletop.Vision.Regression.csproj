@@ -11,5 +11,6 @@
     <Content Include="Fixtures/*.jpg;Fixtures/*LICENSE*.txt;Fixtures/*.md" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Fixtures/hand-candidate-continuity.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Fixtures/blackjack-idle-controls.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Fixtures/menu-control-reflectance-fit.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -28,6 +28,12 @@ Recipes preserve the established board previews. The offline CLI calls the actua
 production Blackjack, Crown & Deed, Roulette, Globe and Paint rendering helpers
 through reflection. It loads only the menu dragon asset for Dragon Slots. Paint
 uses the existing 96-pixel-high simulation, seeded drops and settling sequence.
+Crown & Deed renders its real city painting, all forty property parcels, settled
+shops, silver pieces and a frozen canal-reflection frame into a 2400-square board.
+The saved thumbnail crops the palace and domed waterfront district, keeping the
+curved gold property rail visible at a scale that preserves the architectural
+detail. It contains no landing controls or duplicated title. Its before images
+retain the previous simplified house illustration for comparison.
 Roulette's complete bowl and spindle fill the thumbnail's height, without
 foreground chips. Its composition stays anchored right, so
 changing the board aspect crops the quiet left background instead of resizing

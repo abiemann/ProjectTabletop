@@ -24,14 +24,16 @@ internal sealed partial class PreviewRecipes
     private readonly Type _sceneType;
     private readonly IDisposable _scene;
     private readonly CanvasBitmap _dragon;
+    private readonly CanvasRenderTarget _crownDeedBoard;
     private readonly object _globe;
     private readonly PaletteColors Palette;
     private readonly Vector3[] PaintPigments;
     private readonly Color MonopolyIvory, MonopolyInk;
 
-    private PreviewRecipes(Assembly app, IDisposable scene, CanvasBitmap dragon, object globe)
+    private PreviewRecipes(Assembly app, IDisposable scene, CanvasBitmap dragon, object globe,
+        CanvasRenderTarget crownDeedBoard)
     {
-        _app = app; _scene = scene; _dragon = dragon; _globe = globe;
+        _app = app; _scene = scene; _dragon = dragon; _globe = globe; _crownDeedBoard = crownDeedBoard;
         _sceneType = scene.GetType();
         Palette = new(app.GetType("ProjectTabletop.App.AppPalette", true)!);
         PaintPigments = (Vector3[])_sceneType.GetField("PaintPigments", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
@@ -51,15 +53,18 @@ internal sealed partial class PreviewRecipes
         using var scene = (IDisposable)sceneType.GetConstructors().Single().Invoke(arguments);
         await (Task)Call(scene, "EnsureGlobeResourcesAsync", device)!;
         await (Task)Call(scene, "EnsureRouletteResourcesAsync", device)!;
+        await (Task)Call(scene, "EnsureCrownDeedResourcesAsync", device)!;
         object globe = Call(scene, "GetGlobeRenderer", device)!;
         using var dragon = await CanvasBitmap.LoadAsync(device,
             Path.Combine(AppContext.BaseDirectory, "SlotsRendering", "Assets", "slot-menu-dragon.png"), 96).AsTask();
-        var recipes = new PreviewRecipes(app, scene, dragon, globe);
+        using var crownDeedBoard = RenderCrownDeedBoard(device, scene);
+        await crownDeedBoard.SaveAsync(Path.Combine(comparisons, "crown-deed-native-board.png"), CanvasBitmapFileFormat.Png).AsTask();
+        var recipes = new PreviewRecipes(app, scene, dragon, globe, crownDeedBoard);
         var assets = new List<object>();
         var comparisonRecords = new List<object>();
         foreach (var (screen, stem) in Boards)
         {
-            using var image = recipes.Render(device, screen, ImageWidth, ImageHeight, legacyRoulette: false);
+            using var image = recipes.Render(device, screen, ImageWidth, ImageHeight, legacy: false);
             string path = Path.Combine(output, stem + ".png");
             await image.SaveAsync(path, CanvasBitmapFileFormat.Png).AsTask();
             // Validate the saved file, including its PNG colour type, rather
@@ -94,7 +99,7 @@ internal sealed partial class PreviewRecipes
                 // Main menu cards are .40×.16 of the board; artwork covers the
                 // right .72, giving physical preview aspect = 1.8*boardAspect.
                 int width = (int)Math.Round(ImageHeight * 1.8 * aspect);
-                using var before = recipes.Render(device, screen, width, ImageHeight, legacyRoulette: true);
+                using var before = recipes.Render(device, screen, width, ImageHeight, legacy: true);
                 using var after = new CanvasRenderTarget(device, width, ImageHeight, 96);
                 using (var drawing = after.CreateDrawingSession())
                 {
@@ -121,6 +126,15 @@ internal sealed partial class PreviewRecipes
             "tools/MenuPreviewGenerator/Generate.ps1", "src/ProjectTabletop.App/AppPalette.cs",
             "src/ProjectTabletop.App/Projection/SceneCompositor.Blackjack.cs",
             "src/ProjectTabletop.App/Projection/SceneCompositor.Monopoly.cs",
+            "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedAssets.cs",
+            "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedBuildings.cs",
+            "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedPieces.cs",
+            "src/ProjectTabletop.App/Projection/CrownDeedPieceSources.cs",
+            "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedWater.cs",
+            "src/ProjectTabletop.App/Projection/CrownDeedRendering/CrownDeedWaterShader.cs",
+            "src/ProjectTabletop.Interaction/MonopolyBoard.cs",
+            "src/ProjectTabletop.Interaction/MonopolyGame.cs",
+            "src/ProjectTabletop.Interaction/MonopolyModels.cs",
             "src/ProjectTabletop.App/Projection/SceneCompositor.Paint.cs",
             "src/ProjectTabletop.App/Projection/SceneCompositor.Roulette.cs",
             "src/ProjectTabletop.App/Projection/SceneCompositor.RouletteMotion.cs",
@@ -131,7 +145,9 @@ internal sealed partial class PreviewRecipes
             "src/ProjectTabletop.App/GlobeRendering/Assets/earth-day-8192.png",
             "src/ProjectTabletop.App/GlobeRendering/Assets/earth-clouds-2048.jpg"
         ];
-        var sources = sourceFiles.Concat(Directory.GetFiles(Path.Combine(root, "src/ProjectTabletop.App/Projection/PaintFluid"), "*.cs")
+        var sources = sourceFiles.Concat(Directory.GetFiles(Path.Combine(root, "src/ProjectTabletop.App/Assets/CrownDeed"), "*.png", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/')))
+            .Concat(Directory.GetFiles(Path.Combine(root, "src/ProjectTabletop.App/Projection/PaintFluid"), "*.cs")
                 .Concat(Directory.GetFiles(Path.Combine(root, "src/ProjectTabletop.App/Projection/GlobeRendering"), "*.cs"))
                 .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/')))
             .Distinct().OrderBy(path => path, StringComparer.Ordinal)
@@ -139,10 +155,14 @@ internal sealed partial class PreviewRecipes
         var options = new JsonSerializerOptions { WriteIndented = true };
         await File.WriteAllTextAsync(Path.Combine(output, "manifest.json"), JsonSerializer.Serialize(new
         {
-            recipeVersion = 2,
+            recipeVersion = 3,
             generation = "Offline native Win2D using the project's existing artwork, geometry and shaders; never run during app startup.",
             width = ImageWidth, height = ImageHeight, logicalWidth = CanonicalSpan, logicalHeight = MenuPreviewUnits,
             framing = "Scale uniformly by destination height; align the right edge and crop the left; never stretch.",
+            crownDeed = new { composition = "Close-up of the native lamplit city, property boulevard and silver pieces.",
+                boardRaster = 2400, crop = new { x = 0, y = 0, width = 1000, height = 350 },
+                snapshot = "Fixed representative game; hat on Amber Exchange, car on Festival Dues, three shops on each Crown Quarter property.",
+                waterTimeSeconds = 0 },
             roulette = new { composition = "Full bowl and spindle framed to the thumbnail height.",
                 wheelFromRight = 102, wheelY = 77, wheelScale = .48 },
             globe = new { rotationDegrees = GlobeHome.DefaultRestingRotationDegrees, latitudeDegrees = GlobeHome.DefaultViewLatitudeDegrees,
@@ -154,11 +174,11 @@ internal sealed partial class PreviewRecipes
         await File.WriteAllTextAsync(Path.Combine(comparisons, "comparisons.json"), JsonSerializer.Serialize(new
         {
             productionAssemblySha256 = Hash(app.Location), noMainWindowCameraOutputOrPipeConstructed = true,
-            exactProductionBoardHelpers = true, recipeVersion = 2, comparisons = comparisonRecords
+            exactProductionBoardHelpers = true, recipeVersion = 3, comparisons = comparisonRecords
         }, options) + Environment.NewLine);
     }
 
-    private CanvasRenderTarget Render(CanvasDevice device, BoardScreen screen, int width, int height, bool legacyRoulette)
+    private CanvasRenderTarget Render(CanvasDevice device, BoardScreen screen, int width, int height, bool legacy)
     {
         var image = new CanvasRenderTarget(device, width, height, 96);
         IDisposable? fluid = null;
@@ -175,10 +195,13 @@ internal sealed partial class PreviewRecipes
                     case BoardScreen.PhotoCopy: DrawPhotoCopyPreview(drawing, span); break;
                     case BoardScreen.Blackjack: DrawBlackjackPreview(drawing, span); break;
                     case BoardScreen.Paint: fluid = DrawPaintPreview(drawing, span); break;
-                    case BoardScreen.Monopoly: DrawMonopolyPreview(drawing, span); break;
+                    case BoardScreen.Monopoly:
+                        if (legacy) DrawLegacyMonopolyPreview(drawing, span);
+                        else DrawMonopolyPreview(drawing, span);
+                        break;
                     case BoardScreen.Globe: DrawGlobePreview(drawing, span); break;
                     case BoardScreen.Slots: DrawSlotsPreview(drawing, span); break;
-                    case BoardScreen.Roulette: DrawRoulettePreview(drawing, span, legacyRoulette); break;
+                    case BoardScreen.Roulette: DrawRoulettePreview(drawing, span, legacy); break;
                     default: throw new ArgumentOutOfRangeException(nameof(screen));
                 }
             }
@@ -186,6 +209,46 @@ internal sealed partial class PreviewRecipes
         }
         catch { image.Dispose(); throw; }
         finally { fluid?.Dispose(); }
+    }
+
+    private static CanvasRenderTarget RenderCrownDeedBoard(CanvasDevice device, IDisposable scene)
+    {
+        var game = new MonopolyGame(seed: 27);
+        if (!game.HandleAction("mp-start-game", DateTimeOffset.UnixEpoch) ||
+            !game.HandleAction("mp-start", DateTimeOffset.UnixEpoch))
+            throw new InvalidOperationException("Could not prepare the Crown & Deed preview fixture.");
+        var gameState = game.Snapshot;
+        var snapshot = gameState with
+        {
+            Players = gameState.Players.Select((player, index) => player with
+                { Position = index == 0 ? 21 : 24, PieceIndex = index }).ToArray(),
+            Properties = gameState.Properties.Select(property => property.SpaceIndex is 21 or 22
+                ? property with { OwnerId = gameState.Players[0].Id, Houses = 3 } : property).ToArray()
+        };
+        var board = new CanvasRenderTarget(device, 2400, 2400, 96);
+        try
+        {
+            using var drawing = board.CreateDrawingSession();
+            drawing.Transform = Matrix3x2.CreateScale(2.4f);
+            Call(scene, "DrawMonopolyFrame", drawing, false, true, 1d);
+            foreach (var space in MonopolyGame.Spaces)
+                Call(scene, "DrawMonopolySpace", drawing, space, snapshot, 1d, 1f);
+            return board;
+        }
+        catch { board.Dispose(); throw; }
+    }
+
+    private void DrawMonopolyPreview(CanvasDrawingSession drawing, float span)
+    {
+        drawing.Clear(ThemeColor(9, 25, 22));
+        // Extend the native scene leftward at the same scale. Its boundary then
+        // stays outside the menu's visible artwork on both supported card shapes.
+        const float cropHeight = 350, cropWidth = 1000;
+        float width = MenuPreviewUnits * cropWidth / cropHeight;
+        double density = _crownDeedBoard.Size.Width / 1000;
+        drawing.DrawImage(_crownDeedBoard, new Rect(span - width, 0, width, MenuPreviewUnits),
+            new Rect(0, 0, cropWidth * density, cropHeight * density),
+            1, CanvasImageInterpolation.HighQualityCubic);
     }
 
     private void DrawSlotsPreview(CanvasDrawingSession drawing, float span)

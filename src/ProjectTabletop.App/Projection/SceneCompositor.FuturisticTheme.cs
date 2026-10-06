@@ -105,6 +105,15 @@ public sealed partial class SceneCompositor
         DrawPrecisionButtonMarker(ds, rect, hovered);
     }
 
+    private static void DrawSecondaryPrecisionButtonSurface(CanvasDrawingSession ds, Rect rect, bool hovered,
+        float radius = 19)
+    {
+        // Quiet controls inherit the dark board surface, without a bevel, sheen or shadow.
+        ds.DrawRoundedRectangle(rect, radius, radius,
+            hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 1.25f);
+        DrawPrecisionButtonMarker(ds, rect, hovered);
+    }
+
     private static void DrawPrecisionButtonMarker(CanvasDrawingSession ds, Rect rect, bool hovered)
     {
         var lamp = new Rect(rect.X + 11, rect.Y + rect.Height / 2 - 21, 3, 42);

@@ -1,11 +1,23 @@
 {
-  "recipeVersion": 2,
+  "recipeVersion": 3,
   "generation": "Offline native Win2D using the project\u0027s existing artwork, geometry and shaders; never run during app startup.",
   "width": 2304,
   "height": 512,
   "logicalWidth": 720,
   "logicalHeight": 160,
   "framing": "Scale uniformly by destination height; align the right edge and crop the left; never stretch.",
+  "crownDeed": {
+    "composition": "Close-up of the native lamplit city, property boulevard and silver pieces.",
+    "boardRaster": 2400,
+    "crop": {
+      "x": 0,
+      "y": 0,
+      "width": 1000,
+      "height": 350
+    },
+    "snapshot": "Fixed representative game; hat on Amber Exchange, car on Festival Dues, three shops on each Crown Quarter property.",
+    "waterTimeSeconds": 0
+  },
   "roulette": {
     "composition": "Full bowl and spindle framed to the thumbnail height.",
     "wheelFromRight": 102,
@@ -91,8 +103,8 @@
       "file": "crown-deed.png",
       "width": 2304,
       "height": 512,
-      "sha256": "9ba938603a57f0357192cf1fabfc629ba5c5e431fe41c2e221c77d7e0590d6b2",
-      "bytes": 76411,
+      "sha256": "d9d2cd7718a6df70766d22b3d73e7aef0c03b09a595739bbca3a4b9876f850cd",
+      "bytes": 1312025,
       "pngColorType": 6,
       "alpha": {
         "transparent": 0,
@@ -153,12 +165,56 @@
       "sha256": "5ced1f49d8fd60b6714ca0f9c3aaf9afba7f522c27e57973a5146002bfccc292"
     },
     {
+      "file": "src/ProjectTabletop.App/Assets/CrownDeed/Pieces/car.png",
+      "sha256": "e1b205a284b21fae053ceff0a0ca3081af2c549b015e7477415d1ce4b08490c7"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Assets/CrownDeed/Pieces/dog.png",
+      "sha256": "ca88f27e2076a03ac33d71ea129a21b185b1a350790ff38ad5ea80b340f9c26f"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Assets/CrownDeed/Pieces/gun.png",
+      "sha256": "df50ffde095d60a38947427db053ad26ee55be2c9d95686ab62bd2888028864b"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Assets/CrownDeed/Pieces/hat.png",
+      "sha256": "960ef8132ae0933a1a62236db8e17d0a8e46201fb33e111c3957fa4353c02b41"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Assets/CrownDeed/Pieces/iron.png",
+      "sha256": "7dcd02d753b5c5adbffcf59b4d5782744be1a9eab1cfa9faaab4e203b5dcaca0"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Assets/CrownDeed/Pieces/shoe.png",
+      "sha256": "633a4fcbb007132f8ac6f489d77228b1cb9de2a49df4b0d6fa82a5138f94c6f3"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Assets/CrownDeed/Pieces/steamship.png",
+      "sha256": "0617480f0c7e72fd342ca155c8d0559535a1299e881b9e98487458cf332914d5"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Assets/CrownDeed/Pieces/wheelbarrow.png",
+      "sha256": "b50cf818cc65a773959560d194c123f5fb1979f34d37765e6a44407d76086263"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Assets/CrownDeed/crown-deed-city.png",
+      "sha256": "71670bfaafdc36a2342e7800d058f87a676a9fa9ccda05d51270df8bdcce9919"
+    },
+    {
       "file": "src/ProjectTabletop.App/GlobeRendering/Assets/earth-clouds-2048.jpg",
       "sha256": "daddaad84d7a33bbbc86cdda3f591099f57cee8607b7bcf3b67eb7e4f7a1c793"
     },
     {
       "file": "src/ProjectTabletop.App/GlobeRendering/Assets/earth-day-8192.png",
       "sha256": "aaddcd967a9f09fb2d7ef50ff452bebfcf10192c520465d5eb1ad8446c716e98"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/CrownDeedPieceSources.cs",
+      "sha256": "ecbc3c3ebec0dbc6325c672e53dd892bcb2b4dca8d50b7d0ccd234516dcc5319"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/CrownDeedRendering/CrownDeedWaterShader.cs",
+      "sha256": "e49d02c3c7a157662cebf919fa063e33645aad07386b3ea706077a501f2cef4e"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/GlobeRendering/EarthSurfaceShader.cs",
@@ -183,6 +239,22 @@
     {
       "file": "src/ProjectTabletop.App/Projection/SceneCompositor.Blackjack.cs",
       "sha256": "fdd86ec66a91e77b16f22bf1fcbb3ffe2f6fd37a1f24a326687645d8b7dfa55c"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedAssets.cs",
+      "sha256": "eab13b15ec65292b29d9c7d0296cd341cca04fa6491d8ee4245a217e017d07cd"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedBuildings.cs",
+      "sha256": "f0fcf93fe7f2aa1e0417dc82ef6e7178393fec6ab8dc3fcc7c05349b8bd06816"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedPieces.cs",
+      "sha256": "cc65f627af7a4e59683d050a4224b42a202014421e48cfd1ac637b68a0fb42d6"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedWater.cs",
+      "sha256": "5bbf10aa15cc06fe3aab097f5c83885ccaa5f95cc647ee0d074a73dda723e4d1"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/SceneCompositor.Monopoly.cs",
@@ -213,6 +285,18 @@
       "sha256": "189edcc6599b689bc820e82ed2b5737b12a24e7b4ec3e812414669382cd868b9"
     },
     {
+      "file": "src/ProjectTabletop.Interaction/MonopolyBoard.cs",
+      "sha256": "1048203b2663272ac5ff51e12fab78efc6032b0d80c3ac84d267687dfd0a4324"
+    },
+    {
+      "file": "src/ProjectTabletop.Interaction/MonopolyGame.cs",
+      "sha256": "c46395845d7b4fd443126022c23008df2ab2dfbdc02e585daeeb21abfbdd489c"
+    },
+    {
+      "file": "src/ProjectTabletop.Interaction/MonopolyModels.cs",
+      "sha256": "4e8797175e0d5e1c22ef2ddde6adba19fec8684d7fc8c93293a928e4e8698a60"
+    },
+    {
       "file": "tools/MenuPreviewGenerator/Generate.ps1",
       "sha256": "6f801877cb3a08b80badb87c680c792f731d911f77f2348579f26ed100820b24"
     },
@@ -222,11 +306,11 @@
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.Native.cs",
-      "sha256": "38818f588470b437b413ed3306b68f349e0ed1713dd1552e1efdeef0e998dce0"
+      "sha256": "013ffc50f28004cf556a21fd81232bdca2d545d7a6bbc67a6d6427615a1a4593"
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.cs",
-      "sha256": "9ce3ce0f24d27708ab0984ce3f35d055c274a41bb52b5a9fc6f80732409dfb32"
+      "sha256": "b6682a776e073c68dcf149e956c702ce604ea0f542f22e0ec91edb60fd2a4ad4"
     },
     {
       "file": "tools/MenuPreviewGenerator/Program.cs",

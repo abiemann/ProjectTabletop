@@ -346,9 +346,26 @@ public sealed partial class MainWindow
                     now += TimeSpan.FromMilliseconds(125);
                     edgeQuery = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, edgeOnly, now),
                         context, edgeTracker, now);
-                    Require(edgeQuery.Hints.Count == 0 && edgeQuery.LightingHints.Count == 0 &&
-                            edgeQuery.SearchRegions.SequenceEqual(emptyQuery.SearchRegions),
-                        label + "/" + button.Label + " illuminated or searched a control edge while its label remained intact.");
+                    if (edgeQuery.Hints.Count != 0 || edgeQuery.LightingHints.Count != 0 ||
+                        !edgeQuery.SearchRegions.SequenceEqual(emptyQuery.SearchRegions))
+                    {
+                        string directory = Path.Combine(_appDataDirectory, "SharedAcquisitionFailures", Guid.NewGuid().ToString("N"));
+                        Directory.CreateDirectory(directory);
+                        File.WriteAllBytes(Path.Combine(directory, "empty.bgra"), empty);
+                        File.WriteAllBytes(Path.Combine(directory, "occupied.bgra"), edgeOnly);
+                        File.WriteAllBytes(Path.Combine(directory, "expected.bgra"), context.ExpectedScene!.Bgra);
+                        File.WriteAllText(Path.Combine(directory, "failure.json"), System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            width = size, height = size, stride = size * 4, board = label, button,
+                            center, edge, now, context.SearchPolygon,
+                            expected = new { context.ExpectedScene.Width, context.ExpectedScene.Height,
+                                context.ExpectedScene.CameraToBoard, context.ExpectedScene.BoardSearchRegions,
+                                context.ExpectedScene.BoardReferenceRegions, context.ExpectedScene.BoardTriggerRegions },
+                            presence = edgeQuery.Presence
+                        }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                        throw new InvalidOperationException(label + "/" + button.Label +
+                            " illuminated or searched a control edge while its label remained intact. Diagnostic: " + directory);
+                    }
                 }
                 // The edge-only comparison advanced the fixture clock. Refresh
                 // measured obstruction before the scene accepts its exact frame.

@@ -19,10 +19,7 @@ public sealed partial class SceneCompositor
     {
         var rect = new Rect(button.Bounds.X * BoardSurfaceSize, button.Bounds.Y * BoardSurfaceSize,
             button.Bounds.Width * BoardSurfaceSize, button.Bounds.Height * BoardSurfaceSize);
-        // A quiet secondary control with the shared precision marker; no bevel, sheen or shadow.
-        ds.DrawRoundedRectangle(rect, 19, 19,
-            hovered ? AppPalette.IndicatorOn : AppPalette.MetalEdge, 1.25f);
-        DrawPrecisionButtonMarker(ds, rect, hovered);
+        DrawSecondaryPrecisionButtonSurface(ds, rect, hovered);
         var center = new Vector2((float)rect.X + 58, (float)(rect.Y + rect.Height / 2));
         float aspect = (float)PaintBoardAspect();
         var previous = ds.Transform;

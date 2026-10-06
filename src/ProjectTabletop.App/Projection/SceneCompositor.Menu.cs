@@ -1,4 +1,5 @@
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.Text;
 using ProjectTabletop.Interaction;
 using Windows.Foundation;
@@ -12,8 +13,8 @@ public sealed partial class SceneCompositor
 
     private static bool IsMenuScrollHandle(BoardButton button) => button.Id is "menu-scroll-down" or "menu-scroll-up";
 
-    // Reuse the exact Globe handle silhouette, including its physical aspect
-    // correction, for both the visible arrow and camera caption-ink bounds.
+    // Reuse the Globe chevron silhouette and physical aspect correction for
+    // both the visible arrow and camera caption-ink bounds.
     private static BoardButton MenuArrowAppearance(BoardButton button) =>
         button with { Id = button.Id == "menu-scroll-up" ? "globe-drawer-open" : "globe-drawer-close" };
 
@@ -42,11 +43,14 @@ public sealed partial class SceneCompositor
             if (button.Id == "settings") DrawSettingsCogButton(ds, button, hovered, selectionFeedback);
             else if (IsMenuScrollHandle(button))
             {
-                DrawBoardDrawerHandle(ds, MenuArrowAppearance(button), hovered, PaintBoardAspect());
                 var bounds = button.Bounds;
-                DrawPrecisionButtonMarker(ds, new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
-                    bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize), hovered);
-                DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, ThemeColor(24, 104, 124));
+                var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
+                    bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
+                DrawSecondaryPrecisionButtonSurface(ds, rect, hovered, BoardButtonCornerRadius(button));
+                using var chevron = CanvasGeometry.CreatePolygon(ds.Device,
+                    DrawerArrowVertices(MenuArrowAppearance(button), PaintBoardAspect()));
+                ds.FillGeometry(chevron, AppPalette.ButtonText);
+                DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, AppPalette.IndicatorOn);
             }
         }
         ds.DrawText("Aim with four fingers together.", 80, 907, AppPalette.MutedText, small);
