@@ -83,7 +83,7 @@ public sealed partial class MainWindow : Window
         _ = RefreshCamerasAsync();
         UpdateTrainingStatus();
         SyncVisionSettingsControls();
-        _ = TryLoadAutosavedVisionAsync();
+        _visionAutosaveLoad = TryLoadAutosavedVisionAsync();
         _ = InitializeMonopolySaveAsync();
         _ = WarmMenuPreviewResourcesAsync();
         _ = WarmGlobeResourcesAsync();

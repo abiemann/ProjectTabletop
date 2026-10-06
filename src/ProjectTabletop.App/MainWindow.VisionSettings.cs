@@ -41,33 +41,34 @@ public sealed partial class MainWindow
         var mode = (SegmentationMode)modeIndex;
         double minimumArea = VisionMinimumAreaBox.Value;
         if (_closing) return;
-        var version = ++_visionLoadVersion;
         _visionSettingsBusy = true;
         ApplyVisionSettingsButton.IsEnabled = false;
         CaptureEmptyBoardButton.IsEnabled = false;
         try
         {
+            if (await VisionEngineForActionAsync() is not { } engine) return;
             bool retrained = await Task.Run(() =>
             {
                 lock (_visionGate)
                 {
-                    if (_closing || version != Interlocked.Read(ref _visionLoadVersion)) throw new OperationCanceledException();
-                    if (mode == SegmentationMode.BackgroundDifference && !_vision.HasEmptyBoardReference)
+                    ThrowIfVisionReplaced(engine);
+                    if (mode == SegmentationMode.BackgroundDifference && !engine.HasEmptyBoardReference)
                         throw new InvalidOperationException("Capture an empty board with a fixed projected image first.");
-                    var settings = _vision.Settings;
+                    var settings = engine.Settings;
                     bool patternChanged = settings.PatternBrightnessThreshold != pattern;
                     settings.SegmentationMode = mode;
                     settings.BrightnessThreshold = brightness;
                     settings.DifferenceThreshold = difference;
                     settings.MinimumAreaPixels = minimumArea;
                     settings.PatternBrightnessThreshold = pattern;
-                    bool retrain = patternChanged && _vision.Captures.Count > 0;
-                    if (retrain) _vision.Train();
-                    _vision.Save(AutoProfileDirectory);
+                    bool retrain = patternChanged && engine.Captures.Count > 0;
+                    if (retrain) engine.Train();
+                    engine.Save(AutoProfileDirectory);
                     return retrain;
                 }
             });
-            if (_closing || version != _visionLoadVersion) return;
+            if (_closing) return;
+            ThrowIfVisionReplaced(engine);
             ClearVisionDetections();
             UpdateTrainingStatus();
             SetStatus(retrained
@@ -76,7 +77,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            if (!_closing && version == _visionLoadVersion) SetStatus("Vision tuning failed: " + ex.Message);
+            if (!_closing) SetStatus("Vision tuning failed: " + ex.Message);
         }
         finally
         {
@@ -99,30 +100,31 @@ public sealed partial class MainWindow
             return;
         }
         if (_closing) return;
-        var version = ++_visionLoadVersion;
         _visionSettingsBusy = true;
         ApplyVisionSettingsButton.IsEnabled = false;
         CaptureEmptyBoardButton.IsEnabled = false;
         try
         {
+            if (await VisionEngineForActionAsync() is not { } engine) return;
             await Task.Run(() =>
             {
                 lock (_visionGate)
                 {
-                    if (_closing || version != Interlocked.Read(ref _visionLoadVersion)) throw new OperationCanceledException();
-                    _vision.SetEmptyBoardReference(frame.Width, frame.Height, frame.Stride, frame.Bgra);
-                    _vision.Settings.SegmentationMode = SegmentationMode.BackgroundDifference;
-                    _vision.Save(AutoProfileDirectory);
+                    ThrowIfVisionReplaced(engine);
+                    engine.SetEmptyBoardReference(frame.Width, frame.Height, frame.Stride, frame.Bgra);
+                    engine.Settings.SegmentationMode = SegmentationMode.BackgroundDifference;
+                    engine.Save(AutoProfileDirectory);
                 }
             });
-            if (_closing || version != _visionLoadVersion) return;
+            if (_closing) return;
+            ThrowIfVisionReplaced(engine);
             SyncVisionSettingsControls();
             ClearVisionDetections();
             SetStatus("Empty-board reference saved and difference mode selected. Keep the projected image fixed; moving video will appear as motion to the detector.");
         }
         catch (Exception ex)
         {
-            if (!_closing && version == _visionLoadVersion) SetStatus("Could not save empty-board reference: " + ex.Message);
+            if (!_closing) SetStatus("Could not save empty-board reference: " + ex.Message);
         }
         finally
         {

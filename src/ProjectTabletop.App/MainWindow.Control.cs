@@ -232,15 +232,12 @@ public sealed partial class MainWindow
                     boardAppTitle = _scene.CurrentBoardTitle,
                     blackjack = _scene.BlackjackState,
                     crownDeed = _scene.MonopolyState,
-                    monopoly = _scene.MonopolyState,
                     globe = _scene.GlobeState,
                     slots = SlotsStatus(),
                     roulette = RouletteStatus(),
                     globeDrawer = _scene.GetGlobeDrawerDiagnostics(MonotonicClock.UtcNow),
                     crownDeedSavePath = MonopolySavePath,
                     crownDeedSaveError = _monopolySaveError,
-                    monopolySavePath = MonopolySavePath,
-                    monopolySaveError = _monopolySaveError,
                     blackjackAnimation = _scene.GetBlackjackAnimationDiagnostics(),
                     monopolyDiceAnimation = _scene.GetMonopolyDiceAnimationDiagnostics(MonotonicClock.UtcNow),
                     monopolyEntrance = _scene.GetMonopolyEntranceDiagnostics(),
@@ -324,7 +321,7 @@ public sealed partial class MainWindow
             case "show_monopoly":
                 ShowMonopoly();
                 return new { boardApp = _scene.CurrentBoardScreen.ToString(), boardAppTitle = _scene.CurrentBoardTitle,
-                    crownDeed = _scene.MonopolyState, monopoly = _scene.MonopolyState };
+                    crownDeed = _scene.MonopolyState };
             case "crown_deed_action":
             case "monopoly_action":
                 if (!parameters.TryGetProperty("id", out var monopolyAction) || monopolyAction.ValueKind != JsonValueKind.String)
@@ -332,7 +329,7 @@ public sealed partial class MainWindow
                 bool monopolyAccepted = _scene.ActivateMonopolyButton(monopolyAction.GetString()!);
                 QueueMonopolySave();
                 UpdateBoardAppStatus();
-                return new { accepted = monopolyAccepted, crownDeed = _scene.MonopolyState, monopoly = _scene.MonopolyState,
+                return new { accepted = monopolyAccepted, crownDeed = _scene.MonopolyState,
                     drawerOpen = _scene.MonopolyDrawerOpen };
             case "capture_crown_deed_preview":
             case "capture_monopoly_preview":

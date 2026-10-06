@@ -44,9 +44,12 @@ public sealed partial class SceneCompositor
 
     private void PrepareMenuPreviews(CanvasDevice device)
     {
-        bool ready = GetMenuPreviewImages(device).IsReady;
+        var images = GetMenuPreviewImages(device);
+        bool ready = images.IsReady;
         if (ready == _menuPreviewReady) return;
         _menuPreviewReady = ready;
+        if (ready && images.Error is { } error)
+            AppLog.Write("Menu thumbnails", new InvalidDataException(error));
         InvalidateMenuPreviewSurface();
     }
 

@@ -108,14 +108,13 @@ public sealed partial class MainWindow
             RequireProjectionOutput();
 
             // Menu art is already generated offline. Finish its asynchronous
-            // decode before scanning so the reveal's first frame is ready.
-            await _scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
+            // decode before scanning so the reveal's first frame is ready. The
+            // art is decorative: a failed decode is logged and never blocks setup.
+            await WarmMenuPreviewResourcesAsync();
             if (request != _boardSetupRequestVersion || _closing) return;
 
             Volatile.Write(ref _boardSetupActive, true);
             ClearBoardPreview();
-            Volatile.Write(ref _latestDetections, Array.Empty<PieceDetection>());
-            _scene.SetDetections(Array.Empty<PieceDetection>(), DateTimeOffset.MinValue);
             BoardSetupButton.Content = "End board setup";
             RescanBoardButton.IsEnabled = true;
             if (SelectedCamera is not null && (!_camera.IsRunning ||

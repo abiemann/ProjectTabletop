@@ -149,7 +149,6 @@ public sealed partial class MainWindow
     // can finish, but cannot publish into the new camera/registration generation.
     private void ClearHandTracking([CallerMemberName] string reason = "")
     {
-        _calibrationResults.Invalidate();
         ResetPieceDetections();
         lock (_handGate)
         {

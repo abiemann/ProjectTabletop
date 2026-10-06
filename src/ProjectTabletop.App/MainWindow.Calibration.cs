@@ -193,24 +193,28 @@ public sealed partial class MainWindow
         try
         {
             var session = await CalibrationSessionStore.LoadAsync(CalibrationPath);
-            if (SelectedDisplay is not { } selectedDisplay) return;
             // DisplayChoice retains picker bounds; query Windows again to detect
             // a resolution change on the same display while the file was read.
-            var liveDisplay = DisplayArea.GetFromDisplayId(selectedDisplay.DisplayId);
-            if (liveDisplay is null) return;
+            var liveDisplay = SelectedDisplay is { } selectedDisplay
+                ? DisplayArea.GetFromDisplayId(selectedDisplay.DisplayId) : null;
             _calibrationResults.TryApply(generation, () =>
             {
-                // Read live hardware after the await. A camera restart (even to the
-                // same device), output replacement, new calibration or close makes
-                // the earlier request obsolete.
-                if (_closing || !_cameraWanted || !_camera.IsRunning || _cameraOperation.CurrentCount == 0 ||
+                // A newer calibration action or close owns the status. Otherwise read
+                // live hardware after the await: a camera restart (even to the same
+                // device), output replacement or display change makes this read obsolete.
+                if (_closing) return false;
+                if (liveDisplay is null || !_cameraWanted || !_camera.IsRunning || _cameraOperation.CurrentCount == 0 ||
                     cameraVersion != Interlocked.Read(ref _cameraOperationVersion) ||
                     !ReferenceEquals(output, _output) || output is null || !output.IsFullScreen ||
                     SelectedCamera is not { } currentCamera || SelectedDisplay is not { } currentDisplay ||
-                    currentDisplay.Id != selectedDisplay.Id ||
+                    currentDisplay.Id != display.Id ||
                     _camera.ActiveDeviceId != currentCamera.Device.Id || _camera.LatestFrame is not { } currentFrame ||
                     _outputDisplayId != currentDisplay.Id || output.ActualDisplayId != currentDisplay.Id)
+                {
+                    CalibrationStatusText.Text = "Calibration was not loaded because the webcam or projector output " +
+                        "changed while it was being read. Load it again.";
                     return false;
+                }
                 if (!session.MatchesHardware(currentCamera.Device.Id, currentFrame.Width, currentFrame.Height,
                         currentDisplay.Id, liveDisplay.OuterBounds.Width, liveDisplay.OuterBounds.Height))
                 {

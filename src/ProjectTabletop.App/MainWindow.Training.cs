@@ -6,7 +6,9 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
+    // Only a newer profile load supersedes an older pending load.
     private long _visionLoadVersion;
+    private Task _visionAutosaveLoad = Task.CompletedTask;
 
     private string AutoProfileDirectory => Path.Combine(_appDataDirectory, "VisionAutosave");
 
@@ -43,6 +45,22 @@ public sealed partial class MainWindow
         }
     }
 
+    // Vision actions queue on _visionGate and never cancel one another. They
+    // first let the startup profile load finish, so an early action cannot be
+    // saved over it, then fail visibly only if a newer load replaced their engine.
+    private async Task<VisionEngine?> VisionEngineForActionAsync()
+    {
+        await _visionAutosaveLoad;
+        return _closing ? null : _vision;
+    }
+
+    private void ThrowIfVisionReplaced(VisionEngine engine)
+    {
+        if (_closing) throw new OperationCanceledException();
+        if (!ReferenceEquals(engine, _vision))
+            throw new InvalidOperationException("A different vision profile was loaded first. Try again.");
+    }
+
     private async void AddSample_Click(object sender, RoutedEventArgs e)
     {
         var frame = _frozenFrame;
@@ -52,25 +70,25 @@ public sealed partial class MainWindow
             SetStatus("Capture a frame, enter a piece ID, mark at least three outline points, and mark its front.");
             return;
         }
-        if (_closing) return;
-        var version = ++_visionLoadVersion;
+        var outline = _pieceOutline.ToArray();
+        var front = _pieceFront.Value;
         try
         {
-            var outline = _pieceOutline.ToArray();
-            var front = _pieceFront.Value;
+            if (await VisionEngineForActionAsync() is not { } engine) return;
             var info = await Task.Run(() =>
             {
                 lock (_visionGate)
                 {
-                    if (_closing || version != Interlocked.Read(ref _visionLoadVersion)) throw new OperationCanceledException();
-                    var result = _vision.AddLabeledCapture(pieceId, frame.Width, frame.Height,
+                    ThrowIfVisionReplaced(engine);
+                    var result = engine.AddLabeledCapture(pieceId, frame.Width, frame.Height,
                         frame.Stride, frame.Bgra, outline, front);
                     // Persist the complete original camera frame and annotations immediately.
-                    _vision.Save(AutoProfileDirectory);
+                    engine.Save(AutoProfileDirectory);
                     return result;
                 }
             });
-            if (_closing || version != _visionLoadVersion) return;
+            if (_closing) return;
+            ThrowIfVisionReplaced(engine);
             ClearVisionDetections();
             AddPieceChoice(pieceId);
             _pieceOutline.Clear();
@@ -85,28 +103,28 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            if (!_closing && version == _visionLoadVersion) SetStatus("Could not add labeled snapshot: " + ex.Message);
+            if (!_closing) SetStatus("Could not add labeled snapshot: " + ex.Message);
         }
     }
 
     private async void Train_Click(object sender, RoutedEventArgs e)
     {
-        if (_closing) return;
-        var version = ++_visionLoadVersion;
         try
         {
+            if (await VisionEngineForActionAsync() is not { } engine) return;
             TrainingStatusText.Text = "Training shape recognition locally…";
             var report = await Task.Run(() =>
             {
                 lock (_visionGate)
                 {
-                    if (_closing || version != Interlocked.Read(ref _visionLoadVersion)) throw new OperationCanceledException();
-                    var result = _vision.Train();
-                    _vision.Save(AutoProfileDirectory);
+                    ThrowIfVisionReplaced(engine);
+                    var result = engine.Train();
+                    engine.Save(AutoProfileDirectory);
                     return result;
                 }
             });
-            if (_closing || version != _visionLoadVersion) return;
+            if (_closing) return;
+            ThrowIfVisionReplaced(engine);
             ClearVisionDetections();
             UpdateTrainingStatus();
             SetStatus($"Trained {report.PieceCount} piece IDs from {report.CaptureCount} snapshots. " +
@@ -115,7 +133,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            if (_closing || version != _visionLoadVersion) return;
+            if (_closing) return;
             UpdateTrainingStatus();
             SetStatus("Shape training failed: " + ex.Message);
         }

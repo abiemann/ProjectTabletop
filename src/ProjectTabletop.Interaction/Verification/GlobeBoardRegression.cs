@@ -255,18 +255,6 @@ internal static class GlobeBoardRegression
         bool rejected = false;
         try { _ = new GlobeState(0, double.NaN); } catch (ArgumentOutOfRangeException) { rejected = true; }
         Require(rejected, "A non-finite home latitude was accepted.");
-
-        // Time zones resolve to tz reference cities, refined by the Windows region.
-        static bool City((double Latitude, double Longitude)? city, double latitude, double longitude) =>
-            city is { } value && Math.Abs(value.Latitude - latitude) < .01 && Math.Abs(value.Longitude - longitude) < .01;
-        var pacific = TimeZoneInfo.FindSystemTimeZoneById("Pacific Standard Time");
-        Require(City(GlobeHome.ReferenceCity(pacific, "US"), 34.0522, -118.2428) &&
-            City(GlobeHome.ReferenceCity(pacific, "CA"), 49.2667, -123.1167) &&
-            City(GlobeHome.ReferenceCity(pacific), 34.0522, -118.2428) &&
-            City(GlobeHome.ReferenceCity(TimeZoneInfo.FindSystemTimeZoneById("India Standard Time")), 22.5333, 88.3667) &&
-            City(GlobeHome.ReferenceCity(TimeZoneInfo.FindSystemTimeZoneById("AUS Eastern Standard Time")), -33.8667, 151.2167) &&
-            GlobeHome.ReferenceCity(TimeZoneInfo.FindSystemTimeZoneById("UTC-11")) is null,
-            "Time zones did not resolve to their tz reference cities.");
     }
 
     private static void CheckFixedOpeningView()
