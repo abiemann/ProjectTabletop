@@ -39,10 +39,14 @@ public sealed partial class MainWindow
             (Name: "portrait", Width: 1080, Height: 1920) })
         {
             using var scene = Fixture(view.Width, view.Height, out double inset);
+            await scene.EnsureCrownDeedResourcesAsync(CanvasDevice.GetSharedDevice());
+            Require(scene.GetMonopolyEntranceFrame(now) is { Active: true, ElapsedMilliseconds: 0 },
+                "The static-window fixture did not begin its entrance after artwork loading.");
             using var preview = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), view.Width, view.Height, 96);
             using var projector = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), view.Width, view.Height, 96);
             now += TimeSpan.FromMilliseconds(4975);
             scene.TickMonopoly(now);
+            Require(!scene.MonopolyEntranceActive, "The static-window fixture sampled its stationary board before the entrance ended.");
             Draw(scene, preview, false); Draw(scene, projector, true); Draw(scene, preview, false);
             Require(scene.MonopolyState.Phase == MonopolyPhase.Landing, "The rollback fixture did not retain the landing screen.");
             var city = Field<CanvasBitmap>(scene, "_crownDeedCityBitmap");
@@ -110,6 +114,7 @@ public sealed partial class MainWindow
         using (var scene = Fixture(1254, 1254, out _))
         using (var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), 1254, 1254, 96))
         {
+            await scene.EnsureCrownDeedResourcesAsync(CanvasDevice.GetSharedDevice());
             var began = now;
             byte[] first = Draw(scene, target, false);
             var probes = Probes(1254, 1254, Matrix3x2.CreateScale(1.254f));

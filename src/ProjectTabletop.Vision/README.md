@@ -228,9 +228,20 @@ service.
 5. Call `Save(directory)` to write `vision-profile.json`, `vision-svm.yml`, and
    **full original camera snapshots** under `captures/<capture-id>.png`. Load a
    session with `VisionEngine.Load(directory)`.
+
 6. Run `Evaluate(annotatedFrames)` to get per-piece identity, center, angle,
    and outline IoU errors. Keep held-out frames from the real projection setup
    for meaningful regression testing.
+
+Loading a trained profile reconstructs the exemplar descriptors used for pose
+fitting and unknown rejection, then reuses its saved SVM when class order,
+normalization, classifier type and feature dimensions match. A missing or
+incompatible SVM is fitted once. Loading does not train a throwaway classifier or
+compute an unused training report. Run the persistence regression with:
+
+```powershell
+dotnet run --project src/ProjectTabletop.Vision/Regression/ProjectTabletop.Vision.Regression.csproj -- --vision-persistence
+```
 
 The engine expects BGRA8 top-down image data. `stride` may exceed `width * 4`.
 Its public coordinate values are camera pixels; display/projector calibration is

@@ -73,7 +73,19 @@ public sealed partial class MainWindow
             using var fixture = new RouletteNativeFixture(aspect.Width, aspect.Height, game);
             var scene = fixture.Scene;
             scene.ShowRoulette();
+            await scene.EnsureBoardArtworkResourcesAsync(fixture.Target.Device, BoardScreen.Roulette);
             byte[] idle = await Capture("idle");
+            var motionKeyField = typeof(SceneCompositor).GetField("_rouletteMotionKey", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var idleWheelKey = motionKeyField.GetValue(scene);
+            var idleClock = fixture.Now;
+            foreach (int seconds in new[] { 1, 2, 4 })
+            {
+                fixture.Now = idleClock.AddSeconds(seconds);
+                byte[] unchanged = fixture.Draw();
+                Check(Equals(idleWheelKey, motionKeyField.GetValue(scene)) && unchanged.AsSpan().SequenceEqual(idle),
+                    "The resting Roulette wheel repainted or changed as only time advanced.");
+                exactClockChecks++;
+            }
             var projection = fixture.CheckProjectedRim(idle);
             fixture.CheckRotorPocketColors();
             Check(typeof(SceneCompositor).GetField("_rouletteBackdrop", BindingFlags.Instance | BindingFlags.NonPublic)!
@@ -119,13 +131,21 @@ public sealed partial class MainWindow
                 result.Balance == RouletteGame.StartingBalance - committed.TotalBet + returned && result.History.Count == 1,
                 "Roulette's native deadline did not settle its committed winning wager exactly once.");
             fixture.CheckRenderedBall(landed, result);
+            var landedWheelKey = motionKeyField.GetValue(scene);
             fixture.Now += TimeSpan.FromMilliseconds(650);
             await Capture("win-glints");
-            Check(ReferenceEquals(result, scene.RouletteState), "Winning decorative glints changed roulette state.");
+            Check(ReferenceEquals(result, scene.RouletteState) && !Equals(landedWheelKey, motionKeyField.GetValue(scene)),
+                "Winning decorative glints changed roulette state or stopped producing timed frames.");
 
             // A second paid round must inherit the first physical resting pose,
             // rather than resetting its rotor or ball when Betting/Spinning flips.
             fixture.Now = result.RoundStartedAt + result.SpinDuration + TimeSpan.FromSeconds(4);
+            byte[] rested = fixture.Draw();
+            var restedWheelKey = motionKeyField.GetValue(scene);
+            fixture.Now += TimeSpan.FromSeconds(1);
+            Check(rested.AsSpan().SequenceEqual(fixture.Draw()) && Equals(restedWheelKey, motionKeyField.GetValue(scene)),
+                "The settled winning wheel kept repainting after its glints ended.");
+            exactClockChecks++;
             Check(scene.ActivateRouletteButton("roulette-number-7"), "The second consecutive round could not place its wager.");
             var previousPose = SceneCompositor.GetRouletteMotion(scene.RouletteState, fixture.Now);
             fixture.Hold("roulette-spin");

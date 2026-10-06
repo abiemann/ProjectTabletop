@@ -25,7 +25,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
-            if (_boardSession.Screen != BoardScreen.Roulette || IsBoardRevealActive) return false;
+            if (_boardSession.Screen != BoardScreen.Roulette || IsBoardRevealActive || BlockBoardArtworkInput()) return false;
             bool result = _boardSession.ActivateButton(id, _blackjackClock());
             if (result) SyncPhotoCopySession();
             return result;
@@ -48,6 +48,7 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             if (_disposed || _boardSession.Screen != BoardScreen.Roulette) return;
+            if (!PrepareBoardArtwork(ds.Device)) { DrawArtworkLoading(ds, new Rect(0, 0, width, height)); return; }
             var now = _blackjackClock(); _boardSession.TickRoulette(now);
             double aspect = PaintBoardAspect();
             double w = Math.Min(width, height * aspect), h = w / aspect;

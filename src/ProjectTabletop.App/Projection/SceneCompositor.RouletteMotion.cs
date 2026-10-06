@@ -84,7 +84,14 @@ public sealed partial class SceneCompositor
         if (_boardSession.Screen != BoardScreen.Roulette) return null;
         if (EnsureBoardRenderTarget(ref _rouletteMotionTarget, device)) _rouletteMotionKey = null;
         var game = _boardSession.RouletteState;
-        var key = (game.Revision, now.ToUnixTimeMilliseconds() / 16, aspect);
+        // Once the ball rests, the rotor, spindle and their illumination are
+        // unchanged. Retain their raster until another round or layout change;
+        // only a spin and the short winning glints require new timed frames.
+        double winAge = (now - game.RoundStartedAt - game.SpinDuration).TotalSeconds;
+        bool animated = game.Phase == RoulettePhase.Spinning ||
+            game.Phase == RoulettePhase.Betting && game.LastWin > 0 && game.RoundNumber > 0 &&
+            winAge is >= 0 and < 3;
+        var key = (game.Revision, animated ? now.ToUnixTimeMilliseconds() / 16 : -1, aspect);
         if (_rouletteMotionKey != key)
         {
             using var ds = _rouletteMotionTarget!.CreateDrawingSession();
@@ -471,8 +478,6 @@ public sealed partial class SceneCompositor
         _rouletteMotionTarget?.Dispose(); _rouletteMotionTarget = null; _rouletteMotionKey = null;
         _rouletteFixedBowl?.Dispose(); _rouletteFixedBowl = null;
         _rouletteForegroundRim?.Dispose(); _rouletteForegroundRim = null;
-        DisposeRouletteMaterials();
         _roulettePreviewTarget?.Dispose(); _roulettePreviewTarget = null; _roulettePreviewKey = null;
-        _rouletteBackdrop?.Dispose(); _rouletteBackdrop = null; _rouletteBackdropFailed = false;
     }
 }

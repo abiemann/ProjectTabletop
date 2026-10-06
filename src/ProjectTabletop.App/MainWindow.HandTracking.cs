@@ -107,6 +107,7 @@ public sealed partial class MainWindow
         _handStatusTimer.Interval = TimeSpan.FromMilliseconds(100);
         _handStatusTimer.Tick += (_, _) =>
         {
+            UpdatePaintInputAvailability();
             var expired = false;
             lock (_handGate)
             {
@@ -157,6 +158,7 @@ public sealed partial class MainWindow
             _lastHandDetectionTick = 0;
             _scene.ClearHandTips();
             _scene.InvalidatePhotoCopyCapture();
+            _scene.SetPaintInputAvailable(false);
             LogHandTrackingEvent("tracking_reset", new { reason });
             _handVideoNotBefore = MonotonicClock.UtcNow;
             _handVideoRecorder?.Stop("tracking_reset:" + reason);

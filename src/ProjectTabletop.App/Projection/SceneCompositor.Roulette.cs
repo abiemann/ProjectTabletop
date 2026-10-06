@@ -19,7 +19,6 @@ public sealed partial class SceneCompositor
     private static readonly Color RoulettePink = ThemeColor(239, 120, 160);
     private static readonly Color RouletteInk = ThemeColor(8, 22, 28);
     private CanvasBitmap? _rouletteBackdrop;
-    private bool _rouletteBackdropFailed;
 
     private void DrawRouletteBoard(CanvasDrawingSession ds, RouletteSnapshot game,
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
@@ -46,19 +45,7 @@ public sealed partial class SceneCompositor
 
     private void DrawRouletteBackdrop(CanvasDrawingSession ds)
     {
-        if (_rouletteBackdrop?.Device != ds.Device)
-        {
-            _rouletteBackdrop?.Dispose(); _rouletteBackdrop = null;
-        }
-        if (_rouletteBackdrop is null && !_rouletteBackdropFailed)
-        {
-            try
-            {
-                _rouletteBackdrop = CanvasBitmap.LoadAsync(ds.Device,
-                    Path.Combine(AppContext.BaseDirectory, "Assets", "Roulette", "vice-royale-casino.png")).AsTask().GetAwaiter().GetResult();
-            }
-            catch (Exception error) { _rouletteBackdropFailed = true; AppLog.Write("Roulette artwork", error); }
-        }
+        PrepareRouletteResources(ds.Device);
         if (_rouletteBackdrop is { } art)
         {
             double side = Math.Min(art.Size.Width, art.Size.Height);

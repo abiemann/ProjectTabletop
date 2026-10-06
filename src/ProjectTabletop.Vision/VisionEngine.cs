@@ -27,6 +27,10 @@ public sealed partial class VisionEngine : IDisposable
     private string[] _classIds = [];
     private bool _disposed;
 
+    // Tracks actual classifier fits, including recovery of a missing or stale
+    // cache. Profile-load regressions use this to catch redundant startup work.
+    internal int ClassifierTrainingCount { get; private set; }
+
     public VisionEngine(VisionSettings? settings = null) => Settings = settings ?? new VisionSettings();
 
     public VisionSettings Settings { get; }
@@ -140,6 +144,13 @@ public sealed partial class VisionEngine : IDisposable
 
     private TrainingReport TrainCore()
     {
+        RebuildTrainedCaptures();
+        TrainClassifier();
+        return CreateTrainingReport();
+    }
+
+    private void RebuildTrainedCaptures()
+    {
         ThrowIfDisposed();
         if (_captures.Count == 0)
             throw new InvalidOperationException("Add at least one labeled capture before training.");
@@ -165,9 +176,13 @@ public sealed partial class VisionEngine : IDisposable
             double variance = _trained.Average(t => Math.Pow(t.Features.Vector[j] - _featureMean[j], 2));
             _featureDeviation[j] = Math.Max(Math.Sqrt(variance), 0.05);
         }
+    }
 
+    private void TrainClassifier()
+    {
         if (_classIds.Length >= 2)
         {
+            int dimensions = _trained[0].Features.Vector.Length;
             using var samples = new Mat(_trained.Count, dimensions, MatType.CV_32FC1);
             using var labels = new Mat(_trained.Count, 1, MatType.CV_32SC1);
             for (int row = 0; row < _trained.Count; row++)
@@ -177,15 +192,24 @@ public sealed partial class VisionEngine : IDisposable
                     samples.Set(row, col, normalized[col]);
                 labels.Set(row, 0, Array.IndexOf(_classIds, _trained[row].Capture.PieceId));
             }
-            _svm = SVM.Create();
-            _svm.Type = SVM.Types.CSvc;
-            _svm.KernelType = SVM.KernelTypes.Rbf;
-            _svm.C = 2.0;
-            _svm.Gamma = 1.0 / dimensions;
-            if (!_svm.Train(samples, SampleTypes.RowSample, labels))
-                throw new InvalidOperationException("OpenCV could not train the piece classifier.");
+            var classifier = SVM.Create();
+            try
+            {
+                classifier.Type = SVM.Types.CSvc;
+                classifier.KernelType = SVM.KernelTypes.Rbf;
+                classifier.C = 2.0;
+                classifier.Gamma = 1.0 / dimensions;
+                ClassifierTrainingCount++;
+                if (!classifier.Train(samples, SampleTypes.RowSample, labels))
+                    throw new InvalidOperationException("OpenCV could not train the piece classifier.");
+                _svm = classifier;
+            }
+            catch { classifier.Dispose(); throw; }
         }
+    }
 
+    private TrainingReport CreateTrainingReport()
+    {
         double? leaveOneOut = null;
         if (_classIds.Length >= 2 && _classIds.All(id => _trained.Count(t => t.Capture.PieceId == id) >= 2))
         {
@@ -320,34 +344,71 @@ public sealed partial class VisionEngine : IDisposable
             .Any(group => group.Select(capture => capture.PieceId).Distinct(StringComparer.Ordinal).Skip(1).Any()))
             throw new InvalidDataException("This profile contains piece IDs that differ only by letter case. Rename those IDs before loading it.");
         var engine = new VisionEngine(state.Settings);
-        foreach (StoredCapture capture in state.Captures)
+        try
         {
-            if (capture.PngFileName != "captures/" + capture.CaptureId + ".png" ||
-                !Guid.TryParseExact(capture.CaptureId, "N", out _))
-                throw new InvalidDataException("Invalid capture filename in vision profile.");
-            capture.PngBase64 = Convert.ToBase64String(File.ReadAllBytes(
-                Path.Combine(directory, "captures", capture.CaptureId + ".png")));
-        }
-        engine._captures.AddRange(state.Captures);
-        if (state.BackgroundPngBase64 is not null)
-        {
-            engine._backgroundPng = Convert.FromBase64String(state.BackgroundPngBase64);
-            using Mat image = Cv2.ImDecode(engine._backgroundPng, ImreadModes.Color);
-            engine._backgroundGray = ToGray(image);
-        }
-        if (state.TrainedClassIds is not null)
-        {
-            // Recompute descriptors from the saved images, then load the persisted SVM.
-            // This also validates the capture set against the current implementation.
-            engine.Train();
-            string svmPath = Path.Combine(directory, SvmFileName);
-            if (File.Exists(svmPath) && engine._svm is not null)
+            foreach (StoredCapture capture in state.Captures)
             {
-                engine._svm.Dispose();
-                engine._svm = SVM.Load(svmPath);
+                if (capture.PngFileName != "captures/" + capture.CaptureId + ".png" ||
+                    !Guid.TryParseExact(capture.CaptureId, "N", out _))
+                    throw new InvalidDataException("Invalid capture filename in vision profile.");
+                capture.PngBase64 = Convert.ToBase64String(File.ReadAllBytes(
+                    Path.Combine(directory, "captures", capture.CaptureId + ".png")));
             }
+            engine._captures.AddRange(state.Captures);
+            if (state.BackgroundPngBase64 is not null)
+            {
+                engine._backgroundPng = Convert.FromBase64String(state.BackgroundPngBase64);
+                using Mat image = Cv2.ImDecode(engine._backgroundPng, ImreadModes.Color);
+                engine._backgroundGray = ToGray(image);
+            }
+            if (state.TrainedClassIds is not null)
+            {
+                // Pose fitting still needs the saved exemplars. Reconstruct those and
+                // their normalization without fitting a classifier or evaluating a
+                // training report that the caller never requests.
+                engine.RebuildTrainedCaptures();
+                if (engine._classIds.Length >= 2 && !engine.TryLoadClassifier(directory, state))
+                    engine.TrainClassifier();
+            }
+            return engine;
         }
-        return engine;
+        catch { engine.Dispose(); throw; }
+    }
+
+    private bool TryLoadClassifier(string directory, StoredState state)
+    {
+        // An SVM's numeric labels depend on class order, and its inputs depend
+        // on the normalization used during fitting. Never combine a saved
+        // classifier with different reconstructed descriptors or class labels.
+        if (!state.TrainedClassIds!.SequenceEqual(_classIds, StringComparer.Ordinal) ||
+            !MatchingNormalization(state.FeatureMean, _featureMean!) ||
+            !MatchingNormalization(state.FeatureDeviation, _featureDeviation!)) return false;
+        string path = Path.Combine(directory, SvmFileName);
+        if (!File.Exists(path)) return false;
+        var classifier = SVM.Load(path);
+        try
+        {
+            if (!classifier.IsTrained() || classifier.Type != SVM.Types.CSvc ||
+                classifier.KernelType != SVM.KernelTypes.Rbf ||
+                classifier.GetVarCount() != _featureMean!.Length)
+            {
+                classifier.Dispose();
+                return false;
+            }
+            _svm = classifier;
+            return true;
+        }
+        catch { classifier.Dispose(); throw; }
+    }
+
+    private static bool MatchingNormalization(double[]? saved, double[] current)
+    {
+        if (saved is null || saved.Length != current.Length) return false;
+        for (int index = 0; index < current.Length; index++)
+            if (!double.IsFinite(saved[index]) ||
+                Math.Abs(saved[index] - current[index]) > 1e-12 * Math.Max(1, Math.Abs(current[index])))
+                return false;
+        return true;
     }
 
     public void Dispose()

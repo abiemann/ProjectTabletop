@@ -14,6 +14,7 @@ public sealed partial class SceneCompositor
     internal const double MonopolyEntranceDurationMilliseconds = 4975;
 
     private DateTimeOffset? _monopolyEntranceStartedAt;
+    private DateTimeOffset? _monopolyEntranceEarliestStart;
     private bool _monopolyEntrancePending, _monopolyEntranceCompleted;
     internal long MonopolyEntranceRevision { get; private set; }
 
@@ -49,7 +50,16 @@ public sealed partial class SceneCompositor
 
     private void StartMonopolyEntrance(DateTimeOffset startedAt)
     {
+        if (!CrownDeedResourcesReady)
+        {
+            // Registration can schedule a future entrance while the artwork
+            // is decoding. Keep that deadline, then start when both are ready.
+            _monopolyEntrancePending = true;
+            _monopolyEntranceEarliestStart = startedAt;
+            return;
+        }
         _monopolyEntrancePending = false;
+        _monopolyEntranceEarliestStart = null;
         _monopolyEntranceCompleted = false;
         _monopolyEntranceStartedAt = startedAt;
         MonopolyEntranceRevision++;
@@ -66,9 +76,9 @@ public sealed partial class SceneCompositor
         {
             // A laptop-only board can animate without calibration. A projected
             // setup must finish its registration/reveal before the first tile.
-            if (_blackOutput || _boardSetup || _calibrationTarget >= 0 || IsBoardRevealActive)
+            if (!CrownDeedResourcesReady || _blackOutput || _boardSetup || _calibrationTarget >= 0 || IsBoardRevealActive)
                 return new(0, true, 0, 0);
-            StartMonopolyEntrance(now);
+            StartMonopolyEntrance(_monopolyEntranceEarliestStart is { } earliest && earliest > now ? earliest : now);
         }
         if (_monopolyEntranceStartedAt is not { } started) return null;
         double elapsed = Math.Max(_monopolyEntranceCompleted ? MonopolyEntranceDurationMilliseconds : 0,
@@ -95,6 +105,7 @@ public sealed partial class SceneCompositor
     {
         if (_monopolyEntranceStartedAt is null && !_monopolyEntrancePending) return;
         _monopolyEntranceStartedAt = null;
+        _monopolyEntranceEarliestStart = null;
         _monopolyEntrancePending = _monopolyEntranceCompleted = false;
         MonopolyEntranceRevision++;
         _boardSession.CancelMonopolyPresentation(_monopolyClock());

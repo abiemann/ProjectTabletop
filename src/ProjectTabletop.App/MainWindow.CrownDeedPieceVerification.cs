@@ -42,6 +42,7 @@ public sealed partial class MainWindow
         string saved = scene.ExportMonopolySave();
         var frozen = scene.MonopolyState;
         var device = CanvasDevice.GetSharedDevice();
+        await scene.EnsureCrownDeedResourcesAsync(device);
         using (var warm = new CanvasRenderTarget(device, 256, 256, 96))
         using (var drawing = warm.CreateDrawingSession())
         {
@@ -63,6 +64,7 @@ public sealed partial class MainWindow
             Require(width >= 128 && height >= 128 && pixels.Length == width * height * 4,
                 "A silver-piece source is missing or below useful source resolution.");
             int solid = 0, partial = 0;
+            int left = width, top = height, right = -1, bottom = -1;
             for (int y = 0; y < height; y++)
             for (int x = 0; x < width; x++)
             {
@@ -71,6 +73,11 @@ public sealed partial class MainWindow
                     Require(alpha == 0, "A silver-piece source has an opaque outer border.");
                 if (alpha > 0) Require(x >= source.X && x < source.X + source.Width &&
                     y >= source.Y && y < source.Y + source.Height, "Source trimming discarded visible piece artwork.");
+                if (alpha > 0)
+                {
+                    left = Math.Min(left, x); top = Math.Min(top, y);
+                    right = Math.Max(right, x); bottom = Math.Max(bottom, y);
+                }
                 // Generated metal interiors are near opaque (mostly alpha252/253).
                 // Require substantial coverage, without mistaking quantization
                 // below255 for a missing object or an antialiased silhouette.
@@ -84,6 +91,10 @@ public sealed partial class MainWindow
                 source.X + source.Width <= width && source.Y + source.Height <= height,
                 "A trimmed silver-piece source rectangle exceeds its bitmap.");
             sourceBoundsChecks++;
+            left = Math.Max(0, left - 2); top = Math.Max(0, top - 2);
+            right = Math.Min(width - 1, right + 2); bottom = Math.Min(height - 1, bottom + 2);
+            Require(source == new Rect(left, top, right - left + 1, bottom - top + 1),
+                "Authored piece metadata differs from the original alpha bounds and two-pixel padding.");
             assets.Add(new { piece, name = MonopolyGame.PieceNames[piece], width, height, solid, partial, substantialAlphaMinimum = 250, hash, source });
         }
 
@@ -198,6 +209,7 @@ public sealed partial class MainWindow
             for (int turn = 0; setupGame.Snapshot.SetupPieces[0] != 6 && turn < 8; turn++)
                 Require(setupGame.HandleAction("mp-piece-next-1", now), "The longest piece caption could not be selected.");
             using var setup = new SceneCompositor(monopoly: setupGame, monopolyClock: () => now, boardRevealClock: () => now);
+            await setup.EnsureCrownDeedResourcesAsync(device);
             setup.SetDisplayAspect(width / (double)height);
             setup.SetBoardSetup(true);
             setup.SetDetectedBoardGrid([new(.035f, .035f), new(.965f, .035f), new(.965f, .965f), new(.035f, .965f)],

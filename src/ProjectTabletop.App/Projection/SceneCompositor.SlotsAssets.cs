@@ -15,15 +15,14 @@ public sealed partial class SceneCompositor
     private CanvasBitmap? _slotDragonSwivelArtwork;
     private CanvasBitmap? _slotWildPortraits;
     private CanvasBitmap? _slotWildColossus;
-    private CanvasBitmap? _slotMenuDragonArtwork;
     private CanvasBitmap? _slotCoinPileArtwork;
     private CanvasBitmap? _slotVaultChestArtwork;
     private CanvasBitmap? _slotVaultChestFrontArtwork;
     private CanvasBitmap? _slotVaultKeyArtwork;
     private CanvasDevice? _slotArtworkDevice;
+    private BitmapAssetSet? _slotImages;
     private bool _slotArtworkAttempted;
     private string? _slotArtworkError;
-    private string? _slotMenuArtworkError;
     private string? _slotCabinetArtworkError;
     private readonly Dictionary<SlotSymbol, Rect> _slotArtworkBounds = [];
 
@@ -59,119 +58,71 @@ public sealed partial class SceneCompositor
     internal string? SlotsArtworkError => _slotArtworkError ?? _slotCabinetArtworkError;
     internal bool SlotsCabinetArtworkReady => _slotCoinPileArtwork is not null
         && _slotVaultChestArtwork is not null && _slotVaultChestFrontArtwork is not null && _slotVaultKeyArtwork is not null;
-    internal bool SlotsMenuArtworkReady => _slotMenuDragonArtwork is not null;
-    internal string? SlotsMenuArtworkError => _slotMenuArtworkError;
+    private static readonly string[] SlotImageFiles =
+    [
+        "slot-symbols.png", "dragon-sanctum.png", "slot-treasures.png", "slot-dragons.png",
+        "slot-wild-portraits.png", "slot-wild-colossus.png", "slot-dragon-bodies-front.png",
+        "slot-dragon-heads-front.png", "slot-dragon-heads-swivel.png", "slot-coin-pile.png",
+        "slot-vault-chests.png", "slot-vault-key.png", "slot-vault-chest-fronts.png"
+    ];
 
-    private void EnsureSlotArtwork(CanvasDevice device)
+    private BitmapAssetSet GetSlotImages(CanvasDevice device)
     {
-        if (_slotArtworkDevice != device)
+        if (_slotImages is null || _slotImages.Device != device)
         {
             DisposeSlotArtwork();
+            _slotImages = new(device, Path.Combine(AppContext.BaseDirectory, "SlotsRendering", "Assets"), SlotImageFiles);
             _slotArtworkDevice = device;
         }
-        if (_slotArtworkAttempted) return;
-        _slotArtworkAttempted = true;
-        try
-        {
-            string directory = Path.Combine(AppContext.BaseDirectory, "SlotsRendering", "Assets");
-            // One decode at first use, reused by subsequent frames. Loading the
-            // complete atlas before caching a sprite avoids late image swaps in
-            // the main menu's camera reference.
-            _slotArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-symbols.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-            _slotBackdrop = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "dragon-sanctum.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-            _slotTreasureArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-treasures.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-            _slotDragonArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-dragons.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-            _slotWildPortraits = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-wild-portraits.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-            _slotWildColossus = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-wild-colossus.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-            SetSlotArtworkBounds();
-        }
-        catch (Exception error) when (!device.IsDeviceLost(error.HResult))
-        {
-            _slotArtworkError = error.Message;
-            _slotArtwork?.Dispose();
-            _slotBackdrop?.Dispose();
-            _slotTreasureArtwork?.Dispose();
-            _slotDragonArtwork?.Dispose();
-            _slotWildPortraits?.Dispose(); _slotWildColossus?.Dispose();
-            _slotArtwork = _slotBackdrop = null;
-            _slotTreasureArtwork = null;
-            _slotDragonArtwork = null;
-            _slotWildPortraits = _slotWildColossus = null;
-            _slotArtworkBounds.Clear();
-            AppLog.Write("Dragon Slots artwork", error);
-        }
-        // The articulated portraits can fall back to the original atlas if
-        // their files are unavailable, without discarding the reel artwork.
-        try
-        {
-            string directory = Path.Combine(AppContext.BaseDirectory, "SlotsRendering", "Assets");
-            _slotDragonBodyArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-dragon-bodies-front.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-            _slotDragonHeadArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-dragon-heads-front.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-            _slotDragonSwivelArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-dragon-heads-swivel.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-        }
-        catch (Exception error) when (!device.IsDeviceLost(error.HResult))
-        {
-            _slotDragonBodyArtwork?.Dispose(); _slotDragonHeadArtwork?.Dispose(); _slotDragonSwivelArtwork?.Dispose();
-            _slotDragonBodyArtwork = _slotDragonHeadArtwork = _slotDragonSwivelArtwork = null;
-            _slotArtworkError ??= error.Message;
-            AppLog.Write("Dragon Slots articulated portraits", error);
-        }
-        // The menu illustration is optional and independent of game artwork:
-        // a missing thumbnail must not discard the reels' successfully loaded
-        // atlases. Resolve it before caching the tile, never midway through an
-        // unchanged menu's camera reference.
-        try
-        {
-            _slotMenuDragonArtwork = CanvasBitmap.LoadAsync(device,
-                Path.Combine(AppContext.BaseDirectory, "SlotsRendering", "Assets", "slot-menu-dragon.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-        }
-        catch (Exception error) when (!device.IsDeviceLost(error.HResult))
-        {
-            _slotMenuArtworkError = error.Message;
-            AppLog.Write("Dragon Slots menu artwork", error);
-        }
-        // These sprites have their own load boundary: a missing new cabinet
-        // asset must not discard the already decoded dragons and reel atlases.
-        try
-        {
-            string directory = Path.Combine(AppContext.BaseDirectory, "SlotsRendering", "Assets");
-            _slotCoinPileArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-coin-pile.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-            _slotVaultChestArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-vault-chests.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-            _slotVaultKeyArtwork = CanvasBitmap.LoadAsync(device, Path.Combine(directory, "slot-vault-key.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-        }
-        catch (Exception error) when (!device.IsDeviceLost(error.HResult))
-        {
-            _slotCabinetArtworkError = error.Message;
-            AppLog.Write("Dragon Slots treasure artwork", error);
-        }
-        // The rail has its own straight-on camera artwork. Keep a missing
-        // front asset independent of the successfully loaded full chests.
-        try
-        {
-            _slotVaultChestFrontArtwork = CanvasBitmap.LoadAsync(device,
-                Path.Combine(AppContext.BaseDirectory, "SlotsRendering", "Assets", "slot-vault-chest-fronts.png"), 96)
-                .AsTask().GetAwaiter().GetResult();
-        }
-        catch (Exception error) when (!device.IsDeviceLost(error.HResult))
-        {
-            _slotCabinetArtworkError ??= error.Message;
-            AppLog.Write("Dragon Slots chest front artwork", error);
-        }
+        return _slotImages;
     }
 
+    internal async Task EnsureSlotResourcesAsync(CanvasDevice device)
+    {
+        BitmapAssetSet images;
+        lock (_gate) { ObjectDisposedException.ThrowIf(_disposed, this); images = GetSlotImages(device); }
+        await images.EnsureLoadedAsync().ConfigureAwait(false);
+        lock (_gate)
+            if (!_disposed && ReferenceEquals(images, _slotImages)) PrepareSlotResources(device);
+    }
+
+    private bool PrepareSlotResources(CanvasDevice device)
+    {
+        var images = GetSlotImages(device);
+        if (!images.IsLoaded) return false;
+        if (_slotArtworkAttempted) return true;
+        _slotArtworkAttempted = true;
+        foreach (var (file, error) in images.Errors)
+            AppLog.Write("Dragon Slots artwork: " + file, new InvalidDataException(error));
+        _slotArtworkError = SlotImageFiles.Take(9).Select(file => images.Errors.GetValueOrDefault(file)).FirstOrDefault(error => error is not null);
+        _slotCabinetArtworkError = SlotImageFiles.Skip(9).Select(file => images.Errors.GetValueOrDefault(file)).FirstOrDefault(error => error is not null);
+        // Preserve the original atlas fallback as one group. All attempted
+        // decodes finish before any artwork is exposed to rendering or vision.
+        if (SlotImageFiles.Take(6).All(file => images.Image(file) is not null))
+        {
+            _slotArtwork = images.Image("slot-symbols.png");
+            _slotBackdrop = images.Image("dragon-sanctum.png");
+            _slotTreasureArtwork = images.Image("slot-treasures.png");
+            _slotDragonArtwork = images.Image("slot-dragons.png");
+            _slotWildPortraits = images.Image("slot-wild-portraits.png");
+            _slotWildColossus = images.Image("slot-wild-colossus.png");
+            SetSlotArtworkBounds();
+        }
+        if (SlotImageFiles.Skip(6).Take(3).All(file => images.Image(file) is not null))
+        {
+            _slotDragonBodyArtwork = images.Image("slot-dragon-bodies-front.png");
+            _slotDragonHeadArtwork = images.Image("slot-dragon-heads-front.png");
+            _slotDragonSwivelArtwork = images.Image("slot-dragon-heads-swivel.png");
+        }
+        _slotCoinPileArtwork = images.Image("slot-coin-pile.png");
+        _slotVaultChestArtwork = images.Image("slot-vault-chests.png");
+        _slotVaultKeyArtwork = images.Image("slot-vault-key.png");
+        _slotVaultChestFrontArtwork = images.Image("slot-vault-chest-fronts.png");
+        InvalidateBoardArtworkSurface();
+        return true;
+    }
+
+    private void EnsureSlotArtwork(CanvasDevice device) => PrepareSlotResources(device);
     private void SetSlotArtworkBounds()
     {
         var atlas = _slotArtwork!;
@@ -265,24 +216,18 @@ public sealed partial class SceneCompositor
 
     private void DisposeSlotArtwork()
     {
-        _slotArtwork?.Dispose(); _slotBackdrop?.Dispose(); _slotTreasureArtwork?.Dispose(); _slotDragonArtwork?.Dispose();
-        _slotDragonBodyArtwork?.Dispose(); _slotDragonHeadArtwork?.Dispose(); _slotDragonSwivelArtwork?.Dispose();
-        _slotWildPortraits?.Dispose(); _slotWildColossus?.Dispose();
-        _slotMenuDragonArtwork?.Dispose();
-        _slotCoinPileArtwork?.Dispose(); _slotVaultChestArtwork?.Dispose(); _slotVaultKeyArtwork?.Dispose();
-        _slotVaultChestFrontArtwork?.Dispose();
+        _slotImages?.Dispose();
+        _slotImages = null;
         _slotArtwork = _slotBackdrop = null;
         _slotTreasureArtwork = null;
         _slotDragonArtwork = null;
         _slotDragonBodyArtwork = _slotDragonHeadArtwork = _slotDragonSwivelArtwork = null;
         _slotWildPortraits = _slotWildColossus = null;
-        _slotMenuDragonArtwork = null;
         _slotCoinPileArtwork = _slotVaultChestArtwork = _slotVaultKeyArtwork = null;
         _slotVaultChestFrontArtwork = null;
         _slotArtworkDevice = null;
         _slotArtworkAttempted = false;
         _slotArtworkError = null;
-        _slotMenuArtworkError = null;
         _slotCabinetArtworkError = null;
         _slotArtworkBounds.Clear();
     }

@@ -233,6 +233,9 @@ if (result.ExpectedPieceCount != 2 || result.CorrectIdentityCount != 2 ||
     result.MeanAngleErrorDegrees > 10 || result.MeanOutlineIntersectionOverUnion < 0.8)
     throw new Exception("Synthetic multi-piece regression failed.");
 
+VisionPersistenceRegression.Run(engine, profileDir, evaluation);
+if (args is ["--vision-persistence"]) return;
+
 CheckBoardDetection();
 CheckProjectorFieldIsNotBoard();
 CheckUniformIllumination();

@@ -50,6 +50,7 @@ public sealed partial class MainWindow
         var motionFixture = fixtures[2];
         using var motionTarget = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), motionWidth, motionHeight, 96);
         using var motionScene = new SceneCompositor(blackjackClock: () => clock, slots: new SlotGame(motionFixture.Seed));
+        await motionScene.EnsureSlotResourcesAsync(motionTarget.Device);
         var motionMap = ConfigureWildScene(motionScene, motionWidth, motionHeight);
         var motionOracle = Start(motionScene, motionFixture.Seed);
         var phases = new HashSet<SlotPhase>();
@@ -202,6 +203,7 @@ public sealed partial class MainWindow
             var fixtureClock = origin;
             using var renderTarget = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
             using var native = new SceneCompositor(blackjackClock: () => fixtureClock, slots: new SlotGame(fixture.Seed));
+            await native.EnsureSlotResourcesAsync(renderTarget.Device);
             var map = ConfigureWildScene(native, width, height);
             var oracle = Start(native, fixture.Seed);
             byte[]? first = null, previous = null;
@@ -427,6 +429,7 @@ public sealed partial class MainWindow
             var fixtureClock = origin;
             using var renderTarget = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), fixtureWidth, fixtureHeight, 96);
             using var native = new SceneCompositor(blackjackClock: () => fixtureClock, slots: new SlotGame(fixture.Seed));
+            await native.EnsureSlotResourcesAsync(renderTarget.Device);
             ConfigureWildScene(native, fixtureWidth, fixtureHeight);
             var oracle = Start(native, fixture.Seed);
             Advance(native, oracle, ref fixtureClock, origin + SlotGame.ReelStop(fixture.Reel, false) + TimeSpan.FromSeconds(2.7));

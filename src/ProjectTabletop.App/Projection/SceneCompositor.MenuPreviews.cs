@@ -52,6 +52,9 @@ public sealed partial class SceneCompositor
 
     private void InvalidateMenuPreviewSurface()
     {
+        // Thumbnail completion changes only screens that display thumbnails.
+        // A late background load must not reset another board's camera reference.
+        if (_boardSession.Screen is not (BoardScreen.Menu or BoardScreen.Settings)) return;
         _renderedBoardState = null;
         _acquisitionScene = null;
         _acquisitionExpectedScene = null;

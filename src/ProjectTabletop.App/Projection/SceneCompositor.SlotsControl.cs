@@ -49,7 +49,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
-            if (_boardSession.Screen != BoardScreen.Slots || IsBoardRevealActive) return false;
+            if (_boardSession.Screen != BoardScreen.Slots || IsBoardRevealActive || BlockBoardArtworkInput()) return false;
             bool changed = _boardSession.ActivateButton(id, _blackjackClock());
             if (changed) SyncPhotoCopySession();
             return changed;
@@ -73,6 +73,7 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             if (_disposed || _boardSession.Screen != BoardScreen.Slots) return;
+            if (!PrepareBoardArtwork(ds.Device)) { DrawArtworkLoading(ds, new Rect(0, 0, width, height)); return; }
             var now = _blackjackClock();
             _boardSession.TickSlots(now);
             double aspect = PaintBoardAspect();

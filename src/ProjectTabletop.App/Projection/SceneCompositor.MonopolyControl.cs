@@ -36,7 +36,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
-            if (_boardSession.Screen != BoardScreen.Monopoly || IsBoardRevealActive || MonopolyEntranceActive) return false;
+            if (_boardSession.Screen != BoardScreen.Monopoly || IsBoardRevealActive || BlockBoardArtworkInput() || MonopolyEntranceActive) return false;
             bool changed = _boardSession.ActivateButton(id, _monopolyClock());
             if (changed) SyncPhotoCopySession();
             return changed;
@@ -97,6 +97,7 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             if (_disposed || _boardSession.Screen != BoardScreen.Monopoly) return;
+            if (!PrepareBoardArtwork(ds.Device)) { DrawArtworkLoading(ds, new Rect(0, 0, width, height)); return; }
             var now = _monopolyClock();
             var entrance = GetMonopolyEntranceFrame(now);
             if (entrance?.Active != true) _boardSession.TickMonopoly(now);

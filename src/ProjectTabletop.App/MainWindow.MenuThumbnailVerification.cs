@@ -27,7 +27,7 @@ public sealed partial class MainWindow
         var pagingComparisons = new List<object>();
         int retainedCacheChecks = 0, uninitializedGameResourceChecks = 0;
         string[] boardResources = ["_paintFluid", "_paintFluidDevice", "_globeRenderer",
-            "_slotArtwork", "_slotBackdrop", "_slotMenuDragonArtwork", "_slotArtworkDevice",
+            "_slotArtwork", "_slotBackdrop", "_slotImages", "_slotArtworkDevice",
             "_rouletteBackdrop", "_rouletteBurlBitmap", "_rouletteWoodShader", "_rouletteMaterialDevice",
             "_rouletteMotionTarget", "_rouletteFixedBowl", "_rouletteForegroundRim"];
         var atlasField = typeof(SceneCompositor).GetField("_menuPreviewImages", BindingFlags.Instance | BindingFlags.NonPublic)

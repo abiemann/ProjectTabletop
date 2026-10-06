@@ -159,7 +159,7 @@ public sealed partial class SceneCompositor : IDisposable
     {
         lock (_gate)
         {
-            if (BlockBoardRevealInput() || MonopolyEntranceActive) return;
+            if (BlockBoardRevealInput() || BlockBoardArtworkInput() || MonopolyEntranceActive) return;
             _handTips = [];
             var now = MonotonicClock.UtcNow;
             var acceptVisual = frameTime <= now && now - frameTime <= TimeSpan.FromMilliseconds(350) &&
@@ -884,7 +884,9 @@ public sealed partial class SceneCompositor : IDisposable
             DisposeMonopolyDiceLayer();
             DisposeHoldFeedbackLayer();
             DisposeSlotsLayers();
+            DisposeSlotArtwork();
             DisposeRouletteLayers();
+            DisposeRouletteArtwork();
             DisposeMonopolyEntranceLayers();
             DisposeCrownDeedArtwork();
             CancelCrownDeedDevelopment();

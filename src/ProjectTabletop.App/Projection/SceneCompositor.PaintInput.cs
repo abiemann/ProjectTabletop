@@ -63,15 +63,40 @@ public sealed partial class SceneCompositor
     private bool _paintReferenceActive;
     private string? _paintReferenceError;
     private DateTimeOffset _paintInputReadyAfter;
+    private bool _paintInputAvailable;
+    private BoardSurfaceState? _paintReferenceRenderedState;
+    private CanvasRenderTarget? _paintReferenceSource;
+    private byte[]? _paintReferencePixels;
+    private long _paintReferenceReadbacks;
 
     private bool PaintInputReady => !_disposed && _boardSession.Screen == BoardScreen.Paint &&
         !_blackOutput && !_boardSetup && !IsBoardRevealActive && _calibrationTarget < 0 &&
         _boardMediaClip is not null && _boardCameraMap is not null && _boardSurfaceMap is not null;
 
+    // Camera lifecycle owns availability. A laptop-only drawing or a paused
+    // tracker can still display and save Paint without downloading reference
+    // pixels that no camera consumer can use.
+    internal void SetPaintInputAvailable(bool available)
+    {
+        lock (_gate)
+        {
+            if (_paintInputAvailable == available) return;
+            _paintInputAvailable = available;
+            SyncPaintReference();
+        }
+    }
+
+    private void ClearPaintReferencePixels()
+    {
+        _paintReferencePixels = null;
+        _paintReferenceSource = null;
+        _paintReferenceRenderedState = null;
+    }
+
     private void SyncPaintReference()
     {
         SyncPaintSession();
-        bool active = PaintInputReady;
+        bool active = PaintInputReady && _paintInputAvailable;
         if (_paintReferenceActive == active && _paintReferenceNavigation == _boardSession.Revision &&
             ReferenceEquals(_paintReferenceCameraMap, _boardCameraMap) &&
             ReferenceEquals(_paintReferenceSurfaceMap, _boardSurfaceMap)) return;
@@ -81,6 +106,7 @@ public sealed partial class SceneCompositor
         _paintReferenceSurfaceMap = _boardSurfaceMap;
         _paintReferenceRevision++;
         _paintExpectedFrames.Clear();
+        ClearPaintReferencePixels();
         _paintReferenceError = null;
         // When entering/clearing Paint, the webcam can still show the white
         // calibration screen or the previous painting. Build reference history
@@ -93,7 +119,7 @@ public sealed partial class SceneCompositor
     private void CapturePaintExpectedFrame(CanvasDevice device, DateTimeOffset now)
     {
         SyncPaintReference();
-        if (!PaintInputReady || _boardApplicationTarget is null ||
+        if (!_paintReferenceActive || _boardApplicationTarget is null ||
             _paintExpectedFrames.LastOrDefault() is { } latest &&
             now - latest.PresentedAt < TimeSpan.FromMilliseconds(125)) return;
         try
@@ -102,15 +128,27 @@ public sealed partial class SceneCompositor
             {
                 _paintReferenceTarget?.Dispose();
                 _paintReferenceTarget = new(device, 512, 512, 96);
+                ClearPaintReferencePixels();
             }
-            var pixels = _boardApplicationTarget.SizeInPixels;
-            using (var drawing = _paintReferenceTarget.CreateDrawingSession())
+            // Keep each presentation timestamp for webcam-latency matching,
+            // but reuse immutable pixels while the actual rendered scene is
+            // unchanged. The tracker only reads these arrays.
+            if (_paintReferencePixels is null || _paintReferenceSource != _boardApplicationTarget ||
+                _paintReferenceRenderedState != _renderedBoardState)
             {
-                drawing.Clear(Colors.Black);
-                drawing.DrawImage(_boardApplicationTarget, new Rect(0, 0, 512, 512),
-                    new Rect(0, 0, pixels.Width, pixels.Height), 1, CanvasImageInterpolation.HighQualityCubic);
+                var pixels = _boardApplicationTarget.SizeInPixels;
+                using (var drawing = _paintReferenceTarget.CreateDrawingSession())
+                {
+                    drawing.Clear(Colors.Black);
+                    drawing.DrawImage(_boardApplicationTarget, new Rect(0, 0, 512, 512),
+                        new Rect(0, 0, pixels.Width, pixels.Height), 1, CanvasImageInterpolation.HighQualityCubic);
+                }
+                _paintReferencePixels = _paintReferenceTarget.GetPixelBytes();
+                _paintReferenceRenderedState = _renderedBoardState;
+                _paintReferenceSource = _boardApplicationTarget;
+                _paintReferenceReadbacks++;
             }
-            _paintExpectedFrames.Add(new(512, 512, _paintReferenceTarget.GetPixelBytes(), now));
+            _paintExpectedFrames.Add(new(512, 512, _paintReferencePixels, now));
             _paintExpectedFrames.RemoveAll(frame => now - frame.PresentedAt > TimeSpan.FromMilliseconds(950));
             if (_paintExpectedFrames.Count > 9) _paintExpectedFrames.RemoveAt(0);
             _paintReferenceError = null;
@@ -118,6 +156,7 @@ public sealed partial class SceneCompositor
         catch (Exception error) when (!device.IsDeviceLost(error.HResult))
         {
             _paintExpectedFrames.Clear();
+            ClearPaintReferencePixels();
             _paintReferenceError = error.Message;
         }
     }
@@ -127,7 +166,7 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             SyncPaintReference();
-            if (!PaintInputReady || _paintClock() < _paintInputReadyAfter) return null;
+            if (!_paintReferenceActive || _paintClock() < _paintInputReadyAfter) return null;
             var cameraToProjector = _boardCameraMap!.ToMatrix();
             var projectorToBoard = _boardSurfaceMap!.Inverse().ToMatrix();
             var matrix = new double[9];
@@ -146,7 +185,7 @@ public sealed partial class SceneCompositor
         {
             SyncPaintReference();
             var now = _paintClock();
-            if (!PaintInputReady || now < _paintInputReadyAfter || requested.Revision != _paintReferenceRevision ||
+            if (!_paintReferenceActive || now < _paintInputReadyAfter || requested.Revision != _paintReferenceRevision ||
                 frameTime < _paintInputReadyAfter || frameTime > now ||
                 now - frameTime > TimeSpan.FromMilliseconds(350)) return 0;
             if (result.ReferenceReady && result.ConfirmedCandidateCount > 0 &&
@@ -171,7 +210,8 @@ public sealed partial class SceneCompositor
     public object GetPaintInputDiagnostics()
     {
         lock (_gate)
-            return new { active = PaintInputReady, revision = _paintReferenceRevision,
+            return new { active = PaintInputReady && _paintInputAvailable, inputAvailable = _paintInputAvailable,
+                revision = _paintReferenceRevision, referenceReadbacks = _paintReferenceReadbacks,
                 expectedFrameCount = _paintExpectedFrames.Count,
                 newestExpectedUtc = _paintExpectedFrames.LastOrDefault()?.PresentedAt,
                 readyAfterUtc = _paintInputReadyAfter,
@@ -180,6 +220,18 @@ public sealed partial class SceneCompositor
                 buttonLightIgnoreRegion = _paintClock() <= _paintButtonLightIgnoreUntil
                     ? _paintButtonLightIgnoreRegion : null, error = _paintReferenceError };
     }
+
+#if DEBUG
+    internal (long Readbacks, long Revision, PaintExpectedFrame[] Frames, bool Active) GetPaintReferenceCacheForVerification()
+    {
+        lock (_gate)
+        {
+            SyncPaintReference();
+            return (_paintReferenceReadbacks, _paintReferenceRevision, _paintExpectedFrames.ToArray(),
+                _paintReferenceActive);
+        }
+    }
+#endif
 
     private void DrawPaintNavigationCursor(CanvasDrawingSession drawing, Rect output)
     {
@@ -203,6 +255,7 @@ public sealed partial class SceneCompositor
         _paintReferenceTarget?.Dispose();
         _paintReferenceTarget = null;
         _paintExpectedFrames.Clear();
+        ClearPaintReferencePixels();
         _paintReferenceRevision++;
         _paintInputReadyAfter = _paintClock().AddMilliseconds(900);
     }

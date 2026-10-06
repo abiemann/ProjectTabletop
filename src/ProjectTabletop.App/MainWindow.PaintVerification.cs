@@ -156,7 +156,7 @@ public sealed partial class MainWindow
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && blank.SequenceEqual(Draw(scene)),
             "A Paint control disturbance without measured label corruption switched on a spotlight.");
         await Task.Delay(2);
-        var handTime = DateTimeOffset.UtcNow;
+        var handTime = MonotonicClock.UtcNow;
         var hand = Hand(.5, .55);
         scene.SetHandCursors([new HandCursor(hand.IndexTip, DateTimeOffset.MinValue) { TrackingId = 7811 }], handTime);
         scene.SetHandSpotlights([hand], handTime);
@@ -948,20 +948,25 @@ public sealed partial class MainWindow
             var litPixels = Draw(lightingScene);
             // The lit search follows the expected reaching hand but keeps the caption core.
             double litCore = hint.RadiusPixels * .64;
+            var illuminatedQuery = Query(occupied, searching);
+            int changedExitPixels = ChangedPixels(empty, litPixels, exitBounds);
             Require(searching.IlluminatedHint is not null &&
-                    Query(occupied, searching).SearchRegions is [var litSearch] &&
+                    illuminatedQuery.SearchRegions is [var litSearch] &&
                     litSearch.Width >= hint.SearchBounds.Width &&
                     litSearch.X <= hint.Center.X - litCore && litSearch.X + litSearch.Width >= hint.Center.X + litCore &&
                     litSearch.Y <= hint.Center.Y - litCore && litSearch.Y + litSearch.Height >= hint.Center.Y + litCore &&
-                    ChangedPixels(empty, litPixels, exitBounds) > 300,
-                "Exit text interference did not illuminate its hand region and focus the subsequent model search.");
+                    changedExitPixels > 300,
+                "Exit text interference did not illuminate its hand region and focus the subsequent model search. " +
+                System.Text.Json.JsonSerializer.Serialize(new { hint, litCore, searching.IlluminatedHint,
+                    searching.IlluminationStartedAt, illuminatedQuery.SearchRegions, changedExitPixels,
+                    acquisition = lightingScene.GetHandAcquisitionDiagnostics() }));
 
             // A real landmark result must not extinguish this control-specific
             // light. Paint's ordinary hand spotlight still remains disabled.
             var hand = new HandDetection(Hand(exitU, exitV + .03).Landmarks.Select(point =>
                 new PixelPoint(size * (lightingInset / 2 + point.X * (1 - lightingInset)),
                     size * (lightingInset / 2 + point.Y * (1 - lightingInset)))).ToArray(), .95, .5);
-            var sourceTime = DateTimeOffset.UtcNow;
+            var sourceTime = MonotonicClock.UtcNow;
             lightingScene.SetHandSpotlights([hand], sourceTime);
             for (int frame = 0; frame < 3; frame++)
             {
@@ -1025,7 +1030,9 @@ public sealed partial class MainWindow
             lightingScene.CompleteHandAcquisition(context, [hint], [], now);
             Require(lightingScene.GetHandAcquisitionContext(now)?.IlluminatedHint is not null,
                 "Paint did not rearm label-gated Exit assistance after departure.");
-            sourceTime = DateTimeOffset.UtcNow;
+            // Real cursor freshness and the one-second execute pulse use the
+            // monotonic input clock, independently of the simulated fluid time.
+            sourceTime = MonotonicClock.UtcNow;
             lightingScene.SetHandCursors([new HandCursor(new(size * .5, size * .5), sourceTime.AddSeconds(1), 7871)
                 { TrackingId = 7871 }], sourceTime);
             Require(lightingScene.GetHandLightingDiagnostics().SuppressedHandIds.Contains(7871) &&
@@ -1054,6 +1061,7 @@ public sealed partial class MainWindow
             Point2[] camera = nativeCamera ? [new(0, 0), new(size, 0), new(size, size), new(0, size)] : unit;
             safetyInset = result.SetDetectedBoardGrid(corners, Homography.FromFourPoints(camera, unit));
             result.SetBoardSetup(false);
+            result.SetPaintInputAvailable(true);
             result.ShowPaint();
             if (!keepIntroduction)
             {

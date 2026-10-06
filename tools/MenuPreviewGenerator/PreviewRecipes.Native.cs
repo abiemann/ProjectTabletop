@@ -50,6 +50,7 @@ internal sealed partial class PreviewRecipes
             parameter.DefaultValue).ToArray();
         using var scene = (IDisposable)sceneType.GetConstructors().Single().Invoke(arguments);
         await (Task)Call(scene, "EnsureGlobeResourcesAsync", device)!;
+        await (Task)Call(scene, "EnsureRouletteResourcesAsync", device)!;
         object globe = Call(scene, "GetGlobeRenderer", device)!;
         using var dragon = await CanvasBitmap.LoadAsync(device,
             Path.Combine(AppContext.BaseDirectory, "SlotsRendering", "Assets", "slot-menu-dragon.png"), 96).AsTask();

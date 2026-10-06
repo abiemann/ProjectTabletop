@@ -14,6 +14,16 @@ public sealed partial class MainWindow
     private long _paintTrackerGeneration = -1;
     private object? _lastPaintDetection;
 
+    private void UpdatePaintInputAvailability()
+    {
+        var frame = Volatile.Read(ref _latestCameraFrame);
+        var now = MonotonicClock.UtcNow;
+        _scene.SetPaintInputAvailable(!_closing && _handTrackingEnabled && _cameraWanted && _camera.IsRunning &&
+            _cameraOperation.CurrentCount != 0 && !Volatile.Read(ref _cameraHealthWarning) &&
+            !IsBoardScanMeasuring && frame is not null && frame.Timestamp <= now &&
+            now - frame.Timestamp <= TimeSpan.FromMilliseconds(500));
+    }
+
     private void ShowPaint()
     {
         StopBoardSetup();

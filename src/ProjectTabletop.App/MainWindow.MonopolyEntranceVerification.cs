@@ -29,7 +29,7 @@ public sealed partial class MainWindow
         var samples = new List<object>();
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
         using var preview = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), 960, 960, 96);
-        using var scene = Fixture();
+        using var scene = await FixtureAsync();
         var started = now;
         var state = scene.MonopolyState;
         Require(scene.MonopolyEntranceActive && scene.GetMonopolyEntranceDiagnostics().DurationMilliseconds == duration,
@@ -39,7 +39,17 @@ public sealed partial class MainWindow
         var board = Field<CanvasRenderTarget>(scene, "_boardApplicationTarget");
         int rasterWidth = (int)board.SizeInPixels.Width, rasterHeight = (int)board.SizeInPixels.Height;
         var baseLayer = Field<CanvasRenderTarget>(scene, "_monopolyEntranceBaseTarget");
-        var atlas = Field<CanvasRenderTarget>(scene, "_monopolyEntranceTileAtlas");
+        // An independent verifier-only composite provides the final deed
+        // pixels. Production retains only individually animated parcel images.
+        using var atlas = new CanvasRenderTarget(board.Device, rasterWidth, rasterHeight, 96);
+        using (var drawing = atlas.CreateDrawingSession())
+        {
+            drawing.Clear(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+            drawing.Transform = Matrix3x2.CreateScale(rasterWidth / 1000f, rasterHeight / 1000f);
+            var drawSpace = typeof(SceneCompositor).GetMethod("DrawMonopolySpace", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            foreach (var space in MonopolyGame.Spaces)
+                drawSpace.Invoke(scene, [drawing, space, state, scene.MonopolyPreviewAspect, 1f]);
+        }
         var lid = Field<CanvasRenderTarget>(scene, "_monopolyEntranceLidTarget");
         var basePixels = baseLayer.GetPixelBytes();
         var atlasPixels = atlas.GetPixelBytes();
@@ -185,9 +195,10 @@ public sealed partial class MainWindow
         await Capture("04-exact-complete-board");
         Require(scene.ActivateMonopolyButton("mp-start-game"), "The completed entrance did not release fresh pointer input.");
 
-        CheckAiHold();
-        CheckCancellation();
-        CheckRescan();
+        await CheckAiHold();
+        await CheckCancellation();
+        await CheckRescan();
+        await CheckArtworkDelay();
         await CheckMenuGesture();
         await CheckInputBarrier();
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
@@ -201,10 +212,13 @@ public sealed partial class MainWindow
             inputAiAndLightingBlocked = true, staleInputConsumed = true, navigationAndRescanCancellation = true,
             liveHardwareUnchanged = true, directory, samplePath, images };
 
-        SceneCompositor Fixture(MonopolyGame? game = null, bool showMonopoly = true)
+        async Task<SceneCompositor> FixtureAsync(MonopolyGame? game = null, bool showMonopoly = true)
         {
             var fixture = new SceneCompositor(monopoly: game ?? new MonopolyGame(seed: 113),
                 blackjackClock: () => now, monopolyClock: () => now, boardRevealClock: () => now);
+            await fixture.EnsureCrownDeedResourcesAsync(CanvasDevice.GetSharedDevice());
+            if (!showMonopoly)
+                await fixture.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
             fixture.SetDisplayAspect(width / (double)height);
             fixture.SetBoardSetup(true);
             fixture.SetDetectedBoardGrid(Corners(), CameraMap());
@@ -223,7 +237,6 @@ public sealed partial class MainWindow
         void CheckCaches()
         {
             Require(ReferenceEquals(baseLayer, Field<CanvasRenderTarget>(scene, "_monopolyEntranceBaseTarget")) &&
-                    ReferenceEquals(atlas, Field<CanvasRenderTarget>(scene, "_monopolyEntranceTileAtlas")) &&
                     ReferenceEquals(lid, Field<CanvasRenderTarget>(scene, "_monopolyEntranceLidTarget")) &&
                     Equals(atlasKey, Field<object>(scene, "_monopolyEntranceTileState")) &&
                     Equals(lidKey, Field<object>(scene, "_monopolyEntranceLidState")),
@@ -259,14 +272,14 @@ public sealed partial class MainWindow
             Require(fixture.GetHandAcquisitionContext(now)?.IlluminatedHint is null && fixture.ActiveHandSpotlightCount == 0,
                 "A qualified asynchronous acquisition or tracked hand illuminated the falling board.");
         }
-        void CheckAiHold()
+        async Task CheckAiHold()
         {
             var game = new MonopolyGame(seed: 117, initialRolls: [new(1, 2), new(2, 3)]);
             var gameTime = now.AddSeconds(-10);
             foreach (string id in new[] { "mp-start-game", "mp-start", "mp-roll", "mp-buy", "mp-end-turn" })
                 Require(game.HandleAction(id, gameTime += TimeSpan.FromMilliseconds(20)), "AI entrance setup rejected " + id + ".");
             Require(game.Snapshot.ActivePlayer is { IsAi: true }, "AI entrance fixture did not reach the AI turn.");
-            using var ai = Fixture(game);
+            using var ai = await FixtureAsync(game);
             var aiStarted = now;
             long revision = game.Revision;
             now = aiStarted.AddMilliseconds(duration - 1);
@@ -277,11 +290,11 @@ public sealed partial class MainWindow
             Require(ai.TickMonopoly(now) && game.Revision == revision + 1 && ai.GetMonopolyDiceFrames(now).Count == 2,
                 "Completing the entrance did not release the already-due AI roll exactly once.");
         }
-        void CheckCancellation()
+        async Task CheckCancellation()
         {
             foreach (string cause in new[] { "menu", "paint", "black", "camera", "clip" })
             {
-                using var canceled = Fixture();
+                using var canceled = await FixtureAsync();
                 now += TimeSpan.FromMilliseconds(600); Draw(canceled);
                 Require(canceled.MonopolyEntranceActive, "Cancellation fixture did not have an active entrance.");
                 switch (cause)
@@ -298,7 +311,7 @@ public sealed partial class MainWindow
                 if (cause is "black" or "clip")
                     Require(BlackRect(target.GetPixelBytes(), width, 0, 0, width, height), cause + " left nonblack projector output.");
             }
-            using var reopened = Fixture();
+            using var reopened = await FixtureAsync();
             var before = reopened.GetMonopolyEntranceDiagnostics().Revision;
             now += TimeSpan.FromMilliseconds(600); reopened.ShowBoardMenu(); now += TimeSpan.FromMilliseconds(20);
             reopened.ShowMonopoly(); Draw(reopened);
@@ -306,9 +319,9 @@ public sealed partial class MainWindow
                     reopened.GetMonopolyEntranceDiagnostics().Revision > before,
                 "Explicitly opening Monopoly again reused the interrupted delivery clock.");
         }
-        void CheckRescan()
+        async Task CheckRescan()
         {
-            using var scanned = Fixture();
+            using var scanned = await FixtureAsync();
             now += TimeSpan.FromMilliseconds(600); scanned.SetBoardSetup(true);
             Require(!scanned.MonopolyEntranceActive, "Rescanning retained the old Monopoly entrance.");
             scanned.ShowBoardCalibrationSpot(SceneCompositor.BoardCalibrationSpotCount - 1);
@@ -325,10 +338,29 @@ public sealed partial class MainWindow
             Require(!scanned.BoardRevealActive && scanned.MonopolyEntranceActive && Frame(scanned).ElapsedMilliseconds == 0,
                 "Completing the calibration reveal failed to begin a fresh Monopoly entrance.");
         }
+        async Task CheckArtworkDelay()
+        {
+            using var pending = new SceneCompositor(monopoly: new MonopolyGame(319),
+                blackjackClock: () => now, monopolyClock: () => now, boardRevealClock: () => now);
+            pending.ShowMonopoly();
+            Require(pending.GetMonopolyEntranceDiagnostics() is { Active: true, StartedAt: null, LandedTiles: 0 },
+                "An entrance began before its artwork was ready.");
+            now += TimeSpan.FromSeconds(12);
+            Require(pending.GetMonopolyEntranceFrame(now) is { ElapsedMilliseconds: 0, LandedTiles: 0, Active: true },
+                "Time spent awaiting artwork advanced the pending entrance.");
+            await pending.EnsureCrownDeedResourcesAsync(CanvasDevice.GetSharedDevice());
+            var readyAt = now;
+            Require(pending.GetMonopolyEntranceFrame(now) is { ElapsedMilliseconds: 0, LandedTiles: 0, Active: true } &&
+                pending.GetMonopolyEntranceDiagnostics().StartedAt == readyAt,
+                "Loaded artwork skipped the entrance's initial city pause.");
+            now += TimeSpan.FromMilliseconds(duration);
+            Require(!pending.MonopolyEntranceActive,
+                "An artwork-delayed entrance did not retain its declared animation duration.");
+        }
         async Task CheckMenuGesture()
         {
             now = MonotonicClock.UtcNow;
-            using var menu = Fixture(showMonopoly: false);
+            using var menu = await FixtureAsync(showMonopoly: false);
             var button = menu.CurrentBoardButtons.Single(item => item.Id == "monopoly");
             var map = Field<Homography>(menu, "_boardSurfaceMap");
             var camera = Field<Homography>(menu, "_boardCameraMap");
@@ -360,7 +392,7 @@ public sealed partial class MainWindow
             // active guard with a real timestamp, then use the private session's
             // coherent synthetic clock to check exact post-deadline source times.
             now = DateTimeOffset.UtcNow.AddMinutes(10);
-            using var input = Fixture();
+            using var input = await FixtureAsync();
             var inputStarted = now;
             await Task.Delay(5);
             var button = input.CurrentBoardButtons.Single(item => item.Id == "mp-start-game");

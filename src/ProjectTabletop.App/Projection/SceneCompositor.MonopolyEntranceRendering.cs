@@ -9,10 +9,10 @@ namespace ProjectTabletop.App.Projection;
 public sealed partial class SceneCompositor
 {
     private CanvasRenderTarget? _monopolyEntranceBaseTarget;
-    private CanvasRenderTarget? _monopolyEntranceTileAtlas;
     private CanvasRenderTarget? _monopolyEntranceLidTarget;
     private readonly (CanvasRenderTarget Image, Rect Bounds)?[] _monopolyEntranceParcels = new (CanvasRenderTarget, Rect)?[40];
     private bool _monopolyEntranceBaseReady;
+    private (int Width, int Height)? _monopolyEntranceParcelRaster;
     private (long Game, double Aspect)? _monopolyEntranceTileState;
     private (long Game, long Session, double Aspect, bool HideDice, bool Rolling,
         bool Drawer, float DrawerProgress, string Hover, int Feedback)? _monopolyEntranceLidState;
@@ -124,8 +124,19 @@ public sealed partial class SceneCompositor
         IReadOnlyList<BoardFingerSelectionFeedback> feedback, double aspect,
         bool hideDice, bool rolling, bool drawer, float drawerProgress)
     {
-        if (EnsureBoardRenderTarget(ref _monopolyEntranceBaseTarget, device)) _monopolyEntranceBaseReady = false;
-        if (EnsureBoardRenderTarget(ref _monopolyEntranceTileAtlas, device)) _monopolyEntranceTileState = null;
+        if (EnsureBoardRenderTarget(ref _monopolyEntranceBaseTarget, device))
+        {
+            _monopolyEntranceBaseReady = false;
+            _monopolyEntranceTileState = null;
+        }
+        // Parcels own their independently moving silhouettes. A full-board
+        // deed atlas would duplicate these pixels and is never composited.
+        var parcelRaster = _monopolyEntranceBaseTarget!.SizeInPixels;
+        if (_monopolyEntranceParcelRaster != ((int)parcelRaster.Width, (int)parcelRaster.Height))
+        {
+            _monopolyEntranceParcelRaster = ((int)parcelRaster.Width, (int)parcelRaster.Height);
+            _monopolyEntranceTileState = null;
+        }
         if (EnsureBoardRenderTarget(ref _monopolyEntranceLidTarget, device)) _monopolyEntranceLidState = null;
         if (!_monopolyEntranceBaseReady)
         {
@@ -137,14 +148,8 @@ public sealed partial class SceneCompositor
         var tileKey = (game.Revision, aspect);
         if (_monopolyEntranceTileState != tileKey)
         {
-            using var drawing = _monopolyEntranceTileAtlas!.CreateDrawingSession();
-            drawing.Transform = BoardRasterTransform(_monopolyEntranceTileAtlas);
-            drawing.Clear(Colors.Transparent);
             for (int index = 0; index < 40; index++)
-            {
-                DrawMonopolySpace(drawing, MonopolyGame.Spaces[index], game, aspect);
                 CacheMonopolyEntranceParcel(device, index, game, aspect);
-            }
             _monopolyEntranceTileState = tileKey;
         }
         var lidKey = (game.Revision, _boardSession.Revision, aspect, hideDice, rolling, drawer,
@@ -166,7 +171,7 @@ public sealed partial class SceneCompositor
         // Align each crop to the full-board raster so drawing it back at rest is
         // one-to-one, including anti-aliased boundaries. Padding retains the
         // building silhouettes and token shadows belonging to this deed alone.
-        var raster = _monopolyEntranceTileAtlas!.SizeInPixels;
+        var raster = _monopolyEntranceBaseTarget!.SizeInPixels;
         double densityX = raster.Width / BoardSurfaceSize, densityY = raster.Height / BoardSurfaceSize;
         var bounds = MonopolySpaceRectangle(index);
         const double padding = 40;
@@ -234,15 +239,15 @@ public sealed partial class SceneCompositor
     private void DisposeMonopolyEntranceLayers()
     {
         _monopolyEntranceBaseTarget?.Dispose();
-        _monopolyEntranceTileAtlas?.Dispose();
         _monopolyEntranceLidTarget?.Dispose();
         for (int index = 0; index < _monopolyEntranceParcels.Length; index++)
         {
             _monopolyEntranceParcels[index]?.Image.Dispose();
             _monopolyEntranceParcels[index] = null;
         }
-        _monopolyEntranceBaseTarget = _monopolyEntranceTileAtlas = _monopolyEntranceLidTarget = null;
+        _monopolyEntranceBaseTarget = _monopolyEntranceLidTarget = null;
         _monopolyEntranceBaseReady = false;
+        _monopolyEntranceParcelRaster = null;
         _monopolyEntranceTileState = null;
         _monopolyEntranceLidState = null;
     }

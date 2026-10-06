@@ -36,10 +36,14 @@ public sealed partial class MainWindow
             (Name: "portrait", Width: 1080, Height: 1920) })
         {
             using var scene = Fixture(view.Width, view.Height, out double inset);
+            await scene.EnsureCrownDeedResourcesAsync(CanvasDevice.GetSharedDevice());
+            Require(scene.GetMonopolyEntranceFrame(now) is { Active: true, ElapsedMilliseconds: 0 },
+                "The water fixture did not begin its entrance after artwork loading.");
             using var preview = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), view.Width, view.Height, 96);
             using var projector = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), view.Width, view.Height, 96);
             now += TimeSpan.FromMilliseconds(4975);
             scene.TickMonopoly(now);
+            Require(!scene.MonopolyEntranceActive, "The water fixture sampled its stationary board before the entrance ended.");
             // Reserve the larger laptop raster before checking reuse on either
             // path, so a legitimate first projector/preview resize is excluded.
             DrawPreview(scene, preview); DrawProjector(scene, projector); DrawPreview(scene, preview);
@@ -195,6 +199,7 @@ public sealed partial class MainWindow
         {
             const int width = 1152, height = 896;
             using var scene = Fixture(width, height, out _);
+            await scene.EnsureCrownDeedResourcesAsync(CanvasDevice.GetSharedDevice());
             using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
             var started = now;
             byte[] first = DrawPreview(scene, target);

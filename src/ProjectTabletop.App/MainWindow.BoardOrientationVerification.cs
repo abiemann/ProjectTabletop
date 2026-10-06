@@ -52,6 +52,7 @@ public sealed partial class MainWindow
             foreach (var board in boards)
             {
                 Show(scene, board);
+                await scene.EnsureBoardArtworkResourcesAsync(target.Device, board);
                 if (board == BoardScreen.Paint)
                 {
                     Require(scene.AddPaintDrop(new(.33, .53), .09, now),

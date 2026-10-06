@@ -23,6 +23,8 @@ public sealed partial class MainWindow
         using var scene = new SceneCompositor(globeClock: () => globeNow, monopolyClock: () => monopolyNow);
         await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
         await scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
+        foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.Monopoly })
+            await scene.EnsureBoardArtworkResourcesAsync(CanvasDevice.GetSharedDevice(), screen);
         scene.SetDisplayAspect(1);
         scene.SetBoardSetup(true);
         var inset = scene.SetDetectedBoardGrid([new(.015f, .015f), new(.985f, .015f), new(.985f, .985f), new(.015f, .985f)],

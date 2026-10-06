@@ -180,7 +180,7 @@
     },
     {
       "file": "src/ProjectTabletop.App/Projection/SceneCompositor.Monopoly.cs",
-      "sha256": "997544f1ac18fc8ff3628ef2aeeb323baf20be6e41ea61342c8edd8aa02025fd"
+      "sha256": "2e4ae68c7a14f8f6fe308f3d6ca58607eaf6ace50adbe84856a4449c21df7988"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/SceneCompositor.Paint.cs",
@@ -188,15 +188,15 @@
     },
     {
       "file": "src/ProjectTabletop.App/Projection/SceneCompositor.Roulette.cs",
-      "sha256": "8e379bb7360a4744c0e0bc0effbdee5a734aa80d5b47f94a2277568f29fd017d"
+      "sha256": "e5057366ce9238e83b6588c808f4ef9a5a51a05e58a2bae84549ae1ec8b3c031"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/SceneCompositor.RouletteMaterials.cs",
-      "sha256": "75301865dab7a17d803999878ed51e5d3d200db4d5cbc01b8c0972e4f6b08f56"
+      "sha256": "9f1aeb86733f4a7c279a47ffce3f3ffe78e956f929087c92c7aa2b730a22c210"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/SceneCompositor.RouletteMotion.cs",
-      "sha256": "f73acfb986a64c4c5b5c791556bfb9a4149278e2fc8bef8b92ee0d19f1a89b3a"
+      "sha256": "01da2226c6ce3d92c63b6150e663e234149010e500a9abc76dd273bd211b50a7"
     },
     {
       "file": "src/ProjectTabletop.App/SlotsRendering/Assets/slot-menu-dragon.png",
@@ -216,7 +216,7 @@
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.Native.cs",
-      "sha256": "b60d0d01635eb21c64cd5c6b49b548ca26ecc79b9a8b775c3c329cf445292601"
+      "sha256": "88f115cee7f56d55edf5097f91db2a474575b19825146c8fc81572a896f294d0"
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.cs",

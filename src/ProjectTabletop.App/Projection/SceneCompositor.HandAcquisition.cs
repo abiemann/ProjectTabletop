@@ -160,7 +160,7 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private bool AcquisitionBoardReady => !_disposed && !_boardSession.MenuScrolling && _boardSession.Buttons.Count > 0 &&
+    private bool AcquisitionBoardReady => !_disposed && CurrentBoardArtworkReady && !_boardSession.MenuScrolling && _boardSession.Buttons.Count > 0 &&
         (_boardSession.Screen is not (BoardScreen.Menu or BoardScreen.Settings) || _menuPreviewReady) &&
         !_blackOutput && !_boardSetup && !IsBoardRevealActive && _calibrationTarget < 0 &&
         _boardMediaClip is not null && _boardCameraMap is not null && _boardSurfaceMap is not null;

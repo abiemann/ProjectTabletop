@@ -129,19 +129,7 @@ public sealed partial class SceneCompositor
 
     private CanvasBitmap? EnsureCrownDeedCity(CanvasDevice device)
     {
-        if (_crownDeedCityDevice != device)
-        {
-            _crownDeedCityBitmap?.Dispose();
-            _crownDeedCityBitmap = null;
-            _crownDeedCityDevice = device;
-        }
-        if (_crownDeedCityBitmap is null)
-        {
-            string path = Path.Combine(AppContext.BaseDirectory, "Assets", "CrownDeed", "crown-deed-city.png");
-            if (File.Exists(path))
-                _crownDeedCityBitmap = CanvasBitmap.LoadAsync(device, path, 96).AsTask().GetAwaiter().GetResult();
-        }
-        return _crownDeedCityBitmap;
+        return PrepareCrownDeedResources(device) ? _crownDeedCityBitmap : null;
     }
 
     private void DrawMonopolyFrame(CanvasDrawingSession ds, bool entranceBase = false,

@@ -35,6 +35,8 @@ public sealed partial class MainWindow
         using var scene = new SceneCompositor(game, blackjackClock: () => now, globeClock: () => globeNow);
         await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
         await scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
+        foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.Monopoly })
+            await scene.EnsureBoardArtworkResourcesAsync(CanvasDevice.GetSharedDevice(), screen);
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96);
         scene.SetDisplayAspect(1);
         scene.SetBoardSetup(true);

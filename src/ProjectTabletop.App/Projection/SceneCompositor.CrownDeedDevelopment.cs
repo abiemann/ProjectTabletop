@@ -51,10 +51,6 @@ public sealed partial class SceneCompositor
 
     private void DisposeCrownDeedArtwork()
     {
-        DisposeCrownDeedWater();
-        DisposeCrownDeedPieces();
-        _crownDeedCityBitmap?.Dispose();
-        _crownDeedCityBitmap = null;
-        _crownDeedCityDevice = null;
+        DisposeCrownDeedResources();
     }
 }

@@ -127,6 +127,11 @@ public sealed partial class SceneCompositor
     private void DrawBoardApplicationCore(CanvasDrawingSession ds, Rect output, bool preview)
     {
         if (_boardSurfaceMap is null) return;
+        if (!PrepareBoardArtwork(ds.Device))
+        {
+            DrawArtworkLoading(ds, BoardBounds(_boardMediaClip!, output));
+            return;
+        }
         SyncPhotoCopySession();
         SyncPaintSession();
         ReserveProjectedBoardPixels(ds, output, preview);
@@ -252,7 +257,7 @@ public sealed partial class SceneCompositor
                     handsFresh ? _boardSession.HoveredButtonIds : [], selectionFeedback, PaintBoardAspect());
             else if (globe)
             {
-                DrawGlobeBoard(surface, _boardSession.GetGlobeSnapshot(globeNow), _boardSession.Buttons,
+                DrawCachedGlobeBoard(surface, globeNow, _boardSession.GetGlobeSnapshot(globeNow), _boardSession.Buttons,
                     handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback, PaintBoardAspect(),
                     drawerOpen: _boardSession.GlobeDrawerOpen, drawerProgress: GlobeDrawerProgress(globeNow));
             }

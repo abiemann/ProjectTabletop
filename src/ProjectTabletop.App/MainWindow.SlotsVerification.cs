@@ -25,6 +25,8 @@ public sealed partial class MainWindow
         var game = new SlotGame(20260930);
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
         using var scene = new SceneCompositor(blackjackClock: () => now, globeClock: () => now, slots: game);
+        await scene.EnsureSlotResourcesAsync(target.Device);
+        await scene.EnsureMenuPreviewResourcesAsync(target.Device);
         Configure(scene, width, height);
 
         scene.ShowBoardMenu();
@@ -256,6 +258,7 @@ public sealed partial class MainWindow
                     if (state.Phase == SlotPhase.RespinEffect && !capturedEffects.Contains(state.Effect))
                     {
                         using var effectScene = new SceneCompositor(blackjackClock: () => effectNow, slots: candidate);
+                        await effectScene.EnsureSlotResourcesAsync(target.Device);
                         Configure(effectScene, width, height);
                         effectScene.ShowSlots();
                         string name = $"seed-{seed:D2}-effect-{state.Effect.ToString().ToLowerInvariant()}";
@@ -302,6 +305,7 @@ public sealed partial class MainWindow
         {
             using var fixtureTarget = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), fixtureWidth, fixtureHeight, 96);
             using var fixture = new SceneCompositor(blackjackClock: () => now, slots: new SlotGame(3));
+            await fixture.EnsureSlotResourcesAsync(fixtureTarget.Device);
             Configure(fixture, fixtureWidth, fixtureHeight);
             fixture.ShowSlots();
             using (var drawing = fixtureTarget.CreateDrawingSession())
@@ -371,6 +375,7 @@ public sealed partial class MainWindow
         Directory.CreateDirectory(directory);
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
         using var scene = new SceneCompositor(blackjackClock: () => now, slots: new SlotGame(seed));
+        await scene.EnsureSlotResourcesAsync(target.Device);
         scene.SetDisplayAspect(width / (double)height);
         scene.SetBoardSetup(true);
         scene.SetDetectedBoardGrid([new(.035f, .035f), new(.965f, .035f), new(.965f, .965f), new(.035f, .965f)],
@@ -471,6 +476,7 @@ public sealed partial class MainWindow
         var now = origin;
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
         using var scene = new SceneCompositor(blackjackClock: () => now, slots: new SlotGame(seed));
+        await scene.EnsureSlotResourcesAsync(target.Device);
         var boardMap = ConfigureHatching(scene, width, height);
         Start(scene);
         var samples = new List<(DateTimeOffset Time, string Name, SlotEffect Power, double Age)>
@@ -555,6 +561,7 @@ public sealed partial class MainWindow
         var motionNow = origin;
         using var motionTarget = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), motionWidth, motionHeight, 96);
         using var motionScene = new SceneCompositor(blackjackClock: () => motionNow, slots: new SlotGame(seed));
+        await motionScene.EnsureSlotResourcesAsync(motionTarget.Device);
         ConfigureHatching(motionScene, motionWidth, motionHeight);
         Start(motionScene);
         var motionStart = firstHatch.AddSeconds(-1);
@@ -640,6 +647,7 @@ public sealed partial class MainWindow
             var fixtureNow = origin;
             using var fixtureTarget = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), fixtureWidth, fixtureHeight, 96);
             using var fixture = new SceneCompositor(blackjackClock: () => fixtureNow, slots: new SlotGame(seed));
+            await fixture.EnsureSlotResourcesAsync(fixtureTarget.Device);
             ConfigureHatching(fixture, fixtureWidth, fixtureHeight);
             Start(fixture);
             AdvanceHatching(fixture, ref fixtureNow, allResting);
