@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "ComputeSharp.Core/3.2.0": { "files": ["computesharp/LICENSE"] },
+    "ComputeSharp.D2D1/3.2.0": { "files": ["computesharp/LICENSE"] },
+    "ComputeSharp.D2D1.WinUI/3.2.0": { "files": ["computesharp/LICENSE"] },
+    "Microsoft.Graphics.Win2D/1.4.0": { "files": ["win2d/LICENSE.txt"] },
+    "Microsoft.Windows.SDK.NET.Ref/10.0.26100.57": { "files": ["windows-sdk/sdk_license.rtf", "windows-sdk/cswinrt/LICENSE"] },
+    "Microsoft.Extensions.AI.Abstractions/10.8.3": { "files": ["dotnet-extensions/LICENSE", "dotnet-extensions/THIRD-PARTY-NOTICES.TXT"] },
+    "Microsoft.Extensions.DependencyInjection.Abstractions/10.0.10": { "files": ["dotnet/LICENSE.TXT"] },
+    "Microsoft.Extensions.Logging.Abstractions/10.0.10": { "files": ["dotnet/LICENSE.TXT"] },
+    "ModelContextProtocol.Core/2.0.0": { "files": ["modelcontextprotocol/LICENSE", "modelcontextprotocol/THIRD-PARTY-NOTICES.txt"] },
+    "OpenCvSharp4/4.13.0.20260627": { "files": ["opencvsharp/LICENSE"] },
+    "OpenCvSharp4.runtime.win/4.13.0.20260627": {
+      "files": ["opencvsharp/LICENSE"],
+      "nativeSha256": "41e6a418637b7992814a668272e3197306f75c01b151ddb24ac2de183fb9c3f3"
+    }
+  }
+}

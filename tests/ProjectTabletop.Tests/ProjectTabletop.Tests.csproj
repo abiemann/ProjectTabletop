@@ -7,6 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <DefineConstants>$(DefineConstants);OFFLINE_VERIFICATION</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.0" />
@@ -23,5 +24,8 @@
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Camera\CameraFrame.cs" Link="App\CameraFrame.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\HandTrackingVideoRecorder.cs" Link="App\HandTrackingVideoRecorder.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\HandTrackingVideoRecorderVerification.cs" Link="App\HandTrackingVideoRecorderVerification.cs" />
   </ItemGroup>
 </Project>

@@ -1,4 +1,4 @@
-#if DEBUG
+#if DEBUG || OFFLINE_VERIFICATION
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
@@ -214,7 +214,7 @@ internal static class HandTrackingVideoRecorderVerification
         var fullHdClip = ReadClip(fullHd);
         var fullHdDecoded = DecodeAndCorrelate(fullHdClip.VideoPath, VideoFrames(fullHdClip.Entries), fullHdSources);
         string previewPath = Path.Combine(root, "full-hd-timestamp-preview.png");
-        using (var previewCapture = new VideoCapture(fullHdClip.VideoPath))
+        using (var previewCapture = new VideoCapture(fullHdClip.VideoPath, VideoCaptureAPIs.OPENCV_MJPEG))
         using (var preview = new Mat())
         {
             Require(previewCapture.Read(preview) && !preview.Empty(), "The full-HD timestamp preview could not be decoded.");
@@ -254,7 +254,7 @@ internal static class HandTrackingVideoRecorderVerification
         JsonElement[] entries, IReadOnlyList<CameraFrame> sources)
     {
         var byId = sources.ToDictionary(FrameId, StringComparer.Ordinal);
-        using var capture = new VideoCapture(path);
+        using var capture = new VideoCapture(path, VideoCaptureAPIs.OPENCV_MJPEG);
         Require(capture.IsOpened(), "The completed recording cannot be decoded.");
         double fps = capture.Get(VideoCaptureProperties.Fps);
         using var image = new Mat();

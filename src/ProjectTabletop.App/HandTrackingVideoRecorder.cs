@@ -386,7 +386,9 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
         string videoPath = stem + ".avi", timelinePath = stem + ".jsonl";
         encoder.Timeline = new StreamWriter(new FileStream(timelinePath, FileMode.CreateNew, FileAccess.Write,
             FileShare.ReadWrite, 4096, FileOptions.Asynchronous), new UTF8Encoding(false));
-        encoder.Video = new VideoWriter(videoPath, FourCC.MJPG, Fps,
+        // The built-in MJPEG backend keeps diagnostic recording independent of
+        // OpenCV's optional FFmpeg plugin, which is not shipped in the installer.
+        encoder.Video = new VideoWriter(videoPath, VideoCaptureAPIs.OPENCV_MJPEG, FourCC.MJPG, Fps,
             new Size(encoder.Session.Width, encoder.Session.Height));
         if (!encoder.Video.IsOpened()) throw new IOException("MJPG video encoder could not open the output file.");
         lock (_gate)

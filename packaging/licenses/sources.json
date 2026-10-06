@@ -1,0 +1,346 @@
+[
+  {
+    "path": "computesharp/LICENSE",
+    "sha256": "4d891651f349b7048416511c89f43810c91203b1e0b6061f671daddaadfb55f1",
+    "url": "https://raw.githubusercontent.com/Sergio0694/ComputeSharp/9a7c9e0c755bf68447f7293e5729547750fe6be3/LICENSE"
+  },
+  {
+    "path": "dotnet-extensions/LICENSE",
+    "sha256": "47f0ad8ba753eae5de6178291cd8f38bbb42d2368b177f8e11714ad17c701275",
+    "url": "https://raw.githubusercontent.com/dotnet/extensions/ccb356f31db9d894807c4fd0c97c2f41553d1524/LICENSE"
+  },
+  {
+    "path": "dotnet-extensions/THIRD-PARTY-NOTICES.TXT",
+    "sha256": "07f3e74329ed32ac9229a75ae994b98b30aadb1d9947eee926eed3d3fc4cf0c6",
+    "url": "https://raw.githubusercontent.com/dotnet/extensions/ccb356f31db9d894807c4fd0c97c2f41553d1524/THIRD-PARTY-NOTICES.TXT"
+  },
+  {
+    "path": "dotnet/LICENSE.TXT",
+    "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+    "url": "https://raw.githubusercontent.com/dotnet/dotnet/f7d90799ce4ef09a0bb257852a57248d2a8fb8dd/LICENSE.TXT"
+  },
+  {
+    "path": "modelcontextprotocol/LICENSE",
+    "sha256": "7c6a686d2b34b86ad8c726e0ac4d76903b525f251d73e617f8db3879fa8f11fc",
+    "url": "https://raw.githubusercontent.com/modelcontextprotocol/csharp-sdk/15f8b2da110b574a1c20a35a8c629cea4095c7be/LICENSE"
+  },
+  {
+    "path": "modelcontextprotocol/THIRD-PARTY-NOTICES.txt",
+    "sha256": "b9c35f6ab075077d5c2b644fdc58eb5696b8b70f539947f9e1e57331599fc5ce",
+    "url": "https://raw.githubusercontent.com/modelcontextprotocol/csharp-sdk/15f8b2da110b574a1c20a35a8c629cea4095c7be/THIRD-PARTY-NOTICES.txt"
+  },
+  {
+    "path": "opencv-native/curl-8.18.0/COPYING",
+    "sha256": "e18f1989333b70044b2adfb7dc2f905d0119dbdcac3bc9f4bc9d540e3a29de5b",
+    "url": "https://raw.githubusercontent.com/curl/curl/2eebc58c4b8d68c98c8344381a9f6df4cca838fd/COPYING"
+  },
+  {
+    "path": "opencv-native/curl-8.18.0/inet-conversions-NOTICE.txt",
+    "transformation": "Leading copyright and license comments, ending before the first include directive, as in the pinned vcpkg copyright recipe.",
+    "sha256": "6086a3002ae69532c387f26d696af01479b8e9d9757344cc12d5e2ea2c6469bf",
+    "url": "https://raw.githubusercontent.com/curl/curl/2eebc58c4b8d68c98c8344381a9f6df4cca838fd/lib/curlx/inet_ntop.c"
+  },
+  {
+    "sha256": "0c9b7990ecdca88b676db232c226548ac408b279f550d424d996f0d83591dd8e",
+    "archiveEntry": "giflib-5.2.2/COPYING",
+    "archiveSha256": "be7ffbd057cadebe2aa144542fd90c6838c6a083b5e8a9048b8ee3b66b29d5fb",
+    "url": "https://cfhcable.dl.sourceforge.net/project/giflib/giflib-5.x/giflib-5.2.2.tar.gz",
+    "path": "opencv-native/giflib-5.2.2/COPYING"
+  },
+  {
+    "sha256": "37f11c79f36fb5e1b00aca31c1234a7435c2929d83e181ee802a349ca8571749",
+    "archiveSha256": "56c7bada1067982afd5dd43636f8a9b5a5b80447ec452b754252168cde9d8be8",
+    "archiveEntry": "ippicv_win/EULA.rtf",
+    "path": "opencv-native/ipp-2022.2/ippicv_win/EULA.rtf",
+    "url": "https://raw.githubusercontent.com/opencv/opencv_3rdparty/c934a2a15a6df020446ac3dfa07e3acf72b63a8f/ippicv/ippicv_2022.2.0_win_intel64_20250730_general.zip"
+  },
+  {
+    "sha256": "a0a246b67784450f7a1b99b244d00cbdb8c001aa9b13755ababf4a218431703c",
+    "archiveSha256": "56c7bada1067982afd5dd43636f8a9b5a5b80447ec452b754252168cde9d8be8",
+    "url": "https://raw.githubusercontent.com/opencv/opencv_3rdparty/c934a2a15a6df020446ac3dfa07e3acf72b63a8f/ippicv/ippicv_2022.2.0_win_intel64_20250730_general.zip",
+    "path": "opencv-native/ipp-2022.2/ippicv_win/third-party-programs.txt",
+    "archiveEntry": "ippicv_win/third-party-programs.txt"
+  },
+  {
+    "path": "opencv-native/leptonica-1.87.0/leptonica-license.txt",
+    "sha256": "87829abb5bbb00b55a107365da89e9a33f86c4250169e5a1e5588505be7d5806",
+    "url": "https://raw.githubusercontent.com/DanBloomberg/leptonica/13275a278eb55b5746e33f95fbf5a2c8f604b3ab/leptonica-license.txt"
+  },
+  {
+    "path": "opencv-native/libarchive-3.8.5/COPYING",
+    "sha256": "30e556b3959e3985d66efefec5eaac51d4995053caa1d3cffe6eb916f146f229",
+    "url": "https://raw.githubusercontent.com/libarchive/libarchive/dd897a78c662a2c7a003e7ec158cea7909557bee/COPYING"
+  },
+  {
+    "path": "opencv-native/libjpeg-turbo-3.1.3/LICENSE.md",
+    "sha256": "2189dc45a8fe96204069f8124caa53a148dfdc193f50f584c6ca7849a6072872",
+    "url": "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/af9c1c268520a29adf98cad5138dafe612b3d318/LICENSE.md"
+  },
+  {
+    "path": "opencv-native/libjpeg-turbo-3.1.3/README.ijg",
+    "sha256": "75815e3bf6484201a3c3d17a1bbf10f2e8e3237f84df10a2357ea896db2a81d6",
+    "url": "https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/af9c1c268520a29adf98cad5138dafe612b3d318/README.ijg"
+  },
+  {
+    "path": "opencv-native/liblzma-5.8.2/COPYING",
+    "sha256": "616a3ad264ce29b8f1cb97e53037b139d406899ca8d1f799651e17bfa09830b8",
+    "url": "https://raw.githubusercontent.com/tukaani-project/xz/3d078b52adbff566ccfc51067dfbf742ecf3ef86/COPYING"
+  },
+  {
+    "path": "opencv-native/liblzma-5.8.2/COPYING.0BSD",
+    "sha256": "0b01625d853911cd0e2e088dcfb743261034a091bb379246cb25a14cc4c74bf1",
+    "url": "https://raw.githubusercontent.com/tukaani-project/xz/3d078b52adbff566ccfc51067dfbf742ecf3ef86/COPYING.0BSD"
+  },
+  {
+    "path": "opencv-native/libpng-1.6.55/LICENSE",
+    "sha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526",
+    "url": "https://raw.githubusercontent.com/pnggroup/libpng/c3e304954a9cfd154bc0dfbfea2b01cd61d6546d/LICENSE"
+  },
+  {
+    "path": "opencv-native/libtiff-4.7.1/LICENSE.md",
+    "sha256": "0e27c2382d7b8147972bbb746e04059a1152c8d0fda9d03ef1399d1a433c4ade",
+    "url": "https://gitlab.com/libtiff/libtiff/-/raw/v4.7.1/LICENSE.md"
+  },
+  {
+    "path": "opencv-native/libwebp-1.6.0/COPYING",
+    "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf",
+    "url": "https://raw.githubusercontent.com/webmproject/libwebp/4fa21912338357f89e4fd51cf2368325b59e9bd9/COPYING"
+  },
+  {
+    "path": "opencv-native/libwebp-1.6.0/PATENTS",
+    "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c",
+    "url": "https://raw.githubusercontent.com/webmproject/libwebp/4fa21912338357f89e4fd51cf2368325b59e9bd9/PATENTS"
+  },
+  {
+    "path": "opencv-native/opencv_contrib/LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "url": "https://raw.githubusercontent.com/opencv/opencv_contrib/d99ad2a188210cc35067c2e60076eed7c2442bc3/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv_contrib/modules/cvv/LICENSE",
+    "sha256": "51b23061b9cf86a8d07aa84b31c64d98335d3224d65b03f3f16088d5552777f3",
+    "url": "https://raw.githubusercontent.com/opencv/opencv_contrib/d99ad2a188210cc35067c2e60076eed7c2442bc3/modules/cvv/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv_contrib/modules/julia/LICENSE",
+    "sha256": "06c7aabb5e05935695bccbb8621f2d3c2735dba7f890ab27eea5e9f241ca0541",
+    "url": "https://raw.githubusercontent.com/opencv/opencv_contrib/d99ad2a188210cc35067c2e60076eed7c2442bc3/modules/julia/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv_contrib/modules/matlab/LICENSE",
+    "sha256": "4a323b09542afe6645187cc6114b75a6ecee4ec54aeb0da70d59e8d25f5b34a1",
+    "url": "https://raw.githubusercontent.com/opencv/opencv_contrib/d99ad2a188210cc35067c2e60076eed7c2442bc3/modules/matlab/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv_contrib/modules/rgbd/LICENSE_KinectFusion.md",
+    "sha256": "36831cabb0d39fff20da711ca65eb5e0c3419e1c5001ce8415ecba242abca6b2",
+    "url": "https://raw.githubusercontent.com/opencv/opencv_contrib/d99ad2a188210cc35067c2e60076eed7c2442bc3/modules/rgbd/LICENSE_KinectFusion.md"
+  },
+  {
+    "path": "opencv-native/opencv_contrib/modules/rgbd/LICENSE_WillowGarage.md",
+    "sha256": "c0b1e7d61b4ae2732b543cff0af51003e0eb24373a8b5316d37fa419c238554f",
+    "url": "https://raw.githubusercontent.com/opencv/opencv_contrib/d99ad2a188210cc35067c2e60076eed7c2442bc3/modules/rgbd/LICENSE_WillowGarage.md"
+  },
+  {
+    "path": "opencv-native/opencv_contrib/modules/wechat_qrcode/LICENSE",
+    "sha256": "f8549a71cfb8bfa34e6b7d6491fbfac8034673294e2fd80493389e460a496cb5",
+    "url": "https://raw.githubusercontent.com/opencv/opencv_contrib/d99ad2a188210cc35067c2e60076eed7c2442bc3/modules/wechat_qrcode/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/cpufeatures/LICENSE",
+    "sha256": "c870d52f42a8f93023b99a85fe68d02637d6b04e5f35bbcd7f98759adb4e4d49",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/cpufeatures/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/dlpack/LICENSE",
+    "sha256": "3e8f6bc39276a586d60c8c5aaece2ff989262181cf2b3d2a128db58f97a9300c",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/dlpack/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/ffmpeg/license.txt",
+    "sha256": "1f9d4168b4a9a2bdd1851023735a41d0ab09ffa5fcc1a721a99ebc1d7d35a9c5",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/ffmpeg/license.txt"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/ffmpeg/readme.txt",
+    "sha256": "26e4734e7ac1e72adac7a06a747ac9a997ee3714bc2ed8b745ff27dee35a2ad9",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/ffmpeg/readme.txt"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/flatbuffers/LICENSE.txt",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/flatbuffers/LICENSE.txt"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/include/opencl/LICENSE.txt",
+    "sha256": "cfaceadff07c2c9458283079cd0166872aa2d93d5c480f1f417be321aa7e0f4d",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/include/opencl/LICENSE.txt"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/ittnotify/src/ittnotify/BSD-3-Clause.txt",
+    "sha256": "cf48cdd9ed87c2031b68fb1b9f4cfb55d00dcf815b21a30bf8304aa1e5e6f76a",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/ittnotify/src/ittnotify/BSD-3-Clause.txt"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/ittnotify/src/ittnotify/GPL-2.0-only.txt",
+    "sha256": "cbe0f9505c5ca02ee34bfca453df31a98e31e6d56afcdf8ab0f87f4c94f1181b",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/ittnotify/src/ittnotify/GPL-2.0-only.txt"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/libjasper/copyright",
+    "sha256": "86c11bd7b94d24d6c372bd95f8d8998b8a69c7d82a91dd0247878b28223feabe",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/libjasper/copyright"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/libjasper/LICENSE",
+    "sha256": "edf9f4257cc33a1f396f9b062ca4a01dca7c79747c7d85b8947e603e5166760e",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/libjasper/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/libjpeg-turbo/LICENSE.md",
+    "sha256": "96f5b328adbb78eeaaec6980d73fd558cb1e4d62560ed615646bc3cf5e532430",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/libjpeg-turbo/LICENSE.md"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/libjpeg-turbo/README.ijg",
+    "sha256": "75815e3bf6484201a3c3d17a1bbf10f2e8e3237f84df10a2357ea896db2a81d6",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/libjpeg-turbo/README.ijg"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/libpng/LICENSE",
+    "sha256": "16d9daaafbf63a31a5bdc91d4600972548fef5aaa1244202393288dbd079c49a",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/libpng/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/libspng/LICENSE",
+    "sha256": "a2656f1d2643b1f9d17f263be03eb0d0be8fa5e0561dbcfaf0cf8ec3befb1413",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/libspng/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/libtiff/LICENSE.md",
+    "sha256": "0e27c2382d7b8147972bbb746e04059a1152c8d0fda9d03ef1399d1a433c4ade",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/libtiff/LICENSE.md"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/libwebp/COPYING",
+    "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/libwebp/COPYING"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/openexr/LICENSE",
+    "sha256": "14eba5f05238f57c77e94f0ebd29a0b3736ba0456ff990cda16e21b6903ac453",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/openexr/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/openjpeg/LICENSE",
+    "sha256": "a6af136f3e15038a666b61f376612a07d9a4e48cb7c01adbf3e33b3f14ab49b6",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/openjpeg/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/protobuf/LICENSE",
+    "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/protobuf/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/quirc/LICENSE",
+    "sha256": "f64a0d2030dd3bb501f303eb66097ed92cd0c63f824e515b1116dafbce5346fe",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/quirc/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/zlib-ng/LICENSE.md",
+    "sha256": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/zlib-ng/LICENSE.md"
+  },
+  {
+    "path": "opencv-native/opencv/3rdparty/zlib/LICENSE",
+    "sha256": "845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/3rdparty/zlib/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv/COPYRIGHT",
+    "sha256": "854538f426422b0f989a5e5b7641e5943753d10ef29ea54901dcd36039e43f58",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/COPYRIGHT"
+  },
+  {
+    "path": "opencv-native/opencv/doc/LICENSE_BSD.txt",
+    "sha256": "a5a7cf90fe5ac9763baad852cf69cf9d9b89bff934a679fdc5c8fcecaeba9a25",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/doc/LICENSE_BSD.txt"
+  },
+  {
+    "path": "opencv-native/opencv/doc/LICENSE_CHANGE_NOTICE.txt",
+    "sha256": "b2255f81ae7162e36550daefe432c72a8506cfc1b954897dbc553ed5160ad4b8",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/doc/LICENSE_CHANGE_NOTICE.txt"
+  },
+  {
+    "path": "opencv-native/opencv/LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/LICENSE"
+  },
+  {
+    "path": "opencv-native/opencv/modules/core/3rdparty/SoftFloat/COPYING.txt",
+    "sha256": "0c5b08365136da52639d777f1ebfc03988b0169d80655c90c59f1b3fa3e526a2",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/modules/core/3rdparty/SoftFloat/COPYING.txt"
+  },
+  {
+    "path": "opencv-native/opencv/modules/dnn/src/torch/COPYRIGHT.txt",
+    "sha256": "c5ced63019efecf865d6e65d33495507ba5e744fb9d648f2a2f142a169cafae5",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/modules/dnn/src/torch/COPYRIGHT.txt"
+  },
+  {
+    "path": "opencv-native/opencv/modules/gapi/src/3rdparty/vasot/LICENSE.txt",
+    "sha256": "a9c8a68807d39b6810d593008f02e7835a8f8280781e5ce9b544a7fb973bb79e",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/modules/gapi/src/3rdparty/vasot/LICENSE.txt"
+  },
+  {
+    "path": "opencv-native/opencv/modules/highgui/src/files_Qt/Material/LICENSE",
+    "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "url": "https://raw.githubusercontent.com/opencv/opencv/fe38fc608f6acb8b68953438a62305d8318f4fcd/modules/highgui/src/files_Qt/Material/LICENSE"
+  },
+  {
+    "path": "opencv-native/openjpeg-2.5.4/LICENSE",
+    "sha256": "a6af136f3e15038a666b61f376612a07d9a4e48cb7c01adbf3e33b3f14ab49b6",
+    "url": "https://raw.githubusercontent.com/uclouvain/openjpeg/6c4a29b00211eb0430fa0e5e890f1ce5c80f409f/LICENSE"
+  },
+  {
+    "sha256": "13a01fea4b997bc94b0b6e322a55b35bf18fc66bfdee9812bc34b726c6e6cf2f",
+    "url": "https://raw.githubusercontent.com/orbbec/OrbbecSDK/4313e3db1ac478b636bcb881ad728f721aadd25f/LICENSE.txt",
+    "path": "opencv-native/orbbec-sdk-2.5.5/LICENSE.txt"
+  },
+  {
+    "path": "opencv-native/tesseract-5.5.2/LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "url": "https://raw.githubusercontent.com/tesseract-ocr/tesseract/6e1d56a847e697de07b38619356550e5cf4e8633/LICENSE"
+  },
+  {
+    "path": "opencv-native/zlib-1.3.1/LICENSE",
+    "sha256": "845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243",
+    "url": "https://raw.githubusercontent.com/madler/zlib/51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf/LICENSE"
+  },
+  {
+    "path": "opencvsharp/LICENSE",
+    "sha256": "93a73400a67ba64071d073386c96b21da8d8265574de0c71520061f741b0d645",
+    "url": "https://raw.githubusercontent.com/shimat/opencvsharp/b161e7e012f5101f6d5dc68a835c59db6cc88b18/LICENSE"
+  },
+  {
+    "transformation": "Extracted all Word document body paragraph text in order; paragraph boundaries retained.",
+    "sha256": "67574d66d2632c6ce248b8a5f92bebcfb2d630c40584d683327811397eeadd5d",
+    "url": "https://visualstudio.microsoft.com/wp-content/uploads/2025/10/Visual-C-V14-License-Redistributable_and_Runtime_ENU.docx",
+    "path": "visual-cpp-2026/LICENSE.txt",
+    "sourceSha256": "08651651a7602fc7c0e2763de0fde1ff9f868df2780597cd1775ee9d6441c783"
+  },
+  {
+    "sha256": "c3ba493105fa52657c4c60d9b1680da7c01b188a8665d7a823c2a187fd259808",
+    "url": "https://raw.githubusercontent.com/microsoft/Win2D/0fd4f810be5bf0cb9c981432a6f4ab3954fda08f/LICENSE.txt",
+    "path": "win2d/LICENSE.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/microsoft/CsWinRT/8649ee3eeb2445ca2a36d80d878ef60b96a6c65d/LICENSE",
+    "path": "windows-sdk/cswinrt/LICENSE",
+    "sha256": "9906940f61b1f0b533fa7d99baf55178b2808fbe113ea51dfbfad8572ccd5f2b"
+  },
+  {
+    "url": "https://download.microsoft.com/download/0/F/F/0FF2B061-47DD-4F55-89B6-FD1D8C44F14D/sdk_license.rtf",
+    "path": "windows-sdk/sdk_license.rtf",
+    "sha256": "dd07eb178e00c6bba4148457fc00ff77cd4887eb521d504186fe59c9ec8bbe62"
+  }
+]

@@ -1,0 +1,6 @@
+# Preserve upstream bytes so recorded SHA-256 values survive Windows checkout.
+* -text
+/.gitattributes text
+/README.md text
+/sources.json text
+/fallbacks.json text

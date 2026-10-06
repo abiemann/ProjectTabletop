@@ -1,0 +1,127 @@
+name: Windows CI and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  build:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Check version and release notes
+        id: version
+        env:
+          BUILD_REF: ${{ github.ref }}
+          BUILD_TAG: ${{ github.ref_name }}
+        run: |
+          [xml]$props = Get-Content Directory.Build.props -Raw
+          $version = [string]$props.Project.PropertyGroup.Version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version.' }
+          if ($env:BUILD_REF.StartsWith('refs/tags/') -and $env:BUILD_TAG -ne "v$version") {
+            throw "Tag does not match source version $version."
+          }
+          if (!(Test-Path "docs/releases/$version.md")) { throw 'Release notes must be committed before packaging.' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Restore locked dependencies
+        run: dotnet restore ProjectTabletop.sln -p:Platform=x64 --locked-mode -warnaserror:NU1901,NU1902,NU1903,NU1904
+      - name: Build Release
+        run: dotnet build ProjectTabletop.sln -c Release -p:Platform=x64 --no-restore -p:ContinuousIntegrationBuild=true
+      - name: Run offline regression groups
+        run: dotnet test tests/ProjectTabletop.Tests/ProjectTabletop.Tests.csproj -c Release --no-build --no-restore --logger "trx;LogFileName=offline.trx" --results-directory artifacts/test-results
+      - name: Publish self-contained application and collect notices
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/Publish-Windows.ps1 -StagingDirectory artifacts/staging -Version $env:RELEASE_VERSION
+      - name: Build setup
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/Build-Installer.ps1 -StagingDirectory artifacts/staging -Version $env:RELEASE_VERSION -OutputDirectory artifacts/release
+      - name: Test installed application and uninstaller
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/Test-InstalledApp.ps1 -SetupPath "artifacts/release/ProjectTabletop-$env:RELEASE_VERSION-win-x64-setup.exe" -Version $env:RELEASE_VERSION -WorkDirectory artifacts/install-smoke
+      - name: Create release checksums and payload manifest
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          Copy-Item artifacts/staging/file-manifest.json "artifacts/release/ProjectTabletop-$env:RELEASE_VERSION-win-x64-manifest.json"
+          Get-ChildItem artifacts/release -File | Sort-Object Name | ForEach-Object {
+            "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
+          } | Set-Content artifacts/release/SHA256SUMS.txt -Encoding ascii
+      - name: Upload setup and checksums
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-setup-${{ steps.version.outputs.version }}
+          path: artifacts/release/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload verification logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-verification-${{ github.run_attempt }}
+          path: |
+            artifacts/test-results
+            artifacts/install-smoke
+          if-no-files-found: warn
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-setup-${{ needs.build.outputs.version }}
+          path: artifacts/release
+      - name: Publish verified setup to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          $assets = @(Get-ChildItem artifacts/release -File | ForEach-Object FullName)
+          $existing = gh release view $env:RELEASE_TAG --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (!(($existing | ConvertFrom-Json).isDraft)) { throw 'A published release already exists; never overwrite its assets.' }
+            gh release upload $env:RELEASE_TAG @assets --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }
+          } else {
+            gh release create $env:RELEASE_TAG @assets --verify-tag --draft --title "Project Tabletop $env:RELEASE_VERSION" --notes-file "docs/releases/$env:RELEASE_VERSION.md"
+            if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed.' }
+          }
+          gh release edit $env:RELEASE_TAG --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }

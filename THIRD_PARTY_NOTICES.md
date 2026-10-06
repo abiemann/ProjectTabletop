@@ -4,9 +4,14 @@ ProjectTabletop's original material is governed by the [project license](LICENSE
 The commercial-use restriction in that license does not replace or restrict the
 separate licenses for third-party material.
 
-These notices cover bundled Globe imagery and the open-source GPU rendering code.
-Other dependencies retain their own package and model license notices. Preserve
-all applicable third-party licenses and attributions when redistributing.
+The sections below cover bundled Globe imagery and adapted GPU rendering code.
+Windows release packages also contain `ThirdPartyNotices/` and
+`dependency-notices.json`, generated from the exact published NuGet dependencies,
+their embedded license files, and reviewed upstream notice texts in
+[`packaging/licenses`](https://github.com/abiemann/ProjectTabletop/blob/main/packaging/licenses/README.md). These include the .NET and
+Visual C++ runtimes, Windows App SDK components, OpenCvSharp's native dependencies,
+and the MCP helper's dependencies. The hand models retain their licenses beside
+the models. Preserve all applicable licenses and attributions when redistributing.
 
 ## NASA Blue Marble imagery
 

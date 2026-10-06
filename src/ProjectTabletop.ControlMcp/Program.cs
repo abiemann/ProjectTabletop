@@ -80,7 +80,11 @@ static async Task RunMcpAsync()
             });
     var options = new McpServerOptions
     {
-        ServerInfo = new Implementation { Name = "ProjectTabletop.ControlMcp", Version = "0.1.0" },
+        ServerInfo = new Implementation
+        {
+            Name = "ProjectTabletop.ControlMcp",
+            Version = typeof(ControlPipeClient).Assembly.GetName().Version?.ToString(3) ?? "1.0.0"
+        },
         ToolCollection =
         [
             Tool("get_status", "Read camera, output, cardboard scan, and fingertip tracking status from the local ProjectTabletop app."),
