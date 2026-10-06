@@ -24,7 +24,7 @@ public sealed partial class MainWindow
         var type = typeof(SceneCompositor);
         var drawPiece = type.GetMethod("DrawCrownDeedPiece", instance)!;
         var heading = type.GetMethod("CrownDeedPieceHeading", statics)!;
-        var artAspect = type.GetNestedType("MonopolyArtAspect", BindingFlags.NonPublic)!;
+        var artAspect = type.GetNestedType("CrownDeedArtAspect", BindingFlags.NonPublic)!;
         Require(drawPiece is not null && heading is not null, "The silver-piece renderer or shared inward heading is missing.");
         string directory = Path.Combine(_appDataDirectory, "CrownDeedPieceVerification", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -35,12 +35,12 @@ public sealed partial class MainWindow
         int repeatChecks = 0, stateChecks = 0, cacheChecks = 0, captionChecks = 0;
         int footHeadingChecks = 0, physicalProportionChecks = 0;
         var now = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        var game = new MonopolyGame(seed: 421);
+        var game = new CrownDeedGame(seed: 421);
         foreach (string action in new[] { "mp-start-game", "mp-piece-next-1", "mp-piece-next-2", "mp-start" })
             Require(game.HandleAction(action, now), "The silver-piece fixture could not configure its game.");
-        using var scene = new SceneCompositor(monopoly: game, monopolyClock: () => now, boardRevealClock: () => now);
-        string saved = scene.ExportMonopolySave();
-        var frozen = scene.MonopolyState;
+        using var scene = new SceneCompositor(crownDeed: game, crownDeedClock: () => now, boardRevealClock: () => now);
+        string saved = scene.ExportCrownDeedSave();
+        var frozen = scene.CrownDeedState;
         var device = CanvasDevice.GetSharedDevice();
         await scene.EnsureCrownDeedResourcesAsync(device);
         using (var warm = new CanvasRenderTarget(device, 256, 256, 96))
@@ -85,7 +85,7 @@ public sealed partial class MainWindow
             }
             string hash = Convert.ToHexString(SHA256.HashData(pixels));
             Require(solid > 1000 && partial > 0 && solid < width * height * .90 && hashes.Add(hash),
-                "A piece lacks substantial distinct artwork, transparency or transitional edge pixels: " + MonopolyGame.PieceNames[piece]);
+                "A piece lacks substantial distinct artwork, transparency or transitional edge pixels: " + CrownDeedGame.PieceNames[piece]);
             assetChecks++;
             Require(source.X >= 0 && source.Y >= 0 && source.Width > 1 && source.Height > 1 &&
                 source.X + source.Width <= width && source.Y + source.Height <= height,
@@ -95,7 +95,7 @@ public sealed partial class MainWindow
             right = Math.Min(width - 1, right + 2); bottom = Math.Min(height - 1, bottom + 2);
             Require(source == new Rect(left, top, right - left + 1, bottom - top + 1),
                 "Authored piece metadata differs from the original alpha bounds and two-pixel padding.");
-            assets.Add(new { piece, name = MonopolyGame.PieceNames[piece], width, height, solid, partial, substantialAlphaMinimum = 250, hash, source });
+            assets.Add(new { piece, name = CrownDeedGame.PieceNames[piece], width, height, solid, partial, substantialAlphaMinimum = 250, hash, source });
         }
 
         foreach (var view in new[] { (Name: "measured", Width: 1440, Height: 1120),
@@ -111,14 +111,14 @@ public sealed partial class MainWindow
                 repeatChecks++;
                 Require(first.Where((_, index) => index % 4 == 3).Count(alpha => alpha > 0) > 1000,
                     "The native piece layout was blank.");
-                Require(ReferenceEquals(frozen, scene.MonopolyState) && scene.ExportMonopolySave() == saved,
+                Require(ReferenceEquals(frozen, scene.CrownDeedState) && scene.ExportCrownDeedSave() == saved,
                     "Drawing pieces changed player identities, selected pieces or gameplay.");
                 stateChecks++;
                 Require(ReferenceEquals(bitmaps, Raw(scene, "_crownDeedPieceBitmaps")) &&
                     ReferenceEquals(bounds, Raw(scene, "_crownDeedPieceSourceBounds")) &&
                     bitmaps.All(bitmap => bitmap!.Device == device), "Drawing or resizing recreated piece textures.");
                 cacheChecks++;
-                await Capture(target, view.Name + "-" + MonopolyGame.PieceNames[piece].ToLowerInvariant() + "-forty-parcels");
+                await Capture(target, view.Name + "-" + CrownDeedGame.PieceNames[piece].ToLowerInvariant() + "-forty-parcels");
 
                 byte[] RenderPieces()
                 {
@@ -135,14 +135,14 @@ public sealed partial class MainWindow
                             foreach (int occupants in new[] { 1, 2, 6 })
                             {
                                 var fixture = frozen with { Players = Array.AsReadOnly(Enumerable.Range(0, occupants)
-                                    .Select(slot => new MonopolyPlayerSnapshot(slot + 1, "Fixture", false, 1500,
+                                    .Select(slot => new CrownDeedPlayerSnapshot(slot + 1, "Fixture", false, 1500,
                                         parcel, false, 0, 0, false, slot) { PieceIndex = piece }).ToArray()) };
                                 foreach (var player in fixture.Players)
-                                    CheckHeadingAndProportions(SceneCompositor.MonopolyTokenCenter(fixture, player.Id), true);
+                                    CheckHeadingAndProportions(SceneCompositor.CrownDeedTokenCenter(fixture, player.Id), true);
                             }
                             var single = frozen with { Players = Array.AsReadOnly(frozen.Players.Select((player, slot) =>
                                 player with { Position = slot == 0 ? parcel : (parcel + 20) % 40 }).ToArray()) };
-                            var centre = SceneCompositor.MonopolyTokenCenter(single, single.Players[0].Id);
+                            var centre = SceneCompositor.CrownDeedTokenCenter(single, single.Players[0].Id);
                             var previous = drawing.Transform;
                             Draw(drawing, centre, 9, piece, aspect, true);
                             Require(drawing.Transform == previous, "A piece left its aspect/heading transform on the next parcel.");
@@ -203,34 +203,34 @@ public sealed partial class MainWindow
 
         async Task CheckSetup(string name, int width, int height)
         {
-            var setupGame = new MonopolyGame(seed: 422);
+            var setupGame = new CrownDeedGame(seed: 422);
             foreach (string action in new[] { "mp-start-game", "mp-human-plus", "mp-human-plus", "mp-ai-plus", "mp-ai-plus" })
                 Require(setupGame.HandleAction(action, now), "The six-player chooser fixture could not be configured.");
             for (int turn = 0; setupGame.Snapshot.SetupPieces[0] != 6 && turn < 8; turn++)
                 Require(setupGame.HandleAction("mp-piece-next-1", now), "The longest piece caption could not be selected.");
-            using var setup = new SceneCompositor(monopoly: setupGame, monopolyClock: () => now, boardRevealClock: () => now);
+            using var setup = new SceneCompositor(crownDeed: setupGame, crownDeedClock: () => now, boardRevealClock: () => now);
             await setup.EnsureCrownDeedResourcesAsync(device);
             setup.SetDisplayAspect(width / (double)height);
             setup.SetBoardSetup(true);
             setup.SetDetectedBoardGrid([new(.035f, .035f), new(.965f, .035f), new(.965f, .965f), new(.035f, .965f)],
                 Homography.FromFourPoints([new(0, 0), new(width, 0), new(width, height), new(0, height)],
                     [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
-            setup.SetBoardSetup(false); setup.ShowMonopoly();
-            now += TimeSpan.FromMilliseconds(4975); setup.TickMonopoly(now);
+            setup.SetBoardSetup(false); setup.ShowCrownDeed();
+            now += TimeSpan.FromMilliseconds(4975); setup.TickCrownDeed(now);
             using var target = new CanvasRenderTarget(device, width, height, 96);
-            var before = setup.MonopolyState;
-            Require(before.Phase == MonopolyPhase.Setup && before.Players.Count == 0 && before.SetupPieces.Count == 6,
+            var before = setup.CrownDeedState;
+            Require(before.Phase == CrownDeedPhase.Setup && before.Players.Count == 0 && before.SetupPieces.Count == 6,
                 "Showing the chooser reset the prepared six-player Setup phase.");
-            using (var drawing = target.CreateDrawingSession()) setup.DrawMonopolyPreview(drawing, width, height);
-            Require(ReferenceEquals(before, setup.MonopolyState) && before.SetupPieces.Distinct().Count() == 6,
+            using (var drawing = target.CreateDrawingSession()) setup.DrawCrownDeedPreview(drawing, width, height);
+            Require(ReferenceEquals(before, setup.CrownDeedState) && before.SetupPieces.Distinct().Count() == 6,
                 "Drawing the chooser mutated its selections.");
             var buttons = setup.CurrentBoardButtons.Where(button => button.Id.StartsWith("mp-piece-next-", StringComparison.Ordinal)).ToArray();
             Require(buttons.Length == 6 && buttons.Any(button => button.Label.Contains("Wheelbarrow", StringComparison.Ordinal)),
                 "The chooser lacks its six actual captions or longest design name.");
             foreach (var button in buttons)
             {
-                var rectangle = (Rect)type.GetMethod("MonopolyButtonTextRectangle", statics)!.Invoke(null, [button])!;
-                using var format = (CanvasTextFormat)type.GetMethod("MonopolyButtonTextFormat", statics)!.Invoke(null, [button])!;
+                var rectangle = (Rect)type.GetMethod("CrownDeedButtonTextRectangle", statics)!.Invoke(null, [button])!;
+                using var format = (CanvasTextFormat)type.GetMethod("CrownDeedButtonTextFormat", statics)!.Invoke(null, [button])!;
                 using var text = new CanvasTextLayout(device, button.Label, format, (float)rectangle.Width, (float)rectangle.Height);
                 var ink = text.DrawBounds;
                 Require(ink.Width <= rectangle.Width + 1 && ink.Height <= rectangle.Height + 1,

@@ -27,8 +27,8 @@ public sealed partial class MainWindow
             _scene.DrawSlotsPreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
         else if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Globe)
             _scene.DrawGlobePreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
-        else if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Monopoly)
-            _scene.DrawMonopolyPreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
+        else if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.CrownDeed)
+            _scene.DrawCrownDeedPreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
         else _scene.DrawBlackjackPreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
     }
 
@@ -37,20 +37,20 @@ public sealed partial class MainWindow
         var point = e.GetCurrentPoint(BlackjackPreview);
         if (!point.Properties.IsLeftButtonPressed) return;
         double width = BlackjackPreview.ActualWidth, height = BlackjackPreview.ActualHeight;
-        bool monopoly = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Monopoly;
+        bool crownDeed = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.CrownDeed;
         bool globe = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Globe;
         bool slots = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Slots;
         bool roulette = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Roulette;
         double aspect = roulette ? _scene.RoulettePreviewAspect : slots ? _scene.SlotsPreviewAspect : globe ? _scene.GlobePreviewAspect :
-            monopoly ? _scene.MonopolyPreviewAspect : 1;
+            crownDeed ? _scene.CrownDeedPreviewAspect : 1;
         double drawWidth = Math.Min(width, height * aspect), drawHeight = drawWidth / aspect;
         if (drawWidth <= 0 || drawHeight <= 0) return;
         double u = (point.Position.X - (width - drawWidth) / 2) / drawWidth;
         double v = (point.Position.Y - (height - drawHeight) / 2) / drawHeight;
         if (roulette ? _scene.ActivateRouletteAt(u, v) : slots ? _scene.ActivateSlotsAt(u, v) : globe ? _scene.ActivateGlobeAt(u, v) :
-            monopoly ? _scene.ActivateMonopolyAt(u, v) : _scene.ActivateBlackjackAt(u, v))
+            crownDeed ? _scene.ActivateCrownDeedAt(u, v) : _scene.ActivateBlackjackAt(u, v))
         {
-            if (monopoly) QueueMonopolySave();
+            if (crownDeed) QueueCrownDeedSave();
             UpdateBoardAppStatus();
             e.Handled = true;
         }

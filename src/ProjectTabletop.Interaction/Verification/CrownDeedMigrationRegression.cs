@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using ProjectTabletop.Interaction;
 
-internal static class MonopolyMigrationRegression
+internal static class CrownDeedMigrationRegression
 {
     private static readonly DateTimeOffset Epoch = new(2026, 10, 4, 13, 0, 0, TimeSpan.Zero);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
@@ -38,12 +38,12 @@ internal static class MonopolyMigrationRegression
         var assets = Data();
         foreach (var property in assets.Properties)
         {
-            property.OwnerId = MonopolyGame.Spaces[property.SpaceIndex].Group == MonopolyGroup.Brown ? 1 : 2;
-            property.Houses = MonopolyGame.Spaces[property.SpaceIndex].Group == MonopolyGroup.Brown ? 4 : 0;
+            property.OwnerId = CrownDeedGame.Spaces[property.SpaceIndex].Group == CrownDeedGroup.Brown ? 1 : 2;
+            property.Houses = CrownDeedGame.Spaces[property.SpaceIndex].Group == CrownDeedGroup.Brown ? 4 : 0;
             property.Mortgaged = property.SpaceIndex is 4 or 35;
         }
         assets.Players[0].Money = 732; assets.Players[1].Money = 2901;
-        assets.Players[0].Position = MonopolyGame.CivicWatchIndex;
+        assets.Players[0].Position = CrownDeedGame.CivicWatchIndex;
         assets.Players[0].InJail = true; assets.Players[0].JailTurns = 2;
         assets.ChanceDeck.Reverse(); assets.ChestDeck = assets.ChestDeck.Skip(7).Concat(assets.ChestDeck.Take(7)).ToList();
         assets.ChanceIndex = 6; assets.ChestIndex = 11;
@@ -62,29 +62,29 @@ internal static class MonopolyMigrationRegression
             current.ChestFreeCardHolderId == 2 && current.Players.All(p => p.GetOutOfJailCards == 1) &&
             !current.Status.Contains("Old itinerary") && !current.LastCard.Contains("legacy card"),
             "Migration shuffled a deck, lost a held pass or replayed obsolete public prose.");
-        Require(MonopolyGame.Spaces[22].Name == "Royal Arcade" && MonopolyGame.Spaces[22].Price == 400 &&
-            MonopolyGame.Spaces[22].Rents[^1] == 2000 && MonopolyGame.Spaces[26].Name == "Starling Gardens" &&
-            MonopolyGame.Spaces[34].Name == "Suncrest Avenue", "Migrated estates lost their named economic counterparts.");
+        Require(CrownDeedGame.Spaces[22].Name == "Royal Arcade" && CrownDeedGame.Spaces[22].Price == 400 &&
+            CrownDeedGame.Spaces[22].Rents[^1] == 2000 && CrownDeedGame.Spaces[26].Name == "Starling Gardens" &&
+            CrownDeedGame.Spaces[34].Name == "Suncrest Avenue", "Migrated estates lost their named economic counterparts.");
     }
 
     private static void PendingDecisionsSurvive()
     {
         var purchase = Data();
-        purchase.Phase = MonopolyPhase.AwaitingPurchase; purchase.PendingPropertyIndex = 22; purchase.Players[0].Position = 22;
+        purchase.Phase = CrownDeedPhase.AwaitingPurchase; purchase.PendingPropertyIndex = 22; purchase.Players[0].Position = 22;
         var game = Load(Legacy(purchase));
         Require(game.Snapshot.PendingPropertyIndex == 22 && game.HandleAction("mp-buy", Epoch.AddSeconds(1)) &&
             game.Snapshot.Players[0].Money == 1100 && game.Snapshot.Properties.Single(p => p.SpaceIndex == 22).OwnerId == 1,
             "A legacy pending purchase bought the wrong estate or charged a changed price.");
 
         var manage = Data();
-        manage.Phase = MonopolyPhase.ManageProperties; manage.ManageReturnPhase = MonopolyPhase.AwaitingRoll;
+        manage.Phase = CrownDeedPhase.ManageProperties; manage.ManageReturnPhase = CrownDeedPhase.AwaitingRoll;
         manage.SelectedPropertyIndex = 26; manage.Properties.Single(p => p.SpaceIndex == 26).OwnerId = 1;
         game = Load(Legacy(manage));
         Require(game.Snapshot.SelectedPropertyIndex == 26 && game.HandleAction("mp-mortgage", Epoch.AddSeconds(1)) &&
             game.Snapshot.Players[0].Money == 1570, "Selected-estate migration changed the mortgage target or amount.");
 
         var auction = Data();
-        auction.Phase = MonopolyPhase.Auction; auction.PendingPropertyIndex = 34;
+        auction.Phase = CrownDeedPhase.Auction; auction.PendingPropertyIndex = 34;
         auction.PendingBankAuctions = [16, 27];
         auction.Auction = new() { SpaceIndex = 34, Bid = 50, BidderId = 1, CurrentBidderId = 2 };
         game = Load(Legacy(auction));
@@ -95,7 +95,7 @@ internal static class MonopolyMigrationRegression
             "Legacy auction bids, pending bank assets or winner settlement changed during migration.");
 
         var debt = Data();
-        debt.Phase = MonopolyPhase.Debt; debt.Players[0].Money = 10;
+        debt.Phase = CrownDeedPhase.Debt; debt.Players[0].Money = 10;
         debt.DebtAmount = 200; debt.DebtPlayerId = 1; debt.DebtCreditorId = 2;
         debt.Payments = [new() { PlayerId = 1, CreditorId = 2, Amount = 200 }];
         game = Load(Legacy(debt));
@@ -111,7 +111,7 @@ internal static class MonopolyMigrationRegression
             var data = Data();
             data.Players[0].Position = 4;
             data.ChanceDeck = new[] { card }.Concat(Enumerable.Range(0, 16).Where(id => id != card)).ToList();
-            var game = Load(Legacy(data), new MonopolyDice(1, 2));
+            var game = Load(Legacy(data), new CrownDeedDice(1, 2));
             Require(game.HandleAction("mp-roll", Epoch.AddSeconds(1)) && game.Snapshot.ActivePlayer!.Position == target,
                 $"Retained Charter card {card} traveled to a stale square-board index.");
             Require(game.Snapshot.Players[0].Money == (target < 7 ? 1700 : 1500),
@@ -119,7 +119,7 @@ internal static class MonopolyMigrationRegression
         }
         var ledger = Data();
         ledger.ChestDeck = new[] { 4 }.Concat(Enumerable.Range(0, 16).Where(id => id != 4)).ToList();
-        var pass = Load(Legacy(ledger), new MonopolyDice(1, 1));
+        var pass = Load(Legacy(ledger), new CrownDeedDice(1, 1));
         Require(pass.HandleAction("mp-roll", Epoch.AddSeconds(1)) && pass.Snapshot.LastCard.StartsWith("Safe-Conduct Pass") &&
             pass.Snapshot.Players[0].GetOutOfJailCards == 1, "Legacy Ledger pass ID lost its retained effect or new content.");
     }
@@ -140,15 +140,15 @@ internal static class MonopolyMigrationRegression
         Require(ReferenceEquals(before, game.Snapshot), "An invalid migration partially replaced the running game.");
     }
 
-    private static MonopolySaveData Data()
+    private static CrownDeedSaveData Data()
     {
-        var game = new MonopolyGame(seed: 73);
+        var game = new CrownDeedGame(seed: 73);
         foreach (string action in new[] { "mp-start-game", "mp-ai-minus", "mp-human-plus", "mp-start" })
             Require(game.HandleAction(action, Epoch), "Save fixture setup failed.");
         return Read(game.ExportSave());
     }
-    private static MonopolySaveData Read(string text) => JsonSerializer.Deserialize<MonopolySaveData>(text, Json)!;
-    private static string Legacy(MonopolySaveData data, Action<MonopolySaveData>? amend = null)
+    private static CrownDeedSaveData Read(string text) => JsonSerializer.Deserialize<CrownDeedSaveData>(text, Json)!;
+    private static string Legacy(CrownDeedSaveData data, Action<CrownDeedSaveData>? amend = null)
     {
         var save = Read(JsonSerializer.Serialize(data, Json));
         static int Old(int value) => Array.IndexOf(OldToNew, value);
@@ -162,9 +162,9 @@ internal static class MonopolyMigrationRegression
         amend?.Invoke(save);
         return JsonSerializer.Serialize(save, Json);
     }
-    private static MonopolyGame Load(string save, params MonopolyDice[] rolls)
+    private static CrownDeedGame Load(string save, params CrownDeedDice[] rolls)
     {
-        var game = new MonopolyGame(seed: 73, initialRolls: rolls);
+        var game = new CrownDeedGame(seed: 73, initialRolls: rolls);
         game.LoadSave(save, Epoch); return game;
     }
     private static void Throws<T>(Action action, string message) where T : Exception

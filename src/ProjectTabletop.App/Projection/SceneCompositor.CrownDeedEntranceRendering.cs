@@ -8,34 +8,34 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
-    private CanvasRenderTarget? _monopolyEntranceBaseTarget;
-    private CanvasRenderTarget? _monopolyEntranceLidTarget;
-    private readonly (CanvasRenderTarget Image, Rect Bounds)?[] _monopolyEntranceParcels = new (CanvasRenderTarget, Rect)?[40];
-    private bool _monopolyEntranceBaseReady;
-    private (int Width, int Height)? _monopolyEntranceParcelRaster;
-    private (long Game, double Aspect)? _monopolyEntranceTileState;
+    private CanvasRenderTarget? _crownDeedEntranceBaseTarget;
+    private CanvasRenderTarget? _crownDeedEntranceLidTarget;
+    private readonly (CanvasRenderTarget Image, Rect Bounds)?[] _crownDeedEntranceParcels = new (CanvasRenderTarget, Rect)?[40];
+    private bool _crownDeedEntranceBaseReady;
+    private (int Width, int Height)? _crownDeedEntranceParcelRaster;
+    private (long Game, double Aspect)? _crownDeedEntranceTileState;
     private (long Game, long Session, double Aspect, bool HideDice, bool Rolling,
-        bool Drawer, float DrawerProgress, string Hover, int Feedback)? _monopolyEntranceLidState;
+        bool Drawer, float DrawerProgress, string Hover, int Feedback)? _crownDeedEntranceLidState;
 
-    internal readonly record struct MonopolyEntrancePose(double Progress, bool Visible, bool Landed,
+    internal readonly record struct CrownDeedEntrancePose(double Progress, bool Visible, bool Landed,
         float Elevation, float Scale, float RotationRadians);
 
-    internal static double MonopolyEntranceTileProgress(MonopolyEntranceFrame frame, int index)
+    internal static double CrownDeedEntranceTileProgress(CrownDeedEntranceFrame frame, int index)
     {
         if (index is < 0 or > 39) throw new ArgumentOutOfRangeException(nameof(index));
         if (!frame.Active) return 1;
         double elapsed = double.IsFinite(frame.ElapsedMilliseconds) ? frame.ElapsedMilliseconds : 0;
-        double start = MonopolyEntranceLeadInMilliseconds + index * MonopolyEntranceTileStaggerMilliseconds;
-        return Math.Clamp((elapsed - start) / MonopolyEntranceTileDurationMilliseconds, 0, 1);
+        double start = CrownDeedEntranceLeadInMilliseconds + index * CrownDeedEntranceTileStaggerMilliseconds;
+        return Math.Clamp((elapsed - start) / CrownDeedEntranceTileDurationMilliseconds, 0, 1);
     }
 
-    internal static MonopolyEntrancePose MonopolyEntranceTilePose(MonopolyEntranceFrame frame, int index)
+    internal static CrownDeedEntrancePose CrownDeedEntranceTilePose(CrownDeedEntranceFrame frame, int index)
     {
-        double progress = MonopolyEntranceTileProgress(frame, index);
-        double start = MonopolyEntranceLeadInMilliseconds + index * MonopolyEntranceTileStaggerMilliseconds;
+        double progress = CrownDeedEntranceTileProgress(frame, index);
+        double start = CrownDeedEntranceLeadInMilliseconds + index * CrownDeedEntranceTileStaggerMilliseconds;
         bool visible = !frame.Active || frame.ElapsedMilliseconds >= start;
         if (progress >= 1) return new(1, visible, true, 0, 1, 0);
-        double fallFraction = MonopolyEntranceTileFallMilliseconds / MonopolyEntranceTileDurationMilliseconds;
+        double fallFraction = CrownDeedEntranceTileFallMilliseconds / CrownDeedEntranceTileDurationMilliseconds;
         float height, angle;
         if (progress < fallFraction)
         {
@@ -52,46 +52,46 @@ public sealed partial class SceneCompositor
         return new(progress, visible, false, height, 1 + height / 190 * .22f, angle);
     }
 
-    internal static MonopolyEntrancePose MonopolyEntranceCenterPose(MonopolyEntranceFrame frame)
+    internal static CrownDeedEntrancePose CrownDeedEntranceCenterPose(CrownDeedEntranceFrame frame)
     {
         // The city and plaza stay anchored while the deeds assemble around them.
         // CenterProgress still determines the shared input release deadline.
         return new(1, true, true, 0, 1, 0);
     }
 
-    private void DrawMonopolyEntrance(CanvasDrawingSession ds, MonopolySnapshot game,
+    private void DrawCrownDeedEntrance(CanvasDrawingSession ds, CrownDeedSnapshot game,
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
         IReadOnlyList<BoardFingerSelectionFeedback> feedback, double aspect,
-        bool hideDice, bool rolling, bool drawer, float drawerProgress, MonopolyEntranceFrame frame)
+        bool hideDice, bool rolling, bool drawer, float drawerProgress, CrownDeedEntranceFrame frame)
     {
         if (frame.LandedTiles >= 40 && frame.CenterProgress >= 1)
         {
             // The last contact frame and the normal cached board are identical.
-            DrawMonopolyBoard(ds, game, buttons, hovered, feedback, aspect, hideDice, rolling, drawer, drawerProgress);
+            DrawCrownDeedBoard(ds, game, buttons, hovered, feedback, aspect, hideDice, rolling, drawer, drawerProgress);
             return;
         }
-        EnsureMonopolyEntranceLayers(ds.Device, game, buttons, hovered, feedback, aspect,
+        EnsureCrownDeedEntranceLayers(ds.Device, game, buttons, hovered, feedback, aspect,
             hideDice, rolling, drawer, drawerProgress);
         ds.Clear(Colors.Transparent);
-        DrawMonopolyEntranceImage(ds, _monopolyEntranceBaseTarget!, new Rect(0, 0, 1000, 1000));
+        DrawCrownDeedEntranceImage(ds, _crownDeedEntranceBaseTarget!, new Rect(0, 0, 1000, 1000));
 
         // Cast all moving shadows before the pieces. Each transparent parcel
         // owns its native pixels; its rotated AABB never copies a neighbour.
         for (int index = 0; index < 40; index++)
         {
-            var pose = MonopolyEntranceTilePose(frame, index);
+            var pose = CrownDeedEntranceTilePose(frame, index);
             if (pose.Visible && !pose.Landed)
-                DrawMonopolyEntranceContactShadow(ds, CrownDeedParcelPose(index), pose.Elevation);
+                DrawCrownDeedEntranceContactShadow(ds, CrownDeedParcelPose(index), pose.Elevation);
         }
         for (int index = 0; index < 40; index++)
         {
-            var pose = MonopolyEntranceTilePose(frame, index);
+            var pose = CrownDeedEntranceTilePose(frame, index);
             if (!pose.Visible) continue;
             var parcel = CrownDeedParcelPose(index);
-            var piece = _monopolyEntranceParcels[index]!.Value;
+            var piece = _crownDeedEntranceParcels[index]!.Value;
             var rectangle = piece.Bounds;
             var previous = ds.Transform;
-            ds.Transform = MonopolyEntranceTransform(MonopolySpaceRectangle(index), pose) * previous;
+            ds.Transform = CrownDeedEntranceTransform(CrownDeedSpaceRectangle(index), pose) * previous;
             try
             {
                 if (!pose.Landed)
@@ -109,64 +109,64 @@ public sealed partial class SceneCompositor
             finally { ds.Transform = previous; }
         }
         // Keep every stationary control caption protected above airborne deeds.
-        DrawMonopolyEntranceImage(ds, _monopolyEntranceLidTarget!, new Rect(0, 0, 1000, 1000));
+        DrawCrownDeedEntranceImage(ds, _crownDeedEntranceLidTarget!, new Rect(0, 0, 1000, 1000));
     }
 
-    private void EnsureMonopolyEntranceLayers(CanvasDevice device, MonopolySnapshot game,
+    private void EnsureCrownDeedEntranceLayers(CanvasDevice device, CrownDeedSnapshot game,
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
         IReadOnlyList<BoardFingerSelectionFeedback> feedback, double aspect,
         bool hideDice, bool rolling, bool drawer, float drawerProgress)
     {
-        if (EnsureBoardRenderTarget(ref _monopolyEntranceBaseTarget, device))
+        if (EnsureBoardRenderTarget(ref _crownDeedEntranceBaseTarget, device))
         {
-            _monopolyEntranceBaseReady = false;
-            _monopolyEntranceTileState = null;
+            _crownDeedEntranceBaseReady = false;
+            _crownDeedEntranceTileState = null;
         }
         // Parcels own their independently moving silhouettes. A full-board
         // deed atlas would duplicate these pixels and is never composited.
-        var parcelRaster = _monopolyEntranceBaseTarget!.SizeInPixels;
-        if (_monopolyEntranceParcelRaster != ((int)parcelRaster.Width, (int)parcelRaster.Height))
+        var parcelRaster = _crownDeedEntranceBaseTarget!.SizeInPixels;
+        if (_crownDeedEntranceParcelRaster != ((int)parcelRaster.Width, (int)parcelRaster.Height))
         {
-            _monopolyEntranceParcelRaster = ((int)parcelRaster.Width, (int)parcelRaster.Height);
-            _monopolyEntranceTileState = null;
+            _crownDeedEntranceParcelRaster = ((int)parcelRaster.Width, (int)parcelRaster.Height);
+            _crownDeedEntranceTileState = null;
         }
-        if (EnsureBoardRenderTarget(ref _monopolyEntranceLidTarget, device)) _monopolyEntranceLidState = null;
-        if (!_monopolyEntranceBaseReady)
+        if (EnsureBoardRenderTarget(ref _crownDeedEntranceLidTarget, device)) _crownDeedEntranceLidState = null;
+        if (!_crownDeedEntranceBaseReady)
         {
-            using var drawing = _monopolyEntranceBaseTarget!.CreateDrawingSession();
-            drawing.Transform = BoardRasterTransform(_monopolyEntranceBaseTarget);
-            DrawMonopolyFrame(drawing);
-            _monopolyEntranceBaseReady = true;
+            using var drawing = _crownDeedEntranceBaseTarget!.CreateDrawingSession();
+            drawing.Transform = BoardRasterTransform(_crownDeedEntranceBaseTarget);
+            DrawCrownDeedFrame(drawing);
+            _crownDeedEntranceBaseReady = true;
         }
         var tileKey = (game.Revision, aspect);
-        if (_monopolyEntranceTileState != tileKey)
+        if (_crownDeedEntranceTileState != tileKey)
         {
             for (int index = 0; index < 40; index++)
-                CacheMonopolyEntranceParcel(device, index, game, aspect);
-            _monopolyEntranceTileState = tileKey;
+                CacheCrownDeedEntranceParcel(device, index, game, aspect);
+            _crownDeedEntranceTileState = tileKey;
         }
         var lidKey = (game.Revision, _boardSession.Revision, aspect, hideDice, rolling, drawer,
             drawerProgress, string.Join(",", hovered), FingerSelectionRenderStep(feedback));
-        if (_monopolyEntranceLidState != lidKey)
+        if (_crownDeedEntranceLidState != lidKey)
         {
-            using var drawing = _monopolyEntranceLidTarget!.CreateDrawingSession();
-            drawing.Transform = BoardRasterTransform(_monopolyEntranceLidTarget);
+            using var drawing = _crownDeedEntranceLidTarget!.CreateDrawingSession();
+            drawing.Transform = BoardRasterTransform(_crownDeedEntranceLidTarget);
             drawing.Clear(Colors.Transparent);
-            DrawMonopolyCenterContents(drawing, game, buttons, hovered, feedback, aspect,
+            DrawCrownDeedCenterContents(drawing, game, buttons, hovered, feedback, aspect,
                 hideDice, rolling, drawer, drawerProgress);
-            DrawMonopolyRailCaptions(drawing, rolling, feedback);
-            _monopolyEntranceLidState = lidKey;
+            DrawCrownDeedRailCaptions(drawing, rolling, feedback);
+            _crownDeedEntranceLidState = lidKey;
         }
     }
 
-    private void CacheMonopolyEntranceParcel(CanvasDevice device, int index, MonopolySnapshot game, double aspect)
+    private void CacheCrownDeedEntranceParcel(CanvasDevice device, int index, CrownDeedSnapshot game, double aspect)
     {
         // Align each crop to the full-board raster so drawing it back at rest is
         // one-to-one, including anti-aliased boundaries. Padding retains the
         // building silhouettes and token shadows belonging to this deed alone.
-        var raster = _monopolyEntranceBaseTarget!.SizeInPixels;
+        var raster = _crownDeedEntranceBaseTarget!.SizeInPixels;
         double densityX = raster.Width / BoardSurfaceSize, densityY = raster.Height / BoardSurfaceSize;
-        var bounds = MonopolySpaceRectangle(index);
+        var bounds = CrownDeedSpaceRectangle(index);
         const double padding = 40;
         int left = (int)Math.Floor((bounds.X - padding) * densityX);
         int top = (int)Math.Floor((bounds.Y - padding) * densityY);
@@ -174,7 +174,7 @@ public sealed partial class SceneCompositor
         int bottom = (int)Math.Ceiling((bounds.Bottom + padding) * densityY);
         int width = Math.Max(1, right - left), height = Math.Max(1, bottom - top);
         var logicalBounds = new Rect(left / densityX, top / densityY, width / densityX, height / densityY);
-        var image = _monopolyEntranceParcels[index]?.Image;
+        var image = _crownDeedEntranceParcels[index]?.Image;
         if (image is null || image.Device != device || image.SizeInPixels.Width != width || image.SizeInPixels.Height != height)
         {
             image?.Dispose();
@@ -185,12 +185,12 @@ public sealed partial class SceneCompositor
             parcelDrawing.Clear(Colors.Transparent);
             parcelDrawing.Transform = Matrix3x2.CreateScale((float)densityX, (float)densityY) *
                 Matrix3x2.CreateTranslation(-left, -top);
-            DrawMonopolySpace(parcelDrawing, MonopolyGame.Spaces[index], game, aspect);
+            DrawCrownDeedSpace(parcelDrawing, CrownDeedGame.Spaces[index], game, aspect);
         }
-        _monopolyEntranceParcels[index] = (image, logicalBounds);
+        _crownDeedEntranceParcels[index] = (image, logicalBounds);
     }
 
-    private static Matrix3x2 MonopolyEntranceTransform(Rect bounds, MonopolyEntrancePose pose)
+    private static Matrix3x2 CrownDeedEntranceTransform(Rect bounds, CrownDeedEntrancePose pose)
     {
         if (pose.Landed) return Matrix3x2.Identity;
         var center = new Vector2((float)(bounds.X + bounds.Width / 2), (float)(bounds.Y + bounds.Height / 2));
@@ -199,7 +199,7 @@ public sealed partial class SceneCompositor
             Matrix3x2.CreateTranslation(0, -pose.Elevation);
     }
 
-    private static void DrawMonopolyEntranceImage(CanvasDrawingSession ds, CanvasRenderTarget image, Rect logicalBounds)
+    private static void DrawCrownDeedEntranceImage(CanvasDrawingSession ds, CanvasRenderTarget image, Rect logicalBounds)
     {
         var pixels = image.SizeInPixels;
         var source = new Rect(logicalBounds.X * pixels.Width / BoardSurfaceSize,
@@ -209,7 +209,7 @@ public sealed partial class SceneCompositor
         ds.DrawImage(image, logicalBounds, source, 1, CanvasImageInterpolation.Linear);
     }
 
-    private static void DrawMonopolyEntranceContactShadow(CanvasDrawingSession ds, CrownDeedParcel parcel, float elevation)
+    private static void DrawCrownDeedEntranceContactShadow(CanvasDrawingSession ds, CrownDeedParcel parcel, float elevation)
     {
         float separation = Math.Clamp(elevation / 190, 0, 1);
         float spread = 3 + separation * 8;
@@ -229,19 +229,19 @@ public sealed partial class SceneCompositor
         finally { ds.Transform = previous; }
     }
 
-    private void DisposeMonopolyEntranceLayers()
+    private void DisposeCrownDeedEntranceLayers()
     {
-        _monopolyEntranceBaseTarget?.Dispose();
-        _monopolyEntranceLidTarget?.Dispose();
-        for (int index = 0; index < _monopolyEntranceParcels.Length; index++)
+        _crownDeedEntranceBaseTarget?.Dispose();
+        _crownDeedEntranceLidTarget?.Dispose();
+        for (int index = 0; index < _crownDeedEntranceParcels.Length; index++)
         {
-            _monopolyEntranceParcels[index]?.Image.Dispose();
-            _monopolyEntranceParcels[index] = null;
+            _crownDeedEntranceParcels[index]?.Image.Dispose();
+            _crownDeedEntranceParcels[index] = null;
         }
-        _monopolyEntranceBaseTarget = _monopolyEntranceLidTarget = null;
-        _monopolyEntranceBaseReady = false;
-        _monopolyEntranceParcelRaster = null;
-        _monopolyEntranceTileState = null;
-        _monopolyEntranceLidState = null;
+        _crownDeedEntranceBaseTarget = _crownDeedEntranceLidTarget = null;
+        _crownDeedEntranceBaseReady = false;
+        _crownDeedEntranceParcelRaster = null;
+        _crownDeedEntranceTileState = null;
+        _crownDeedEntranceLidState = null;
     }
 }

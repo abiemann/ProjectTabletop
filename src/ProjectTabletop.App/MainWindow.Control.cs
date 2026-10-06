@@ -108,19 +108,15 @@ public sealed partial class MainWindow
             case "verify_blackjack":
                 return await VerifyBlackjackAsync();
             case "verify_crown_deed":
-            case "verify_monopoly":
-                return await VerifyMonopolyAsync();
+                return await VerifyCrownDeedAsync();
             case "verify_crown_deed_dice":
-            case "verify_monopoly_dice":
-                return await VerifyMonopolyDiceAnimationAsync();
+                return await VerifyCrownDeedDiceAnimationAsync();
             case "verify_crown_deed_drawer":
-            case "verify_monopoly_drawer":
-                return await VerifyMonopolyDrawerAsync();
+                return await VerifyCrownDeedDrawerAsync();
             case "verify_crown_deed_entrance":
-            case "verify_monopoly_entrance":
-                return await VerifyMonopolyEntranceAsync();
+                return await VerifyCrownDeedEntranceAsync();
             case "verify_crown_deed_development":
-                return await VerifyMonopolyDevelopmentAsync();
+                return await VerifyCrownDeedDevelopmentAsync();
             case "verify_crown_deed_windows":
                 return await VerifyCrownDeedWindowsAsync();
             case "verify_crown_deed_pieces":
@@ -231,17 +227,17 @@ public sealed partial class MainWindow
                     boardApp = _scene.CurrentBoardScreen.ToString(),
                     boardAppTitle = _scene.CurrentBoardTitle,
                     blackjack = _scene.BlackjackState,
-                    crownDeed = _scene.MonopolyState,
+                    crownDeed = _scene.CrownDeedState,
                     globe = _scene.GlobeState,
                     slots = SlotsStatus(),
                     roulette = RouletteStatus(),
                     globeDrawer = _scene.GetGlobeDrawerDiagnostics(MonotonicClock.UtcNow),
-                    crownDeedSavePath = MonopolySavePath,
-                    crownDeedSaveError = _monopolySaveError,
+                    crownDeedSavePath = CrownDeedSavePath,
+                    crownDeedSaveError = _crownDeedSaveError,
                     blackjackAnimation = _scene.GetBlackjackAnimationDiagnostics(),
-                    monopolyDiceAnimation = _scene.GetMonopolyDiceAnimationDiagnostics(MonotonicClock.UtcNow),
-                    monopolyEntrance = _scene.GetMonopolyEntranceDiagnostics(),
-                    monopolyDrawer = _scene.GetMonopolyDrawerDiagnostics(MonotonicClock.UtcNow),
+                    crownDeedDiceAnimation = _scene.GetCrownDeedDiceAnimationDiagnostics(MonotonicClock.UtcNow),
+                    crownDeedEntrance = _scene.GetCrownDeedEntranceDiagnostics(),
+                    crownDeedDrawer = _scene.GetCrownDeedDrawerDiagnostics(MonotonicClock.UtcNow),
                     hoveredBoardButtons = _scene.HoveredBoardButtons,
                     photoCopyStatus = _scene.PhotoCopyStatus,
                     photoCopyLighting = _scene.PhotoCopyLightingStatus,
@@ -318,22 +314,19 @@ public sealed partial class MainWindow
             case "capture_blackjack_preview":
                 return new { path = await SaveBlackjackPreviewAsync() };
             case "show_crown_deed":
-            case "show_monopoly":
-                ShowMonopoly();
+                ShowCrownDeed();
                 return new { boardApp = _scene.CurrentBoardScreen.ToString(), boardAppTitle = _scene.CurrentBoardTitle,
-                    crownDeed = _scene.MonopolyState };
+                    crownDeed = _scene.CrownDeedState };
             case "crown_deed_action":
-            case "monopoly_action":
-                if (!parameters.TryGetProperty("id", out var monopolyAction) || monopolyAction.ValueKind != JsonValueKind.String)
+                if (!parameters.TryGetProperty("id", out var crownDeedAction) || crownDeedAction.ValueKind != JsonValueKind.String)
                     throw new ArgumentException("Provide a Crown & Deed button id.");
-                bool monopolyAccepted = _scene.ActivateMonopolyButton(monopolyAction.GetString()!);
-                QueueMonopolySave();
+                bool crownDeedAccepted = _scene.ActivateCrownDeedButton(crownDeedAction.GetString()!);
+                QueueCrownDeedSave();
                 UpdateBoardAppStatus();
-                return new { accepted = monopolyAccepted, crownDeed = _scene.MonopolyState,
-                    drawerOpen = _scene.MonopolyDrawerOpen };
+                return new { accepted = crownDeedAccepted, crownDeed = _scene.CrownDeedState,
+                    drawerOpen = _scene.CrownDeedDrawerOpen };
             case "capture_crown_deed_preview":
-            case "capture_monopoly_preview":
-                return new { path = await SaveMonopolyPreviewAsync() };
+                return new { path = await SaveCrownDeedPreviewAsync() };
             case "show_globe":
                 ShowGlobe();
                 return new { boardApp = _scene.CurrentBoardScreen.ToString(), globe = _scene.GlobeState };

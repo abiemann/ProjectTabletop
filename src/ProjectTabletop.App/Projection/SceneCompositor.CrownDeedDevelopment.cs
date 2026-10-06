@@ -5,25 +5,25 @@ namespace ProjectTabletop.App.Projection;
 public sealed partial class SceneCompositor
 {
     internal static readonly TimeSpan CrownDeedDevelopmentDuration = TimeSpan.FromMilliseconds(1350);
-    private MonopolyDevelopment? _crownDeedDevelopment;
+    private CrownDeedDevelopment? _crownDeedDevelopment;
     private long _crownDeedDevelopmentRevision;
     internal sealed record CrownDeedDevelopmentFrame(long Sequence, int SpaceIndex, int PlayerId, float Progress, bool Active);
 
-    private void OnMonopolyDevelopment(MonopolyDevelopment development)
+    private void OnCrownDeedDevelopment(CrownDeedDevelopment development)
     {
         _crownDeedDevelopment = development;
         _crownDeedDevelopmentRevision++;
-        _boardSession.HoldMonopolyPresentationUntil(development.StartedAt + CrownDeedDevelopmentDuration);
+        _boardSession.HoldCrownDeedPresentationUntil(development.StartedAt + CrownDeedDevelopmentDuration);
     }
 
     internal CrownDeedDevelopmentFrame? GetCrownDeedDevelopmentFrame(DateTimeOffset now)
     {
         if (_crownDeedDevelopment is not { } development) return null;
-        var current = _boardSession.MonopolyState;
+        var current = _boardSession.CrownDeedState;
         var built = development.Current.Properties.First(p => p.SpaceIndex == development.SpaceIndex);
         var property = current.Properties.FirstOrDefault(p => p.SpaceIndex == development.SpaceIndex);
-        if (_boardSession.Screen != BoardScreen.Monopoly ||
-            current.Phase is MonopolyPhase.Landing or MonopolyPhase.Setup or MonopolyPhase.ExitConfirmation or MonopolyPhase.Saving or MonopolyPhase.GameOver ||
+        if (_boardSession.Screen != BoardScreen.CrownDeed ||
+            current.Phase is CrownDeedPhase.Landing or CrownDeedPhase.Setup or CrownDeedPhase.ExitConfirmation or CrownDeedPhase.Saving or CrownDeedPhase.GameOver ||
             property is null || property.OwnerId != built.OwnerId || property.Houses != built.Houses)
         {
             CancelCrownDeedDevelopment();

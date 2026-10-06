@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public sealed partial class MonopolyGame
+public sealed partial class CrownDeedGame
 {
     private void ReturnJailCard(bool chance)
     {
@@ -72,12 +72,12 @@ public sealed partial class MonopolyGame
             case 5:
             case 6:
                 Card("An express freight charter takes you to the next transit route. Its owner charges double passage.");
-                MoveTo(NextSpaceOfKind(MonopolySpaceKind.Railroad));
+                MoveTo(NextSpaceOfKind(CrownDeedSpaceKind.Railroad));
                 ResolveLanding(railroadMultiplier: 2);
                 break;
             case 7:
                 Card("An urgent city-service call takes you to the next service. If owned, roll fresh dice and pay ten crowns per pip.");
-                MoveTo(NextSpaceOfKind(MonopolySpaceKind.Utility));
+                MoveTo(NextSpaceOfKind(CrownDeedSpaceKind.Utility));
                 ResolveLanding(specialUtility: true);
                 break;
             case 8:
@@ -149,7 +149,7 @@ public sealed partial class MonopolyGame
         }
     }
 
-    private int NextSpaceOfKind(MonopolySpaceKind kind) => Spaces
+    private int NextSpaceOfKind(CrownDeedSpaceKind kind) => Spaces
         .Where(space => space.Kind == kind)
         .OrderBy(space => (space.Index - Active.Position + Spaces.Count) % Spaces.Count)
         .First().Index;

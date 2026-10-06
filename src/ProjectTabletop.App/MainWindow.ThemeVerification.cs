@@ -19,11 +19,11 @@ public sealed partial class MainWindow
     {
         const int size = 1200;
         var globeNow = MonotonicClock.UtcNow.AddMinutes(1);
-        var monopolyNow = MonotonicClock.UtcNow;
-        using var scene = new SceneCompositor(globeClock: () => globeNow, monopolyClock: () => monopolyNow);
+        var crownDeedNow = MonotonicClock.UtcNow;
+        using var scene = new SceneCompositor(globeClock: () => globeNow, crownDeedClock: () => crownDeedNow);
         await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
         await scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
-        foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.Monopoly })
+        foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.CrownDeed })
             await scene.EnsureBoardArtworkResourcesAsync(CanvasDevice.GetSharedDevice(), screen);
         scene.SetDisplayAspect(1);
         scene.SetBoardSetup(true);
@@ -58,24 +58,24 @@ public sealed partial class MainWindow
         }
 
         long eventId = 0;
-        foreach (BoardScreen screen in new[] { BoardScreen.Slots, BoardScreen.Blackjack, BoardScreen.Paint, BoardScreen.Monopoly,
+        foreach (BoardScreen screen in new[] { BoardScreen.Slots, BoardScreen.Blackjack, BoardScreen.Paint, BoardScreen.CrownDeed,
             BoardScreen.Globe, BoardScreen.Settings })
         {
             scene.ShowBoardMenu();
             await Task.Delay(2); // A new selection must follow external navigation.
             BoardButton button = new BoardSession().Buttons.Single(item => item.Destination == screen);
             var time = MonotonicClock.UtcNow;
-            monopolyNow = time.AddMilliseconds(-5075);
+            crownDeedNow = time.AddMilliseconds(-5075);
             scene.SetHandCursors([new(BoardPoint(button.Bounds.X + button.Bounds.Width / 2,
                 button.Bounds.Y + button.Bounds.Height / 2), time.AddSeconds(1), ++eventId)], time);
             if (scene.CurrentBoardScreen != screen)
                 throw new InvalidOperationException("The theme fixture could not open " + screen + ".");
             scene.ClearHandTips(resetInput: false);
             if (screen == BoardScreen.Globe) globeNow += TimeSpan.FromSeconds(4);
-            if (screen == BoardScreen.Monopoly)
+            if (screen == BoardScreen.CrownDeed)
             {
-                monopolyNow += TimeSpan.FromMilliseconds(4975);
-                scene.TickMonopoly(monopolyNow);
+                crownDeedNow += TimeSpan.FromMilliseconds(4975);
+                scene.TickCrownDeed(crownDeedNow);
             }
             await Save(screen.ToString().ToLowerInvariant());
         }

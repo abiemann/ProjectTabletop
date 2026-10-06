@@ -18,19 +18,19 @@ internal static class BoardOpenedRegression
         var board = new BoardSession();
         var opened = Observe(board);
         Require(opened.Count == 0, "Constructing a session fabricated a board launch.");
-        board.ShowMonopoly(Time(0));
-        var state = board.MonopolyState;
-        board.ShowMonopoly(Time(10));
-        Require(opened.SequenceEqual([BoardScreen.Monopoly, BoardScreen.Monopoly]) &&
-                ReferenceEquals(state, board.MonopolyState),
-            "Explicit Monopoly launch/reopen did not notify once each or changed the game.");
-        Require(!board.ActivateButton("monopoly", Time(20)) && opened.Count == 2,
-            "A rejected menu action on Monopoly raised a launch.");
+        board.ShowCrownDeed(Time(0));
+        var state = board.CrownDeedState;
+        board.ShowCrownDeed(Time(10));
+        Require(opened.SequenceEqual([BoardScreen.CrownDeed, BoardScreen.CrownDeed]) &&
+                ReferenceEquals(state, board.CrownDeedState),
+            "Explicit CrownDeed launch/reopen did not notify once each or changed the game.");
+        Require(!board.ActivateButton("crown-deed", Time(20)) && opened.Count == 2,
+            "A rejected menu action on CrownDeed raised a launch.");
         board.ShowMenu(Time(30));
-        Require(opened.SequenceEqual([BoardScreen.Monopoly, BoardScreen.Monopoly, BoardScreen.Menu]),
+        Require(opened.SequenceEqual([BoardScreen.CrownDeed, BoardScreen.CrownDeed, BoardScreen.Menu]),
             "Explicit navigation away omitted its new-screen notification.");
-        Require(board.ActivateButton("monopoly", Time(40)) && opened.Count == 4 && opened[^1] == BoardScreen.Monopoly,
-            "The menu pointer route did not emit exactly one Monopoly launch.");
+        Require(board.ActivateButton("crown-deed", Time(40)) && opened.Count == 4 && opened[^1] == BoardScreen.CrownDeed,
+            "The menu pointer route did not emit exactly one CrownDeed launch.");
         board.ResetInput(Time(50));
         Require(opened.Count == 4, "An input reset restarted the board notification.");
     }
@@ -41,7 +41,7 @@ internal static class BoardOpenedRegression
         {
             var board = new BoardSession();
             var opened = Observe(board);
-            var button = board.Buttons.Single(item => item.Id == "monopoly");
+            var button = board.Buttons.Single(item => item.Id == "crown-deed");
             double u = button.Bounds.X + button.Bounds.Width / 2;
             double v = button.Bounds.Y + button.Bounds.Height / 2;
             BoardNavigation? navigation;
@@ -68,45 +68,45 @@ internal static class BoardOpenedRegression
                 Require(At(board, 30, pinched) is null && At(board, 40, pinched) is null,
                     "A held pinch repeated its menu navigation.");
             }
-            Require(navigation is { Previous: BoardScreen.Menu, Current: BoardScreen.Monopoly, ButtonId: "monopoly" } &&
+            Require(navigation is { Previous: BoardScreen.Menu, Current: BoardScreen.CrownDeed, ButtonId: "crown-deed" } &&
                     navigation.Gesture == (fingers ? BoardSelectionGesture.IndexSeparation : BoardSelectionGesture.Pinch) &&
-                    opened.SequenceEqual([BoardScreen.Monopoly]),
-                "An accepted menu gesture omitted or duplicated its Monopoly launch notification.");
+                    opened.SequenceEqual([BoardScreen.CrownDeed]),
+                "An accepted menu gesture omitted or duplicated its CrownDeed launch notification.");
             Require(board.ActivateButton("mp-exit", Time(600)) && opened.Count == 1,
                 "Opening the inactive drawer was treated as a new board.");
-            board.TickMonopoly(Time(900));
+            board.TickCrownDeed(Time(900));
             Require(board.ActivateButton("mp-exit-game", Time(910)) &&
-                    opened.SequenceEqual([BoardScreen.Monopoly, BoardScreen.Menu]),
+                    opened.SequenceEqual([BoardScreen.CrownDeed, BoardScreen.Menu]),
                 "Exit Game did not notify the actual navigation to Menu once.");
         }
     }
 
     private static void GameAndDrawerActionsAreNotLaunches()
     {
-        var board = new BoardSession(monopoly: new MonopolyGame(seed: 109, initialRolls: [new(1, 2)]));
+        var board = new BoardSession(crownDeed: new CrownDeedGame(seed: 109, initialRolls: [new(1, 2)]));
         var opened = Observe(board);
-        board.ShowMonopoly(Time(0));
+        board.ShowCrownDeed(Time(0));
         int milliseconds = 0;
         foreach (string action in new[] { "mp-start-game", "mp-ai-minus", "mp-human-plus", "mp-start", "mp-roll", "mp-buy", "mp-exit" })
             Require(board.ActivateButton(action, Time(milliseconds += 20)) && opened.Count == 1,
                 $"The accepted {action} action raised a spurious board-open notification.");
-        Require(board.MonopolyState.Phase == MonopolyPhase.ExitConfirmation && board.MonopolyDrawerOpen,
+        Require(board.CrownDeedState.Phase == CrownDeedPhase.ExitConfirmation && board.CrownDeedDrawerOpen,
             "The event fixture never reached the active save drawer.");
-        board.TickMonopoly(Time(milliseconds += 300));
+        board.TickCrownDeed(Time(milliseconds += 300));
         Require(board.ActivateButton("mp-save-exit", Time(milliseconds += 20)) && opened.Count == 1,
             "Beginning an asynchronous save prematurely reported navigation.");
-        long request = board.MonopolySaveRequestId;
-        Require(board.CompleteMonopolySave(request, false, Time(milliseconds += 20), "Fixture failure") && opened.Count == 1 &&
+        long request = board.CrownDeedSaveRequestId;
+        Require(board.CompleteCrownDeedSave(request, false, Time(milliseconds += 20), "Fixture failure") && opened.Count == 1 &&
                 board.ActivateButton("mp-exit-cancel", Time(milliseconds += 20)) && opened.Count == 1,
             "Save failure or closing the drawer was treated as a board launch.");
         Require(board.ActivateButton("mp-exit", Time(milliseconds += 20)), "The retry drawer did not open.");
-        board.TickMonopoly(Time(milliseconds += 300));
+        board.TickCrownDeed(Time(milliseconds += 300));
         Require(board.ActivateButton("mp-save-exit", Time(milliseconds += 20)) && opened.Count == 1,
             "Retrying Save and Exit reported navigation before persistence completed.");
-        request = board.MonopolySaveRequestId;
-        Require(board.CompleteMonopolySave(request, true, Time(milliseconds += 20)) &&
-                opened.SequenceEqual([BoardScreen.Monopoly, BoardScreen.Menu]) &&
-                !board.CompleteMonopolySave(request, true, Time(milliseconds += 20)) && opened.Count == 2,
+        request = board.CrownDeedSaveRequestId;
+        Require(board.CompleteCrownDeedSave(request, true, Time(milliseconds += 20)) &&
+                opened.SequenceEqual([BoardScreen.CrownDeed, BoardScreen.Menu]) &&
+                !board.CompleteCrownDeedSave(request, true, Time(milliseconds += 20)) && opened.Count == 2,
             "A completed save omitted, duplicated or replayed its Menu launch notification.");
     }
 

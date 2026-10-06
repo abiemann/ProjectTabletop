@@ -3,7 +3,7 @@ using System.Text;
 namespace ProjectTabletop.App;
 
 /// <summary>One resumable local game, published only after a complete write.</summary>
-internal static class MonopolySaveStore
+internal static class CrownDeedSaveStore
 {
     internal const int MaximumSaveBytes = 1024 * 1024;
 

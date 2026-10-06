@@ -22,15 +22,15 @@ public sealed partial class BoardSession
     /// <summary>Raised after DEAL state and input barriers are committed, once per accepted action.</summary>
     public event Action<BlackjackDeal>? BlackjackDealOccurred;
 
-    public BoardSession(BlackjackGame? blackjack = null, MonopolyGame? monopoly = null, GlobeState? globe = null,
+    public BoardSession(BlackjackGame? blackjack = null, CrownDeedGame? crownDeed = null, GlobeState? globe = null,
         SlotGame? slots = null, RouletteGame? roulette = null)
     {
         _blackjack = blackjack ?? new BlackjackGame();
         _slots = slots ?? new SlotGame();
         _roulette = roulette ?? new RouletteGame();
-        _monopoly = monopoly ?? new MonopolyGame();
-        _monopoly.RollOccurred += RelayMonopolyRoll;
-        _monopoly.DevelopmentOccurred += RelayMonopolyDevelopment;
+        _crownDeed = crownDeed ?? new CrownDeedGame();
+        _crownDeed.RollOccurred += RelayCrownDeedRoll;
+        _crownDeed.DevelopmentOccurred += RelayCrownDeedDevelopment;
         _globe = globe ?? new GlobeState();
     }
     public BlackjackSnapshot BlackjackState => _blackjack.Snapshot;
@@ -71,7 +71,7 @@ public sealed partial class BoardSession
     public bool ActivateButton(string id, DateTimeOffset now)
     {
         AdvanceBlackjackPresentation(now);
-        AdvanceMonopolyPresentation(now);
+        AdvanceCrownDeedPresentation(now);
         AdvanceBottomDrawers(now);
         AdvanceSlots(now);
         AdvanceRoulette(now);
@@ -87,7 +87,7 @@ public sealed partial class BoardSession
     private bool SelectButton(BoardButton button, DateTimeOffset now, bool pointerAction = false)
     {
         AdvanceBlackjackPresentation(now);
-        AdvanceMonopolyPresentation(now);
+        AdvanceCrownDeedPresentation(now);
         AdvanceBottomDrawers(now);
         AdvanceMenuScroll(now);
         BlackjackHit? hit = null;
@@ -97,9 +97,9 @@ public sealed partial class BoardSession
             return SelectMenuScroll(button, now);
         if (Screen == BoardScreen.Roulette)
             return SelectRouletteButton(button, now);
-        if (Screen == BoardScreen.Monopoly)
+        if (Screen == BoardScreen.CrownDeed)
         {
-            return SelectMonopolyButton(button, now);
+            return SelectCrownDeedButton(button, now);
         }
         if (Screen == BoardScreen.Globe)
         {
@@ -156,8 +156,8 @@ public sealed partial class BoardSession
         else
         {
             ClearBlackjackPresentationHold();
-            ClearMonopolyPresentationHold();
-            ClearMonopolyDrawerUi();
+            ClearCrownDeedPresentationHold();
+            ClearCrownDeedDrawerUi();
             // Clear intentionally restarts the captured result, but keeps its
             // drawer in place so the new Swirl/Copy captions remain available.
             if (Screen != BoardScreen.PhotoCopy || button.Id != "capture-again") ClearBottomDrawers(now);

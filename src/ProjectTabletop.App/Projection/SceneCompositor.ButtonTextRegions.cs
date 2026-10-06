@@ -9,10 +9,10 @@ namespace ProjectTabletop.App.Projection;
 public sealed partial class SceneCompositor
 {
     private static bool IsVectorArrowHandle(BoardButton button) =>
-        IsBoardDrawerHandle(button) || IsMenuScrollHandle(button) || IsMonopolyDrawerHandle(button);
+        IsBoardDrawerHandle(button) || IsMenuScrollHandle(button) || IsCrownDeedDrawerHandle(button);
 
-    private Rect BoardVectorArrowInk(BoardButton button) => IsMonopolyDrawerHandle(button)
-        ? MonopolyDrawerArrowInk(button, PaintBoardAspect())
+    private Rect BoardVectorArrowInk(BoardButton button) => IsCrownDeedDrawerHandle(button)
+        ? CrownDeedDrawerArrowInk(button, PaintBoardAspect())
         : DrawerArrowInk(IsMenuScrollHandle(button) ? MenuArrowAppearance(button) : button, PaintBoardAspect());
 
     private static HandTrackingBounds BoardButtonPlateRegion(BoardButton button) =>
@@ -54,10 +54,10 @@ public sealed partial class SceneCompositor
                 (float)rectangle.Width, (float)rectangle.Height);
             return ButtonInkRegion(button, layout.DrawBounds, rectangle.X, rectangle.Y);
         }
-        if (_boardSession.Screen == BoardScreen.Monopoly)
+        if (_boardSession.Screen == BoardScreen.CrownDeed)
         {
-            var rectangle = MonopolyButtonTextRectangle(button);
-            using var format = MonopolyButtonTextFormat(button);
+            var rectangle = CrownDeedButtonTextRectangle(button);
+            using var format = CrownDeedButtonTextFormat(button);
             using var layout = new CanvasTextLayout(device, button.Label, format,
                 (float)rectangle.Width, (float)rectangle.Height);
             return ButtonInkRegion(button, layout.DrawBounds, rectangle.X, rectangle.Y);

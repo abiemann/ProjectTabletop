@@ -219,7 +219,7 @@ public sealed partial class MainWindow
         byte[] initial = await Capture("menu-top");
         var initialButtons = scene.CurrentBoardButtons.Select(button => (button.Id, button.Bounds)).ToArray();
         Check(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
-            ["slots", "photo-copy", "blackjack", "paint", "monopoly", "globe", "settings", "menu-scroll-down"]),
+            ["slots", "photo-copy", "blackjack", "paint", "crown-deed", "globe", "settings", "menu-scroll-down"]),
             "The initial menu does not show the six original cards and a separate scroll handle.");
         scene.GetHandAcquisitionContext(fixture.Now);
         fixture.Now += TimeSpan.FromMilliseconds(600);

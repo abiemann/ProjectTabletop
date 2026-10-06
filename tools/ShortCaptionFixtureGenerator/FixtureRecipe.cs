@@ -19,13 +19,13 @@ internal static class FixtureRecipe
     private const double CameraOffset = -.04306506098490942;
     private static readonly BoardButton[] Buttons =
     [
-        new("fixture-exit", "Exit", new(.825, .012, .15, .038), BoardScreen.Monopoly),
-        new("mp-human-minus", "-", new(.36, .42, .07, .058), BoardScreen.Monopoly),
-        new("mp-human-plus", "+", new(.57, .42, .07, .058), BoardScreen.Monopoly),
-        new("mp-ai-minus", "-", new(.36, .53, .07, .058), BoardScreen.Monopoly),
-        new("mp-ai-plus", "+", new(.57, .53, .07, .058), BoardScreen.Monopoly),
-        new("mp-start", "Start", new(.365, .665, .27, .072), BoardScreen.Monopoly),
-        new("mp-setup-cancel", "Cancel", new(.395, .755, .21, .048), BoardScreen.Monopoly)
+        new("fixture-exit", "Exit", new(.825, .012, .15, .038), BoardScreen.CrownDeed),
+        new("mp-human-minus", "-", new(.36, .42, .07, .058), BoardScreen.CrownDeed),
+        new("mp-human-plus", "+", new(.57, .42, .07, .058), BoardScreen.CrownDeed),
+        new("mp-ai-minus", "-", new(.36, .53, .07, .058), BoardScreen.CrownDeed),
+        new("mp-ai-plus", "+", new(.57, .53, .07, .058), BoardScreen.CrownDeed),
+        new("mp-start", "Start", new(.365, .665, .27, .072), BoardScreen.CrownDeed),
+        new("mp-setup-cancel", "Cancel", new(.395, .755, .21, .048), BoardScreen.CrownDeed)
     ];
 
     public static async Task GenerateAsync(Assembly application, string output)
@@ -39,8 +39,8 @@ internal static class FixtureRecipe
                 ? (object)new Func<DateTimeOffset>(() => DateTimeOffset.UnixEpoch)
                 : parameter.DefaultValue).ToArray();
         using var scene = (IDisposable)constructor.Invoke(arguments);
-        MethodInfo drawButton = sceneType.GetMethod("DrawMonopolyButton", BindingFlags.NonPublic | BindingFlags.Instance)
-            ?? throw new MissingMethodException(sceneType.FullName, "DrawMonopolyButton");
+        MethodInfo drawButton = sceneType.GetMethod("DrawCrownDeedButton", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new MissingMethodException(sceneType.FullName, "DrawCrownDeedButton");
         using var expected = Render(device, ReferenceSize, ReferenceSize, Matrix3x2.Identity, scene, drawButton);
         var cameraTransform = Matrix3x2.CreateScale((float)(1 / (1000 * CameraScaleX)), (float)(1 / (1000 * CameraScaleY))) *
             Matrix3x2.CreateTranslation((float)(-CameraOffset / CameraScaleX), (float)(-CameraOffset / CameraScaleY));

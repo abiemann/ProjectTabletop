@@ -120,7 +120,7 @@
                         <TextBlock Text="Place an object on grey above the bottom controls, then lift your hands to lock its light. Hold the up arrow for a second to reveal EXIT, SWIRL and COPY. Cover a caption for a second to select it, then uncover it before pressing again. SWIRL becomes CLEAR and COPY becomes SAVE while copies are displayed. Images go to Pictures / Project Tabletop." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Blackjack" Click="Blackjack_Click" />
                         <TextBlock Text="Play the dealer with virtual chips. Aim with four fingers together, then move your index finger sideways to select, or click the laptop table. The laptop table works with the projector off." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
-                        <Button Content="Crown &amp; Deed" Click="Monopoly_Click" />
+                        <Button Content="Crown &amp; Deed" Click="CrownDeed_Click" />
                         <TextBlock Text="Choose 2–6 human and AI players, then play on the gold-and-emerald board. Click the laptop table or use the same four-finger selection gesture. Open the up-arrow drawer for Save and Exit during a game; saved games can be resumed." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Globe" Click="Globe_Click" />
                         <TextBlock Text="Explore a detailed Earth with a distant arrival and slow spin. Hold the bottom up arrow for a second to reveal Exit and zoom controls. Hold their captions or click the laptop controls; zoom repeats while covered." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />

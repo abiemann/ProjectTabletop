@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public sealed partial class MonopolyGame
+public sealed partial class CrownDeedGame
 {
     // Version 1 followed the former square itinerary. This complete bijection
     // retains each estate's economics, district, ownership and development.
@@ -10,7 +10,7 @@ public sealed partial class MonopolyGame
         23, 31, 19, 32, 34, 25, 11, 12, 27, 14, 33, 37, 38, 30, 39, 35, 36, 21, 24, 22
     ];
 
-    private static void MigrateLegacySave(MonopolySaveData save)
+    private static void MigrateLegacySave(CrownDeedSaveData save)
     {
         static int Map(int index) => index is >= 0 and < 40 ? LegacySpaceMap[index]
             : throw new FormatException("The legacy city save contains an invalid stop.");

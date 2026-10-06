@@ -56,7 +56,7 @@ public sealed partial class SceneCompositor
             lock (_gate)
             {
                 var now = MonotonicClock.UtcNow;
-                return _boardSession.Screen == BoardScreen.Paint || MonopolyEntranceActive || HasBoardControlDrawerAnimation() ? 0 :
+                return _boardSession.Screen == BoardScreen.Paint || CrownDeedEntranceActive || HasBoardControlDrawerAnimation() ? 0 :
                     _handSpotlights.Count(hand => SpotlightOpacity(now, hand.SourceFrameTime) > 0);
             }
         }
@@ -64,10 +64,10 @@ public sealed partial class SceneCompositor
 
     // A tracked hand missed for one frame is usually still under its held
     // light, and that light blocks the caption evidence that found it. Keep
-    // searching there; live Monopoly attempts otherwise restarted every 1.5 s.
+    // searching there; live CrownDeed attempts otherwise restarted every 1.5 s.
     private HandDetection[] LostLitHands()
     {
-        if (_boardSession.Screen == BoardScreen.Paint || MonopolyEntranceActive || HasBoardControlDrawerAnimation()) return [];
+        if (_boardSession.Screen == BoardScreen.Paint || CrownDeedEntranceActive || HasBoardControlDrawerAnimation()) return [];
         var now = MonotonicClock.UtcNow;
         return _handSpotlights.Where(hand => hand.SourceFrameTime < _spotlightObservationFrameTime &&
             SpotlightOpacity(now, hand.SourceFrameTime) > 0).Select(hand => hand.Hand).ToArray();
@@ -83,7 +83,7 @@ public sealed partial class SceneCompositor
             if (frameTime < _spotlightResetTime || frameTime <= _spotlightObservationFrameTime ||
                 frameTime > now || now - frameTime > TimeSpan.FromMilliseconds(350)) return;
             if (_boardCameraMap is null || _boardMediaClip is null || _blackOutput || _boardSetup || IsBoardRevealActive ||
-                _calibrationTarget >= 0 || MonopolyEntranceActive || HasBoardControlDrawerAnimation())
+                _calibrationTarget >= 0 || CrownDeedEntranceActive || HasBoardControlDrawerAnimation())
             {
                 ClearHandSpotlights();
                 return;
@@ -196,7 +196,7 @@ public sealed partial class SceneCompositor
     // labels back over the light would put those dark markings back on the hand.
     private void DrawHandSpotlights(CanvasDrawingSession ds, Rect output)
     {
-        if (_boardSession.Screen == BoardScreen.Paint || MonopolyEntranceActive || HasBoardControlDrawerAnimation()) return;
+        if (_boardSession.Screen == BoardScreen.Paint || CrownDeedEntranceActive || HasBoardControlDrawerAnimation()) return;
         var now = MonotonicClock.UtcNow;
         if (_handSpotlights.Length == 0 || SpotlightOpacity(now) <= 0) return;
         using var brush = new CanvasRadialGradientBrush(ds.Device,

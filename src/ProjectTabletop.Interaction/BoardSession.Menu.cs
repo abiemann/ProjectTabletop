@@ -12,7 +12,7 @@ public sealed partial class BoardSession
         new BoardButton("photo-copy", "Photo Copy", new(.52, .25, .40, .16), BoardScreen.PhotoCopy),
         new BoardButton("blackjack", "Blackjack", new(.08, .45, .40, .16), BoardScreen.Blackjack),
         new BoardButton("paint", "Paint", new(.52, .45, .40, .16), BoardScreen.Paint),
-        new BoardButton("monopoly", "Crown & Deed", new(.08, .65, .40, .16), BoardScreen.Monopoly),
+        new BoardButton("crown-deed", "Crown & Deed", new(.08, .65, .40, .16), BoardScreen.CrownDeed),
         new BoardButton("globe", "Globe", new(.52, .65, .40, .16), BoardScreen.Globe),
         new BoardButton("roulette", "Roulette", new(.08, .85, .40, .16), BoardScreen.Roulette)
     });

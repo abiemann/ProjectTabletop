@@ -99,7 +99,7 @@
       }
     },
     {
-      "board": "Monopoly",
+      "board": "CrownDeed",
       "file": "crown-deed.png",
       "width": 2304,
       "height": 512,
@@ -257,7 +257,7 @@
       "sha256": "5bbf10aa15cc06fe3aab097f5c83885ccaa5f95cc647ee0d074a73dda723e4d1"
     },
     {
-      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.Monopoly.cs",
+      "file": "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeed.cs",
       "sha256": "2e4ae68c7a14f8f6fe308f3d6ca58607eaf6ace50adbe84856a4449c21df7988"
     },
     {
@@ -285,15 +285,15 @@
       "sha256": "189edcc6599b689bc820e82ed2b5737b12a24e7b4ec3e812414669382cd868b9"
     },
     {
-      "file": "src/ProjectTabletop.Interaction/MonopolyBoard.cs",
+      "file": "src/ProjectTabletop.Interaction/CrownDeedBoard.cs",
       "sha256": "1048203b2663272ac5ff51e12fab78efc6032b0d80c3ac84d267687dfd0a4324"
     },
     {
-      "file": "src/ProjectTabletop.Interaction/MonopolyGame.cs",
+      "file": "src/ProjectTabletop.Interaction/CrownDeedGame.cs",
       "sha256": "c46395845d7b4fd443126022c23008df2ab2dfbdc02e585daeeb21abfbdd489c"
     },
     {
-      "file": "src/ProjectTabletop.Interaction/MonopolyModels.cs",
+      "file": "src/ProjectTabletop.Interaction/CrownDeedModels.cs",
       "sha256": "4e8797175e0d5e1c22ef2ddde6adba19fec8684d7fc8c93293a928e4e8698a60"
     },
     {

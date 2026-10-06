@@ -63,7 +63,7 @@ public sealed partial class SceneCompositor
 
     private AcquisitionSceneState CurrentAcquisitionState() => new(_boardSession.Revision,
         _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision :
-        _boardSession.Screen == BoardScreen.Monopoly ? _boardSession.MonopolyState.Revision :
+        _boardSession.Screen == BoardScreen.CrownDeed ? _boardSession.CrownDeedState.Revision :
         _boardSession.Screen == BoardScreen.Globe ? _boardSession.GetGlobeSnapshot(_globeClock()).Revision :
         _boardSession.Screen == BoardScreen.Roulette ? _boardSession.RouletteState.Revision : 0,
         _boardSession.Screen == BoardScreen.Blackjack ? _blackjackFlightRevision : 0, _spotlightResetCount,
@@ -88,8 +88,8 @@ public sealed partial class SceneCompositor
             }
             var blackjack = _boardSession.Screen == BoardScreen.Blackjack;
             var animating = blackjack && HasBlackjackCardAnimation(now) ||
-                _boardSession.Screen == BoardScreen.Monopoly &&
-                    (MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock())) ||
+                _boardSession.Screen == BoardScreen.CrownDeed &&
+                    (CrownDeedEntranceActive || HasCrownDeedDiceAnimation(_crownDeedClock()) || HasCrownDeedDrawerAnimation(_crownDeedClock())) ||
                 HasBoardControlDrawerAnimation();
             var state = CurrentAcquisitionState();
             var buttons = _boardSession.Buttons;
@@ -266,7 +266,7 @@ public sealed partial class SceneCompositor
 
     // Without a measured hand outline the light covered only the caption, and
     // the back of a palm-down hand beyond it stayed painted with board art:
-    // over Monopoly's property row the model saw no hand for seconds. Hands
+    // over CrownDeed's property row the model saw no hand for seconds. Hands
     // reach in from the viewer's edge (board v = 1); assist over where that
     // hand must be, about 30% of the board long, inside the camera's board view.
     private HandAcquisitionHint? ExpectedReachingHand(HandAcquisitionHint hint, Point2 board)
@@ -347,12 +347,12 @@ public sealed partial class SceneCompositor
             (rendered.BlackjackRevision != _boardSession.BlackjackState.Revision ||
             rendered.BlackjackFlightRevision != _blackjackFlightRevision ||
             HasBlackjackCardAnimation(_blackjackClock()))) return null;
-        if (_boardSession.Screen == BoardScreen.Monopoly &&
-            (rendered.MonopolyRevision != _boardSession.MonopolyState.Revision ||
-            rendered.MonopolyDiceRevision != MonopolyDicePresentationRevision ||
-            rendered.MonopolySessionRevision != _boardSession.Revision ||
-            MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()) ||
-            GetCrownDeedDevelopmentFrame(_monopolyClock())?.Active == true)) return null;
+        if (_boardSession.Screen == BoardScreen.CrownDeed &&
+            (rendered.CrownDeedRevision != _boardSession.CrownDeedState.Revision ||
+            rendered.CrownDeedDiceRevision != CrownDeedDicePresentationRevision ||
+            rendered.CrownDeedSessionRevision != _boardSession.Revision ||
+            CrownDeedEntranceActive || HasCrownDeedDiceAnimation(_crownDeedClock()) || HasCrownDeedDrawerAnimation(_crownDeedClock()) ||
+            GetCrownDeedDevelopmentFrame(_crownDeedClock())?.Active == true)) return null;
         if (slots && rendered.SlotsRevision != _boardSession.SlotsState.Revision) return null;
         if (photoCopy && (rendered.PhotoUiRevision != _boardSession.Revision ||
             HasPhotoCopyDrawerAnimation(_blackjackClock()))) return null;
@@ -450,7 +450,7 @@ public sealed partial class SceneCompositor
                 // Fixed deed plaques and gold trim constrain the camera response
                 // when a hand covers the only gold action panel. These bands
                 // calibrate colour only; searches remain inside the controls.
-                BoardScreen.Monopoly => [.. controlReferences,
+                BoardScreen.CrownDeed => [.. controlReferences,
                     new(.18, .045, .64, .12), new(.18, .835, .64, .12)],
                 BoardScreen.Blackjack => [new(.05, .24, .90, .50), new(.31, .05, .63, .095)],
                 _ => _boardSession.Buttons.Any(IsVectorArrowHandle) ? controlReferences : null
@@ -460,7 +460,7 @@ public sealed partial class SceneCompositor
                 BoardTriggerRegions: _boardSession.Buttons
                     .Select(button => BoardButtonTextRegion(_acquisitionReferenceTarget.Device, button)).ToArray(),
                 AllowsLocalForegroundContext: _boardSession.Screen is BoardScreen.Menu or BoardScreen.Settings or
-                    BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.Monopoly,
+                    BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.CrownDeed,
                 BoardControlReferenceRegions: controlReferences);
         }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or
@@ -486,8 +486,8 @@ public sealed partial class SceneCompositor
             !_acquisitionButtons.SequenceEqual(_boardSession.Buttons) ||
             HasBoardControlDrawerAnimation() ||
             _boardSession.Screen == BoardScreen.Blackjack && HasBlackjackCardAnimation(now) ||
-            _boardSession.Screen == BoardScreen.Monopoly &&
-                (MonopolyEntranceActive || HasMonopolyDiceAnimation(_monopolyClock()) || HasMonopolyDrawerAnimation(_monopolyClock()))) return;
+            _boardSession.Screen == BoardScreen.CrownDeed &&
+                (CrownDeedEntranceActive || HasCrownDeedDiceAnimation(_crownDeedClock()) || HasCrownDeedDrawerAnimation(_crownDeedClock()))) return;
         var center = new Vector2((float)(output.X + light.Center.X * output.Width),
             (float)(output.Y + light.Center.Y * output.Height));
         float radius = (float)(light.Radius * output.Height);

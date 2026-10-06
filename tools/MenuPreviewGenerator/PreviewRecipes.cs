@@ -170,7 +170,7 @@ internal sealed partial class PreviewRecipes
         return fluid;
     }
 
-    private void DrawLegacyMonopolyPreview(CanvasDrawingSession ds, float span)
+    private void DrawLegacyCrownDeedPreview(CanvasDrawingSession ds, float span)
     {
         // A native miniature of Crown & Deed's oval boulevard and city skyline.
         // Small physical shapes stay crisp at the tile's cached native density.
@@ -199,8 +199,8 @@ internal sealed partial class PreviewRecipes
         House(-35, 12, 16, 24, ThemeColor(204, 186, 137));
         House(-10, 18, 19, 29, ThemeColor(151, 174, 145));
         House(18, 17, 16, 23, ThemeColor(197, 171, 118));
-        DrawDie(ds, new Rect(span - 46, 118, 18, 18), 5, MonopolyIvory, MonopolyInk);
-        DrawDie(ds, new Rect(span - 24, 125, 16, 16), 2, MonopolyIvory, MonopolyInk);
+        DrawDie(ds, new Rect(span - 46, 118, 18, 18), 5, CrownDeedIvory, CrownDeedInk);
+        DrawDie(ds, new Rect(span - 24, 125, 16, 16), 2, CrownDeedIvory, CrownDeedInk);
 
         void House(float x, float y, float width, float height, Color stone)
         {

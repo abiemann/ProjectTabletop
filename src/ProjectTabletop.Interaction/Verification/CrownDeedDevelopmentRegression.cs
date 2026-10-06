@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ProjectTabletop.Interaction;
 
-internal static class MonopolyDevelopmentRegression
+internal static class CrownDeedDevelopmentRegression
 {
     private static readonly DateTimeOffset Epoch = new(2026, 10, 4, 12, 0, 0, TimeSpan.Zero);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
@@ -34,7 +34,7 @@ internal static class MonopolyDevelopmentRegression
         string frozen = JsonSerializer.Serialize(first);
         Require(!game.HandleAction("mp-build", At(120)) && !game.HandleAction("mp-build", At(119)) && events.Count == 1,
             "An unavailable or backwards build replayed the development.");
-        Throws<NotSupportedException>(() => ((IList<MonopolyPropertySnapshot>)first.Current.Properties)[0] =
+        Throws<NotSupportedException>(() => ((IList<CrownDeedPropertySnapshot>)first.Current.Properties)[0] =
             first.Current.Properties[0] with { Houses = 5 }, "A published development property was mutable.");
         Throws<NotSupportedException>(() => ((IList<string>)first.Current.AvailableActions)[0] = "mp-build",
             "A published development action list was mutable.");
@@ -66,34 +66,34 @@ internal static class MonopolyDevelopmentRegression
     private static void AiDevelopmentAndBoardRelay()
     {
         var game = Fixture(ai: true);
-        var board = new BoardSession(monopoly: game);
-        board.ShowMonopoly(At(100));
-        var events = new List<MonopolyDevelopment>();
+        var board = new BoardSession(crownDeed: game);
+        board.ShowCrownDeed(At(100));
+        var events = new List<CrownDeedDevelopment>();
         long boardRevision = board.Revision;
-        board.MonopolyDevelopmentOccurred += development =>
+        board.CrownDeedDevelopmentOccurred += development =>
         {
-            Require(board.Revision == boardRevision + 1 && ReferenceEquals(development.Current, board.MonopolyState),
+            Require(board.Revision == boardRevision + 1 && ReferenceEquals(development.Current, board.CrownDeedState),
                 "The board relayed development before its input barrier and committed snapshot.");
             events.Add(development);
-            board.HoldMonopolyPresentationUntil(development.StartedAt.AddMilliseconds(1500));
+            board.HoldCrownDeedPresentationUntil(development.StartedAt.AddMilliseconds(1500));
         };
-        Require(board.TickMonopoly(At(1100)) && events.Count == 1 && events[0].Current.ActivePlayer!.IsAi &&
+        Require(board.TickCrownDeed(At(1100)) && events.Count == 1 && events[0].Current.ActivePlayer!.IsAi &&
             events[0].StartedAt == At(1100) && Level(events[0].Current, 1) == 1 &&
-            events[0].Current.Players[0].Money == 1450 && board.IsMonopolyPresentationActive(At(1100)),
+            events[0].Current.Players[0].Money == 1450 && board.IsCrownDeedPresentationActive(At(1100)),
             "An AI build was omitted, replayed or presented before its transaction.");
-        Require(!board.TickMonopoly(At(1100)) && !board.TickMonopoly(At(1099)) && !board.TickMonopoly(At(2500)) &&
+        Require(!board.TickCrownDeed(At(1100)) && !board.TickCrownDeed(At(1099)) && !board.TickCrownDeed(At(2500)) &&
             events.Count == 1, "Duplicate, stale or presentation-blocked AI ticks built again.");
         // Releasing presentation creates one barrier before the next AI build creates its own.
-        Require(!board.IsMonopolyPresentationActive(At(2600)), "The injected presentation deadline did not release.");
+        Require(!board.IsCrownDeedPresentationActive(At(2600)), "The injected presentation deadline did not release.");
         boardRevision = board.Revision;
-        Require(board.TickMonopoly(At(2601)) && events.Count == 2 && events[1].Sequence == 2 &&
+        Require(board.TickCrownDeed(At(2601)) && events.Count == 2 && events[1].Sequence == 2 &&
             events[1].SpaceIndex == 3 && Level(events[1].Current, 3) == 1,
             "The AI could not make its next visible even development after the presentation.");
     }
 
-    private static List<MonopolyDevelopment> Observe(MonopolyGame game)
+    private static List<CrownDeedDevelopment> Observe(CrownDeedGame game)
     {
-        var events = new List<MonopolyDevelopment>();
+        var events = new List<CrownDeedDevelopment>();
         game.DevelopmentOccurred += value =>
         {
             Require(value.Current.Revision == value.Previous.Revision + 1 &&
@@ -104,12 +104,12 @@ internal static class MonopolyDevelopmentRegression
         return events;
     }
 
-    private static MonopolyGame Fixture(bool ai = false, int level = 0)
+    private static CrownDeedGame Fixture(bool ai = false, int level = 0)
     {
-        var game = new MonopolyGame(seed: 51);
+        var game = new CrownDeedGame(seed: 51);
         Require(game.HandleAction("mp-start-game", At(0)) && game.HandleAction("mp-ai-minus", At(10)) &&
             game.HandleAction("mp-human-plus", At(20)) && game.HandleAction("mp-start", At(30)), "Fixture setup failed.");
-        var data = JsonSerializer.Deserialize<MonopolySaveData>(game.ExportSave(), Json)!;
+        var data = JsonSerializer.Deserialize<CrownDeedSaveData>(game.ExportSave(), Json)!;
         foreach (var estate in data.Properties.Where(p => p.SpaceIndex is 1 or 3))
         {
             estate.OwnerId = 1;
@@ -118,12 +118,12 @@ internal static class MonopolyDevelopmentRegression
         if (ai)
         {
             data.Humans = 1; data.Ais = 1; data.Players[0].IsAi = true;
-            data.Phase = MonopolyPhase.AwaitingEndTurn;
+            data.Phase = CrownDeedPhase.AwaitingEndTurn;
         }
         game.LoadSave(JsonSerializer.Serialize(data, Json), At(40));
         return game;
     }
-    private static int Level(MonopolySnapshot state, int index) => state.Properties.Single(p => p.SpaceIndex == index).Houses;
+    private static int Level(CrownDeedSnapshot state, int index) => state.Properties.Single(p => p.SpaceIndex == index).Houses;
     private static DateTimeOffset At(int milliseconds) => Epoch.AddMilliseconds(milliseconds);
     private static void Throws<T>(Action action, string message) where T : Exception
     {

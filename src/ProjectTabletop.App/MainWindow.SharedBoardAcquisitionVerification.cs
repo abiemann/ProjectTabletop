@@ -35,7 +35,7 @@ public sealed partial class MainWindow
         using var scene = new SceneCompositor(game, blackjackClock: () => now, globeClock: () => globeNow);
         await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
         await scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
-        foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.Monopoly })
+        foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.CrownDeed })
             await scene.EnsureBoardArtworkResourcesAsync(CanvasDevice.GetSharedDevice(), screen);
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96);
         scene.SetDisplayAspect(1);
@@ -61,14 +61,14 @@ public sealed partial class MainWindow
         now += BoardSession.PhotoCopyDrawerOpeningDuration;
         scene.TickPhotoCopy(now);
         VerifyButtons("Photo Copy open drawer");
-        foreach (var (id, title) in new[] { ("paint", "Paint"), ("monopoly", "Crown & Deed"), ("globe", "Globe") })
+        foreach (var (id, title) in new[] { ("paint", "Paint"), ("crown-deed", "Crown & Deed"), ("globe", "Globe") })
         {
             // Acquisition runs on a synthetic presentation clock. Navigation
             // gestures use wall time and are covered by Interaction verification.
             switch (id)
             {
                 case "paint": scene.ShowPaint(); break;
-                case "monopoly": scene.ShowMonopoly(); break;
+                case "crown-deed": scene.ShowCrownDeed(); break;
                 case "globe": scene.ShowGlobe(); break;
             }
             Require(scene.CurrentBoardTitle == title, "The acquisition fixture could not open " + title + ".");

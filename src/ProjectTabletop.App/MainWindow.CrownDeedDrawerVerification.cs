@@ -11,84 +11,84 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     // Private native render/camera fixtures preserve the user's hardware, save and game.
-    private async Task<object> VerifyMonopolyDrawerAsync()
+    private async Task<object> VerifyCrownDeedDrawerAsync()
     {
         var liveOutput = _output;
         var liveState = (_camera.IsRunning, _output?.AppWindow.IsVisible,
-            Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.MonopolyState.Revision);
+            Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.CrownDeedState.Revision);
         const int width = 3840, height = 2160;
         var now = DateTimeOffset.UtcNow.AddMinutes(10);
-        string directory = Path.Combine(_appDataDirectory, "MonopolyDrawerVerification", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(_appDataDirectory, "CrownDeedDrawerVerification", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var images = new List<object>();
         var tested = new HashSet<string>();
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
-        using var scene = new SceneCompositor(monopoly: new MonopolyGame(seed: 97),
-            blackjackClock: () => now, monopolyClock: () => now);
+        using var scene = new SceneCompositor(crownDeed: new CrownDeedGame(seed: 97),
+            blackjackClock: () => now, crownDeedClock: () => now);
         scene.SetDisplayAspect(width / (double)height); scene.SetBoardSetup(true);
         double inset = scene.SetDetectedBoardGrid([new(.035f, .035f), new(.965f, .035f), new(.965f, .965f), new(.035f, .965f)],
             Homography.FromFourPoints([new(0, 0), new(width, 0), new(width, height), new(0, height)],
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
-        scene.SetBoardSetup(false); scene.ShowMonopoly();
+        scene.SetBoardSetup(false); scene.ShowCrownDeed();
         await scene.EnsureCrownDeedResourcesAsync(CanvasDevice.GetSharedDevice());
-        Require(scene.GetMonopolyEntranceFrame(now) is { Active: true, ElapsedMilliseconds: 0 },
+        Require(scene.GetCrownDeedEntranceFrame(now) is { Active: true, ElapsedMilliseconds: 0 },
             "The drawer fixture did not start its entrance after artwork loading.");
-        now += TimeSpan.FromMilliseconds(4975); scene.TickMonopoly(now);
+        now += TimeSpan.FromMilliseconds(4975); scene.TickCrownDeed(now);
         await Capture("landing-closed");
-        Require(!scene.MonopolyDrawerOpen && Button("mp-exit").Label == "^", "The landing drawer lacks its closed upward caret.");
+        Require(!scene.CrownDeedDrawerOpen && Button("mp-exit").Label == "^", "The landing drawer lacks its closed upward caret.");
         CheckAcquisition();
-        var landing = scene.MonopolyState;
+        var landing = scene.CrownDeedState;
         Act("mp-exit"); var openedAt = now;
         await Capture("drawer-start");
         CheckDrawerProgress(0);
-        Require(ReferenceEquals(landing, scene.MonopolyState) && !Button("mp-exit-game").Enabled,
+        Require(ReferenceEquals(landing, scene.CrownDeedState) && !Button("mp-exit-game").Enabled,
             "Opening the landing drawer mutated rules state or enabled its moving action.");
         now = openedAt.AddMilliseconds(150); await Capture("drawer-halfway"); CheckDrawerProgress(.5);
         Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null, ExpectedScene: null } &&
-                !scene.ActivateMonopolyButton("mp-exit-game"),
+                !scene.ActivateCrownDeedButton("mp-exit-game"),
             "The moving drawer supplied an acquisition reference, light or active Exit Game target.");
         now = openedAt.AddMilliseconds(299);
-        Require(!scene.ActivateMonopolyButton("mp-exit-game"), "Exit Game enabled before the 300 ms slide finished.");
-        now = openedAt.AddMilliseconds(300); scene.TickMonopoly(now);
+        Require(!scene.ActivateCrownDeedButton("mp-exit-game"), "Exit Game enabled before the 300 ms slide finished.");
+        now = openedAt.AddMilliseconds(300); scene.TickCrownDeed(now);
         await Capture("landing-drawer-open"); CheckDrawerProgress(1); CheckOpen(active: false);
         CheckAcquisition();
         Act("mp-exit-cancel");
-        Require(!scene.MonopolyDrawerOpen && ReferenceEquals(landing, scene.MonopolyState),
+        Require(!scene.CrownDeedDrawerOpen && ReferenceEquals(landing, scene.CrownDeedState),
             "The downward caret failed to close the inactive drawer without changing the game.");
         Act("mp-start-game"); Act("mp-ai-minus"); Act("mp-human-plus"); Act("mp-start");
-        var preserved = scene.MonopolyState;
-        string preservedSave = scene.ExportMonopolySave();
+        var preserved = scene.CrownDeedState;
+        string preservedSave = scene.ExportCrownDeedSave();
         await Capture("active-game-closed");
-        Act("mp-exit"); now += TimeSpan.FromMilliseconds(300); scene.TickMonopoly(now);
+        Act("mp-exit"); now += TimeSpan.FromMilliseconds(300); scene.TickCrownDeed(now);
         await Capture("active-game-drawer"); CheckOpen(active: true); CheckAcquisition();
-        Require(scene.ExportMonopolySave() == preservedSave, "Opening the active drawer changed the interrupted save payload.");
+        Require(scene.ExportCrownDeedSave() == preservedSave, "Opening the active drawer changed the interrupted save payload.");
         Act("mp-save-exit");
-        Require(scene.TryGetMonopolySaveRequest(out long first, out string json) && json == preservedSave &&
-                scene.MonopolyDrawerOpen && scene.CurrentBoardButtons.All(button => !button.Enabled),
+        Require(scene.TryGetCrownDeedSaveRequest(out long first, out string json) && json == preservedSave &&
+                scene.CrownDeedDrawerOpen && scene.CurrentBoardButtons.All(button => !button.Enabled),
             "Save and Exit closed the drawer early, changed its payload or left busy controls enabled.");
         await Capture("saving");
         now += TimeSpan.FromMilliseconds(20);
-        Require(scene.CompleteMonopolySave(first, false, "Verification write failure") && scene.MonopolyDrawerOpen &&
-                scene.MonopolyState.Phase == MonopolyPhase.ExitConfirmation &&
-                scene.MonopolyState.Status.Contains("Verification write failure") && !scene.CompleteMonopolySave(first, true),
+        Require(scene.CompleteCrownDeedSave(first, false, "Verification write failure") && scene.CrownDeedDrawerOpen &&
+                scene.CrownDeedState.Phase == CrownDeedPhase.ExitConfirmation &&
+                scene.CrownDeedState.Status.Contains("Verification write failure") && !scene.CompleteCrownDeedSave(first, true),
             "A failed save dismissed the drawer, hid the failure or accepted a stale completion.");
         await Capture("save-failure"); CheckOpen(active: true);
         Act("mp-exit-cancel");
-        Require(!scene.MonopolyDrawerOpen && scene.MonopolyState.Phase == preserved.Phase &&
-                scene.MonopolyState.Players.SequenceEqual(preserved.Players), "Closing the failed-save drawer lost the interrupted turn.");
-        Act("mp-exit"); now += TimeSpan.FromMilliseconds(300); scene.TickMonopoly(now);
+        Require(!scene.CrownDeedDrawerOpen && scene.CrownDeedState.Phase == preserved.Phase &&
+                scene.CrownDeedState.Players.SequenceEqual(preserved.Players), "Closing the failed-save drawer lost the interrupted turn.");
+        Act("mp-exit"); now += TimeSpan.FromMilliseconds(300); scene.TickCrownDeed(now);
         Act("mp-save-exit");
-        Require(scene.TryGetMonopolySaveRequest(out long retry, out string retryJson) && retry > first && retryJson == preservedSave &&
-                scene.CompleteMonopolySave(retry, true) && scene.CurrentBoardScreen == BoardScreen.Menu && !scene.MonopolyDrawerOpen,
+        Require(scene.TryGetCrownDeedSaveRequest(out long retry, out string retryJson) && retry > first && retryJson == preservedSave &&
+                scene.CompleteCrownDeedSave(retry, true) && scene.CurrentBoardScreen == BoardScreen.Menu && !scene.CrownDeedDrawerOpen,
             "A successful retry did not navigate after persistence completed.");
-        scene.ShowMonopoly();
-        now += TimeSpan.FromMilliseconds(4975); scene.TickMonopoly(now);
+        scene.ShowCrownDeed();
+        now += TimeSpan.FromMilliseconds(4975); scene.TickCrownDeed(now);
         Act("mp-resume");
-        Require(!scene.MonopolyDrawerOpen && scene.ExportMonopolySave() == preservedSave,
+        Require(!scene.CrownDeedDrawerOpen && scene.ExportCrownDeedSave() == preservedSave,
             "Resume lost the saved turn or replayed the old drawer.");
         Require(tested.IsSupersetOf(["^", "v", "Exit Game", "Save and Exit"]), "Caption acquisition omitted a drawer label.");
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
-                Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.MonopolyState.Revision),
+                Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.CrownDeedState.Revision),
             "The isolated drawer check changed the user's hardware or live game.");
         return new { passed = true, nativeWidth = width, nativeHeight = height, durationMilliseconds = 300,
             slideReferenceSuppression = true, modalTargets = true, bothConditionalActionsAndCaretsAcquired = true,
@@ -99,17 +99,17 @@ public sealed partial class MainWindow
         void Act(string id)
         {
             now += TimeSpan.FromMilliseconds(20);
-            Require(scene.ActivateMonopolyButton(id), $"Drawer fixture rejected {id} during {scene.MonopolyState.Phase}.");
+            Require(scene.ActivateCrownDeedButton(id), $"Drawer fixture rejected {id} during {scene.CrownDeedState.Phase}.");
         }
         BoardButton Button(string id) => scene.CurrentBoardButtons.Single(button => button.Id == id);
-        void CheckOpen(bool active) => Require(scene.MonopolyDrawerOpen &&
+        void CheckOpen(bool active) => Require(scene.CrownDeedDrawerOpen &&
             scene.CurrentBoardButtons.Count == 2 && Button("mp-exit-cancel").Label == "v" &&
             Button(active ? "mp-save-exit" : "mp-exit-game").Label == (active ? "Save and Exit" : "Exit Game") &&
             Button(active ? "mp-save-exit" : "mp-exit-game").Enabled,
             "The stationary drawer lacks its downward caret and single enabled conditional action.");
         void CheckDrawerProgress(double expected)
         {
-            using var metadata = JsonDocument.Parse(JsonSerializer.Serialize(scene.GetMonopolyDrawerDiagnostics(now)));
+            using var metadata = JsonDocument.Parse(JsonSerializer.Serialize(scene.GetCrownDeedDrawerDiagnostics(now)));
             var root = metadata.RootElement;
             Require(root.GetProperty("open").GetBoolean() && root.GetProperty("durationMilliseconds").GetDouble() == 300 &&
                     Math.Abs(root.GetProperty("progress").GetDouble() - expected) < .001 &&
@@ -204,7 +204,7 @@ public sealed partial class MainWindow
             foreach (int offset in new[] { 0, (width - 1) * 4, (height - 1) * width * 4, (width * height - 1) * 4 })
                 Require(pixels[offset] == 0 && pixels[offset + 1] == 0 && pixels[offset + 2] == 0, "The drawer escaped the physical board clip.");
             string path = Path.Combine(directory, name + ".png"); await target.SaveAsync(path, CanvasBitmapFileFormat.Png);
-            images.Add(new { name, path, drawer = scene.GetMonopolyDrawerDiagnostics(now) });
+            images.Add(new { name, path, drawer = scene.GetCrownDeedDrawerDiagnostics(now) });
         }
         static void Require(bool condition, string message)
         {

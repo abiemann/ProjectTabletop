@@ -63,7 +63,7 @@ public sealed partial class BoardSession
             : null;
         // Like any camera frame, hold evidence advances timed presentations.
         AdvanceBlackjackPresentation(now);
-        AdvanceMonopolyPresentation(now);
+        AdvanceCrownDeedPresentation(now);
         AdvanceBottomDrawers(now);
         AdvanceSlots(now);
         AdvanceRoulette(now);

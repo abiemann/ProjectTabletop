@@ -113,7 +113,7 @@ public sealed partial class SceneCompositor : IDisposable
         lock (_gate)
         {
             CancelBoardReveal();
-            CancelMonopolyEntrance();
+            CancelCrownDeedEntrance();
             _boardMediaClip = null;
             SetEstimatedBoardSize(null);
             _detectedBoardCorners = null;
@@ -130,9 +130,9 @@ public sealed partial class SceneCompositor : IDisposable
     }
 
     public void ClearHandTips(bool resetInput = true)
-        => ClearHandTipsCore(resetInput, cancelMonopolyEntrance: true);
+        => ClearHandTipsCore(resetInput, cancelCrownDeedEntrance: true);
 
-    private void ClearHandTipsCore(bool resetInput, bool cancelMonopolyEntrance)
+    private void ClearHandTipsCore(bool resetInput, bool cancelCrownDeedEntrance)
     {
         lock (_gate)
         {
@@ -142,14 +142,14 @@ public sealed partial class SceneCompositor : IDisposable
             // already in flight. Camera/calibration resets still block old input.
             if (resetInput)
             {
-                if (cancelMonopolyEntrance) CancelMonopolyEntrance();
+                if (cancelCrownDeedEntrance) CancelCrownDeedEntrance();
                 _handVisualResetThrough = MonotonicClock.UtcNow;
                 ClearHandSpotlights();
                 _boardSession.ResetInput(MonotonicClock.UtcNow);
                 CancelBlackjackDeal();
-                CancelMonopolyDiceAnimation();
-                if (!cancelMonopolyEntrance && _monopolyEntranceStartedAt is { } started && !_monopolyEntranceCompleted)
-                    _boardSession.HoldMonopolyPresentationUntil(started.AddMilliseconds(MonopolyEntranceDurationMilliseconds));
+                CancelCrownDeedDiceAnimation();
+                if (!cancelCrownDeedEntrance && _crownDeedEntranceStartedAt is { } started && !_crownDeedEntranceCompleted)
+                    _boardSession.HoldCrownDeedPresentationUntil(started.AddMilliseconds(CrownDeedEntranceDurationMilliseconds));
             }
         }
     }
@@ -159,7 +159,7 @@ public sealed partial class SceneCompositor : IDisposable
     {
         lock (_gate)
         {
-            if (BlockBoardRevealInput() || BlockBoardArtworkInput() || MonopolyEntranceActive) return;
+            if (BlockBoardRevealInput() || BlockBoardArtworkInput() || CrownDeedEntranceActive) return;
             _handTips = [];
             var now = MonotonicClock.UtcNow;
             var acceptVisual = frameTime <= now && now - frameTime <= TimeSpan.FromMilliseconds(350) &&
@@ -298,7 +298,7 @@ public sealed partial class SceneCompositor : IDisposable
         lock (_gate)
         {
             CancelBoardReveal();
-            CancelMonopolyEntrance();
+            CancelCrownDeedEntrance();
             _displayAspect = double.IsFinite(aspect) && aspect > 0 ? aspect : 16.0 / 9;
             ClearHandSpotlights();
         }
@@ -318,7 +318,7 @@ public sealed partial class SceneCompositor : IDisposable
         lock (_gate)
         {
             CancelBoardReveal();
-            if (enabled) CancelMonopolyDiceAnimation();
+            if (enabled) CancelCrownDeedDiceAnimation();
             if (enabled && !_boardSetup) _boardSetupStarted = MonotonicClock.UtcNow;
             if (enabled) ClearBoardMediaClip();
             _boardSetup = enabled;
@@ -337,8 +337,8 @@ public sealed partial class SceneCompositor : IDisposable
             if (enabled)
             {
                 CancelBoardReveal();
-                CancelMonopolyDiceAnimation();
-                CancelMonopolyEntrance();
+                CancelCrownDeedDiceAnimation();
+                CancelCrownDeedEntrance();
                 PausePaintIdle();
             }
             _blackOutput = enabled;
@@ -420,7 +420,7 @@ public sealed partial class SceneCompositor : IDisposable
             _calibrationTargetTop = pieceTop;
             if (_calibrationTarget >= 0)
             {
-                CancelMonopolyEntrance();
+                CancelCrownDeedEntrance();
                 PausePaintIdle();
                 ClearHandSpotlights();
             }
@@ -626,7 +626,7 @@ public sealed partial class SceneCompositor : IDisposable
     {
         // Four-finger aiming is visible on each board. Red pinch feedback stays
         // confined to the gesture tester.
-        if (_boardSetup || _calibrationTarget >= 0 || MonopolyEntranceActive || HasBoardControlDrawerAnimation()) return;
+        if (_boardSetup || _calibrationTarget >= 0 || CrownDeedEntranceActive || HasBoardControlDrawerAnimation()) return;
         var now = MonotonicClock.UtcNow;
         if (_boardMediaClip is not { } clip || _boardCameraMap is null ||
             _handTips.Length == 0 || _handFrameTime > now ||
@@ -867,7 +867,7 @@ public sealed partial class SceneCompositor : IDisposable
         lock (_gate)
         {
             if (_disposed) return;
-            CancelMonopolyEntrance();
+            CancelCrownDeedEntrance();
             CancelPaintIntroduction();
             ResetPaintAutomatic();
             _disposed = true;
@@ -879,15 +879,15 @@ public sealed partial class SceneCompositor : IDisposable
             _acquisitionReferenceTarget = null;
             _blackjackPreviewTarget?.Dispose();
             _blackjackPreviewTarget = null;
-            _monopolyPreviewTarget?.Dispose();
-            _monopolyPreviewTarget = null;
-            DisposeMonopolyDiceLayer();
+            _crownDeedPreviewTarget?.Dispose();
+            _crownDeedPreviewTarget = null;
+            DisposeCrownDeedDiceLayer();
             DisposeHoldFeedbackLayer();
             DisposeSlotsLayers();
             DisposeSlotArtwork();
             DisposeRouletteLayers();
             DisposeRouletteArtwork();
-            DisposeMonopolyEntranceLayers();
+            DisposeCrownDeedEntranceLayers();
             DisposeCrownDeedArtwork();
             CancelCrownDeedDevelopment();
             _globePreviewTarget?.Dispose();
@@ -900,8 +900,8 @@ public sealed partial class SceneCompositor : IDisposable
             _blackjackDeal = null;
             _boardSession.BlackjackHitOccurred -= OnBlackjackHit;
             _boardSession.BlackjackDealOccurred -= OnBlackjackDeal;
-            _boardSession.MonopolyRollOccurred -= OnMonopolyRoll;
-            _boardSession.MonopolyDevelopmentOccurred -= OnMonopolyDevelopment;
+            _boardSession.CrownDeedRollOccurred -= OnCrownDeedRoll;
+            _boardSession.CrownDeedDevelopmentOccurred -= OnCrownDeedDevelopment;
             _boardSession.BoardOpened -= OnBoardOpened;
             _photoCopyBitmap?.Dispose();
             _photoCopyBitmap = null;

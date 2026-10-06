@@ -150,13 +150,13 @@ public sealed partial class SceneCompositor
     private void ResetBoardRaster()
     {
         bool unseenPaintIntroduction = _paintIntroductionStartedAt is null && _paintIntroductionDrops.Count > 0;
-        CancelMonopolyDiceAnimation();
-        DisposeMonopolyDiceLayer();
+        CancelCrownDeedDiceAnimation();
+        DisposeCrownDeedDiceLayer();
         DisposeHoldFeedbackLayer();
         DisposeSlotsLayers();
         DisposeRouletteLayers();
-        CancelMonopolyEntrance();
-        DisposeMonopolyEntranceLayers();
+        CancelCrownDeedEntrance();
+        DisposeCrownDeedEntranceLayers();
         _boardRasterPixels = new(1000, 1000);
         _boardRasterDevice = null;
         _projectorPixelWidth = _projectorPixelHeight = 0;

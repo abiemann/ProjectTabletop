@@ -1,6 +1,6 @@
 using ProjectTabletop.Interaction;
 
-internal static class MonopolyPresentationRegression
+internal static class CrownDeedPresentationRegression
 {
     public static void Run()
     {
@@ -8,7 +8,7 @@ internal static class MonopolyPresentationRegression
         CheckPresentationInputBarriers();
         CheckAiPresentationPause();
         CheckNavigationAndReset();
-        Console.WriteLine("Monopoly presentation verification passed: committed roll relays from pointer/pinch/fingers/AI, " +
+        Console.WriteLine("CrownDeed presentation verification passed: committed roll relays from pointer/pinch/fingers/AI, " +
             "one roll input barrier, disabled game controls, AI pause, delayed frame/pulse/pose rejection, " +
             "fresh selection after expiry, save/exit navigation and projection reset cancellation.");
     }
@@ -18,12 +18,12 @@ internal static class MonopolyPresentationRegression
         foreach (string route in new[] { "pointer", "pinch", "fingers" })
         {
             var board = Board();
-            var previous = board.MonopolyState;
+            var previous = board.CrownDeedState;
             long revision = board.Revision;
-            var events = new List<MonopolyRoll>();
-            board.MonopolyRollOccurred += roll =>
+            var events = new List<CrownDeedRoll>();
+            board.CrownDeedRollOccurred += roll =>
             {
-                Require(ReferenceEquals(roll.Current, board.MonopolyState) && ReferenceEquals(roll.Previous, previous) &&
+                Require(ReferenceEquals(roll.Current, board.CrownDeedState) && ReferenceEquals(roll.Previous, previous) &&
                     board.Revision == revision + 1 && board.HoveredButtonIds.Count == 0 &&
                     board.FingerSelectionFeedback.Count == 0,
                     "Roll relay preceded game/input commit or applied the roll input barrier twice.");
@@ -44,8 +44,8 @@ internal static class MonopolyPresentationRegression
                     { ButtonId: "mp-roll", Gesture: BoardSelectionGesture.IndexSeparation }, "Finger Roll failed.");
                 Require(board.Update([separated], Time(330), Time(330)) is null, "A held finger pose replayed Roll.");
             }
-            Require(events is [{ Sequence: 1, Previous.Phase: MonopolyPhase.AwaitingRoll,
-                Current.Phase: MonopolyPhase.AwaitingPurchase }] && events[0].Current.Dice == new MonopolyDice(1, 2) &&
+            Require(events is [{ Sequence: 1, Previous.Phase: CrownDeedPhase.AwaitingRoll,
+                Current.Phase: CrownDeedPhase.AwaitingPurchase }] && events[0].Current.Dice == new CrownDeedDice(1, 2) &&
                 events[0].Current.ActivePlayer!.Position == 3 && events[0].StartedAt == Time(route == "fingers" ? 310 : 100),
                 "Roll relay lost the actual dice, committed landing or accepted action time.");
             Require(!board.ActivateButton("mp-roll", Time(400)) && !board.ActivateButton("unknown", Time(410)) &&
@@ -59,10 +59,10 @@ internal static class MonopolyPresentationRegression
     private static void CheckPresentationInputBarriers()
     {
         var board = Board();
-        board.MonopolyRollOccurred += roll => board.HoldMonopolyPresentationUntil(roll.StartedAt.AddSeconds(3.6));
+        board.CrownDeedRollOccurred += roll => board.HoldCrownDeedPresentationUntil(roll.StartedAt.AddSeconds(3.6));
         Require(board.ActivateButton("mp-roll", Time(100)), "Presentation fixture did not roll.");
-        long gameRevision = board.MonopolyState.Revision;
-        Require(board.IsMonopolyPresentationActive(Time(100)) &&
+        long gameRevision = board.CrownDeedState.Revision;
+        Require(board.IsCrownDeedPresentationActive(Time(100)) &&
             board.Buttons.Where(button => button.Id != "mp-exit").All(button => !button.Enabled) && Button(board, "mp-exit").Enabled,
             "Roll presentation left game choices enabled or disabled Exit.");
         var buy = Button(board, "mp-buy");
@@ -73,12 +73,12 @@ internal static class MonopolyPresentationRegression
         board.Update([together], Time(400), Time(400));
         board.Update([together], Time(500), Time(500));
         Require(board.FingerSelectionFeedback.Count == 0, "Disabled game choices armed a finger selection.");
-        board.HoldMonopolyPresentationUntil(Time(600));
-        Require(board.IsMonopolyPresentationActive(Time(3699)) && !board.TickMonopoly(Time(3699)),
+        board.HoldCrownDeedPresentationUntil(Time(600));
+        Require(board.IsCrownDeedPresentationActive(Time(3699)) && !board.TickCrownDeed(Time(3699)),
             "A shorter hold shortened the 3.6-second presentation.");
         // Expiry can be driven without a camera frame; the completed roll remains the real game state.
-        Require(!board.TickMonopoly(Time(3700)) && !board.IsMonopolyPresentationActive(Time(3700)) &&
-            Button(board, "mp-buy").Enabled && board.MonopolyState.Revision == gameRevision,
+        Require(!board.TickCrownDeed(Time(3700)) && !board.IsCrownDeedPresentationActive(Time(3700)) &&
+            Button(board, "mp-buy").Enabled && board.CrownDeedState.Revision == gameRevision,
             "Expiry failed to release controls or modified human gameplay.");
         Require(board.Update([together], Time(3650), Time(3701)) is null && board.HoveredButtonIds.Count == 0 &&
             board.FingerSelectionFeedback.Count == 0, "A delayed frame captured during animation armed a choice.");
@@ -89,7 +89,7 @@ internal static class MonopolyPresentationRegression
         var separated = together with { FingersTogether = false, IndexFingerSeparated = true };
         board.Update([separated], Time(3720), Time(3720));
         Require(board.Update([separated], Time(3810), Time(3810)) is null &&
-            board.MonopolyState.Phase == MonopolyPhase.AwaitingPurchase,
+            board.CrownDeedState.Phase == CrownDeedPhase.AwaitingPurchase,
             "A pose armed while controls were disabled executed immediately at release.");
         board.Update([together], Time(3820), Time(3820));
         board.Update([together], Time(3920), Time(3920));
@@ -98,42 +98,42 @@ internal static class MonopolyPresentationRegression
             "The hold blocked a fresh grouped-to-separated gesture after expiry.");
 
         var pointer = Rolled();
-        pointer.HoldMonopolyPresentationUntil(Time(500));
+        pointer.HoldCrownDeedPresentationUntil(Time(500));
         Require(pointer.ActivateButton("mp-buy", Time(500)), "Pointer time did not expire the hold.");
         var camera = Rolled();
-        camera.HoldMonopolyPresentationUntil(Time(500));
+        camera.HoldCrownDeedPresentationUntil(Time(500));
         Require(camera.Update([Pinch(Button(camera, "mp-buy"), 10, 501)], Time(501), Time(501)) is { ButtonId: "mp-buy" },
             "Camera time did not expire the hold for a fresh pulse.");
         var extended = Rolled();
-        extended.HoldMonopolyPresentationUntil(Time(500)); extended.HoldMonopolyPresentationUntil(Time(800));
-        Require(extended.IsMonopolyPresentationActive(Time(500)) && !extended.IsMonopolyPresentationActive(Time(800)),
+        extended.HoldCrownDeedPresentationUntil(Time(500)); extended.HoldCrownDeedPresentationUntil(Time(800));
+        Require(extended.IsCrownDeedPresentationActive(Time(500)) && !extended.IsCrownDeedPresentationActive(Time(800)),
             "A later hold failed to extend the deadline.");
     }
 
     private static void CheckAiPresentationPause()
     {
         var board = Board(humansOnly: false);
-        var events = new List<MonopolyRoll>();
-        board.MonopolyRollOccurred += roll =>
+        var events = new List<CrownDeedRoll>();
+        board.CrownDeedRollOccurred += roll =>
         {
-            Require(ReferenceEquals(roll.Current, board.MonopolyState) && board.FingerSelectionFeedback.Count == 0,
+            Require(ReferenceEquals(roll.Current, board.CrownDeedState) && board.FingerSelectionFeedback.Count == 0,
                 "AI relay preceded its committed gameplay or input barrier.");
             events.Add(roll);
-            if (roll.Current.ActivePlayer!.IsAi) board.HoldMonopolyPresentationUntil(roll.StartedAt.AddSeconds(3.6));
+            if (roll.Current.ActivePlayer!.IsAi) board.HoldCrownDeedPresentationUntil(roll.StartedAt.AddSeconds(3.6));
         };
         Require(board.ActivateButton("mp-roll", Time(100)) && board.ActivateButton("mp-buy", Time(120)) &&
             board.ActivateButton("mp-end-turn", Time(140)), "AI fixture did not finish the human turn.");
-        long beforeBoardRevision = board.Revision, beforeGameRevision = board.MonopolyState.Revision;
-        Require(board.TickMonopoly(Time(1140)) && events.Count == 2 && events[1].Current.ActivePlayer!.IsAi &&
+        long beforeBoardRevision = board.Revision, beforeGameRevision = board.CrownDeedState.Revision;
+        Require(board.TickCrownDeed(Time(1140)) && events.Count == 2 && events[1].Current.ActivePlayer!.IsAi &&
             events[1].Current.ActivePlayer!.Position == 3 && events[1].Current.ActivePlayer!.Money == 1496 &&
-            board.Revision == beforeBoardRevision + 1 && board.MonopolyState.Revision == beforeGameRevision + 1,
+            board.Revision == beforeBoardRevision + 1 && board.CrownDeedState.Revision == beforeGameRevision + 1,
             "AI roll did not relay once with actual movement/rent and one input barrier.");
-        long rolledRevision = board.MonopolyState.Revision;
-        Require(!board.TickMonopoly(Time(2000)) && !board.TickMonopoly(Time(4739)) &&
-            board.MonopolyState.Revision == rolledRevision && events.Count == 2,
+        long rolledRevision = board.CrownDeedState.Revision;
+        Require(!board.TickCrownDeed(Time(2000)) && !board.TickCrownDeed(Time(4739)) &&
+            board.CrownDeedState.Revision == rolledRevision && events.Count == 2,
             "AI progressed or generated extra events before the dice presentation finished.");
-        Require(board.TickMonopoly(Time(4740)) && board.MonopolyState.ActivePlayerIndex == 0 &&
-            board.MonopolyState.Revision == rolledRevision + 1 && events.Count == 2 && !board.TickMonopoly(Time(4741)) &&
+        Require(board.TickCrownDeed(Time(4740)) && board.CrownDeedState.ActivePlayerIndex == 0 &&
+            board.CrownDeedState.Revision == rolledRevision + 1 && events.Count == 2 && !board.TickCrownDeed(Time(4741)) &&
             Button(board, "mp-roll").Enabled,
             "Expiry changed normal one-decision AI progress or prevented return to the human.");
     }
@@ -143,63 +143,63 @@ internal static class MonopolyPresentationRegression
         foreach (bool gesture in new[] { false, true })
         {
             var board = Rolled();
-            board.HoldMonopolyPresentationUntil(Time(5000));
+            board.HoldCrownDeedPresentationUntil(Time(5000));
             bool exited = gesture
                 ? board.Update([Pinch(Button(board, "mp-exit"), 1, 300)], Time(300), Time(300))?.ButtonId == "mp-exit"
                 : board.ActivateButton("mp-exit", Time(300));
-            Require(exited && board.Screen == BoardScreen.Monopoly && board.MonopolyState.Phase == MonopolyPhase.ExitConfirmation &&
-                !board.IsMonopolyPresentationActive(Time(300)) && Button(board, "mp-exit-cancel").Enabled,
+            Require(exited && board.Screen == BoardScreen.CrownDeed && board.CrownDeedState.Phase == CrownDeedPhase.ExitConfirmation &&
+                !board.IsCrownDeedPresentationActive(Time(300)) && Button(board, "mp-exit-cancel").Enabled,
                 "Presentation blocked Exit/save choices or left their animation lock behind.");
             Require(board.ActivateButton("mp-exit-cancel", Time(400)) && Button(board, "mp-buy").Enabled,
                 "Cancel Exit restored the old presentation lock.");
-            board.HoldMonopolyPresentationUntil(Time(5000));
+            board.HoldCrownDeedPresentationUntil(Time(5000));
             Require(board.ActivateButton("mp-exit", Time(500)) && board.ActivateButton("mp-save-exit", Time(800)),
                 "A roll presentation blocked saving the already committed game.");
-            string saved = board.ExportMonopolySave();
-            Require(board.CompleteMonopolySave(board.MonopolySaveRequestId, true, Time(900)) && board.Screen == BoardScreen.Menu,
+            string saved = board.ExportCrownDeedSave();
+            Require(board.CompleteCrownDeedSave(board.CrownDeedSaveRequestId, true, Time(900)) && board.Screen == BoardScreen.Menu,
                 "Successful save failed to leave the board.");
-            board.LoadMonopolySave(saved, Time(1000), resume: true); board.ShowMonopoly(Time(1010));
-            Require(!board.IsMonopolyPresentationActive(Time(1010)) && board.MonopolyState.ActivePlayer!.Position == 3 &&
-                board.MonopolyState.Dice == new MonopolyDice(1, 2) && Button(board, "mp-buy").Enabled,
+            board.LoadCrownDeedSave(saved, Time(1000), resume: true); board.ShowCrownDeed(Time(1010));
+            Require(!board.IsCrownDeedPresentationActive(Time(1010)) && board.CrownDeedState.ActivePlayer!.Position == 3 &&
+                board.CrownDeedState.Dice == new CrownDeedDice(1, 2) && Button(board, "mp-buy").Enabled,
                 "Save/load retained the animation hold or saved an uncommitted previous roll.");
-            board.HoldMonopolyPresentationUntil(Time(5000));
+            board.HoldCrownDeedPresentationUntil(Time(5000));
             Require(board.ActivateButton("mp-exit", Time(1020)) && board.ActivateButton("mp-save-exit", Time(1320)) &&
-                board.CompleteMonopolySave(board.MonopolySaveRequestId, true, Time(1330)) &&
+                board.CompleteCrownDeedSave(board.CrownDeedSaveRequestId, true, Time(1330)) &&
                 board.Screen == BoardScreen.Menu, "The drawer's saving exit was blocked by the presentation.");
         }
 
         var reset = Rolled();
-        reset.HoldMonopolyPresentationUntil(Time(5000)); reset.ResetInput(Time(300));
-        Require(!reset.IsMonopolyPresentationActive(Time(300)) && Button(reset, "mp-buy").Enabled,
+        reset.HoldCrownDeedPresentationUntil(Time(5000)); reset.ResetInput(Time(300));
+        Require(!reset.IsCrownDeedPresentationActive(Time(300)) && Button(reset, "mp-buy").Enabled,
             "Camera reset retained the roll presentation lock.");
-        reset.HoldMonopolyPresentationUntil(Time(5000)); reset.ShowPaint(Time(400)); reset.ShowMonopoly(Time(500));
-        Require(!reset.IsMonopolyPresentationActive(Time(500)) && Button(reset, "mp-buy").Enabled,
+        reset.HoldCrownDeedPresentationUntil(Time(5000)); reset.ShowPaint(Time(400)); reset.ShowCrownDeed(Time(500));
+        Require(!reset.IsCrownDeedPresentationActive(Time(500)) && Button(reset, "mp-buy").Enabled,
             "Programmatic board navigation retained the roll presentation lock.");
-        reset.HoldMonopolyPresentationUntil(Time(499));
+        reset.HoldCrownDeedPresentationUntil(Time(499));
         Require(Button(reset, "mp-buy").Enabled, "An already expired hold disabled controls.");
-        reset.HoldMonopolyPresentationUntil(Time(5000)); reset.CancelMonopolyPresentation(Time(600));
-        Require(!reset.IsMonopolyPresentationActive(Time(600)) &&
+        reset.HoldCrownDeedPresentationUntil(Time(5000)); reset.CancelCrownDeedPresentation(Time(600));
+        Require(!reset.IsCrownDeedPresentationActive(Time(600)) &&
             reset.Update([Pinch(Button(reset, "mp-buy"), 10, 590)], Time(601), Time(601)) is null &&
             reset.Update([Pinch(Button(reset, "mp-buy"), 11, 620)], Time(620), Time(620)) is { ButtonId: "mp-buy" },
             "Projection cancellation retained the hold, replayed old input or rejected fresh input.");
         reset.ShowPaint(Time(700)); long paintRevision = reset.Revision;
-        reset.CancelMonopolyPresentation(Time(710));
+        reset.CancelCrownDeedPresentation(Time(710));
         Require(reset.Screen == BoardScreen.Paint && reset.Revision == paintRevision &&
             reset.Update([Pinch(Button(reset, "menu"), 12, 705)], Time(720), Time(720))?.Current == BoardScreen.Menu,
-            "Cancelling an inactive Monopoly presentation changed or invalidated the active board.");
+            "Cancelling an inactive CrownDeed presentation changed or invalidated the active board.");
     }
 
     private static BoardSession Board(bool humansOnly = true)
     {
-        var board = new BoardSession(monopoly: new MonopolyGame(seed: 31, initialRolls: [new(1, 2), new(1, 2)]));
-        board.ShowMonopoly(Time(0));
-        Require(board.ActivateButton("mp-start-game", Time(10)), "Could not open Monopoly setup.");
+        var board = new BoardSession(crownDeed: new CrownDeedGame(seed: 31, initialRolls: [new(1, 2), new(1, 2)]));
+        board.ShowCrownDeed(Time(0));
+        Require(board.ActivateButton("mp-start-game", Time(10)), "Could not open CrownDeed setup.");
         if (humansOnly)
         {
             Require(board.ActivateButton("mp-ai-minus", Time(20)) && board.ActivateButton("mp-human-plus", Time(30)),
                 "Could not configure two human players.");
         }
-        Require(board.ActivateButton("mp-start", Time(40)), "Could not start Monopoly.");
+        Require(board.ActivateButton("mp-start", Time(40)), "Could not start CrownDeed.");
         return board;
     }
     private static BoardSession Rolled()

@@ -155,7 +155,7 @@ public sealed partial class SceneCompositor
                     ds.FillCircle(new Vector2(10, -6), 3.5f, color);
                     Stroke([-9, 19, 13, -16, 20, -12, -3, 22, -9, 19]);
                     break;
-                case BoardScreen.Monopoly:
+                case BoardScreen.CrownDeed:
                     ds.DrawRectangle(new Rect(-21, -21, 42, 42), color, 2.5f);
                     ds.DrawRectangle(new Rect(-12, -12, 24, 24), color, 1.5f);
                     Stroke([-9, 6, -9, -2, 0, -10, 9, -2, 9, 6, -9, 6]);

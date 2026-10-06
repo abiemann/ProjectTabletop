@@ -15,7 +15,7 @@ internal sealed class MenuThumbnailImages : IDisposable
         (BoardScreen.PhotoCopy, "photo-copy.png"),
         (BoardScreen.Blackjack, "blackjack.png"),
         (BoardScreen.Paint, "paint.png"),
-        (BoardScreen.Monopoly, "crown-deed.png"),
+        (BoardScreen.CrownDeed, "crown-deed.png"),
         (BoardScreen.Globe, "globe.png"),
         (BoardScreen.Slots, "dragon-slots.png"),
         (BoardScreen.Roulette, "roulette.png")

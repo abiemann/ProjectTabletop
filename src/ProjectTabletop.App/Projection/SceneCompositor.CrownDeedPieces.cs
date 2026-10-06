@@ -25,19 +25,19 @@ public sealed partial class SceneCompositor
     private void DrawCrownDeedPiece(CanvasDrawingSession ds, Vector2 center, float radius,
         int pieceIndex, int colorIndex, bool active, double boardAspect = 1, bool faceCenter = true)
     {
-        if ((uint)pieceIndex >= (uint)MonopolyGame.PieceNames.Count)
+        if ((uint)pieceIndex >= (uint)CrownDeedGame.PieceNames.Count)
             throw new ArgumentOutOfRangeException(nameof(pieceIndex));
         if (!EnsureCrownDeedPieces(ds.Device) || _crownDeedPieceBitmaps![pieceIndex] is not { } bitmap) return;
-        using var correction = new MonopolyArtAspect(ds, center, boardAspect);
+        using var correction = new CrownDeedArtAspect(ds, center, boardAspect);
         // Ownership colour stays in a small ground marker; the metal itself
         // keeps its silver finish and fine engraved surface.
         ds.FillEllipse(center + new Vector2(0, radius * .46f), radius * .65f, radius * .26f,
             ThemeColor(0, 6, 8, 145));
         if (active)
             ds.DrawEllipse(center + new Vector2(0, radius * .45f), radius * .75f, radius * .29f,
-                MonopolyGold, Math.Max(.65f, radius * .07f));
+                CrownDeedGold, Math.Max(.65f, radius * .07f));
         ds.FillCircle(center + new Vector2(0, radius * .89f), Math.Max(1.1f, radius * .12f),
-            MonopolyPlayerColor(colorIndex));
+            CrownDeedPlayerColor(colorIndex));
         var source = _crownDeedPieceSourceBounds![pieceIndex];
         double scale = radius * 2 / Math.Max(source.Width, source.Height);
         double width = source.Width * scale, height = source.Height * scale;

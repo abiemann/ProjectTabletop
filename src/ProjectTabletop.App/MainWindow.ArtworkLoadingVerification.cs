@@ -16,9 +16,9 @@ public sealed partial class MainWindow
         using var target = new CanvasRenderTarget(device, 1280, 720, 96);
         var now = MonotonicClock.UtcNow.AddMinutes(1);
         var results = new List<object>();
-        foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.Monopoly })
+        foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.CrownDeed })
         {
-            using var scene = new SceneCompositor(blackjackClock: () => now, monopolyClock: () => now);
+            using var scene = new SceneCompositor(blackjackClock: () => now, crownDeedClock: () => now);
             Configure(scene);
             scene.ShowBoardMenu();
             Require(Field(scene, "_slotImages") is null && Field(scene, "_rouletteImages") is null &&
@@ -27,7 +27,7 @@ public sealed partial class MainWindow
             {
                 case BoardScreen.Slots: scene.ShowSlots(); break;
                 case BoardScreen.Roulette: scene.ShowRoulette(); break;
-                case BoardScreen.Monopoly: scene.ShowMonopoly(); break;
+                case BoardScreen.CrownDeed: scene.ShowCrownDeed(); break;
             }
             string action = screen switch
             {
@@ -37,13 +37,13 @@ public sealed partial class MainWindow
             // entrance. Roulette's Spin is disabled until a bet is placed, so
             // its fixture uses an otherwise enabled chip-selection action.
             Require(scene.CurrentBoardButtons.Any(button => button.Id == action &&
-                    (screen == BoardScreen.Monopoly || button.Enabled)),
+                    (screen == BoardScreen.CrownDeed || button.Enabled)),
                 "The pending-artwork fixture has no game action: " + screen);
             bool activatedBeforeArtwork = screen switch
             {
                 BoardScreen.Slots => scene.ActivateSlotsButton(action),
                 BoardScreen.Roulette => scene.ActivateRouletteButton(action),
-                _ => scene.ActivateMonopolyButton(action)
+                _ => scene.ActivateCrownDeedButton(action)
             };
             Require(!activatedBeforeArtwork, "A game accepted a button before its artwork was available.");
             Draw(scene);
@@ -72,8 +72,8 @@ public sealed partial class MainWindow
             if (screen == BoardScreen.Slots)
                 Require(assets.Image("slot-menu-dragon.png") is null && scene.SlotsArtworkReady,
                     "Dragon Slots loaded the unused menu dragon or lost a gameplay sprite.");
-            if (screen == BoardScreen.Monopoly)
-                Require(typeof(SceneCompositor).GetField("_monopolyEntranceTileAtlas", BindingFlags.Instance | BindingFlags.NonPublic) is null,
+            if (screen == BoardScreen.CrownDeed)
+                Require(typeof(SceneCompositor).GetField("_crownDeedEntranceTileAtlas", BindingFlags.Instance | BindingFlags.NonPublic) is null,
                     "Crown & Deed retained its unused full-board entrance atlas.");
             // A calibration/raster reset invalidates display targets, not decoded files.
             Configure(scene);

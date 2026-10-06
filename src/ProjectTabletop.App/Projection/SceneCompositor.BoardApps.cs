@@ -23,26 +23,26 @@ public sealed partial class SceneCompositor
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long PhotoUiRevision, int PhotoDrawerFrame, double PhotoAspect,
         long BlackjackRevision, long BlackjackFlightRevision,
-        long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long MonopolyRevision, long MonopolyDiceRevision,
-        long MonopolySessionRevision, int MonopolyDrawerFrame, long MonopolyEntranceRevision, int MonopolyEntranceFrame, long CrownDeedDevelopmentFrame,
+        long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long CrownDeedRevision, long CrownDeedDiceRevision,
+        long CrownDeedSessionRevision, int CrownDeedDrawerFrame, long CrownDeedEntranceRevision, int CrownDeedEntranceFrame, long CrownDeedDevelopmentFrame,
         long GlobeRevision, long GlobeFrame, long GlobeSessionRevision, long SlotsRevision, double SlotsAspect, int MenuFrame,
         long RouletteRevision, double RouletteAspect, string? RouletteHover);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
         Func<DateTimeOffset>? boardRevealClock = null, Func<DateTimeOffset>? paintClock = null,
-        MonopolyGame? monopoly = null, Func<DateTimeOffset>? monopolyClock = null,
+        CrownDeedGame? crownDeed = null, Func<DateTimeOffset>? crownDeedClock = null,
         GlobeState? globe = null, Func<DateTimeOffset>? globeClock = null, SlotGame? slots = null, RouletteGame? roulette = null)
     {
-        _boardSession = new BoardSession(blackjack, monopoly, globe, slots, roulette);
+        _boardSession = new BoardSession(blackjack, crownDeed, globe, slots, roulette);
         _blackjackClock = blackjackClock ?? (() => MonotonicClock.UtcNow);
         _boardRevealClock = boardRevealClock ?? (() => MonotonicClock.UtcNow);
         _paintClock = paintClock ?? (() => MonotonicClock.UtcNow);
-        _monopolyClock = monopolyClock ?? blackjackClock ?? (() => MonotonicClock.UtcNow);
+        _crownDeedClock = crownDeedClock ?? blackjackClock ?? (() => MonotonicClock.UtcNow);
         _globeClock = globeClock ?? blackjackClock ?? (() => MonotonicClock.UtcNow);
         _boardSession.BlackjackHitOccurred += OnBlackjackHit;
         _boardSession.BlackjackDealOccurred += OnBlackjackDeal;
-        _boardSession.MonopolyRollOccurred += OnMonopolyRoll;
-        _boardSession.MonopolyDevelopmentOccurred += OnMonopolyDevelopment;
+        _boardSession.CrownDeedRollOccurred += OnCrownDeedRoll;
+        _boardSession.CrownDeedDevelopmentOccurred += OnCrownDeedDevelopment;
         _boardSession.BoardOpened += OnBoardOpened;
         _boardSession.LicensesRequested += () => LicensesRequested?.Invoke();
     }
@@ -144,11 +144,11 @@ public sealed partial class SceneCompositor
         var blackjackNow = _blackjackClock();
         _boardSession.TickMenu(blackjackNow);
         TickBlackjackVisuals(blackjackNow);
-        var monopolyNow = _monopolyClock();
-        var monopolyEntrance = GetMonopolyEntranceFrame(monopolyNow);
-        if (monopolyEntrance?.Active != true) _boardSession.TickMonopoly(monopolyNow);
-        var monopolyPresented = MonopolyPresentedState(monopolyNow);
-        var monopolyDicePresented = HasMonopolyDicePresentation(monopolyNow);
+        var crownDeedNow = _crownDeedClock();
+        var crownDeedEntrance = GetCrownDeedEntranceFrame(crownDeedNow);
+        if (crownDeedEntrance?.Active != true) _boardSession.TickCrownDeed(crownDeedNow);
+        var crownDeedPresented = CrownDeedPresentedState(crownDeedNow);
+        var crownDeedDicePresented = HasCrownDeedDicePresentation(crownDeedNow);
         var flights = GetBlackjackFlights(blackjackNow);
         var deal = GetBlackjackDealFrame(blackjackNow);
         var photoCopy = _boardSession.Screen == BoardScreen.PhotoCopy;
@@ -186,13 +186,13 @@ public sealed partial class SceneCompositor
             _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision : 0,
             _blackjackFlightRevision, paint ? PaintVisualRevision(paintNow) : 0,
             paint ? GetPaintSaveStatus(paintNow) : null, paint && _boardSession.PaintSaveEnabled,
-            _boardSession.Screen == BoardScreen.Monopoly ? _boardSession.MonopolyState.Revision : 0,
-            _boardSession.Screen == BoardScreen.Monopoly ? MonopolyDicePresentationRevision : 0,
-            _boardSession.Screen == BoardScreen.Monopoly ? _boardSession.Revision : 0,
-            _boardSession.Screen == BoardScreen.Monopoly ? MonopolyDrawerFrame(monopolyNow) : -1,
-            _boardSession.Screen == BoardScreen.Monopoly ? MonopolyEntranceRevision : 0,
-            MonopolyEntranceRenderFrame(monopolyEntrance),
-            _boardSession.Screen == BoardScreen.Monopoly ? CrownDeedDevelopmentRenderFrame(monopolyNow) : 0,
+            _boardSession.Screen == BoardScreen.CrownDeed ? _boardSession.CrownDeedState.Revision : 0,
+            _boardSession.Screen == BoardScreen.CrownDeed ? CrownDeedDicePresentationRevision : 0,
+            _boardSession.Screen == BoardScreen.CrownDeed ? _boardSession.Revision : 0,
+            _boardSession.Screen == BoardScreen.CrownDeed ? CrownDeedDrawerFrame(crownDeedNow) : -1,
+            _boardSession.Screen == BoardScreen.CrownDeed ? CrownDeedEntranceRevision : 0,
+            CrownDeedEntranceRenderFrame(crownDeedEntrance),
+            _boardSession.Screen == BoardScreen.CrownDeed ? CrownDeedDevelopmentRenderFrame(crownDeedNow) : 0,
             globe ? _boardSession.GetGlobeSnapshot(globeNow).Revision : 0,
             globe ? GlobeVisualFrame(globeNow) : 0,
             globe ? _boardSession.Revision : 0,
@@ -214,7 +214,7 @@ public sealed partial class SceneCompositor
                 DrawPhotoCopyStamps(surface, state.PhotoStampCount);
                 DrawPhotoCopyObjectSpotlight(surface);
             }
-            else if (_boardSession.Screen is not (BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.Monopoly or
+            else if (_boardSession.Screen is not (BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.CrownDeed or
                 BoardScreen.Globe or BoardScreen.Slots or BoardScreen.Roulette))
                 DrawMetalBackdrop(surface, drawFooterDivider: _boardSession.Screen != BoardScreen.Menu,
                     drawDarkInsetFrame: _boardSession.Screen != BoardScreen.Menu);
@@ -246,13 +246,13 @@ public sealed partial class SceneCompositor
                     handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback,
                     HiddenBlackjackCards(flights), deal);
             }
-            else if (_boardSession.Screen == BoardScreen.Monopoly)
+            else if (_boardSession.Screen == BoardScreen.CrownDeed)
             {
-                DrawMonopolyBoard(surface, monopolyPresented, _boardSession.Buttons,
+                DrawCrownDeedBoard(surface, crownDeedPresented, _boardSession.Buttons,
                     handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback,
-                    PaintBoardAspect(), hideDiceDisplay: monopolyDicePresented,
-                    rolling: HasMonopolyDiceAnimation(monopolyNow), drawerOpen: _boardSession.MonopolyDrawerOpen,
-                    drawerProgress: MonopolyDrawerProgress(monopolyNow), entrance: monopolyEntrance);
+                    PaintBoardAspect(), hideDiceDisplay: crownDeedDicePresented,
+                    rolling: HasCrownDeedDiceAnimation(crownDeedNow), drawerOpen: _boardSession.CrownDeedDrawerOpen,
+                    drawerProgress: CrownDeedDrawerProgress(crownDeedNow), entrance: crownDeedEntrance);
             }
             else if (slots)
                 DrawSlotsMachine(surface, _boardSession.SlotsState, _boardSession.Buttons, PaintBoardAspect());
@@ -393,7 +393,7 @@ public sealed partial class SceneCompositor
             };
             ds.DrawImage(moving);
         }
-        if (DrawMonopolyDiceLayer(ds.Device, monopolyNow, PaintBoardAspect()) is { } diceLayer)
+        if (DrawCrownDeedDiceLayer(ds.Device, crownDeedNow, PaintBoardAspect()) is { } diceLayer)
         {
             using var movingDice = new Transform3DEffect
             {
@@ -449,7 +449,7 @@ public sealed partial class SceneCompositor
             BoardScreen.PhotoCopy => "Copy hands and objects",
             BoardScreen.Blackjack => "Play against the dealer",
             BoardScreen.Paint => "Liquid colour & metallic ink",
-            BoardScreen.Monopoly => "Build your fortune. Shape the city.",
+            BoardScreen.CrownDeed => "Build your fortune. Shape the city.",
             BoardScreen.Globe => "Zoom and rotate Earth",
             BoardScreen.Roulette => "Place your chips and spin",
             _ => "Coming soon"

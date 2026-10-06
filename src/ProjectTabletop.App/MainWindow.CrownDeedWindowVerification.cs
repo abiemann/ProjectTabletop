@@ -40,15 +40,15 @@ public sealed partial class MainWindow
         {
             using var scene = Fixture(view.Width, view.Height, out double inset);
             await scene.EnsureCrownDeedResourcesAsync(CanvasDevice.GetSharedDevice());
-            Require(scene.GetMonopolyEntranceFrame(now) is { Active: true, ElapsedMilliseconds: 0 },
+            Require(scene.GetCrownDeedEntranceFrame(now) is { Active: true, ElapsedMilliseconds: 0 },
                 "The static-window fixture did not begin its entrance after artwork loading.");
             using var preview = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), view.Width, view.Height, 96);
             using var projector = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), view.Width, view.Height, 96);
             now += TimeSpan.FromMilliseconds(4975);
-            scene.TickMonopoly(now);
-            Require(!scene.MonopolyEntranceActive, "The static-window fixture sampled its stationary board before the entrance ended.");
+            scene.TickCrownDeed(now);
+            Require(!scene.CrownDeedEntranceActive, "The static-window fixture sampled its stationary board before the entrance ended.");
             Draw(scene, preview, false); Draw(scene, projector, true); Draw(scene, preview, false);
-            Require(scene.MonopolyState.Phase == MonopolyPhase.Landing, "The rollback fixture did not retain the landing screen.");
+            Require(scene.CrownDeedState.Phase == CrownDeedPhase.Landing, "The rollback fixture did not retain the landing screen.");
             var city = Field<CanvasBitmap>(scene, "_crownDeedCityBitmap");
             using var original = await CanvasBitmap.LoadAsync(city.Device,
                 Path.Combine(AppContext.BaseDirectory, "Assets", "CrownDeed", "crown-deed-city.png"), 96);
@@ -62,11 +62,11 @@ public sealed partial class MainWindow
                     (float)(view.Height * (.035 + .93 * inset / 2)));
             var projectorProbes = Probes(view.Width, view.Height, projectedMap);
             byte[] firstPreview = Draw(scene, preview, false), firstProjector = Draw(scene, projector, true);
-            var foreground = Field<CanvasRenderTarget>(scene, "_monopolyPreviewTarget");
+            var foreground = Field<CanvasRenderTarget>(scene, "_crownDeedPreviewTarget");
             CheckOriginalPaneSource(city, foreground);
             byte[] staticForeground = foreground.GetPixelBytes();
-            var foregroundKey = Raw(scene, "_monopolyPreviewState");
-            var snapshot = scene.MonopolyState;
+            var foregroundKey = Raw(scene, "_crownDeedPreviewState");
+            var snapshot = scene.CrownDeedState;
             long gameRevision = snapshot.Revision;
             var buttons = scene.CurrentBoardButtons.ToArray();
             var started = now;
@@ -80,11 +80,11 @@ public sealed partial class MainWindow
                 sameClockChecks += 2;
                 CheckWindows(firstPreview, current, previewProbes);
                 CheckWindows(firstProjector, projected, projectorProbes);
-                Require(ReferenceEquals(foreground, Field<CanvasRenderTarget>(scene, "_monopolyPreviewTarget")) &&
-                    Equals(foregroundKey, Raw(scene, "_monopolyPreviewState")) && staticForeground.SequenceEqual(foreground.GetPixelBytes()),
+                Require(ReferenceEquals(foreground, Field<CanvasRenderTarget>(scene, "_crownDeedPreviewTarget")) &&
+                    Equals(foregroundKey, Raw(scene, "_crownDeedPreviewState")) && staticForeground.SequenceEqual(foreground.GetPixelBytes()),
                     "Clock advancement repainted the static city artwork.");
                 cacheChecks++;
-                Require(ReferenceEquals(snapshot, scene.MonopolyState) && scene.MonopolyState.Revision == gameRevision &&
+                Require(ReferenceEquals(snapshot, scene.CrownDeedState) && scene.CrownDeedState.Revision == gameRevision &&
                     scene.CurrentBoardButtons.SequenceEqual(buttons),
                     "Static artwork drawing changed the landing game state.");
                 stateChecks++;
@@ -94,11 +94,11 @@ public sealed partial class MainWindow
                 if (seconds == 18)
                     await Capture(preview, view.Name + "-landing-static-artwork-18s");
             }
-            Require(scene.ActivateMonopolyButton("mp-start-game"), "The static-window fixture could not enter setup.");
+            Require(scene.ActivateCrownDeedButton("mp-start-game"), "The static-window fixture could not enter setup.");
             CheckWindows(firstPreview, Draw(scene, preview, false), previewProbes);
             phaseChecks++;
-            Require(scene.ActivateMonopolyButton("mp-ai-minus") && scene.ActivateMonopolyButton("mp-human-plus") &&
-                scene.ActivateMonopolyButton("mp-start"), "The static-window fixture could not start two human players.");
+            Require(scene.ActivateCrownDeedButton("mp-ai-minus") && scene.ActivateCrownDeedButton("mp-human-plus") &&
+                scene.ActivateCrownDeedButton("mp-start"), "The static-window fixture could not start two human players.");
             CheckWindows(firstPreview, Draw(scene, preview, false), previewProbes);
             phaseChecks++;
             await Capture(preview, view.Name + "-playing-original-windows");
@@ -132,14 +132,14 @@ public sealed partial class MainWindow
 
         SceneCompositor Fixture(int width, int height, out double inset)
         {
-            var scene = new SceneCompositor(monopoly: new MonopolyGame(157), blackjackClock: () => now,
-                monopolyClock: () => now, boardRevealClock: () => now);
+            var scene = new SceneCompositor(crownDeed: new CrownDeedGame(157), blackjackClock: () => now,
+                crownDeedClock: () => now, boardRevealClock: () => now);
             scene.SetDisplayAspect(width / (double)height);
             scene.SetBoardSetup(true);
             inset = scene.SetDetectedBoardGrid([new(.035f, .035f), new(.965f, .035f), new(.965f, .965f), new(.035f, .965f)],
                 Homography.FromFourPoints([new(0, 0), new(width, 0), new(width, height), new(0, height)],
                     [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
-            scene.SetBoardSetup(false); scene.ShowMonopoly();
+            scene.SetBoardSetup(false); scene.ShowCrownDeed();
             return scene;
         }
         void CheckWindows(byte[] first, byte[] current, int[][] probes)
@@ -216,7 +216,7 @@ public sealed partial class MainWindow
         {
             using (var drawing = target.CreateDrawingSession())
                 if (projector) scene.Draw(drawing, (float)target.Size.Width, (float)target.Size.Height, false, false);
-                else scene.DrawMonopolyPreview(drawing, (float)target.Size.Width, (float)target.Size.Height);
+                else scene.DrawCrownDeedPreview(drawing, (float)target.Size.Width, (float)target.Size.Height);
             return target.GetPixelBytes();
         }
         async Task Capture(CanvasRenderTarget target, string name)

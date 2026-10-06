@@ -24,11 +24,11 @@ public sealed partial class MainWindow
         var now = MonotonicClock.UtcNow.AddMinutes(1);
         var globeStartedAt = now;
         var globeNow = globeStartedAt;
-        var monopolyNow = MonotonicClock.UtcNow;
+        var crownDeedNow = MonotonicClock.UtcNow;
         Vector2[] physicalCorners = [new(.10f, .14f), new(.90f, .14f), new(.90f, .86f), new(.10f, .86f)];
         Point2[] unit = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
         BoardScreen[] boards = [BoardScreen.Menu, BoardScreen.HandTracking, BoardScreen.PhotoCopy,
-            BoardScreen.Paint, BoardScreen.Blackjack, BoardScreen.Monopoly, BoardScreen.Globe,
+            BoardScreen.Paint, BoardScreen.Blackjack, BoardScreen.CrownDeed, BoardScreen.Globe,
             BoardScreen.Slots, BoardScreen.Settings];
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
         var referencePixels = new Dictionary<BoardScreen, byte[]>();
@@ -98,7 +98,7 @@ public sealed partial class MainWindow
                 {
                     using var scene = new SceneCompositor(new BlackjackGame(seed: 173),
                         paintClock: () => now, globeClock: () => globeNow,
-                        monopolyClock: () => monopolyNow);
+                        crownDeedClock: () => crownDeedNow);
                     await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
                     await scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
                     scene.SetDisplayAspect((double)width / height);
@@ -223,7 +223,7 @@ public sealed partial class MainWindow
         SceneCompositor NewScene(int cameraQuarterTurn, out Homography map, out double inset)
         {
             var result = new SceneCompositor(new BlackjackGame(seed: 173),
-                paintClock: () => now, globeClock: () => globeNow, monopolyClock: () => monopolyNow);
+                paintClock: () => now, globeClock: () => globeNow, crownDeedClock: () => crownDeedNow);
             result.SetDisplayAspect((double)width / height);
             result.SetBoardFacingDegrees(0);
             result.SetBoardSetup(true);
@@ -269,13 +269,13 @@ public sealed partial class MainWindow
                     scene.ResetPaint();
                     break;
                 case BoardScreen.Blackjack: scene.ShowBlackjack(); break;
-                case BoardScreen.Monopoly:
+                case BoardScreen.CrownDeed:
                     // Keep the completed barrier behind real camera timestamps;
                     // the unrelated Paint clock deliberately runs in the future.
-                    monopolyNow = MonotonicClock.UtcNow.AddMilliseconds(-5075);
-                    scene.ShowMonopoly();
-                    monopolyNow += TimeSpan.FromMilliseconds(4975);
-                    scene.TickMonopoly(monopolyNow);
+                    crownDeedNow = MonotonicClock.UtcNow.AddMilliseconds(-5075);
+                    scene.ShowCrownDeed();
+                    crownDeedNow += TimeSpan.FromMilliseconds(4975);
+                    scene.TickCrownDeed(crownDeedNow);
                     break;
                 case BoardScreen.Globe:
                     // Each camera orientation samples the same fully approached

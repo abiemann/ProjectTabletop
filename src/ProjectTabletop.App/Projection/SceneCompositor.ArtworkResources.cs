@@ -13,7 +13,7 @@ public sealed partial class SceneCompositor
     {
         BoardScreen.Slots => _slotArtworkAttempted,
         BoardScreen.Roulette => _rouletteArtworkPublished,
-        BoardScreen.Monopoly => CrownDeedResourcesReady,
+        BoardScreen.CrownDeed => CrownDeedResourcesReady,
         _ => true
     };
 
@@ -21,7 +21,7 @@ public sealed partial class SceneCompositor
     {
         BoardScreen.Slots => EnsureSlotResourcesAsync(device),
         BoardScreen.Roulette => EnsureRouletteResourcesAsync(device),
-        BoardScreen.Monopoly => EnsureCrownDeedResourcesAsync(device),
+        BoardScreen.CrownDeed => EnsureCrownDeedResourcesAsync(device),
         _ => Task.CompletedTask
     };
 
@@ -29,7 +29,7 @@ public sealed partial class SceneCompositor
     {
         BoardScreen.Slots => PrepareSlotResources(device),
         BoardScreen.Roulette => PrepareRouletteResources(device),
-        BoardScreen.Monopoly => PrepareCrownDeedResources(device),
+        BoardScreen.CrownDeed => PrepareCrownDeedResources(device),
         _ => true
     };
 
@@ -42,7 +42,7 @@ public sealed partial class SceneCompositor
         _holdExpectedScene = null;
         _slotsPreviewKey = null;
         _roulettePreviewKey = null;
-        _monopolyPreviewState = null;
+        _crownDeedPreviewState = null;
     }
 
     private bool BlockBoardArtworkInput()
@@ -57,7 +57,7 @@ public sealed partial class SceneCompositor
         {
             _artworkInputPending = false;
             if (_artworkInputPendingScreen == _boardSession.Screen)
-                ClearHandTipsCore(resetInput: true, cancelMonopolyEntrance: false);
+                ClearHandTipsCore(resetInput: true, cancelCrownDeedEntrance: false);
         }
         return false;
     }
@@ -75,7 +75,7 @@ public sealed partial class SceneCompositor
         {
             BoardScreen.Slots => _slotImages?.Error,
             BoardScreen.Roulette => _rouletteImages?.Error,
-            BoardScreen.Monopoly => CrownDeedResourcesError,
+            BoardScreen.CrownDeed => CrownDeedResourcesError,
             _ => null
         };
         drawing.DrawText(error is null ? "Loading…" : "Could not load board",

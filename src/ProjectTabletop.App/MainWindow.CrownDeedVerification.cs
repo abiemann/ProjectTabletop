@@ -15,20 +15,20 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     // Render and camera-comparison fixtures are isolated from the user's game,
-    // camera, projection window and persistent Monopoly save.
-    private async Task<object> VerifyMonopolyAsync()
+    // camera, projection window and persistent CrownDeed save.
+    private async Task<object> VerifyCrownDeedAsync()
     {
         var liveOutput = _output;
         var liveState = (_camera.IsRunning, _output?.AppWindow.IsVisible,
-            Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.MonopolyState.Revision);
+            Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.CrownDeedState.Revision);
         const int width = 3840, height = 2160;
         var now = DateTimeOffset.UtcNow.AddMinutes(1);
-        string directory = Path.Combine(_appDataDirectory, "MonopolyVerification", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(_appDataDirectory, "CrownDeedVerification", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var images = new List<string>();
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), width, height, 96);
-        using var scene = new SceneCompositor(monopoly: new MonopolyGame(seed: 27, initialRolls: [new(1, 2)]),
-            blackjackClock: () => now, monopolyClock: () => now);
+        using var scene = new SceneCompositor(crownDeed: new CrownDeedGame(seed: 27, initialRolls: [new(1, 2)]),
+            blackjackClock: () => now, crownDeedClock: () => now);
         await scene.EnsureCrownDeedResourcesAsync(CanvasDevice.GetSharedDevice());
         scene.SetDisplayAspect(width / (double)height);
         scene.SetBoardSetup(true);
@@ -37,90 +37,90 @@ public sealed partial class MainWindow
             Homography.FromFourPoints([new(0, 0), new(width, 0), new(width, height), new(0, height)],
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
         scene.SetBoardSetup(false);
-        scene.ShowMonopoly();
+        scene.ShowCrownDeed();
         now += TimeSpan.FromMilliseconds(4975);
-        scene.TickMonopoly(now);
+        scene.TickCrownDeed(now);
         await Capture("landing");
         Require(scene.CurrentBoardButtons.Any(button => button.Label == "Start Game"), "The landing board lacks Start Game.");
         await CheckAcquisition("landing");
         Act("mp-start-game");
         await Capture("setup");
-        Require(scene.MonopolyState.Phase == MonopolyPhase.Setup && scene.MonopolyState.HumanPlayers == 1 &&
-            scene.MonopolyState.AiPlayers == 1, "The setup view does not show one human and one AI.");
+        Require(scene.CrownDeedState.Phase == CrownDeedPhase.Setup && scene.CrownDeedState.HumanPlayers == 1 &&
+            scene.CrownDeedState.AiPlayers == 1, "The setup view does not show one human and one AI.");
         await CheckAcquisition("setup");
         Act("mp-ai-minus"); Act("mp-human-plus"); Act("mp-start");
         await Capture("game");
-        Require(scene.MonopolyState.Players.Count == 2 && scene.MonopolyState.Players.All(player => !player.IsAi),
+        Require(scene.CrownDeedState.Players.Count == 2 && scene.CrownDeedState.Players.All(player => !player.IsAi),
             "The actual game did not use the configured two human players.");
-        CheckTokenGeometry(scene.MonopolyState);
+        CheckTokenGeometry(scene.CrownDeedState);
         var roll = scene.CurrentBoardButtons.Single(button => button.Id == "mp-roll");
         Require(roll.Label == "Roll" && roll.Enabled && roll.Bounds.Width > roll.Bounds.Height,
             "The dice pill lacks its exact Roll caption or enabled target.");
         await CheckAcquisition("game");
         Act("mp-roll");
         now += TimeSpan.FromSeconds(3.6);
-        scene.TickMonopoly(now);
+        scene.TickCrownDeed(now);
         Act("mp-buy");
         await Capture("property-purchased");
-        Require(scene.MonopolyState.Players[0].Position == 3 &&
-            scene.MonopolyState.Properties.Single(property => property.SpaceIndex == 3).OwnerId == scene.MonopolyState.Players[0].Id,
+        Require(scene.CrownDeedState.Players[0].Position == 3 &&
+            scene.CrownDeedState.Properties.Single(property => property.SpaceIndex == 3).OwnerId == scene.CrownDeedState.Players[0].Id,
             "A native rendered move and purchase disagree with the game state.");
         Act("mp-exit");
         now += TimeSpan.FromMilliseconds(320);
-        scene.TickMonopoly(now);
+        scene.TickCrownDeed(now);
         await Capture("exit-confirmation");
         await CheckAcquisition("exit-confirmation");
-        Require(scene.CurrentBoardScreen == BoardScreen.Monopoly && scene.MonopolyState.Phase == MonopolyPhase.ExitConfirmation,
+        Require(scene.CurrentBoardScreen == BoardScreen.CrownDeed && scene.CrownDeedState.Phase == CrownDeedPhase.ExitConfirmation,
             "Mid-game Exit closed the game before save confirmation.");
 
         Act("mp-save-exit");
-        Require(scene.TryGetMonopolySaveRequest(out long requestId, out string json) && scene.MonopolyState.Phase == MonopolyPhase.Saving,
+        Require(scene.TryGetCrownDeedSaveRequest(out long requestId, out string json) && scene.CrownDeedState.Phase == CrownDeedPhase.Saving,
             "Save and exit did not produce a save request.");
         string savePath = Path.Combine(directory, "saved-game.json");
-        await MonopolySaveStore.SaveAsync(savePath, json);
-        Require(await MonopolySaveStore.LoadAsync(savePath) == json, "Saving and reading Monopoly changed its JSON payload.");
+        await CrownDeedSaveStore.SaveAsync(savePath, json);
+        Require(await CrownDeedSaveStore.LoadAsync(savePath) == json, "Saving and reading CrownDeed changed its JSON payload.");
         byte[] previousSave = await File.ReadAllBytesAsync(savePath);
         // Holding the destination without delete-sharing rejects atomic replacement
         // after the temporary write. The earlier game must survive that failure.
         bool failed = false;
         await using (var heldSave = new FileStream(savePath, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
-            try { await MonopolySaveStore.SaveAsync(savePath, json + " "); }
+            try { await CrownDeedSaveStore.SaveAsync(savePath, json + " "); }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException) { failed = true; }
         }
         byte[] saveAfterFailure = await File.ReadAllBytesAsync(savePath);
         Require(failed && previousSave.SequenceEqual(saveAfterFailure) &&
             Directory.GetFiles(directory, "*.tmp").Length == 0,
-            "A failed Monopoly write damaged the prior save or left an unpublished temporary file.");
-        Require(scene.CompleteMonopolySave(requestId, success: false, "Verification write failure") &&
-            scene.CurrentBoardScreen == BoardScreen.Monopoly && scene.MonopolyState.Phase == MonopolyPhase.ExitConfirmation &&
-            !scene.CompleteMonopolySave(requestId, success: true),
+            "A failed CrownDeed write damaged the prior save or left an unpublished temporary file.");
+        Require(scene.CompleteCrownDeedSave(requestId, success: false, "Verification write failure") &&
+            scene.CurrentBoardScreen == BoardScreen.CrownDeed && scene.CrownDeedState.Phase == CrownDeedPhase.ExitConfirmation &&
+            !scene.CompleteCrownDeedSave(requestId, success: true),
             "A failed save navigated away or accepted a later stale success.");
         Act("mp-exit-cancel");
-        Require(scene.MonopolyState.Phase == MonopolyPhase.AwaitingEndTurn && scene.MonopolyState.Players[0].Money == 1440,
+        Require(scene.CrownDeedState.Phase == CrownDeedPhase.AwaitingEndTurn && scene.CrownDeedState.Players[0].Money == 1440,
             "Cancel after a failed save lost the interrupted game.");
         Act("mp-exit");
         now += TimeSpan.FromMilliseconds(320);
-        scene.TickMonopoly(now);
+        scene.TickCrownDeed(now);
         Act("mp-save-exit");
-        Require(scene.TryGetMonopolySaveRequest(out long retryId, out string retryJson) && retryId > requestId,
+        Require(scene.TryGetCrownDeedSaveRequest(out long retryId, out string retryJson) && retryId > requestId,
             "A save failure blocked a fresh retry.");
-        await MonopolySaveStore.SaveAsync(savePath, retryJson);
-        Require(scene.CompleteMonopolySave(retryId, success: true) && scene.CurrentBoardScreen == BoardScreen.Menu,
+        await CrownDeedSaveStore.SaveAsync(savePath, retryJson);
+        Require(scene.CompleteCrownDeedSave(retryId, success: true) && scene.CurrentBoardScreen == BoardScreen.Menu,
             "A completed disk save did not exit to the menu.");
-        using var resumed = new SceneCompositor(monopolyClock: () => now);
+        using var resumed = new SceneCompositor(crownDeedClock: () => now);
         await resumed.EnsureCrownDeedResourcesAsync(CanvasDevice.GetSharedDevice());
-        Require(resumed.LoadMonopolySave((await MonopolySaveStore.LoadAsync(savePath))!), "A persisted Monopoly game could not be loaded.");
-        resumed.ShowMonopoly();
+        Require(resumed.LoadCrownDeedSave((await CrownDeedSaveStore.LoadAsync(savePath))!), "A persisted CrownDeed game could not be loaded.");
+        resumed.ShowCrownDeed();
         now += TimeSpan.FromMilliseconds(4975);
-        resumed.TickMonopoly(now);
-        Require(resumed.MonopolyState.Phase == MonopolyPhase.Landing && resumed.MonopolyState.CanResume &&
-            resumed.ActivateMonopolyButton("mp-resume") && resumed.MonopolyState.Phase == MonopolyPhase.AwaitingEndTurn &&
-            resumed.MonopolyState.Players[0].Money == 1440 && resumed.MonopolyState.Players[0].Position == 3,
+        resumed.TickCrownDeed(now);
+        Require(resumed.CrownDeedState.Phase == CrownDeedPhase.Landing && resumed.CrownDeedState.CanResume &&
+            resumed.ActivateCrownDeedButton("mp-resume") && resumed.CrownDeedState.Phase == CrownDeedPhase.AwaitingEndTurn &&
+            resumed.CrownDeedState.Players[0].Money == 1440 && resumed.CrownDeedState.Players[0].Position == 3,
             "Resume did not restore the player's cash, location and interrupted turn.");
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
-                Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.MonopolyState.Revision),
-            "The isolated Monopoly check changed the user's hardware or live game.");
+                Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.CrownDeedState.Revision),
+            "The isolated CrownDeed check changed the user's hardware or live game.");
         return new { passed = true, nativeWidth = width, nativeHeight = height, images, directory,
             landingSetupGameplayAndExitRendered = true, actualTextTargets = true, stationaryTextCorruptionNeedsTwoFrames = true,
             sevenPercentThreshold = true, preliminaryLightCannotExecute = true, fortySpacesAndTokenLocations = true, saveRoundTrip = true,
@@ -129,7 +129,7 @@ public sealed partial class MainWindow
         void Act(string id)
         {
             now += TimeSpan.FromMilliseconds(20);
-            Require(scene.ActivateMonopolyButton(id), $"Monopoly view rejected {id} during {scene.MonopolyState.Phase}.");
+            Require(scene.ActivateCrownDeedButton(id), $"CrownDeed view rejected {id} during {scene.CrownDeedState.Phase}.");
         }
         byte[] Draw()
         {
@@ -140,7 +140,7 @@ public sealed partial class MainWindow
         async Task Capture(string name)
         {
             var pixels = Draw();
-            Require(pixels.Take(4).SequenceEqual(new byte[] { 0, 0, 0, 255 }), "The Monopoly frame spills outside its physical board clip.");
+            Require(pixels.Take(4).SequenceEqual(new byte[] { 0, 0, 0, 255 }), "The CrownDeed frame spills outside its physical board clip.");
             int visible = 0, gold = 0;
             for (int offset = 0; offset < pixels.Length; offset += 4)
             {
@@ -257,17 +257,17 @@ public sealed partial class MainWindow
                 {
                     scene.CompleteHandAcquisition(ready, [belowThreshold], [], now);
                     Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
-                        "Sub-7% control or lettering evidence started Monopoly search illumination.");
+                        "Sub-7% control or lettering evidence started CrownDeed search illumination.");
                 }
-                long revision = scene.MonopolyState.Revision;
+                long revision = scene.CrownDeedState.Revision;
                 scene.CompleteHandAcquisition(ready, [measured with { ControlCoverage = .07, ControlTriggerCoverage = .07 }], [], now);
                 var illuminated = scene.GetHandAcquisitionContext(now)!;
-                Require(illuminated.IlluminatedHint is not null && scene.MonopolyState.Revision == revision &&
+                Require(illuminated.IlluminatedHint is not null && scene.CrownDeedState.Revision == revision &&
                     scene.ActiveHandSpotlightCount == 0 && scene.HoveredBoardButtons.Count == 0 &&
                     ReferenceEquals(ready.ExpectedScene, illuminated.ExpectedScene),
                     $"Search assistance over {button.Label} executed an action or contaminated its unlit reference.");
                 Require(WhiteNear(Draw(), illuminated.IlluminatedHint!.Center) > WhiteNear(unlit, illuminated.IlluminatedHint.Center) + 200,
-                    "The search light does not illuminate the obstructed Monopoly text.");
+                    "The search light does not illuminate the obstructed CrownDeed text.");
                 scene.CompleteHandAcquisition(illuminated, second.Hints, [], now, illuminatedPresence: false);
                 now += TimeSpan.FromMilliseconds(1000);
                 await Task.Yield();
@@ -276,7 +276,7 @@ public sealed partial class MainWindow
         SceneCompositor.HandAcquisitionContext Ready()
         {
             Draw(); var context = scene.GetHandAcquisitionContext(now);
-            Require(context is { ObserveMotion: true, ExpectedScene: not null }, "Monopoly text acquisition did not finish settling.");
+            Require(context is { ObserveMotion: true, ExpectedScene: not null }, "CrownDeed text acquisition did not finish settling.");
             return context!;
         }
         void SaveAcquisitionFailure(string state, BoardButton button, SceneCompositor.HandAcquisitionContext context,
@@ -295,11 +295,11 @@ public sealed partial class MainWindow
                 presence
             }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         }
-        void CheckTokenGeometry(MonopolySnapshot game)
+        void CheckTokenGeometry(CrownDeedSnapshot game)
         {
             for (int space = 0; space < 40; space++)
             {
-                var cell = SceneCompositor.MonopolySpaceRectangle(space);
+                var cell = SceneCompositor.CrownDeedSpaceRectangle(space);
                 var pose = SceneCompositor.CrownDeedParcelPose(space);
                 Require(cell.X >= 0 && cell.Y >= 0 && cell.Right <= 1000 && cell.Bottom <= 1000 &&
                     pose.Width == 60 && pose.Depth == 90 && Matrix3x2.Invert(pose.Transform, out _),
@@ -311,7 +311,7 @@ public sealed partial class MainWindow
                 var fixtures = game with { Players = Array.AsReadOnly(game.Players.Select(player => player with { Position = space }).ToArray()) };
                 foreach (var player in fixtures.Players)
                 {
-                    var center = SceneCompositor.MonopolyTokenCenter(fixtures, player.Id);
+                    var center = SceneCompositor.CrownDeedTokenCenter(fixtures, player.Id);
                     Matrix3x2.Invert(pose.Transform, out var inverse);
                     var local = Vector2.Transform(center, inverse);
                     Require(local.X > 6 && local.X < pose.Width - 6 && local.Y > 6 && local.Y < pose.Depth - 6,
@@ -354,11 +354,11 @@ public sealed partial class MainWindow
     }
     // Real committed human and AI developments feed the same native renderer
     // used by the projector and laptop. No clock, event or image is substituted.
-    private async Task<object> VerifyMonopolyDevelopmentAsync()
+    private async Task<object> VerifyCrownDeedDevelopmentAsync()
     {
         var liveOutput = _output;
         var liveState = (_camera.IsRunning, _output?.AppWindow.IsVisible,
-            Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.MonopolyState.Revision);
+            Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.CrownDeedState.Revision);
         var now = DateTimeOffset.UtcNow.AddMinutes(20);
         string directory = Path.Combine(_appDataDirectory, "CrownDeedDevelopmentVerification", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -371,27 +371,27 @@ public sealed partial class MainWindow
             (Name: "portrait", Width: 720, Height: 1280) })
         {
             var game = GameFixture();
-            var developments = new List<MonopolyDevelopment>();
+            var developments = new List<CrownDeedDevelopment>();
             game.DevelopmentOccurred += value => developments.Add(value);
             using var scene = Fixture(game, viewport.Width, viewport.Height);
             using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), viewport.Width, viewport.Height, 96);
-            Require(Math.Abs(scene.MonopolyPreviewAspect - viewport.Width / (double)viewport.Height) < .001,
+            Require(Math.Abs(scene.CrownDeedPreviewAspect - viewport.Width / (double)viewport.Height) < .001,
                 "The development fixture lost its physical viewport aspect.");
             await Capture(scene, target, viewport.Name + "-owned-stage-0");
             Act(scene, "mp-manage");
             for (int stage = 1; stage <= 5; stage++)
             {
                 if (stage > 1) Act(scene, "mp-property-next");
-                Require(scene.MonopolyState.SelectedPropertyIndex == 1, "The human rise selected the wrong deed.");
-                var previous = scene.MonopolyState;
+                Require(scene.CrownDeedState.SelectedPropertyIndex == 1, "The human rise selected the wrong deed.");
+                var previous = scene.CrownDeedState;
                 int oldCount = developments.Count;
                 Act(scene, "mp-build");
                 humanBuilds++;
                 Require(developments.Count == oldCount + 1, "A human development did not publish exactly once.");
                 var development = developments[^1];
                 var started = now;
-                var committed = scene.MonopolyState;
-                string frozen = scene.ExportMonopolySave();
+                var committed = scene.CrownDeedState;
+                string frozen = scene.ExportCrownDeedSave();
                 Require(development.StartedAt == started && development.PlayerId == committed.ActivePlayer!.Id &&
                     !committed.ActivePlayer.IsAi && ReferenceEquals(development.Previous, previous) &&
                     ReferenceEquals(development.Current, committed) && Level(previous, 1) == stage - 1 &&
@@ -414,13 +414,13 @@ public sealed partial class MainWindow
                     var pixels = Draw(scene, target);
                     Require(pixels.SequenceEqual(Draw(scene, target)), "Repeated same-clock building draws changed native pixels.");
                     exactClockChecks++;
-                    Require(scene.ExportMonopolySave() == frozen && ReferenceEquals(committed, scene.MonopolyState) &&
+                    Require(scene.ExportCrownDeedSave() == frozen && ReferenceEquals(committed, scene.CrownDeedState) &&
                         developments.Count == oldCount + 1, "Drawing a building mutated rules, cash, state or event identity.");
                     immutableChecks++;
                     initial ??= pixels;
                     if (milliseconds < 1350)
                     {
-                        Require(!scene.ActivateMonopolyButton("mp-build") && !scene.TickMonopoly(now),
+                        Require(!scene.ActivateCrownDeedButton("mp-build") && !scene.TickCrownDeed(now),
                             "A development presentation allowed another action before its deadline.");
                         Require(ButtonPixelsEqual(initial, pixels, controls, viewport.Width, viewport.Height),
                             "Building motion changed stationary control captions or their surfaces.");
@@ -428,7 +428,7 @@ public sealed partial class MainWindow
                         // Construction must leave the original city artwork,
                         // neighbouring deeds and fixed UI unchanged.
                         var foreground = (CanvasRenderTarget)typeof(SceneCompositor)
-                            .GetField("_monopolyPreviewTarget", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scene)!;
+                            .GetField("_crownDeedPreviewTarget", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scene)!;
                         var foregroundPixels = foreground.GetPixelBytes();
                         initialForeground ??= foregroundPixels;
                         var nativeSize = foreground.SizeInPixels;
@@ -448,11 +448,11 @@ public sealed partial class MainWindow
                 }
                 Require(!initial!.SequenceEqual(Draw(scene, target)), "The accepted building has no visible native rise.");
                 Act(scene, "mp-property-next");
-                Require(scene.MonopolyState.SelectedPropertyIndex == 3, "The even-development partner is not selected.");
+                Require(scene.CrownDeedState.SelectedPropertyIndex == 3, "The even-development partner is not selected.");
                 Act(scene, "mp-build"); humanBuilds++;
                 now += SceneCompositor.CrownDeedDevelopmentDuration;
                 Draw(scene, target);
-                Require(Level(scene.MonopolyState, 1) == stage && Level(scene.MonopolyState, 3) == stage,
+                Require(Level(scene.CrownDeedState, 1) == stage && Level(scene.CrownDeedState, 3) == stage,
                     "The final human stage disagrees with the committed legal development levels.");
                 await Capture(scene, target, viewport.Name + "-owned-stage-" + stage);
             }
@@ -462,7 +462,7 @@ public sealed partial class MainWindow
         CheckStaleRollRetirement();
         CheckCancellation();
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
-                Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.MonopolyState.Revision),
+                Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.CrownDeedState.Revision),
             "Native development verification changed the user's live hardware or game.");
         string samplePath = Path.Combine(directory, "development-samples.json");
         await File.WriteAllTextAsync(samplePath, JsonSerializer.Serialize(samples, new JsonSerializerOptions { WriteIndented = true }));
@@ -472,46 +472,46 @@ public sealed partial class MainWindow
             stalePriorRollRetirementPreservesDevelopment = true,
             liveHardwareUnchanged = true, directory, samplePath, images };
 
-        MonopolyGame GameFixture(bool ai = false)
+        CrownDeedGame GameFixture(bool ai = false)
         {
-            var game = new MonopolyGame(seed: 151, initialRolls: [new(1, 2)]);
+            var game = new CrownDeedGame(seed: 151, initialRolls: [new(1, 2)]);
             Require(game.HandleAction("mp-start-game", now) && game.HandleAction("mp-ai-minus", now.AddMilliseconds(1)) &&
                 game.HandleAction("mp-human-plus", now.AddMilliseconds(2)) && game.HandleAction("mp-start", now.AddMilliseconds(3)),
                 "Development game fixture failed to start.");
             now += TimeSpan.FromMilliseconds(4);
-            var data = JsonSerializer.Deserialize<MonopolySaveData>(game.ExportSave(), json)!;
+            var data = JsonSerializer.Deserialize<CrownDeedSaveData>(game.ExportSave(), json)!;
             foreach (var property in data.Properties.Where(property => property.SpaceIndex is 1 or 3)) property.OwnerId = 1;
             if (ai)
             {
                 data.Humans = 1; data.Ais = 1; data.Players[0].IsAi = true;
-                data.Phase = MonopolyPhase.AwaitingEndTurn;
+                data.Phase = CrownDeedPhase.AwaitingEndTurn;
             }
             game.LoadSave(JsonSerializer.Serialize(data, json), now);
             return game;
         }
-        SceneCompositor Fixture(MonopolyGame game, int width, int height)
+        SceneCompositor Fixture(CrownDeedGame game, int width, int height)
         {
-            var fixture = new SceneCompositor(monopoly: game, blackjackClock: () => now, monopolyClock: () => now,
+            var fixture = new SceneCompositor(crownDeed: game, blackjackClock: () => now, crownDeedClock: () => now,
                 boardRevealClock: () => now);
             fixture.SetDisplayAspect(width / (double)height);
             fixture.SetBoardSetup(true);
             fixture.SetDetectedBoardGrid([new(.035f, .035f), new(.965f, .035f), new(.965f, .965f), new(.035f, .965f)],
                 Homography.FromFourPoints([new(0, 0), new(width, 0), new(width, height), new(0, height)],
                     [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
-            fixture.SetBoardSetup(false); fixture.ShowMonopoly();
-            Require(fixture.LoadMonopolySave(game.ExportSave(), resume: true), "An isolated owned city could not load.");
+            fixture.SetBoardSetup(false); fixture.ShowCrownDeed();
+            Require(fixture.LoadCrownDeedSave(game.ExportSave(), resume: true), "An isolated owned city could not load.");
             return fixture;
         }
         void Act(SceneCompositor scene, string id)
         {
             now += TimeSpan.FromMilliseconds(20);
-            Require(scene.ActivateMonopolyButton(id), "Development fixture rejected " + id + " during " + scene.MonopolyState.Phase + ".");
+            Require(scene.ActivateCrownDeedButton(id), "Development fixture rejected " + id + " during " + scene.CrownDeedState.Phase + ".");
         }
-        static int Level(MonopolySnapshot game, int space) => game.Properties.Single(property => property.SpaceIndex == space).Houses;
+        static int Level(CrownDeedSnapshot game, int space) => game.Properties.Single(property => property.SpaceIndex == space).Houses;
         static byte[] Draw(SceneCompositor scene, CanvasRenderTarget target)
         {
             using (var drawing = target.CreateDrawingSession())
-                scene.DrawMonopolyPreview(drawing, (float)target.Size.Width, (float)target.Size.Height);
+                scene.DrawCrownDeedPreview(drawing, (float)target.Size.Width, (float)target.Size.Height);
             return target.GetPixelBytes();
         }
         async Task Capture(SceneCompositor scene, CanvasRenderTarget target, string name)
@@ -538,7 +538,7 @@ public sealed partial class MainWindow
         static (int ChangedPixels, int MaxChannelDelta, long TotalChannelError, bool AlphaStable) OutsideGrowthDifference(
             byte[] first, byte[] current, int width, int height, int space)
         {
-            var b = SceneCompositor.MonopolySpaceRectangle(space);
+            var b = SceneCompositor.CrownDeedSpaceRectangle(space);
             int changed = 0, maxDelta = 0; long total = 0; bool alphaStable = true;
             for (int y = 0; y < height; y += 2)
             for (int x = 0; x < width; x += 2)
@@ -598,26 +598,26 @@ public sealed partial class MainWindow
         async Task<int> CheckAi()
         {
             var game = GameFixture(ai: true);
-            var developments = new List<MonopolyDevelopment>();
+            var developments = new List<CrownDeedDevelopment>();
             game.DevelopmentOccurred += development => developments.Add(development);
             using var scene = Fixture(game, 1152, 896);
             using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), 1152, 896, 96);
             now += TimeSpan.FromMilliseconds(1000);
-            Require(scene.TickMonopoly(now) && developments.Count == 1 && scene.MonopolyState.ActivePlayer!.IsAi &&
-                Level(scene.MonopolyState, 1) == 1, "The real AI did not develop its owned district.");
+            Require(scene.TickCrownDeed(now) && developments.Count == 1 && scene.CrownDeedState.ActivePlayer!.IsAi &&
+                Level(scene.CrownDeedState, 1) == 1, "The real AI did not develop its owned district.");
             var started = now;
-            string frozen = scene.ExportMonopolySave();
+            string frozen = scene.ExportCrownDeedSave();
             foreach (int milliseconds in new[] { 0, 675, 1349 })
             {
                 now = started.AddMilliseconds(milliseconds);
-                Require(!scene.TickMonopoly(now) && scene.GetCrownDeedDevelopmentFrame(now) is { Active: true } &&
-                    scene.ExportMonopolySave() == frozen && developments.Count == 1,
+                Require(!scene.TickCrownDeed(now) && scene.GetCrownDeedDevelopmentFrame(now) is { Active: true } &&
+                    scene.ExportCrownDeedSave() == frozen && developments.Count == 1,
                     "The AI made another decision before its building settled.");
                 await Capture(scene, target, "ai-rise-" + milliseconds + "ms");
             }
             now = started.AddMilliseconds(1350);
             Require(scene.GetCrownDeedDevelopmentFrame(now) is { Active: false, Progress: 1 } &&
-                scene.TickMonopoly(now) && developments.Count == 2 && Level(scene.MonopolyState, 3) == 1 &&
+                scene.TickCrownDeed(now) && developments.Count == 2 && Level(scene.CrownDeedState, 3) == 1 &&
                 developments[^1].Sequence > developments[0].Sequence,
                 "The actual AI did not resume one visible even development after the deadline.");
             await Capture(scene, target, "ai-second-development");
@@ -626,33 +626,33 @@ public sealed partial class MainWindow
         void CheckStaleRollRetirement()
         {
             var game = GameFixture();
-            var data = JsonSerializer.Deserialize<MonopolySaveData>(game.ExportSave(), json)!;
+            var data = JsonSerializer.Deserialize<CrownDeedSaveData>(game.ExportSave(), json)!;
             foreach (var property in data.Properties.Where(property => property.SpaceIndex is 1 or 3)) property.OwnerId = 2;
             game.LoadSave(JsonSerializer.Serialize(data, json), now);
             using var scene = Fixture(game, 1152, 896);
             using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), 1152, 896, 96);
             Act(scene, "mp-roll");
             now += TimeSpan.FromMilliseconds(3600); Draw(scene, target);
-            Require(scene.GetMonopolyDiceFrames(now).Count == 2 && scene.MonopolyState.Phase == MonopolyPhase.AwaitingEndTurn,
+            Require(scene.GetCrownDeedDiceFrames(now).Count == 2 && scene.CrownDeedState.Phase == CrownDeedPhase.AwaitingEndTurn,
                 "The stale-dice fixture has no settled real prior roll.");
             // No draw between turn change and construction: the compositor must
             // retire old dice during its first building frame without resetting
             // the newer presentation or its shared input deadline.
             Act(scene, "mp-end-turn"); Act(scene, "mp-manage"); Act(scene, "mp-build");
             var started = now;
-            var committed = scene.MonopolyState;
+            var committed = scene.CrownDeedState;
             foreach (int milliseconds in new[] { 0, 675, 1349 })
             {
                 now = started.AddMilliseconds(milliseconds); Draw(scene, target);
                 Require(scene.GetCrownDeedDevelopmentFrame(now) is { Active: true } &&
-                    ReferenceEquals(committed, scene.MonopolyState) && scene.GetMonopolyDiceFrames(now).Count == 0 &&
+                    ReferenceEquals(committed, scene.CrownDeedState) && scene.GetCrownDeedDiceFrames(now).Count == 0 &&
                     !scene.CurrentBoardButtons.Single(button => button.Id == "mp-property-next").Enabled &&
-                    !scene.ActivateMonopolyButton("mp-property-next"),
+                    !scene.ActivateCrownDeedButton("mp-property-next"),
                     "Retiring a stale prior roll cancelled a newer building rise or released its controls.");
             }
             now = started.AddMilliseconds(1350); Draw(scene, target);
             Require(scene.GetCrownDeedDevelopmentFrame(now) is { Active: false, Progress: 1 } &&
-                scene.ActivateMonopolyButton("mp-property-next"),
+                scene.ActivateCrownDeedButton("mp-property-next"),
                 "The newer building failed to release controls at its own exact deadline.");
         }
         void CheckCancellation()
@@ -667,11 +667,11 @@ public sealed partial class MainWindow
                     case "drawer": Act(scene, "mp-exit"); break;
                     case "menu": scene.ShowBoardMenu(); break;
                     case "paint": scene.ShowPaint(); break;
-                    case "same-board": scene.ShowMonopoly(); break;
+                    case "same-board": scene.ShowCrownDeed(); break;
                     case "camera": scene.ClearHandTips(resetInput: true); break;
                     case "clip": scene.ClearBoardMediaClip(); break;
                     case "black": scene.SetBlackOutput(true); break;
-                    case "load": scene.LoadMonopolySave(scene.ExportMonopolySave(), resume: true); break;
+                    case "load": scene.LoadCrownDeedSave(scene.ExportCrownDeedSave(), resume: true); break;
                 }
                 Require(scene.GetCrownDeedDevelopmentFrame(now) is null,
                     "A cancelled " + cause + " presentation retained stale development pixels.");

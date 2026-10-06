@@ -313,7 +313,7 @@ public sealed partial class MainWindow
                                 QueuePhotoCopyObservation(frame, visibleHands);
                                 QueuePhotoCopyCapture(frame, visibleHands, cursors);
                                 QueuePaintSave(frame.Timestamp);
-                                QueueMonopolySave();
+                                QueueCrownDeedSave();
                             }
                         }
                         if (_frozenFrame is null) CameraCanvas.Invalidate();

@@ -17,7 +17,7 @@ internal sealed partial class PreviewRecipes
     [
         (BoardScreen.HandTracking, "hand-tracking"), (BoardScreen.PhotoCopy, "photo-copy"),
         (BoardScreen.Blackjack, "blackjack"), (BoardScreen.Paint, "paint"),
-        (BoardScreen.Monopoly, "crown-deed"), (BoardScreen.Globe, "globe"),
+        (BoardScreen.CrownDeed, "crown-deed"), (BoardScreen.Globe, "globe"),
         (BoardScreen.Slots, "dragon-slots"), (BoardScreen.Roulette, "roulette")
     ];
     private readonly Assembly _app;
@@ -28,7 +28,7 @@ internal sealed partial class PreviewRecipes
     private readonly object _globe;
     private readonly PaletteColors Palette;
     private readonly Vector3[] PaintPigments;
-    private readonly Color MonopolyIvory, MonopolyInk;
+    private readonly Color CrownDeedIvory, CrownDeedInk;
 
     private PreviewRecipes(Assembly app, IDisposable scene, CanvasBitmap dragon, object globe,
         CanvasRenderTarget crownDeedBoard)
@@ -37,8 +37,8 @@ internal sealed partial class PreviewRecipes
         _sceneType = scene.GetType();
         Palette = new(app.GetType("ProjectTabletop.App.AppPalette", true)!);
         PaintPigments = (Vector3[])_sceneType.GetField("PaintPigments", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
-        MonopolyIvory = (Color)_sceneType.GetField("MonopolyIvory", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
-        MonopolyInk = (Color)_sceneType.GetField("MonopolyInk", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+        CrownDeedIvory = (Color)_sceneType.GetField("CrownDeedIvory", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+        CrownDeedInk = (Color)_sceneType.GetField("CrownDeedInk", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
     }
 
     public static async Task GenerateAsync(Assembly app, string root, string output, string comparisons)
@@ -125,14 +125,14 @@ internal sealed partial class PreviewRecipes
             "tools/MenuPreviewGenerator/PreviewRecipes.Native.cs", "tools/MenuPreviewGenerator/MenuPreviewGenerator.csproj",
             "tools/MenuPreviewGenerator/Generate.ps1", "src/ProjectTabletop.App/AppPalette.cs",
             "src/ProjectTabletop.App/Projection/SceneCompositor.Blackjack.cs",
-            "src/ProjectTabletop.App/Projection/SceneCompositor.Monopoly.cs",
+            "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeed.cs",
             "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedAssets.cs",
             "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedBuildings.cs",
             "src/ProjectTabletop.App/Projection/SceneCompositor.CrownDeedPieces.cs",
             "src/ProjectTabletop.App/Projection/CrownDeedPieceSources.cs",
-            "src/ProjectTabletop.Interaction/MonopolyBoard.cs",
-            "src/ProjectTabletop.Interaction/MonopolyGame.cs",
-            "src/ProjectTabletop.Interaction/MonopolyModels.cs",
+            "src/ProjectTabletop.Interaction/CrownDeedBoard.cs",
+            "src/ProjectTabletop.Interaction/CrownDeedGame.cs",
+            "src/ProjectTabletop.Interaction/CrownDeedModels.cs",
             "src/ProjectTabletop.App/Projection/SceneCompositor.Paint.cs",
             "src/ProjectTabletop.App/Projection/SceneCompositor.Roulette.cs",
             "src/ProjectTabletop.App/Projection/SceneCompositor.RouletteMotion.cs",
@@ -193,9 +193,9 @@ internal sealed partial class PreviewRecipes
                     case BoardScreen.PhotoCopy: DrawPhotoCopyPreview(drawing, span); break;
                     case BoardScreen.Blackjack: DrawBlackjackPreview(drawing, span); break;
                     case BoardScreen.Paint: fluid = DrawPaintPreview(drawing, span); break;
-                    case BoardScreen.Monopoly:
-                        if (legacy) DrawLegacyMonopolyPreview(drawing, span);
-                        else DrawMonopolyPreview(drawing, span);
+                    case BoardScreen.CrownDeed:
+                        if (legacy) DrawLegacyCrownDeedPreview(drawing, span);
+                        else DrawCrownDeedPreview(drawing, span);
                         break;
                     case BoardScreen.Globe: DrawGlobePreview(drawing, span); break;
                     case BoardScreen.Slots: DrawSlotsPreview(drawing, span); break;
@@ -211,7 +211,7 @@ internal sealed partial class PreviewRecipes
 
     private static CanvasRenderTarget RenderCrownDeedBoard(CanvasDevice device, IDisposable scene)
     {
-        var game = new MonopolyGame(seed: 27);
+        var game = new CrownDeedGame(seed: 27);
         if (!game.HandleAction("mp-start-game", DateTimeOffset.UnixEpoch) ||
             !game.HandleAction("mp-start", DateTimeOffset.UnixEpoch))
             throw new InvalidOperationException("Could not prepare the Crown & Deed preview fixture.");
@@ -228,15 +228,15 @@ internal sealed partial class PreviewRecipes
         {
             using var drawing = board.CreateDrawingSession();
             drawing.Transform = Matrix3x2.CreateScale(2.4f);
-            Call(scene, "DrawMonopolyFrame", drawing);
-            foreach (var space in MonopolyGame.Spaces)
-                Call(scene, "DrawMonopolySpace", drawing, space, snapshot, 1d, 1f);
+            Call(scene, "DrawCrownDeedFrame", drawing);
+            foreach (var space in CrownDeedGame.Spaces)
+                Call(scene, "DrawCrownDeedSpace", drawing, space, snapshot, 1d, 1f);
             return board;
         }
         catch { board.Dispose(); throw; }
     }
 
-    private void DrawMonopolyPreview(CanvasDrawingSession drawing, float span)
+    private void DrawCrownDeedPreview(CanvasDrawingSession drawing, float span)
     {
         drawing.Clear(ThemeColor(9, 25, 22));
         // Extend the native scene leftward at the same scale. Its boundary then
@@ -308,7 +308,7 @@ internal sealed partial class PreviewRecipes
             [device, width, height, width / (double)height])!;
 
     private void DrawDie(CanvasDrawingSession drawing, Rect bounds, int value, Color face, Color dots) =>
-        CallBoard("DrawMonopolyDie", drawing, bounds, value, face, dots, 1d);
+        CallBoard("DrawCrownDeedDie", drawing, bounds, value, face, dots, 1d);
 
     private object? CallBoard(string name, params object?[] arguments) => Call(_scene, name, arguments);
 

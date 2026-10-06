@@ -9,42 +9,42 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
-    private static readonly TimeSpan MonopolyDiceAnimationDuration = TimeSpan.FromSeconds(3.6);
-    private MonopolyRoll? _monopolyDiceRoll;
-    private MonopolyDicePath[] _monopolyDicePaths = [];
-    private bool _monopolyDiceSettled;
-    private long _monopolyDicePresentationRevision;
+    private static readonly TimeSpan CrownDeedDiceAnimationDuration = TimeSpan.FromSeconds(3.6);
+    private CrownDeedRoll? _crownDeedDiceRoll;
+    private CrownDeedDicePath[] _crownDeedDicePaths = [];
+    private bool _crownDeedDiceSettled;
+    private long _crownDeedDicePresentationRevision;
 
-    private sealed record MonopolyDicePath(int Edge, int Seed, Vector2 Origin, Vector2 Control,
+    private sealed record CrownDeedDicePath(int Edge, int Seed, Vector2 Origin, Vector2 Control,
         Vector2 Impact, Vector2 RollStart, Vector2 Destination, Vector3 Spin, float Phase);
 
-    internal sealed record MonopolyDiceFaceFrame(int Value, Vector3 Normal, IReadOnlyList<Vector2> Corners);
-    internal sealed record MonopolyDiceFrame(long Sequence, int DieIndex, int Result, int Edge, int Seed,
+    internal sealed record CrownDeedDiceFaceFrame(int Value, Vector3 Normal, IReadOnlyList<Vector2> Corners);
+    internal sealed record CrownDeedDiceFrame(long Sequence, int DieIndex, int Result, int Edge, int Seed,
         Vector2 StartCenter, Vector2 GroundCenter, Vector2 Center, Vector2 Destination,
         float Height, float Size, Quaternion Rotation, float Progress, bool Settled,
-        int FrontFace, IReadOnlyList<MonopolyDiceFaceFrame> VisibleFaces);
+        int FrontFace, IReadOnlyList<CrownDeedDiceFaceFrame> VisibleFaces);
 
-    internal long MonopolyDicePresentationRevision => _monopolyDicePresentationRevision;
+    internal long CrownDeedDicePresentationRevision => _crownDeedDicePresentationRevision;
 
     // Raised once for a committed rules roll. Visual randomness is captured
     // here, independently of the game's dice/card random source. A preview,
     // projection, or diagnostic read of the same frame consumes no randomness.
-    private void OnMonopolyRoll(MonopolyRoll roll)
+    private void OnCrownDeedRoll(CrownDeedRoll roll)
     {
         if (roll.Current.Dice.First is < 1 or > 6 || roll.Current.Dice.Second is < 1 or > 6) return;
-        _monopolyDiceRoll = roll;
-        _monopolyDiceSettled = false;
+        _crownDeedDiceRoll = roll;
+        _crownDeedDiceSettled = false;
         int firstEdge = Random.Shared.Next(4);
-        _monopolyDicePaths =
+        _crownDeedDicePaths =
         [
-            CreateMonopolyDicePath(firstEdge, new Vector2(691, 576)),
-            CreateMonopolyDicePath((firstEdge + 1 + Random.Shared.Next(3)) % 4, new Vector2(737, 576))
+            CreateCrownDeedDicePath(firstEdge, new Vector2(691, 576)),
+            CreateCrownDeedDicePath((firstEdge + 1 + Random.Shared.Next(3)) % 4, new Vector2(737, 576))
         ];
-        _monopolyDicePresentationRevision++;
-        _boardSession.HoldMonopolyPresentationUntil(roll.StartedAt + MonopolyDiceAnimationDuration);
+        _crownDeedDicePresentationRevision++;
+        _boardSession.HoldCrownDeedPresentationUntil(roll.StartedAt + CrownDeedDiceAnimationDuration);
     }
 
-    private static MonopolyDicePath CreateMonopolyDicePath(int edge, Vector2 destination)
+    private static CrownDeedDicePath CreateCrownDeedDicePath(int edge, Vector2 destination)
     {
         int seed = Random.Shared.Next();
         var random = new Random(seed);
@@ -66,89 +66,89 @@ public sealed partial class SceneCompositor
         return new(edge, seed, origin, control, impact, rollStart, destination, spin, Between(0, MathF.Tau));
     }
 
-    private void CancelMonopolyDiceAnimation()
+    private void CancelCrownDeedDiceAnimation()
     {
-        bool hadPresentation = _monopolyDiceRoll is not null || _crownDeedDevelopment is not null;
+        bool hadPresentation = _crownDeedDiceRoll is not null || _crownDeedDevelopment is not null;
         CancelCrownDeedDevelopment();
-        RetireMonopolyDicePresentation();
-        if (hadPresentation) _boardSession.CancelMonopolyPresentation(_monopolyClock());
+        RetireCrownDeedDicePresentation();
+        if (hadPresentation) _boardSession.CancelCrownDeedPresentation(_crownDeedClock());
     }
 
-    private void RetireMonopolyDicePresentation()
+    private void RetireCrownDeedDicePresentation()
     {
-        if (_monopolyDiceRoll is null) return;
-        _monopolyDiceRoll = null;
-        _monopolyDicePaths = [];
-        _monopolyDiceSettled = false;
-        _monopolyDicePresentationRevision++;
+        if (_crownDeedDiceRoll is null) return;
+        _crownDeedDiceRoll = null;
+        _crownDeedDicePaths = [];
+        _crownDeedDiceSettled = false;
+        _crownDeedDicePresentationRevision++;
     }
 
-    private void SynchronizeMonopolyDicePresentation(DateTimeOffset now)
+    private void SynchronizeCrownDeedDicePresentation(DateTimeOffset now)
     {
-        if (_monopolyDiceRoll is null) return;
-        var current = _boardSession.MonopolyState;
-        if (_boardSession.Screen != BoardScreen.Monopoly ||
-            current.Phase is MonopolyPhase.Landing or MonopolyPhase.Setup or MonopolyPhase.ExitConfirmation or
-                MonopolyPhase.Saving or MonopolyPhase.GameOver || current.Dice != _monopolyDiceRoll.Current.Dice)
+        if (_crownDeedDiceRoll is null) return;
+        var current = _boardSession.CrownDeedState;
+        if (_boardSession.Screen != BoardScreen.CrownDeed ||
+            current.Phase is CrownDeedPhase.Landing or CrownDeedPhase.Setup or CrownDeedPhase.ExitConfirmation or
+                CrownDeedPhase.Saving or CrownDeedPhase.GameOver || current.Dice != _crownDeedDiceRoll.Current.Dice)
         {
             // Retiring an earlier roll must not erase a later accepted build or
             // release its presentation hold when actions arrive before redraw.
-            RetireMonopolyDicePresentation();
+            RetireCrownDeedDicePresentation();
             if (GetCrownDeedDevelopmentFrame(now)?.Active != true)
-                _boardSession.CancelMonopolyPresentation(now);
+                _boardSession.CancelCrownDeedPresentation(now);
             return;
         }
-        if (!_monopolyDiceSettled && now - _monopolyDiceRoll.StartedAt >= MonopolyDiceAnimationDuration)
+        if (!_crownDeedDiceSettled && now - _crownDeedDiceRoll.StartedAt >= CrownDeedDiceAnimationDuration)
         {
-            _monopolyDiceSettled = true;
-            _monopolyDicePresentationRevision++;
+            _crownDeedDiceSettled = true;
+            _crownDeedDicePresentationRevision++;
         }
     }
 
-    private bool HasMonopolyDiceAnimation(DateTimeOffset now)
+    private bool HasCrownDeedDiceAnimation(DateTimeOffset now)
     {
-        SynchronizeMonopolyDicePresentation(now);
-        return _monopolyDiceRoll is not null && !_monopolyDiceSettled;
+        SynchronizeCrownDeedDicePresentation(now);
+        return _crownDeedDiceRoll is not null && !_crownDeedDiceSettled;
     }
 
-    private bool HasMonopolyDicePresentation(DateTimeOffset now)
+    private bool HasCrownDeedDicePresentation(DateTimeOffset now)
     {
-        SynchronizeMonopolyDicePresentation(now);
-        return _monopolyDiceRoll is not null;
+        SynchronizeCrownDeedDicePresentation(now);
+        return _crownDeedDiceRoll is not null;
     }
 
-    private MonopolySnapshot MonopolyPresentedState(DateTimeOffset now)
+    private CrownDeedSnapshot CrownDeedPresentedState(DateTimeOffset now)
     {
-        return HasMonopolyDiceAnimation(now)
-            ? _monopolyDiceRoll!.Previous with { Dice = default, Status = "Rolling the dice…", LastCard = "" }
-            : _boardSession.MonopolyState;
+        return HasCrownDeedDiceAnimation(now)
+            ? _crownDeedDiceRoll!.Previous with { Dice = default, Status = "Rolling the dice…", LastCard = "" }
+            : _boardSession.CrownDeedState;
     }
 
-    internal IReadOnlyList<MonopolyDiceFrame> GetMonopolyDiceFrames(DateTimeOffset now)
+    internal IReadOnlyList<CrownDeedDiceFrame> GetCrownDeedDiceFrames(DateTimeOffset now)
     {
         lock (_gate)
         {
-            if (!HasMonopolyDicePresentation(now)) return Array.Empty<MonopolyDiceFrame>();
-            var roll = _monopolyDiceRoll!;
+            if (!HasCrownDeedDicePresentation(now)) return Array.Empty<CrownDeedDiceFrame>();
+            var roll = _crownDeedDiceRoll!;
             float progress = Math.Clamp((float)((now - roll.StartedAt).TotalSeconds /
-                MonopolyDiceAnimationDuration.TotalSeconds), 0, 1);
-            return _monopolyDicePaths.Select((path, index) => MonopolyDicePose(roll.Sequence, index,
+                CrownDeedDiceAnimationDuration.TotalSeconds), 0, 1);
+            return _crownDeedDicePaths.Select((path, index) => CrownDeedDicePose(roll.Sequence, index,
                 index == 0 ? roll.Current.Dice.First : roll.Current.Dice.Second, path, progress)).ToArray();
         }
     }
 
-    public object GetMonopolyDiceAnimationDiagnostics(DateTimeOffset now)
+    public object GetCrownDeedDiceAnimationDiagnostics(DateTimeOffset now)
     {
         lock (_gate)
         {
-            var frames = GetMonopolyDiceFrames(now);
+            var frames = GetCrownDeedDiceFrames(now);
             return new
             {
-                durationMilliseconds = MonopolyDiceAnimationDuration.TotalMilliseconds,
-                presentationRevision = _monopolyDicePresentationRevision,
-                active = HasMonopolyDiceAnimation(now), present = _monopolyDiceRoll is not null,
-                sequence = _monopolyDiceRoll?.Sequence,
-                result = _monopolyDiceRoll?.Current.Dice,
+                durationMilliseconds = CrownDeedDiceAnimationDuration.TotalMilliseconds,
+                presentationRevision = _crownDeedDicePresentationRevision,
+                active = HasCrownDeedDiceAnimation(now), present = _crownDeedDiceRoll is not null,
+                sequence = _crownDeedDiceRoll?.Sequence,
+                result = _crownDeedDiceRoll?.Current.Dice,
                 frames = frames.Select(frame => new
                 {
                     frame.DieIndex, frame.Result, frame.Edge, frame.Seed, frame.Progress, frame.Settled,
@@ -168,16 +168,16 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private static MonopolyDiceFrame MonopolyDicePose(long sequence, int index, int result,
-        MonopolyDicePath path, float progress)
+    private static CrownDeedDiceFrame CrownDeedDicePose(long sequence, int index, int result,
+        CrownDeedDicePath path, float progress)
     {
         // The retained, settled pose is an exact state rather than the tail of
         // floating-point easing. It is shared by both native canvases and never
         // jitters or retains a residual bounce after the presentation deadline.
         if (progress >= 1)
         {
-            var finalRotation = MonopolyDiceFinalRotation(result, index);
-            var finalFaces = MonopolyDiceFaces(path.Destination, 30, finalRotation);
+            var finalRotation = CrownDeedDiceFinalRotation(result, index);
+            var finalFaces = CrownDeedDiceFaces(path.Destination, 30, finalRotation);
             int finalFrontFace = finalFaces.OrderByDescending(face => face.Normal.Z).First().Value;
             return new(sequence, index, result, path.Edge, path.Seed, path.Origin,
                 path.Destination, path.Destination, path.Destination, 0, 30, finalRotation, 1, true,
@@ -209,26 +209,26 @@ public sealed partial class SceneCompositor
         settle = 1 - MathF.Pow(1 - settle, 3);
         float size = 64 + (30 - 64) * settle;
         Quaternion orientation;
-        if (progress < .72f) orientation = MonopolyDiceTumble(path, progress);
+        if (progress < .72f) orientation = CrownDeedDiceTumble(path, progress);
         else
         {
             float u = (progress - .72f) / .28f;
             u = u * u * (3 - 2 * u);
-            orientation = Quaternion.Slerp(MonopolyDiceTumble(path, .72f), MonopolyDiceFinalRotation(result, index), u);
+            orientation = Quaternion.Slerp(CrownDeedDiceTumble(path, .72f), CrownDeedDiceFinalRotation(result, index), u);
         }
         var center = ground - new Vector2(0, height);
-        var faces = MonopolyDiceFaces(center, size, orientation);
+        var faces = CrownDeedDiceFaces(center, size, orientation);
         int frontFace = faces.OrderByDescending(face => face.Normal.Z).First().Value;
         return new(sequence, index, result, path.Edge, path.Seed, path.Origin, ground, center,
             path.Destination, height, size, orientation, progress, progress >= 1, frontFace, faces);
     }
 
-    private static Quaternion MonopolyDiceTumble(MonopolyDicePath path, float progress) =>
+    private static Quaternion CrownDeedDiceTumble(CrownDeedDicePath path, float progress) =>
         Quaternion.CreateFromYawPitchRoll(path.Phase + progress * path.Spin.Y * MathF.Tau,
             path.Phase * .63f + progress * path.Spin.X * MathF.Tau,
             path.Phase * .41f + progress * path.Spin.Z * MathF.Tau);
 
-    private static Quaternion MonopolyDiceFinalRotation(int value, int index)
+    private static Quaternion CrownDeedDiceFinalRotation(int value, int index)
     {
         var face = value switch
         {
@@ -243,8 +243,8 @@ public sealed partial class SceneCompositor
         return Quaternion.Normalize(Quaternion.Concatenate(face, tilt));
     }
 
-    private readonly record struct MonopolyDieFace(int Value, Vector3 Normal, Vector3 Right, Vector3 Down);
-    private static readonly MonopolyDieFace[] MonopolyCubeFaces =
+    private readonly record struct CrownDeedDieFace(int Value, Vector3 Normal, Vector3 Right, Vector3 Down);
+    private static readonly CrownDeedDieFace[] CrownDeedCubeFaces =
     [
         new(1, Vector3.UnitZ, Vector3.UnitX, -Vector3.UnitY),
         new(6, -Vector3.UnitZ, -Vector3.UnitX, -Vector3.UnitY),
@@ -254,27 +254,27 @@ public sealed partial class SceneCompositor
         new(5, -Vector3.UnitY, Vector3.UnitX, -Vector3.UnitZ)
     ];
 
-    private static MonopolyDiceFaceFrame[] MonopolyDiceFaces(Vector2 center, float size, Quaternion rotation) =>
-        MonopolyCubeFaces.Select(face =>
+    private static CrownDeedDiceFaceFrame[] CrownDeedDiceFaces(Vector2 center, float size, Quaternion rotation) =>
+        CrownDeedCubeFaces.Select(face =>
         {
             var normal = Vector3.Transform(face.Normal, rotation);
-            Vector2 Point(float x, float y) => MonopolyDiceProject(
+            Vector2 Point(float x, float y) => CrownDeedDiceProject(
                 Vector3.Transform((face.Normal + face.Right * x + face.Down * y) * (size / 2), rotation), center);
-            return new MonopolyDiceFaceFrame(face.Value, normal,
+            return new CrownDeedDiceFaceFrame(face.Value, normal,
                 new[] { Point(-1, -1), Point(1, -1), Point(1, 1), Point(-1, 1) });
         }).Where(face => face.Normal.Z > .015f).OrderBy(face => face.Normal.Z).ToArray();
 
-    private static Vector2 MonopolyDiceProject(Vector3 position, Vector2 center)
+    private static Vector2 CrownDeedDiceProject(Vector3 position, Vector2 center)
     {
         float perspective = 320 / Math.Max(180, 320 - position.Z);
         return center + new Vector2(position.X, -position.Y) * perspective;
     }
 
-    private void DrawMonopolyDiceAnimation(CanvasDrawingSession drawing, DateTimeOffset now, double boardAspect)
+    private void DrawCrownDeedDiceAnimation(CanvasDrawingSession drawing, DateTimeOffset now, double boardAspect)
     {
-        foreach (var frame in GetMonopolyDiceFrames(now))
+        foreach (var frame in GetCrownDeedDiceFrames(now))
         {
-            using (var aspect = new MonopolyArtAspect(drawing, frame.GroundCenter, boardAspect))
+            using (var aspect = new CrownDeedArtAspect(drawing, frame.GroundCenter, boardAspect))
             {
                 float opacity = 1 / (1 + frame.Height * .026f);
                 var shadow = frame.GroundCenter + new Vector2(3, 6);
@@ -282,21 +282,21 @@ public sealed partial class SceneCompositor
                 drawing.FillEllipse(shadow, rx + 4, ry + 2, ThemeColor(0, 8, 4, (byte)(24 * opacity)));
                 drawing.FillEllipse(shadow, rx, ry, ThemeColor(0, 7, 3, (byte)(100 * opacity)));
             }
-            using (var aspect = new MonopolyArtAspect(drawing, frame.Center, boardAspect))
-                DrawMonopolyCube(drawing, frame);
+            using (var aspect = new CrownDeedArtAspect(drawing, frame.Center, boardAspect))
+                DrawCrownDeedCube(drawing, frame);
         }
     }
 
-    private static void DrawMonopolyCube(CanvasDrawingSession drawing, MonopolyDiceFrame frame)
+    private static void DrawCrownDeedCube(CanvasDrawingSession drawing, CrownDeedDiceFrame frame)
     {
         var light = Vector3.Normalize(new Vector3(-.35f, .48f, .82f));
         foreach (var visible in frame.VisibleFaces)
         {
-            var face = MonopolyCubeFaces.Single(face => face.Value == visible.Value);
+            var face = CrownDeedCubeFaces.Single(face => face.Value == visible.Value);
             float illumination = .54f + .46f * Math.Max(0, Vector3.Dot(visible.Normal, light));
             Color Shade(byte r, byte g, byte b, byte alpha = 255) => ThemeColor((byte)(r * illumination),
                 (byte)(g * illumination), (byte)(b * illumination), alpha);
-            using var shape = MonopolyDiceRoundedFace(drawing.Device, visible.Corners, .10f);
+            using var shape = CrownDeedDiceRoundedFace(drawing.Device, visible.Corners, .10f);
             var top = visible.Corners.MinBy(point => point.Y);
             var bottom = visible.Corners.MaxBy(point => point.Y);
             using var ivory = new CanvasLinearGradientBrush(drawing.Device,
@@ -305,10 +305,10 @@ public sealed partial class SceneCompositor
             drawing.DrawGeometry(shape, Shade(141, 113, 55), Math.Max(.7f, frame.Size * .022f));
             var faceCenter = visible.Corners.Aggregate(Vector2.Zero, (sum, corner) => sum + corner) / visible.Corners.Count;
             var inset = visible.Corners.Select(corner => Vector2.Lerp(faceCenter, corner, .90f)).ToArray();
-            using var bevel = MonopolyDiceRoundedFace(drawing.Device, inset, .09f);
+            using var bevel = CrownDeedDiceRoundedFace(drawing.Device, inset, .09f);
             drawing.DrawGeometry(bevel, Shade(236, 207, 135, 170), Math.Max(.4f, frame.Size * .010f));
 
-            foreach (var pip in MonopolyDicePips(face.Value))
+            foreach (var pip in CrownDeedDicePips(face.Value))
             {
                 var points = new Vector2[16];
                 float pipRadius = .133f;
@@ -318,7 +318,7 @@ public sealed partial class SceneCompositor
                     float x = pip.X + MathF.Cos(angle) * pipRadius;
                     float y = pip.Y + MathF.Sin(angle) * pipRadius;
                     var local = (face.Normal * 1.002f + face.Right * x + face.Down * y) * (frame.Size / 2);
-                    points[point] = MonopolyDiceProject(Vector3.Transform(local, frame.Rotation), frame.Center);
+                    points[point] = CrownDeedDiceProject(Vector3.Transform(local, frame.Rotation), frame.Center);
                 }
                 using var cavity = CanvasGeometry.CreatePolygon(drawing.Device, points);
                 drawing.FillGeometry(cavity, Shade(23, 38, 29));
@@ -327,7 +327,7 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private static CanvasGeometry MonopolyDiceRoundedFace(CanvasDevice device,
+    private static CanvasGeometry CrownDeedDiceRoundedFace(CanvasDevice device,
         IReadOnlyList<Vector2> corners, float radius)
     {
         using var path = new CanvasPathBuilder(device);
@@ -343,7 +343,7 @@ public sealed partial class SceneCompositor
         return CanvasGeometry.CreatePath(path);
     }
 
-    private static IEnumerable<Vector2> MonopolyDicePips(int value)
+    private static IEnumerable<Vector2> CrownDeedDicePips(int value)
     {
         if (value is 1 or 3 or 5) yield return Vector2.Zero;
         if (value >= 2) { yield return new(-.46f, -.46f); yield return new(.46f, .46f); }

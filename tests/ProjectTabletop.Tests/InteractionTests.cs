@@ -6,11 +6,11 @@ public class InteractionTests
     [Fact] public void Slots() => SlotRegression.Run();
     [Fact] public void SlotsBoard() => SlotBoardRegression.Run();
     [Fact] public void BoardOpened() => BoardOpenedRegression.Run();
-    [Fact] public void CrownAndDeed() => MonopolyRegression.Run();
-    [Fact] public void CrownAndDeedBoard() => MonopolyBoardRegression.Run();
-    [Fact] public void CrownAndDeedDrawer() => MonopolyDrawerRegression.Run();
-    [Fact] public void CrownAndDeedRollEvents() => MonopolyRollEventRegression.Run();
-    [Fact] public void CrownAndDeedPresentation() => MonopolyPresentationRegression.Run();
+    [Fact] public void CrownAndDeed() => CrownDeedRegression.Run();
+    [Fact] public void CrownAndDeedBoard() => CrownDeedBoardRegression.Run();
+    [Fact] public void CrownAndDeedDrawer() => CrownDeedDrawerRegression.Run();
+    [Fact] public void CrownAndDeedRollEvents() => CrownDeedRollEventRegression.Run();
+    [Fact] public void CrownAndDeedPresentation() => CrownDeedPresentationRegression.Run();
     [Fact] public void GlobeBoard() => GlobeBoardRegression.Run();
     [Fact] public void MenuScroll() => MenuScrollRegression.Run();
     [Fact] public void Roulette() => RouletteRegression.Run();

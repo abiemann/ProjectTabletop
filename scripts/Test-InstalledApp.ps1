@@ -62,7 +62,7 @@ try {
     if ($status.boardApp -ne 'Menu') { throw 'Installed app did not start at the menu.' }
     # Production navigation and GPU preview, with no camera/projector activation.
     foreach ($route in @{
-            show_blackjack = 'Blackjack'; show_crown_deed = 'Monopoly'; show_globe = 'Globe';
+            show_blackjack = 'Blackjack'; show_crown_deed = 'CrownDeed'; show_globe = 'Globe';
             show_slots = 'Slots'; show_roulette = 'Roulette'; show_photo_copy = 'PhotoCopy';
             show_paint = 'Paint'; show_settings = 'Settings'; show_board_menu = 'Menu'
         }.GetEnumerator()) {

@@ -41,16 +41,16 @@ public sealed partial class MainWindow
         if (_closing) return;
         UpdateHandDetectionLogStatus();
         bool blackjack = _scene.CurrentBoardScreen == BoardScreen.Blackjack;
-        bool monopoly = _scene.CurrentBoardScreen == BoardScreen.Monopoly;
+        bool crownDeed = _scene.CurrentBoardScreen == BoardScreen.CrownDeed;
         bool globe = _scene.CurrentBoardScreen == BoardScreen.Globe;
         bool slots = _scene.CurrentBoardScreen == BoardScreen.Slots;
         bool roulette = _scene.CurrentBoardScreen == BoardScreen.Roulette;
         SettingsToolsPanel.Visibility = _scene.CurrentBoardScreen == BoardScreen.Settings
             ? Visibility.Visible : Visibility.Collapsed;
-        bool boardGame = blackjack || monopoly || globe || slots || roulette;
+        bool boardGame = blackjack || crownDeed || globe || slots || roulette;
         BoardGamePreviewTitle.Text = roulette ? "VICE ROYALE  ·  ROULETTE  ·  click to place chips" :
             slots ? "DRAGON SLOTS  ·  click a button to play  ·  virtual credits" :
-            globe ? "GLOBE  ·  zoom Earth in and out" : monopoly ? "CROWN & DEED  ·  click the table to play" :
+            globe ? "GLOBE  ·  zoom Earth in and out" : crownDeed ? "CROWN & DEED  ·  click the table to play" :
             "BLACKJACK  ·  click the table to play  ·  virtual chips";
         BlackjackPreviewPanel.Visibility = boardGame ? Visibility.Visible : Visibility.Collapsed;
         CameraPreviewPanel.Visibility = ProjectionPreviewPanel.Visibility = boardGame ? Visibility.Collapsed : Visibility.Visible;
@@ -59,7 +59,7 @@ public sealed partial class MainWindow
              blackjack ? _scene.BlackjackState.Status :
              slots ? _scene.SlotsState.Status :
              roulette ? _scene.RouletteState.Status :
-             monopoly ? _scene.MonopolyState.Status :
+             crownDeed ? _scene.CrownDeedState.Status :
              globe ? "Earth spins slowly. Open the ^ drawer for Zoom + and Zoom -; its Exit returns to the menu." :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :

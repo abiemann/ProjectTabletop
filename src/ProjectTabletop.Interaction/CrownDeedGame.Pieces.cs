@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public sealed partial class MonopolyGame
+public sealed partial class CrownDeedGame
 {
     /// <summary>Stable save/atlas order. Silver pieces are independent of ownership colours.</summary>
     public static IReadOnlyList<string> PieceNames { get; } = Array.AsReadOnly(new[]
@@ -31,7 +31,7 @@ public sealed partial class MonopolyGame
         }
     }
 
-    private static void ResolveSavedPieces(MonopolySaveData state)
+    private static void ResolveSavedPieces(CrownDeedSaveData state)
     {
         var occupied = new HashSet<int>();
         // Explicit choices are authoritative. Reject duplicates before resolving

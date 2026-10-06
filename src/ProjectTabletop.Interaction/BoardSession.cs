@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, Monopoly, Globe, Media, Slots, Settings, Roulette }
+public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, CrownDeed, Globe, Media, Slots, Settings, Roulette }
 
 /// <summary>A rectangle in the board's normalized, perspective-corrected coordinate system.</summary>
 public readonly record struct BoardRect(double X, double Y, double Width, double Height)
@@ -118,7 +118,7 @@ public sealed partial class BoardSession
         BoardScreen.PhotoCopy => "Photo Copy",
         BoardScreen.Blackjack => "Blackjack",
         BoardScreen.Paint => "Paint",
-        BoardScreen.Monopoly => "Crown & Deed",
+        BoardScreen.CrownDeed => "Crown & Deed",
         BoardScreen.Globe => "Globe",
         BoardScreen.Media => "Media",
         BoardScreen.Slots => "Dragon Slots",
@@ -132,7 +132,7 @@ public sealed partial class BoardSession
         BoardScreen.PhotoCopy => CurrentPhotoCopyButtons(),
         BoardScreen.Paint => CurrentPaintButtons(),
         BoardScreen.Blackjack => BlackjackButtons(),
-        BoardScreen.Monopoly => MonopolyButtons(),
+        BoardScreen.CrownDeed => CrownDeedButtons(),
         BoardScreen.Globe => CurrentGlobeButtons(),
         BoardScreen.Media => Array.Empty<BoardButton>(),
         BoardScreen.Slots => SlotsButtons(),
@@ -156,7 +156,7 @@ public sealed partial class BoardSession
         }
         _lastNow = now;
         AdvanceBlackjackPresentation(now);
-        AdvanceMonopolyPresentation(now);
+        AdvanceCrownDeedPresentation(now);
         AdvanceBottomDrawers(now);
         AdvanceSlots(now);
         AdvanceRoulette(now);
@@ -229,9 +229,9 @@ public sealed partial class BoardSession
         ClearMenuScroll(now);
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
-        ClearMonopolyPresentationHold();
-        ClearMonopolyDrawerUi();
-        AdvanceMonopolyPresentation(now);
+        ClearCrownDeedPresentationHold();
+        ClearCrownDeedDrawerUi();
+        AdvanceCrownDeedPresentation(now);
         ClearBottomDrawers(now);
         ClearHolds();
         HoveredButtonIds = Array.Empty<string>();
@@ -249,9 +249,9 @@ public sealed partial class BoardSession
         ClearMenuScroll(now);
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
-        ClearMonopolyPresentationHold();
-        ClearMonopolyDrawerUi();
-        AdvanceMonopolyPresentation(now);
+        ClearCrownDeedPresentationHold();
+        ClearCrownDeedDrawerUi();
+        AdvanceCrownDeedPresentation(now);
         ClearBottomDrawers(now);
         if (screen == BoardScreen.Globe) _globe.Start(now);
         ClearHolds();

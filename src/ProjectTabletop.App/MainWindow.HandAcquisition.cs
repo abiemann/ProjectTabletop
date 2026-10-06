@@ -79,7 +79,7 @@ public sealed partial class MainWindow
         // A rejected model fit can still request the existing search light.
         regions.AddRange(hints.Take(2).Select(hint => AcquisitionSearchBounds(hint, frame.Width, frame.Height)));
         // A still hand under an unchanged light gives the model the same crop
-        // every frame, so one miss repeats until the hand moves: a live Monopoly
+        // every frame, so one miss repeats until the hand moves: a live CrownDeed
         // Exit Game search stayed empty for 5 s. Alternate with closer views.
         if (context.IlluminatedHint is not null && regions.Count > 0 &&
             LitSearchView(regions[0], frame.Timestamp - context.IlluminationStartedAt, frame.Width, frame.Height) is { } view)

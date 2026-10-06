@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using ProjectTabletop.Interaction;
 
-internal static class MonopolyPiecesRegression
+internal static class CrownDeedPiecesRegression
 {
     private static readonly DateTimeOffset Epoch = new(2026, 10, 4, 20, 0, 0, TimeSpan.Zero);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
@@ -23,7 +23,7 @@ internal static class MonopolyPiecesRegression
 
     private static void ReachableUniqueAndImmutable()
     {
-        Require(MonopolyGame.PieceNames.SequenceEqual(["Hat", "Car", "Shoe", "Dog", "Gun", "Iron", "Wheelbarrow", "Steamship"]),
+        Require(CrownDeedGame.PieceNames.SequenceEqual(["Hat", "Car", "Shoe", "Dog", "Gun", "Iron", "Wheelbarrow", "Steamship"]),
             "The stable piece/atlas order changed.");
         for (int count = 2; count <= 6; count++)
         {
@@ -73,11 +73,11 @@ internal static class MonopolyPiecesRegression
         Choose(game, 0, 7); Choose(game, 1, 6);
         Act(game, "mp-start");
         string saved = game.ExportSave();
-        var restored = new MonopolyGame(seed: 91); restored.LoadSave(saved, Epoch);
+        var restored = new CrownDeedGame(seed: 91); restored.LoadSave(saved, Epoch);
         Require(restored.ExportSave() == saved && restored.Snapshot.Players.Select(p => p.PieceIndex).SequenceEqual([7, 6]) &&
             !restored.Snapshot.Players[0].IsAi && restored.Snapshot.Players[1].IsAi &&
             restored.Snapshot.SetupPieces.SequenceEqual([7, 6]), "Piece round-trip changed a human/AI identity or design.");
-        var staged = new MonopolyGame(); staged.StageSave(saved); Act(staged, "mp-resume");
+        var staged = new CrownDeedGame(); staged.StageSave(saved); Act(staged, "mp-resume");
         Require(staged.ExportSave() == saved, "Staging and resuming discarded saved silver pieces.");
 
         foreach (int version in new[] { 1, 2 })
@@ -138,23 +138,23 @@ internal static class MonopolyPiecesRegression
         }
     }
 
-    private static MonopolyGame Setup()
+    private static CrownDeedGame Setup()
     {
-        var game = new MonopolyGame(seed: 173); Act(game, "mp-start-game"); return game;
+        var game = new CrownDeedGame(seed: 173); Act(game, "mp-start-game"); return game;
     }
-    private static void Choose(MonopolyGame game, int slot, int desired)
+    private static void Choose(CrownDeedGame game, int slot, int desired)
     {
         for (int tries = 0; game.Snapshot.SetupPieces[slot] != desired && tries < 8; tries++) Act(game, $"mp-piece-next-{slot + 1}");
         Require(game.Snapshot.SetupPieces[slot] == desired, "A free design was unreachable.");
     }
-    private static MonopolySaveData Read(string saved) => JsonSerializer.Deserialize<MonopolySaveData>(saved, Json)!;
+    private static CrownDeedSaveData Read(string saved) => JsonSerializer.Deserialize<CrownDeedSaveData>(saved, Json)!;
     private static string WithoutPieces(string saved)
     {
         var node = JsonNode.Parse(saved)!;
         foreach (var player in node["players"]!.AsArray()) player!.AsObject().Remove("pieceIndex");
         return node.ToJsonString();
     }
-    private static void Act(MonopolyGame game, string action) => Require(game.HandleAction(action, Epoch), "Rejected fixture action:" + action);
+    private static void Act(CrownDeedGame game, string action) => Require(game.HandleAction(action, Epoch), "Rejected fixture action:" + action);
     private static void Throws<T>(Action action, string message) where T : Exception
     {
         try { action(); } catch (T) { return; } throw new InvalidOperationException(message);

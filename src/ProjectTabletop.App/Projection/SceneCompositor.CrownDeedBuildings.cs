@@ -16,7 +16,7 @@ public sealed partial class SceneCompositor
     {
         if (houses <= 0 || !float.IsFinite(width) || width <= 0) return;
         progress = float.IsFinite(progress) ? Math.Clamp(progress, 0, 1) : 1;
-        using var aspect = new MonopolyArtAspect(ds, new(width / 2, 11), boardAspect);
+        using var aspect = new CrownDeedArtAspect(ds, new(width / 2, 11), boardAspect);
         float scale = Math.Min(1, (width - 8) / 52);
         var previous = ds.Transform;
         ds.Transform = Matrix3x2.CreateScale(scale, new Vector2(width / 2, 15)) * previous;

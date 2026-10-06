@@ -56,8 +56,8 @@ public sealed partial class SceneCompositor
             _boardRevealCenter = center;
             _boardRevealStartedAt = _boardRevealClock();
             _boardRevealInputPending = true;
-            if (_boardSession.Screen == BoardScreen.Monopoly)
-                StartMonopolyEntrance(_monopolyClock() + CurrentFlairDuration + BoardRevealDuration);
+            if (_boardSession.Screen == BoardScreen.CrownDeed)
+                StartCrownDeedEntrance(_crownDeedClock() + CurrentFlairDuration + BoardRevealDuration);
             return inset;
         }
     }
@@ -79,7 +79,7 @@ public sealed partial class SceneCompositor
         if (_boardRevealInputPending)
         {
             _boardRevealInputPending = false;
-            ClearHandTipsCore(resetInput: true, cancelMonopolyEntrance: false);
+            ClearHandTipsCore(resetInput: true, cancelCrownDeedEntrance: false);
         }
         return false;
     }

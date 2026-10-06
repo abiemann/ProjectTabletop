@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ProjectTabletop.Interaction;
 
-internal static class MonopolyRollEventRegression
+internal static class CrownDeedRollEventRegression
 {
     private static readonly DateTimeOffset Epoch = new(2026, 9, 28, 20, 0, 0, TimeSpan.Zero);
     private static readonly JsonSerializerOptions SaveJson = new(JsonSerializerDefaults.Web)
@@ -17,14 +17,14 @@ internal static class MonopolyRollEventRegression
         AiRollsUseTheSameCommittedEvent();
         SequencesSurviveNewGamesAndLoads();
         JailRollsRetainTheirActualMovement();
-        Console.WriteLine("Monopoly roll events passed: committed immutable before/after snapshots, real dice and " +
+        Console.WriteLine("CrownDeed roll events passed: committed immutable before/after snapshots, real dice and " +
             "human/AI movement, rejected/duplicate/backwards barriers, non-roll silence, sequence continuity " +
             "across new games and saves, and stationary/releasing Jail rolls.");
     }
 
     private static void HumanRollsAndImmutablePayloads()
     {
-        var game = new MonopolyGame(seed: 31, initialRolls: [new(1, 2), new(2, 3)]);
+        var game = new CrownDeedGame(seed: 31, initialRolls: [new(1, 2), new(2, 3)]);
         var events = Observe(game);
         Require(!game.HandleAction("mp-roll", Next()) && !game.HandleAction("unknown", Next()) &&
             !game.Tick(Next(1100)) && events.Count == 0,
@@ -37,10 +37,10 @@ internal static class MonopolyRollEventRegression
             "Accepted human Roll did not publish exactly one event.");
         var first = events[0];
         Require(first.StartedAt == rolledAt && ReferenceEquals(first.Previous, previous) &&
-            first.Previous.Phase == MonopolyPhase.AwaitingRoll && first.Previous.Dice == default &&
-            first.Previous.ActivePlayer!.Position == 0 && first.Current.Dice == new MonopolyDice(1, 2) &&
+            first.Previous.Phase == CrownDeedPhase.AwaitingRoll && first.Previous.Dice == default &&
+            first.Previous.ActivePlayer!.Position == 0 && first.Current.Dice == new CrownDeedDice(1, 2) &&
             first.Current.ActivePlayer!.Position == 3 && first.Current.ActivePlayer.Id == first.Previous.ActivePlayer.Id &&
-            first.Current.Phase == MonopolyPhase.AwaitingPurchase && first.Current.PendingPropertyIndex == 3,
+            first.Current.Phase == CrownDeedPhase.AwaitingPurchase && first.Current.PendingPropertyIndex == 3,
             "Human event lost the committed dice, actor, landing or source time.");
         long revision = game.Revision;
         Require(!game.HandleAction("mp-roll", rolledAt) && !game.HandleAction("mp-roll", rolledAt.AddMilliseconds(-1)) &&
@@ -57,7 +57,7 @@ internal static class MonopolyRollEventRegression
         Require(game.HandleAction("mp-roll", secondTime) && events.Count == 2 &&
             events[1].StartedAt == secondTime && ReferenceEquals(events[1].Previous, secondPrevious) &&
             events[1].Previous.ActivePlayer!.Id == 2 && events[1].Previous.ActivePlayer!.Position == 0 &&
-            events[1].Current.Dice == new MonopolyDice(2, 3) && events[1].Current.ActivePlayer!.Position == 5,
+            events[1].Current.Dice == new CrownDeedDice(2, 3) && events[1].Current.ActivePlayer!.Position == 5,
             "The next player's roll reused the prior actor, dice or before snapshot.");
         Require(JsonSerializer.Serialize(first.Previous) == frozenPrevious &&
             JsonSerializer.Serialize(first.Current) == frozenCurrent &&
@@ -68,7 +68,7 @@ internal static class MonopolyRollEventRegression
 
     private static void AiRollsUseTheSameCommittedEvent()
     {
-        var game = new MonopolyGame(seed: 41, initialRolls: [new(1, 2), new(1, 2)]);
+        var game = new CrownDeedGame(seed: 41, initialRolls: [new(1, 2), new(1, 2)]);
         var events = Observe(game);
         Start(game, humansOnly: false);
         Act(game, "mp-roll"); Act(game, "mp-buy"); Act(game, "mp-end-turn");
@@ -83,8 +83,8 @@ internal static class MonopolyRollEventRegression
             roll.Previous.ActivePlayer!.IsAi && roll.Previous.ActivePlayer.Position == 0 &&
             roll.Current.ActivePlayer!.Id == roll.Previous.ActivePlayer.Id &&
             roll.Current.ActivePlayer.IsAi && roll.Current.ActivePlayer.Position == 3 &&
-            roll.Current.ActivePlayer.Money == 1496 && roll.Current.Dice == new MonopolyDice(1, 2) &&
-            roll.Current.Phase == MonopolyPhase.AwaitingEndTurn,
+            roll.Current.ActivePlayer.Money == 1496 && roll.Current.Dice == new CrownDeedDice(1, 2) &&
+            roll.Current.Phase == CrownDeedPhase.AwaitingEndTurn,
             "AI event did not contain its actual committed movement and rent result.");
         Require(!game.Tick(time) && !game.Tick(time.AddMilliseconds(-1)) && events.Count == 2,
             "Duplicate or backwards AI ticks emitted another Roll.");
@@ -94,7 +94,7 @@ internal static class MonopolyRollEventRegression
 
     private static void SequencesSurviveNewGamesAndLoads()
     {
-        var game = new MonopolyGame(seed: 47, initialRolls: [new(1, 2), new(1, 3), new(2, 3)]);
+        var game = new CrownDeedGame(seed: 47, initialRolls: [new(1, 2), new(1, 3), new(2, 3)]);
         var events = Observe(game);
         Start(game, humansOnly: true);
         string initialSave = game.ExportSave();
@@ -106,25 +106,25 @@ internal static class MonopolyRollEventRegression
         Require(events.Count == 1, "Returning to landing and starting anew emitted a Roll.");
         Act(game, "mp-roll");
         Require(events.Count == 2 && events[1].Sequence == first.Sequence + 1 &&
-            events[1].Current.Dice == new MonopolyDice(1, 3),
+            events[1].Current.Dice == new CrownDeedDice(1, 3),
             "A new game reset or duplicated the per-game-instance roll sequence.");
         game.StageSave(initialSave);
         game.LoadSave(initialSave, Next());
-        Require(events.Count == 2 && game.Snapshot.Phase == MonopolyPhase.AwaitingRoll,
+        Require(events.Count == 2 && game.Snapshot.Phase == CrownDeedPhase.AwaitingRoll,
             "Staging or loading a save fabricated a roll event.");
         Act(game, "mp-roll");
         Require(events.Count == 3 && events[2].Sequence == events[1].Sequence + 1 &&
-            events[2].Current.Dice == new MonopolyDice(2, 3) && JsonSerializer.Serialize(first) == frozen,
+            events[2].Current.Dice == new CrownDeedDice(2, 3) && JsonSerializer.Serialize(first) == frozen,
             "A loaded game reset sequence identity or changed a historical payload.");
     }
 
     private static void JailRollsRetainTheirActualMovement()
     {
-        foreach (var dice in new MonopolyDice[] { new(1, 2), new(2, 2) })
+        foreach (var dice in new CrownDeedDice[] { new(1, 2), new(2, 2) })
         {
-            var game = new MonopolyGame(seed: 53, initialRolls: [dice]);
+            var game = new CrownDeedGame(seed: 53, initialRolls: [dice]);
             Start(game, humansOnly: true);
-            var save = JsonSerializer.Deserialize<MonopolySaveData>(game.ExportSave(), SaveJson)!;
+            var save = JsonSerializer.Deserialize<CrownDeedSaveData>(game.ExportSave(), SaveJson)!;
             save.Players[0].Position = 13; save.Players[0].InJail = true;
             game.LoadSave(JsonSerializer.Serialize(save, SaveJson), Next());
             var events = Observe(game);
@@ -136,16 +136,16 @@ internal static class MonopolyRollEventRegression
                 "Jail roll payload lost its before state or actual dice.");
             Require(dice.IsDouble
                 ? roll.Current.ActivePlayer is { Position: 17, InJail: false, JailTurns: 0 } &&
-                    roll.Current.Phase == MonopolyPhase.AwaitingPurchase
+                    roll.Current.Phase == CrownDeedPhase.AwaitingPurchase
                 : roll.Current.ActivePlayer is { Position: 13, InJail: true, JailTurns: 1 } &&
-                    roll.Current.Phase == MonopolyPhase.AwaitingEndTurn,
+                    roll.Current.Phase == CrownDeedPhase.AwaitingEndTurn,
                 "Jail roll event invented movement or missed release on doubles.");
         }
     }
 
-    private static List<MonopolyRoll> Observe(MonopolyGame game)
+    private static List<CrownDeedRoll> Observe(CrownDeedGame game)
     {
-        var events = new List<MonopolyRoll>();
+        var events = new List<CrownDeedRoll>();
         game.RollOccurred += roll =>
         {
             Require(roll.Sequence > 0 && (events.Count == 0 || roll.Sequence == events[^1].Sequence + 1) &&
@@ -157,7 +157,7 @@ internal static class MonopolyRollEventRegression
         return events;
     }
 
-    private static void Start(MonopolyGame game, bool humansOnly)
+    private static void Start(CrownDeedGame game, bool humansOnly)
     {
         Act(game, "mp-start-game");
         if (humansOnly)
@@ -168,7 +168,7 @@ internal static class MonopolyRollEventRegression
         Act(game, "mp-start");
     }
     private static DateTimeOffset Next(int milliseconds = 20) => Epoch.AddMilliseconds(_milliseconds += milliseconds);
-    private static void Act(MonopolyGame game, string id) => Require(game.HandleAction(id, Next()),
+    private static void Act(CrownDeedGame game, string id) => Require(game.HandleAction(id, Next()),
         $"Legal {id} was rejected in {game.Snapshot.Phase}.");
     private static void Require(bool valid, string message)
     {
