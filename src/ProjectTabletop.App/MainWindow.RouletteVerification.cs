@@ -219,8 +219,9 @@ public sealed partial class MainWindow
         byte[] initial = await Capture("menu-top");
         var initialButtons = scene.CurrentBoardButtons.Select(button => (button.Id, button.Bounds)).ToArray();
         Check(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
-            ["slots", "photo-copy", "blackjack", "paint", "crown-deed", "globe", "settings", "menu-scroll-down"]),
-            "The initial menu does not show the six original cards and a separate scroll handle.");
+            ["slots", "photo-copy", "blackjack", "crown-deed", "globe", "settings", "menu-scroll-down"]) &&
+            scene.CurrentBoardButtons.All(button => !button.Bounds.Contains(.72, .53)),
+            "The initial menu does not retain five cards, Paint's empty former position and a separate scroll handle.");
         scene.GetHandAcquisitionContext(fixture.Now);
         fixture.Now += TimeSpan.FromMilliseconds(600);
         fixture.Draw();
@@ -234,7 +235,8 @@ public sealed partial class MainWindow
         Check(board.MenuScrolling && scene.CurrentBoardButtons.All(button => !button.Enabled),
             "A moving menu left cards or navigation controls enabled.");
         Check(scene.GetHandAcquisitionContext(fixture.Now) is null && scene.GetHoldButtonContext(fixture.Now) is null &&
-            !board.ActivateButton("roulette", fixture.Now) && !board.ActivateButton("settings", fixture.Now),
+            !board.ActivateButton("roulette", fixture.Now) && !board.ActivateButton("paint", fixture.Now) &&
+            !board.ActivateButton("settings", fixture.Now),
             "The moving menu accepted input or a camera reference.");
         await Capture("menu-slide-start");
         fixture.Now = started + BoardSession.MenuScrollDuration / 2;
@@ -250,14 +252,17 @@ public sealed partial class MainWindow
         fixture.Now = started + BoardSession.MenuScrollDuration;
         await Capture("menu-scrolled");
         Check(board.MenuScrolled && !board.MenuScrolling && scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
-            ["roulette", "settings", "menu-scroll-up"]),
-            "The settled second page did not show exactly Roulette and the fixed navigation controls.");
+            ["roulette", "paint", "settings", "menu-scroll-up"]),
+            "The settled second page did not show Roulette, Paint and the fixed navigation controls.");
         var roulette = scene.CurrentBoardButtons.Single(button => button.Id == "roulette");
+        var paint = scene.CurrentBoardButtons.Single(button => button.Id == "paint");
         Check(Math.Abs(board.GetMenuScrollOffset(fixture.Now) - .60) < 1e-9 &&
             Math.Abs(roulette.Bounds.Y - .25) < 1e-9 && roulette.Bounds.Height == .16 &&
-            board.GetMenuCards(fixture.Now).Where(button => button.Id != "roulette")
+            Math.Abs(paint.Bounds.Y - .25) < 1e-9 && paint.Bounds.Height == .16 &&
+            roulette.Bounds.X == .08 && paint.Bounds.X == .52 &&
+            board.GetMenuCards(fixture.Now).Where(button => button.Id is not ("roulette" or "paint"))
                 .All(button => button.Bounds.Y + button.Bounds.Height <= BoardSession.MenuCardViewport.Y),
-            "A full-page scroll left an original card in the viewport or misplaced Roulette's visible/input bounds.");
+            "A full-page scroll left an original card in the viewport or misplaced Roulette or Paint's visible/input bounds.");
         fixture.Now += TimeSpan.FromMilliseconds(1);
         Check(board.Update([obsoletePinch with { ExecuteEventId = 2 }], fixture.Now, fixture.Now) is null &&
             scene.CurrentBoardScreen == BoardScreen.Menu && !board.MenuScrolling,
@@ -278,7 +283,7 @@ public sealed partial class MainWindow
         Check(!board.MenuScrolled && !board.MenuScrolling &&
             scene.CurrentBoardButtons.Select(button => (button.Id, button.Bounds)).SequenceEqual(initialButtons) &&
             fixture.RegionUnchanged(initial, returned, BoardSession.MenuCardViewport),
-            "The up-arrow precision gesture did not restore all six initial cards, their positions and their native pixels.");
+            "The up-arrow precision gesture did not restore all five initial cards, their positions and their native pixels.");
         Check(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "Isolated menu-scroll verification changed live hardware or navigation.");
@@ -286,7 +291,7 @@ public sealed partial class MainWindow
             armObstructionCannotPage = true, noCaptionHoldTargets = true, continuedSeparationCannotReverse = true,
             staleGesturesRejected = true, scrollDurationMilliseconds = BoardSession.MenuScrollDuration.TotalMilliseconds,
             fixedHeadingAndFooter = true, movingInputAndAcquisitionSuppressed = true,
-            seventhCardRevealed = true, fullPageScroll = true, originalCardsFullyLeaveViewport = true,
+            secondPageCardsRevealed = true, fullPageScroll = true, originalCardsFullyLeaveViewport = true,
             firstPageRestoredExactly = true, sharedVisibleAndInputBounds = true, settledReferenceRefreshed = true,
             liveHardwareUnchanged = true };
 

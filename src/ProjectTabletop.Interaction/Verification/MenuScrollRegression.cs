@@ -38,8 +38,10 @@ internal static class MenuScrollRegression
     {
         var board = new BoardSession();
         var firstPage = board.Buttons.Select(button => (button.Id, button.Bounds)).ToArray();
-        Require(board.GetMenuCards(At(0)).Count == 7 && board.Buttons.All(button => button.Id != "roulette"),
-            "Roulette must begin below the six visible menu cards.");
+        Require(board.GetMenuCards(At(0)).Count == 7 && board.Buttons.Select(button => button.Id).SequenceEqual(
+            ["slots", "photo-copy", "blackjack", "crown-deed", "globe", "settings", "menu-scroll-down"]) &&
+            board.Buttons.All(button => !button.Bounds.Contains(.72, .53)),
+            "The first page must retain five cards with Paint's previous position empty.");
         var arrow = Button(board, "menu-scroll-down");
         Require(board.Update([Pinch(arrow, 1, 1300)], At(1300), At(1300)) is
             { ButtonId: "menu-scroll-down", Gesture: BoardSelectionGesture.Pinch } && board.MenuScrolling && board.MenuScrolled,
@@ -50,7 +52,8 @@ internal static class MenuScrollRegression
             board.Revision == revision && board.MenuScrolling,
             "Presentation samples must be clock-deterministic and cannot settle interaction state.");
         Require(board.Buttons.All(button => !button.Enabled) &&
-            !board.ActivateButton("roulette", At(1450)) && !board.ActivateButton("settings", At(1450)) &&
+            !board.ActivateButton("roulette", At(1450)) && !board.ActivateButton("paint", At(1450)) &&
+            !board.ActivateButton("settings", At(1450)) &&
             !board.ActivateButton("menu-scroll-up", At(1450)), "A moving menu accepted pointer input.");
         Require(board.Update([Pinch(Button(board, "roulette"), 2, 1500)], At(1500), At(1500)) is null &&
             board.HoveredButtonIds.Count == 0 && board.FingerSelectionFeedback.Count == 0,
@@ -60,12 +63,13 @@ internal static class MenuScrollRegression
             "Caption obstruction activated the replacement arrow while the menu was moving.");
         Require(board.TickMenu(At(1950)) && !board.MenuScrolling && !board.TickMenu(At(1950)) &&
             !board.TickMenu(At(1949)), "Menu settlement repeated or moved backward in time.");
-        Require(board.Buttons.Select(button => button.Id).SequenceEqual(["roulette", "settings", "menu-scroll-up"]),
-            "The second page did not expose exactly Roulette and the fixed navigation controls.");
-        Require(Near(Button(board, "roulette").Bounds.Y, .25) &&
-            board.GetMenuCards(At(1950)).Where(button => button.Id != "roulette")
+        Require(board.Buttons.Select(button => button.Id).SequenceEqual(["roulette", "paint", "settings", "menu-scroll-up"]),
+            "The second page did not expose Roulette, Paint and the fixed navigation controls.");
+        Require(Near(Button(board, "roulette").Bounds.Y, .25) && Near(Button(board, "paint").Bounds.Y, .25) &&
+            Near(Button(board, "roulette").Bounds.X, .08) && Near(Button(board, "paint").Bounds.X, .52) &&
+            board.GetMenuCards(At(1950)).Where(button => button.Id is not ("roulette" or "paint"))
                 .All(button => button.Bounds.Y + button.Bounds.Height <= BoardSession.MenuCardViewport.Y),
-            "A full-page scroll left an original card in the viewport or misplaced Roulette.");
+            "A full-page scroll left an original card in the viewport or misplaced Roulette and Paint.");
         var roulette = Button(board, "roulette");
         Require(board.Update([Pinch(roulette, 3, 1949)], At(1949), At(2000)) is null,
             "A delayed camera observation from the animation selected a settled card.");
@@ -78,7 +82,7 @@ internal static class MenuScrollRegression
         board.ShowMenu(At(2200));
         Require(!board.MenuScrolled && !board.MenuScrolling &&
             board.Buttons.Select(button => (button.Id, button.Bounds)).SequenceEqual(firstPage),
-            "Returning to the menu did not restore all six original cards and their positions.");
+            "Returning to the menu did not restore the five first-page cards and their positions.");
     }
 
     private static void CheckArrowReleaseAndReverse()

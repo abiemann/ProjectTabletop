@@ -51,8 +51,8 @@ public sealed partial class MainWindow
             AssertCameraMap(scene, cameraMap);
             foreach (var board in boards)
             {
-                Show(scene, board);
                 await scene.EnsureBoardArtworkResourcesAsync(target.Device, board);
+                Show(scene, board);
                 if (board == BoardScreen.Paint)
                 {
                     Require(scene.AddPaintDrop(new(.33, .53), .09, now),
@@ -189,6 +189,16 @@ public sealed partial class MainWindow
         Require(turned.GetBoardFacingDegrees() == 180 && Math.Abs(originalInset - rescanInset) < 1e-6 &&
                 rescanDifference.MeanChannelError < .1 && rescanDifference.PixelsOver16 < width * height * .001,
             "Rescanning with a 270-degree camera changed the stored physical board facing.");
+        var pageArrow = turned.CurrentBoardButtons.Single(button => button.Id == "menu-scroll-down");
+        await Hover(turned, rescannedCameraMap, halfTurnSurface, pageArrow);
+        await Task.Delay(2);
+        var pageSourceTime = MonotonicClock.UtcNow;
+        var pagePoint = CameraPoint(rescannedCameraMap, halfTurnSurface, pageArrow);
+        turned.SetHandCursors([new HandCursor(new(pagePoint.X, pagePoint.Y),
+            pageSourceTime.AddSeconds(1), 880000)], pageSourceTime);
+        await Task.Delay(BoardSession.MenuScrollDuration + TimeSpan.FromMilliseconds(50));
+        Draw(turned);
+        turned.ClearHandTips(resetInput: false);
         var paintButton = turned.CurrentBoardButtons.Single(button => button.Id == "paint");
         await Hover(turned, rescannedCameraMap, halfTurnSurface, paintButton);
         await Task.Delay(2);

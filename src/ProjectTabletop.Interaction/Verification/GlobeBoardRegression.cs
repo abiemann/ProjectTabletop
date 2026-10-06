@@ -205,8 +205,9 @@ internal static class GlobeBoardRegression
     private static void CheckEntranceAndRotation()
     {
         var board = new BoardSession();
-        Require(board.Buttons[5] is { Id: "globe", Label: "Globe", Destination: BoardScreen.Globe },
-            "The Globe menu tile did not replace Diablo in its original position.");
+        Require(board.Buttons.Single(button => button.Id == "globe") is
+            { Label: "Globe", Destination: BoardScreen.Globe, Bounds.X: .52, Bounds.Y: .65 },
+            "The Globe menu tile moved from the bottom-right of the first page.");
         board.ShowGlobe(Time(100));
         long revision = board.Revision;
         GlobeSnapshot start = board.GetGlobeSnapshot(Time(100));

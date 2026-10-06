@@ -5,9 +5,15 @@ internal static class PaintBoardRegression
     public static void Run()
     {
         var board = new BoardSession();
+        Require(board.Buttons.All(button => button.Id != "paint") &&
+            !board.ActivateButton("paint", Time(-1100)), "Paint was selectable on the first menu page.");
+        Require(board.ActivateButton("menu-scroll-down", Time(-1000)) && board.TickMenu(Time(-350)),
+            "The menu could not reveal Paint before its navigation checks.");
         var paint = board.Buttons.Single(button => button.Id == "paint");
         Require(paint.Label == "Paint" && paint.Destination == BoardScreen.Paint &&
-            board.Buttons[3].Id == "paint", "The Paint menu target or its placement changed.");
+            board.Buttons[1].Id == "paint" && paint.Bounds.X == .52 &&
+            Math.Abs(paint.Bounds.Y - .25) < 1e-9 &&
+            board.Buttons[0].Id == "roulette", "Paint must sit beside Roulette on the second menu page.");
         Require(board.ActivateButton("paint", Time(0)) && board.Screen == BoardScreen.Paint && board.Title == "Paint",
             "The Paint menu target did not launch Paint.");
         var exit = board.Buttons.Single(button => button.Id == "menu");
