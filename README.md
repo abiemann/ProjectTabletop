@@ -30,7 +30,13 @@ dotnet run --project src/ProjectTabletop.App/ProjectTabletop.App.csproj -c Debug
 
 The build includes the Windows App SDK runtime, but remains dependent on the .NET 10 runtime; copying the output is not a fully self-contained .NET deployment. Hand models and their licenses are already tracked in the repository and need no runtime download. See Microsoft's [WinUI setup guide](https://learn.microsoft.com/en-us/windows/apps/get-started/start-here) and [self-contained deployment notes](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/self-contained-deploy/deploy-self-contained-apps). The SDK policy and dependency graph are not currently locked, and a clean-machine restore has not been verified.
 
-Offline verification uses console entrypoints, rather than a `dotnet test` suite:
+Run the offline checks with xUnit, from the repository root or Visual Studio's Test Explorer:
+
+```powershell
+dotnet test tests/ProjectTabletop.Tests/ProjectTabletop.Tests.csproj
+```
+
+`tests/ProjectTabletop.Tests` reports each Interaction, Calibration and Vision check group as its own test, including the Vision board cross-check, Photo Copy camera-image and hand-tracking diagnostics groups that the console run reaches only through flags. `dotnet test ProjectTabletop.sln` also works, but builds the app first. The same groups remain available as console entrypoints; each stops at its first failed check with a non-zero exit code:
 
 ```powershell
 dotnet run --project src/ProjectTabletop.Interaction/Verification/ProjectTabletop.Interaction.Verification.csproj

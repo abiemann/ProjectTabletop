@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="ProjectTabletop.Tests" />
     <ProjectReference Include="../ProjectTabletop.Calibration.csproj" />
   </ItemGroup>
 </Project>
