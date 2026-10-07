@@ -160,6 +160,7 @@ public sealed partial class SceneCompositor
         var paint = _boardSession.Screen == BoardScreen.Paint;
         var water = _boardSession.Screen == BoardScreen.WaterGarden;
         var waterNow = _waterClock();
+        if (water) _boardSession.TickWaterGarden(waterNow);
         var paintNow = _paintClock();
         var globeNow = _globeClock();
         var globe = _boardSession.Screen == BoardScreen.Globe;

@@ -403,7 +403,7 @@ public sealed partial class SceneCompositor
                     // Animated water cannot supply stationary letter evidence.
                     // The opaque stone controls are rendered identically here.
                     drawing.Clear(Colors.Black);
-                    DrawWaterGardenControls(drawing, _boardSession.Buttons, [], []);
+                    DrawWaterGardenControls(drawing, _boardSession.Buttons, [], [], _waterClock());
                 }
                 else if (globe)
                 {

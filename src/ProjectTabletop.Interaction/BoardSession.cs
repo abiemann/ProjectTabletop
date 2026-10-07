@@ -132,7 +132,7 @@ public sealed partial class BoardSession
         BoardScreen.Menu => CurrentMenuButtons(),
         BoardScreen.PhotoCopy => CurrentPhotoCopyButtons(),
         BoardScreen.Paint => CurrentPaintButtons(),
-        BoardScreen.WaterGarden => WaterGardenButtons,
+        BoardScreen.WaterGarden => CurrentWaterGardenButtons(),
         BoardScreen.Blackjack => BlackjackButtons(),
         BoardScreen.CrownDeed => CrownDeedButtons(),
         BoardScreen.Globe => CurrentGlobeButtons(),
@@ -260,7 +260,7 @@ public sealed partial class BoardSession
         Screen = screen;
         Revision++;
         NavigationRevision++;
-        if (screen == BoardScreen.WaterGarden) WaterGardenResetRevision++;
+        if (screen == BoardScreen.WaterGarden) RequestWaterGardenReset();
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

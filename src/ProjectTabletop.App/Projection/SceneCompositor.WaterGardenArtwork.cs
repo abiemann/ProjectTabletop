@@ -20,7 +20,7 @@ public sealed partial class SceneCompositor
         {
             DisposeWaterGardenArtwork();
             _waterImages = new(device, Path.Combine(AppContext.BaseDirectory, "Assets", "WaterGarden"),
-                ["moss-rocks.png", "warm-limestone.png", "wet-slate.png"]);
+                ["moss-rocks.png", "warm-limestone.png", "wet-slate.png", "sand-ground.png"]);
         }
         return _waterImages;
     }
@@ -39,7 +39,7 @@ public sealed partial class SceneCompositor
         var images = GetWaterGardenImages(device);
         if (!images.IsLoaded) return false;
         if (_waterArtworkPublished) return images.Image("warm-limestone.png") is not null &&
-            images.Image("wet-slate.png") is not null;
+            images.Image("wet-slate.png") is not null && images.Image("sand-ground.png") is not null;
         if (images.Image("moss-rocks.png") is { } rocks)
         {
             _waterRockWidth = (int)rocks.SizeInPixels.Width;
@@ -58,7 +58,8 @@ public sealed partial class SceneCompositor
         _waterArtworkPublished = true;
         _waterRenderedFrame = null;
         InvalidateBoardArtworkSurface();
-        return images.Image("warm-limestone.png") is not null && images.Image("wet-slate.png") is not null;
+        return images.Image("warm-limestone.png") is not null && images.Image("wet-slate.png") is not null &&
+            images.Image("sand-ground.png") is not null;
     }
 
     private (Rect First, Rect Second) WaterGardenRockPlacements() =>

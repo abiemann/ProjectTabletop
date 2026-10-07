@@ -51,7 +51,8 @@ public sealed partial class SceneCompositor
         (BoardSurfaceSize - rowTop + 4) * MathF.Pow(1 - Math.Clamp(progress, 0, 1), 3);
 
     private static bool IsBoardDrawerHandle(BoardButton button) =>
-        button.Id is "globe-drawer-open" or "globe-drawer-close" or "photo-drawer-open" or "photo-drawer-close";
+        button.Id is "globe-drawer-open" or "globe-drawer-close" or "photo-drawer-open" or "photo-drawer-close" or
+            "water-drawer-open" or "water-drawer-close";
 
     // The camera trigger measures the same vector silhouette that is rendered.
     // Its physical proportions remain stable on portrait and landscape boards.
@@ -59,7 +60,8 @@ public sealed partial class SceneCompositor
     {
         aspect = double.IsFinite(aspect) ? Math.Clamp(aspect, .2, 5) : 1;
         float x = aspect >= 1 ? (float)(1 / aspect) : 1;
-        float y = (aspect >= 1 ? 1 : (float)aspect) * (button.Id is "globe-drawer-open" or "photo-drawer-open" ? -1 : 1);
+        float y = (aspect >= 1 ? 1 : (float)aspect) *
+            (button.Id is "globe-drawer-open" or "photo-drawer-open" or "water-drawer-open" ? -1 : 1);
         var center = new Vector2((float)(button.Bounds.X + button.Bounds.Width / 2) * BoardSurfaceSize,
             (float)(button.Bounds.Y + button.Bounds.Height / 2) * BoardSurfaceSize);
         Vector2[] profile = [new(-27, -8), new(0, 12), new(27, -8),

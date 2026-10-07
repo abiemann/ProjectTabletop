@@ -76,7 +76,7 @@ static async Task RunMcpAsync()
             new McpServerToolCreateOptions
             {
                 Name = "water_garden_action",
-                Description = "Activate a Water Garden control: water-garden-calm resets the water; menu returns to the launcher."
+                Description = "Activate a visible Water Garden control by id: water-drawer-open, water-drawer-close, water-garden-exit, water-garden-reset, or water-garden-duck-add."
             });
     static McpServerTool CrownDeedActionTool() =>
         McpServerTool.Create((Func<string, Task<string>>)CrownDeedActionAsync,

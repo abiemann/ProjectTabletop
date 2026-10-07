@@ -13,6 +13,9 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
+    private readonly record struct SandGroundSample(int Count, int NonOpaque,
+        double Red, double Green, double Blue, double LuminanceStdDev);
+
     // Synthetic camera coordinates and private scenes keep this GPU check away
     // from the user's live camera, projector, registration and water field.
     private async Task<object> VerifyWaterGardenAsync()
@@ -27,9 +30,15 @@ public sealed partial class MainWindow
             var opened = new List<BoardScreen>();
             navigation.BoardOpened += opened.Add;
             navigation.ShowWaterGarden();
-            Require(navigation.ActivateWaterGardenButton("water-garden-calm") &&
+            Require(navigation.CurrentBoardButtons.Single().Id == "water-drawer-open" &&
+                    !navigation.ActivateWaterGardenButton("water-garden-reset") &&
+                    navigation.ActivateWaterGardenButton("water-drawer-open"),
+                "Water Garden exposed a reset action before its drawer opened.");
+            now += BoardSession.WaterGardenDrawerOpeningDuration;
+            Require(navigation.TickWaterGarden(now) &&
+                    navigation.ActivateWaterGardenButton("water-garden-reset") &&
                     opened.SequenceEqual(new[] { BoardScreen.WaterGarden }),
-                "Calm Water replayed the board-entry notification that enables remembered stick tracking.");
+                "RESET replayed the board-entry notification that enables remembered stick tracking.");
             navigation.ShowBoardMenu();
             navigation.ShowWaterGarden();
             Require(opened.SequenceEqual(new[] { BoardScreen.WaterGarden, BoardScreen.Menu, BoardScreen.WaterGarden }),
@@ -40,6 +49,7 @@ public sealed partial class MainWindow
         var images = new List<object>();
         var aspects = new List<object>();
         var perspectiveTouches = new List<object>();
+        var sandAppearance = new List<object>();
         int perspectiveRoundTrips = 0;
         foreach (float aspect in new[] { 1f, 16f / 9, 9f / 16 })
         foreach (var surface in new Vector2[] { new(.08f, .08f), new(.83f, .17f), new(.5f, .5f), new(.17f, .83f), new(.91f, .89f) })
@@ -74,6 +84,19 @@ public sealed partial class MainWindow
         using var scene = NewScene(1, out double inset);
         await scene.EnsureBoardArtworkResourcesAsync(device, BoardScreen.WaterGarden);
         Draw(scene, target);
+        Require(scene.CurrentBoardButtons.Single() is { Id: "water-drawer-open", Label: "^", Enabled: true },
+            "The initial water board did not show only the bottom-left up-arrow.");
+        await Save(target, "water-square-closed-drawer");
+        Require(scene.ActivateWaterGardenButton("water-drawer-open") &&
+                scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
+                    new[] { "water-drawer-close", "water-garden-exit", "water-garden-reset", "water-garden-duck-add" }) &&
+                scene.CurrentBoardButtons.Skip(1).All(button => !button.Enabled) &&
+                !scene.ActivateWaterGardenButton("water-garden-reset"),
+            "The opening water drawer exposed an enabled moving action.");
+        now += BoardSession.WaterGardenDrawerOpeningDuration;
+        Require(scene.TickWaterGarden(now) && scene.CurrentBoardButtons.All(button => button.Enabled),
+            "The water drawer did not settle into four usable hold controls.");
+        Draw(scene, target);
         var projectedEyeFrames = scene.GetEyeTipProjectionFrames();
         Require(projectedEyeFrames.Count == 1 && projectedEyeFrames[0].Width <= 2048 &&
                 projectedEyeFrames[0].Height <= 2048 && projectedEyeFrames[0].CameraToBoard.Count == 9 &&
@@ -85,6 +108,7 @@ public sealed partial class MainWindow
         now += TimeSpan.FromSeconds(1.0 / 60);
         Draw(scene, target);
         var blank = Pixels(target);
+        CheckSandGround(blank, 1000, 1000, inset, "square");
         var calm = Statistics(water);
         var initialDucks = DuckStates(water);
         Require(IsFinite(calm) && calm.TotalEnergy == 0 && calm.MaximumHeight == 0,
@@ -95,9 +119,126 @@ public sealed partial class MainWindow
             WaterGardenView.SurfaceToScreen(new(duck.SurfaceX, duck.SurfaceY)))).ToArray();
         Require(visibleDuckPixels.All(count => count > 4),
             $"The native calm render did not show every yellow duck: {string.Join(", ", visibleDuckPixels)} pixels.");
-        Require(scene.CurrentBoardButtons.Count == 2 && scene.CurrentBoardButtons.All(button => button.Hold == BoardButtonHold.Once),
-            "Water Garden must expose only its two stationary long-press controls.");
+        Require(scene.CurrentBoardButtons.Count == 4 && scene.CurrentBoardButtons.All(button => button.Hold == BoardButtonHold.Once),
+            "Water Garden's revealed arrow and three actions must all be long-press controls.");
         await Save(target, "water-square-calm");
+        var dropSurface = WaterGardenView.ScreenToSurface(new(.5f, .5f));
+        var fieldBeforeDuckAdd = Statistics(water);
+        Require(scene.ActivateWaterGardenButton("water-garden-duck-add") &&
+                water.GetDiagnostics().DuckCount == 11 &&
+                DuckStates(water).Take(10).SequenceEqual(initialDucks) &&
+                Statistics(water) == fieldBeforeDuckAdd,
+            "DUCK+ did not add exactly one duck while retaining the water and existing ducks.");
+        var fallingDuck = DuckStates(water)[10];
+        Require(DuckIsFiniteAndInside(fallingDuck) &&
+                Vector2.Distance(new(fallingDuck.SurfaceX, fallingDuck.SurfaceY), dropSurface) < .005f &&
+                WaterGardenView.Project(new Vector3(fallingDuck.SurfaceX - .5f,
+                    fallingDuck.SurfaceY - .5f, fallingDuck.Height + fallingDuck.DropHeight), 1).Y < 0,
+            "DUCK+ did not start its new duck above the screen over the center of the pond.");
+        int inFlightFrame = -1, landingFrame = -1;
+        int innerRingFrame = -1, outerRingFrame = -1;
+        double maximumInnerRing = 0, maximumOuterRing = 0;
+        var innerRingCardinals = new double[4];
+        Vector2[] innerRingOffsets = [new(.07f, 0), new(-.07f, 0),
+            new(0, .07f), new(0, -.07f)];
+        WaterGardenDuckState? landedDuck = null;
+        WaterGardenFieldStatistics? landingSplash = null;
+        for (int frame = 0; frame < 150; frame++)
+        {
+            // Advance through the compositor's clock so its retained frame is
+            // redrawn as well as the GPU simulation. Direct simulation steps
+            // alone would make every saved PNG show the same cached image.
+            now += TimeSpan.FromSeconds(1.0 / 30);
+            Draw(scene, target);
+            var current = DuckStates(water)[10];
+            Require(DuckIsFiniteAndInside(current), "The falling duck became non-finite or escaped the pond.");
+            var projectedDuck = WaterGardenView.Project(new Vector3(current.SurfaceX - .5f,
+                current.SurfaceY - .5f, current.Height + current.DropHeight), 1);
+            if (inFlightFrame < 0 && projectedDuck.Y is > .10f and < .30f && current.DropHeight > .08f)
+            {
+                Require(YellowPixels(Pixels(target), projectedDuck) > 4,
+                    "The falling duck was not rendered at its three-dimensional position above the pond.");
+                inFlightFrame = frame;
+                await Save(target, "water-duck-in-flight");
+            }
+            if (landingFrame < 0 && current.DropHeight < .12f)
+            {
+                var field = Statistics(water);
+                if (field.TotalEnergy > 1e-9)
+                {
+                    landingFrame = frame;
+                    landedDuck = current;
+                    landingSplash = field;
+                    await Save(target, "water-duck-landing");
+                }
+            }
+            if (landingFrame < 0) continue;
+            var inner = water.GetFieldProbe(dropSurface + new Vector2(.07f, 0));
+            var outer = water.GetFieldProbe(dropSurface + new Vector2(.14f, 0));
+            Require(double.IsFinite(inner.Height) && double.IsFinite(outer.Height),
+                "The duck-impact ring produced a non-finite water height.");
+            maximumInnerRing = Math.Max(maximumInnerRing, Math.Abs(inner.Height));
+            maximumOuterRing = Math.Max(maximumOuterRing, Math.Abs(outer.Height));
+            for (int direction = 0; direction < innerRingOffsets.Length; direction++)
+            {
+                var probe = water.GetFieldProbe(dropSurface + innerRingOffsets[direction]);
+                Require(double.IsFinite(probe.Height), "The duck-impact circle became non-finite.");
+                innerRingCardinals[direction] = Math.Max(innerRingCardinals[direction], Math.Abs(probe.Height));
+            }
+            if (innerRingFrame < 0 && Math.Abs(inner.Height) > 1e-7) innerRingFrame = frame;
+            if (outerRingFrame < 0 && Math.Abs(outer.Height) > 1e-7) outerRingFrame = frame;
+            if (frame == landingFrame + 24)
+                await Save(target, "water-duck-outward-ring");
+        }
+        Require(inFlightFrame >= 0 && landingFrame > inFlightFrame && landedDuck is not null &&
+                landingSplash is { TotalEnergy: > 0, MaximumHeight: > .00001 } &&
+                Vector2.Distance(new(landedDuck.SurfaceX, landedDuck.SurfaceY), dropSurface) < .045f,
+            $"DUCK+ did not visibly fall into the pond center and produce a splash: " +
+            $"flight={inFlightFrame}, landing={landingFrame}, position={landedDuck}, field={landingSplash}.");
+        Require(innerRingFrame >= landingFrame && outerRingFrame > innerRingFrame &&
+                maximumInnerRing > 1e-7 && maximumOuterRing > 1e-7 &&
+                innerRingCardinals.All(amplitude => amplitude > 1e-7),
+            $"The duck impact did not launch an outward-travelling circular water wave: " +
+            $"inner={innerRingFrame}/{maximumInnerRing:G6}, outer={outerRingFrame}/{maximumOuterRing:G6}, " +
+            $"cardinals={string.Join(",", innerRingCardinals.Select(a => a.ToString("G6")))}, landing={landingFrame}.");
+        Draw(scene, target);
+        var addedDuck = DuckStates(water)[10];
+        Require(YellowPixels(Pixels(target), WaterGardenView.SurfaceToScreen(
+                    new(addedDuck.SurfaceX, addedDuck.SurfaceY))) > 4,
+            "The new duck was not visible floating after landing.");
+        for (int addition = 11; addition < WaterGardenDucks.MaximumCount; addition++)
+            Require(scene.ActivateWaterGardenButton("water-garden-duck-add"),
+                "DUCK+ stopped before reaching its stated capacity.");
+        Require(water.GetDiagnostics().DuckCount == WaterGardenDucks.MaximumCount &&
+                !scene.CurrentBoardButtons.Single(button => button.Id == "water-garden-duck-add").Enabled &&
+                !scene.ActivateWaterGardenButton("water-garden-duck-add"),
+            "DUCK+ exceeded its capacity or remained enabled when full.");
+        var fullDuckTimer = Stopwatch.StartNew();
+        Draw(scene, target);
+        var fullDuckPixels = Pixels(target);
+        double fullDuckDrawMilliseconds = fullDuckTimer.Elapsed.TotalMilliseconds;
+        var fullDuckStates = DuckStates(water);
+        int visibleFullDuckPixels = fullDuckStates.Sum(duck => YellowPixels(fullDuckPixels,
+            WaterGardenView.Project(new Vector3(duck.SurfaceX - .5f,
+                duck.SurfaceY - .5f, duck.Height + duck.DropHeight), 1)));
+        Require(fullDuckStates.Count >= 11 && fullDuckStates.Count <= WaterGardenDucks.MaximumCount &&
+                fullDuckStates.All(DuckIsFiniteAndInside) &&
+                visibleFullDuckPixels > 40,
+            $"Rendering the full pond did not show finite ducks at capacity: " +
+            $"{visibleFullDuckPixels} sampled yellow pixels.");
+        await Save(target, "water-square-ducks-20");
+        Require(scene.ActivateWaterGardenButton("water-garden-reset") &&
+                water.GetDiagnostics().DuckCount == 10 &&
+                DuckStatesWithinTolerance(initialDucks, DuckStates(water)) &&
+                scene.CurrentBoardButtons.Single(button => button.Id == "water-garden-duck-add").Enabled &&
+                scene.WaterGardenDrawerOpen,
+            "RESET did not restore ten ducks and re-enable DUCK+ while retaining the drawer.");
+        Require(scene.ActivateWaterGardenButton("water-garden-duck-add") &&
+                water.GetDiagnostics().DuckCount == 11 &&
+                scene.ActivateWaterGardenButton("water-garden-reset") &&
+                water.GetDiagnostics().DuckCount == 10,
+            "DUCK+ did not work again after RESET restored capacity.");
+        Draw(scene, target);
 
         now += TimeSpan.FromSeconds(1.0 / 60);
         Require(scene.SetWaterStickTip(CameraPoint(.5, .5, inset), now),
@@ -168,7 +309,7 @@ public sealed partial class MainWindow
                  { ("far", new Vector2(.55f, .28f)), ("near", new Vector2(.50f, .68f)) })
         {
             now += TimeSpan.FromMilliseconds(20);
-            Require(scene.ActivateWaterGardenButton("water-garden-calm"), "Perspective touch fixture could not reset its field.");
+            Require(scene.ActivateWaterGardenButton("water-garden-reset"), "Perspective touch fixture could not reset its field.");
             Draw(scene, target);
             var beforeTouch = Pixels(target);
             now += TimeSpan.FromMilliseconds(20);
@@ -195,13 +336,13 @@ public sealed partial class MainWindow
         }
 
         now += TimeSpan.FromMilliseconds(20);
-        Require(scene.ActivateWaterGardenButton("water-garden-calm"), "Calm Water did not activate.");
+        Require(scene.ActivateWaterGardenButton("water-garden-reset"), "RESET did not activate.");
         Draw(scene, target);
         var reset = Statistics(water);
         Require(IsFinite(reset) && reset.TotalEnergy == 0 && reset.MaximumHeight == 0 &&
                 DuckStatesWithinTolerance(initialDucks, DuckStates(water)) &&
                 scene.GetWaterGardenDiagnostics() is { TipVisible: false, InputCount: 0, PendingDisturbances: 0 },
-            "Calm Water left a wave, moving duck, queued disturbance or active eye tip.");
+            "RESET left a wave, moving duck, queued disturbance or active eye tip.");
         Require(!scene.SetWaterStickTip(CameraPoint(.5, .5, inset), now),
             "A frame captured at the reset watermark replayed an old disturbance.");
         await Save(target, "water-square-reset");
@@ -300,17 +441,98 @@ public sealed partial class MainWindow
             duckWater.Advance(1.0 / 30);
             duckWater.Reset();
             Require(DuckStatesWithinTolerance(start, firstReset) && firstReset.SequenceEqual(DuckStates(duckWater)),
-                "Repeated Calm Water resets did not restore identical duck placement and motion.");
+                "Repeated RESET actions did not restore identical duck placement and motion.");
+            duckWater.AddDisturbance(new(.5f, .5f), .034f, .004f);
+            var waveBeforeAddition = Statistics(duckWater);
+            var ducksBeforeAddition = DuckStates(duckWater);
+            Require(waveBeforeAddition.TotalEnergy > 0 && duckWater.AddDuck() &&
+                duckWater.GetDiagnostics().DuckCount == 11 &&
+                DuckStates(duckWater).Take(10).SequenceEqual(ducksBeforeAddition) &&
+                Statistics(duckWater) == waveBeforeAddition,
+                "Adding a duck disturbed an existing duck or the active wave field.");
+            for (int addition = 11; addition < WaterGardenDucks.MaximumCount; addition++)
+                Require(duckWater.AddDuck(), "A duck could not be added before the pool reached capacity.");
+            Require(!duckWater.AddDuck() &&
+                duckWater.GetDiagnostics().DuckCount == WaterGardenDucks.MaximumCount &&
+                DuckStates(duckWater).Count <= WaterGardenDucks.MaximumCount &&
+                DuckStates(duckWater).All(DuckIsFiniteAndInside),
+                "The pond exceeded duck capacity or spawned a non-finite duck.");
+            // Rapid button presses queue drops instead of stacking ten duck
+            // bodies at the same screen position in one simulation step.
+            int launchedAfterQueue = DuckStates(duckWater).Count;
+            Require(launchedAfterQueue < WaterGardenDucks.MaximumCount,
+                "Rapid DUCK+ presses spawned overlapping falling ducks instead of staging them.");
+            for (int frame = 0; frame < 420 && DuckStates(duckWater).Count < WaterGardenDucks.MaximumCount; frame++)
+                duckWater.Advance(1.0 / 30);
+            var launchedDucks = DuckStates(duckWater);
+            Require(launchedDucks.Count == WaterGardenDucks.MaximumCount &&
+                    launchedDucks.All(DuckIsFiniteAndInside),
+                $"The staged DUCK+ queue did not launch every bounded duck: " +
+                $"launched={launchedDucks.Count} of {WaterGardenDucks.MaximumCount}.");
+            duckWater.Reset();
+            Require(duckWater.GetDiagnostics().DuckCount == 10 &&
+                DuckStatesWithinTolerance(start, DuckStates(duckWater)) &&
+                Statistics(duckWater).TotalEnergy == 0,
+                "RESET did not restore exactly ten initial ducks and calm water after DUCK+.");
             duckPhysics = new { count = start.Count, ambientDisabledCalmStable = true,
                 maximumHeave, maximumSlope, maximumDrift, additionalStrokeTravel, outwardStrokeTravel,
                 fastStrokeTravel, intermediateSegmentTravel,
-                simulatedSecondsAfterImpulse = 6,
+                simulatedSecondsAfterImpulse = 6, maxDuckCount = WaterGardenDucks.MaximumCount,
+                launchedAfterQueue, stagedQueueDrained = true,
+                addedDucksPreserveWaterAndExistingDucks = true,
                 boundedAfterSettling = true, repeatedResetDeterministic = true };
+        }
+
+        // Place one otherwise-still resident directly in the falling hull's
+        // path. An outward response by the resident and opposite response by
+        // the newcomer demonstrate a body collision, not just a moving ring.
+        object duckDropCollision;
+        using (var collisionWater = new WaterGardenSimulation(device, 256, 256, 1))
+        {
+            collisionWater.SetAmbientEnabledForVerification(false);
+            collisionWater.SetFountainEnabledForVerification(false);
+            var residentPosition = dropSurface + new Vector2(.018f, 0);
+            collisionWater.PlaceDuckForVerification(2, residentPosition);
+            var residentStart = DuckStates(collisionWater)[2];
+            for (int frame = 0; frame < 60; frame++) collisionWater.Advance(1.0 / 30);
+            var residentIdle = DuckStates(collisionWater)[2];
+            Require(Vector2.Distance(new(residentStart.SurfaceX, residentStart.SurfaceY),
+                    new(residentIdle.SurfaceX, residentIdle.SurfaceY)) < .0001f,
+                "The resident duck moved in the collision fixture before any new duck fell.");
+            Require(collisionWater.AddDuck(), "The collision fixture could not launch a centered duck.");
+            int collisionFrame = -1;
+            double maximumResidentOutwardVelocity = 0, maximumNewDuckReboundVelocity = 0;
+            double maximumSeparation = 0;
+            for (int frame = 0; frame < 120; frame++)
+            {
+                collisionWater.Advance(1.0 / 30);
+                var ducks = DuckStates(collisionWater);
+                Require(ducks.Count == 11 && ducks.All(DuckIsFiniteAndInside),
+                    "A colliding duck became non-finite or escaped the pond.");
+                var resident = ducks[2];
+                var newcomer = ducks[10];
+                if (collisionFrame < 0 && newcomer.DropHeight > .07f) continue;
+                if (collisionFrame < 0) collisionFrame = frame;
+                if (frame > collisionFrame + 24) continue;
+                maximumResidentOutwardVelocity = Math.Max(maximumResidentOutwardVelocity, resident.VelocityX);
+                maximumNewDuckReboundVelocity = Math.Max(maximumNewDuckReboundVelocity, -newcomer.VelocityX);
+                maximumSeparation = Math.Max(maximumSeparation, Vector2.Distance(
+                    new(resident.SurfaceX, resident.SurfaceY),
+                    new(newcomer.SurfaceX, newcomer.SurfaceY)));
+            }
+            Require(collisionFrame >= 0 && maximumResidentOutwardVelocity > .002 &&
+                    maximumNewDuckReboundVelocity > .002 && maximumSeparation > .024,
+                $"The centered falling duck did not bounce against the resident hull: " +
+                $"contact={collisionFrame}, resident vx={maximumResidentOutwardVelocity:G6}, " +
+                $"newcomer opposite vx={maximumNewDuckReboundVelocity:G6}, " +
+                $"separation={maximumSeparation:G6}.");
+            duckDropCollision = new { collisionFrame, maximumResidentOutwardVelocity,
+                maximumNewDuckReboundVelocity, maximumSeparation };
         }
 
         // No stick input or ambient motion can satisfy this fixture. Persistent
         // 3D parcels must contact the stone, take time to reach the pond, and feed
-        // the actual wave field. Replaying Calm must reproduce both simulations.
+        // the actual wave field. Replaying RESET must reproduce both simulations.
         object fountainPhysics;
         using (var fountainWater = new WaterGardenSimulation(device, 256, 256, 1))
         {
@@ -389,7 +611,7 @@ public sealed partial class MainWindow
                     Require(currentFluid is { ParticleCount: 0, EmittedParticles: 0, PoolImpactParticles: 0 } &&
                             Statistics(fountainWater).TotalEnergy == 0 &&
                             DuckStatesWithinTolerance(fountainStartDucks, DuckStates(fountainWater)),
-                        "The fountain emitted parcels, moved ducks or disturbed the first quiet second after Calm Water.");
+                        "The fountain emitted parcels, moved ducks or disturbed the first quiet second after RESET.");
                 if (frame >= 60 && frame % 15 == 0)
                 {
                     var probe = fountainWater.GetFieldProbe(neighbour);
@@ -478,7 +700,7 @@ public sealed partial class MainWindow
                         EscapedParticles: 0, RockContacts: 0, Steps: 0 } && resetVolume.Occupied == 0 &&
                     Statistics(fountainWater).TotalEnergy == 0 &&
                     DuckStatesWithinTolerance(fountainStartDucks, DuckStates(fountainWater)),
-                "Calm Water failed to restore ducks or clear fountain particles, density, waves and impacts.");
+                "RESET failed to restore ducks or clear fountain particles, density, waves and impacts.");
             for (int frame = 0; frame < firstFlowFrame; frame++) fountainWater.Advance(1.0 / 30);
             var resumedFlow = Statistics(fountainWater);
             var resumedFlowDucks = DuckStates(fountainWater);
@@ -500,7 +722,7 @@ public sealed partial class MainWindow
                     Math.Abs(resumedFlow.MaximumSpeed - firstFlow.MaximumSpeed) < 1e-8 &&
                     firstFlowDucks is not null && resumedFlowDucks.All(DuckIsFiniteAndInside) &&
                     DuckStatesWithinTolerance(firstFlowDucks, resumedFlowDucks),
-                "The fountain did not resume reproducibly after Calm Water. " +
+                "The fountain did not resume reproducibly after RESET. " +
                 System.Text.Json.JsonSerializer.Serialize(new
                 {
                     initialImpacts = firstFlowImpacts, firstFlowFrame, resumedDiagnostics,
@@ -577,7 +799,14 @@ public sealed partial class MainWindow
             "A 90-degree board turn did not map the raw camera point into the new board coordinates.");
         Draw(scene, target);
         await Save(target, "water-square-facing-90");
-        Require(scene.ActivateWaterGardenButton("menu") && scene.CurrentBoardScreen == BoardScreen.Menu &&
+        // Orientation changes discard the current drawer and its camera
+        // references. Reopen it with fresh input before exercising EXIT.
+        if (!scene.WaterGardenDrawerOpen)
+            Require(scene.ActivateWaterGardenButton("water-drawer-open"),
+                "The rotated board could not reopen its controls drawer.");
+        now += BoardSession.WaterGardenDrawerOpeningDuration;
+        scene.TickWaterGarden(now);
+        Require(scene.ActivateWaterGardenButton("water-garden-exit") && scene.CurrentBoardScreen == BoardScreen.Menu &&
                 scene.GetWaterGardenDiagnostics() is { Active: false, TipVisible: false, Simulation: null },
             "Exit did not release the Water Garden field and return to the menu.");
 
@@ -588,6 +817,7 @@ public sealed partial class MainWindow
             using var output = new CanvasRenderTarget(device, width, height, 96);
             Draw(aspectScene, output);
             var initialAspectPixels = Pixels(output);
+            CheckSandGround(initialAspectPixels, width, height, aspectInset, label);
             var aspectWater = Simulation(aspectScene);
             // Allow actual parcels to travel over the rock before capturing the
             // falling water. Advance at the normal cadence without rendering 4K
@@ -639,6 +869,38 @@ public sealed partial class MainWindow
             await Save(output, "water-" + label + "-native");
         }
 
+        // A calibration/device-resource reset recreates the GPU duck state.
+        // The board session's accepted DUCK+ additions must be replayed on the
+        // new target, while the transient drawer closes for the new camera fit.
+        using (var recreated = NewScene(1, out _))
+        {
+            await recreated.EnsureBoardArtworkResourcesAsync(device, BoardScreen.WaterGarden);
+            Draw(recreated, target);
+            Require(recreated.ActivateWaterGardenButton("water-drawer-open"),
+                "The resource-recreation fixture could not reveal its controls.");
+            now += BoardSession.WaterGardenDrawerOpeningDuration;
+            Require(recreated.TickWaterGarden(now) &&
+                    recreated.ActivateWaterGardenButton("water-garden-duck-add") &&
+                    recreated.ActivateWaterGardenButton("water-garden-duck-add") &&
+                    Simulation(recreated).GetDiagnostics().DuckCount == 12,
+                "The resource-recreation fixture could not add two ducks.");
+            recreated.SetBoardSetup(true);
+            Require(recreated.GetWaterGardenDiagnostics().Simulation is null,
+                "Restarting board setup retained the old water GPU resources.");
+            Vector2[] registrationCorners = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
+            Point2[] registrationUnit = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
+            Point2[] registrationCamera =
+                [new(0, 0), new(1000, 0), new(1000, 1000), new(0, 1000)];
+            recreated.SetDetectedBoardGrid(registrationCorners,
+                Homography.FromFourPoints(registrationCamera, registrationUnit));
+            recreated.SetBoardSetup(false);
+            Draw(recreated, target);
+            Require(Simulation(recreated).GetDiagnostics().DuckCount == 12 &&
+                    DuckStates(Simulation(recreated)).All(DuckIsFiniteAndInside) &&
+                    recreated.CurrentBoardButtons.Single().Id == "water-drawer-open",
+                "Recreating the water GPU resources lost accepted ducks or kept a stale drawer open.");
+        }
+
         using (var uncalibrated = new SceneCompositor(blackjackClock: () => now, waterClock: () => now))
         {
             uncalibrated.ShowWaterGarden();
@@ -656,14 +918,19 @@ public sealed partial class MainWindow
                 "The isolated local-preview reset fixture did not begin with a disturbed field.");
             now += TimeSpan.FromMilliseconds(20);
             Require(!uncalibrated.SetWaterStickTip(new(500, 500), now) &&
-                    uncalibrated.ActivateWaterGardenAt(.75, .90) &&
+                    !uncalibrated.ActivateWaterGardenAt(.45, .93) &&
+                    uncalibrated.ActivateWaterGardenAt(.10, .93),
+                "The uncalibrated preview accepted camera input or selected a hidden action.");
+            now += BoardSession.WaterGardenDrawerOpeningDuration;
+            Require(uncalibrated.TickWaterGarden(now) &&
+                    uncalibrated.ActivateWaterGardenAt(.45, .93) &&
                     uncalibrated.CurrentBoardScreen == BoardScreen.WaterGarden,
-                "The uncalibrated preview accepted unmapped camera input or could not activate Calm Water.");
+                "The uncalibrated preview could not reveal and activate RESET.");
             DrawRawPreview(uncalibrated, preview);
             var previewReset = Statistics(Simulation(uncalibrated));
             Require(IsFinite(previewReset) && previewReset.TotalEnergy == 0 &&
-                    uncalibrated.ActivateWaterGardenAt(.18, .90) && uncalibrated.CurrentBoardScreen == BoardScreen.Menu,
-                "The uncalibrated local preview could not calm its field or return to the menu.");
+                    uncalibrated.ActivateWaterGardenAt(.28, .93) && uncalibrated.CurrentBoardScreen == BoardScreen.Menu,
+                "The uncalibrated local preview could not reset its field or return to the menu.");
         }
 
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
@@ -671,7 +938,13 @@ public sealed partial class MainWindow
                 _scene.HasBoardMediaClip, _scene.GetBoardFacingDegrees()),
             "Water Garden verification changed the live camera, projector or board registration.");
         return new { passed = true, propagatedHeight, injected, propagating, decayed, reset,
-            duckPhysics, fountainPhysics, visibleDuckPixels, sameClockDuckStateStable = true,
+            duckDrop = new { inFlightFrame, landingFrame, landedDuck, landingSplash,
+                innerRingFrame, outerRingFrame, maximumInnerRing, maximumOuterRing,
+                innerRingCardinals },
+            queuedDucksAtCapacity = fullDuckStates.Count,
+            duckPhysics, duckDropCollision, fountainPhysics, visibleDuckPixels, visibleFullDuckPixels,
+            fullDuckDrawMilliseconds,
+            sameClockDuckStateStable = true,
             sameClockFountainStable = true,
             perspectiveRoundTrips, perspectiveTouches, trapezoidAndRimOcclusionRejected = true,
             boundedEyeProjectionReference = true,
@@ -679,6 +952,7 @@ public sealed partial class MainWindow
             rawPreviewSameClockStable = true, uncalibratedPreviewControls = true,
             lossHasNoConnectingStroke = true, staleAndDuplicateFramesRejected = true, quarterTurnMapping = true,
             liveHardwareUnchanged = true, aspects, renderedFrames, drawMilliseconds, readbackMilliseconds,
+            sandAppearance,
             timingScope = "Isolated GPU draw submission and explicit field/pixel readbacks; PNG encoding excluded; not projector frame pacing.",
             directory, images };
 
@@ -725,6 +999,48 @@ public sealed partial class MainWindow
             var pixels = output.GetPixelBytes();
             readbackMilliseconds += timer.Elapsed.TotalMilliseconds;
             return pixels;
+        }
+        void CheckSandGround(byte[] pixels, int width, int height, double safetyInset, string label)
+        {
+            // These strips are beyond the far and near basin walls, clear of the
+            // moss rocks, fountain and control drawer for all tested aspects.
+            // They sample the actual projected frame, including its board fit.
+            var far = SampleSandGround(pixels, width, height, safetyInset,
+                new(.20, .025, .60, .075));
+            var near = SampleSandGround(pixels, width, height, safetyInset,
+                new(.20, .84, .60, .02));
+            foreach (var (name, sample) in new[] { ("far", far), ("near", near) })
+                Require(sample.Count > 1000 && sample.NonOpaque == 0 &&
+                        sample.Red > sample.Green + 3 && sample.Green > sample.Blue + 4 &&
+                        sample.Red < 240 && sample.LuminanceStdDev > 1.5,
+                    $"The {label} {name} ground is missing warm, varied, opaque sand: {sample}.");
+            sandAppearance.Add(new { label, far, near });
+        }
+        static SandGroundSample SampleSandGround(byte[] pixels, int width, int height,
+            double safetyInset, BoardRect region)
+        {
+            int left = (int)Math.Ceiling(width * (safetyInset / 2 + region.X * (1 - safetyInset)));
+            int top = (int)Math.Ceiling(height * (safetyInset / 2 + region.Y * (1 - safetyInset)));
+            int right = (int)Math.Floor(width * (safetyInset / 2 + (region.X + region.Width) * (1 - safetyInset)));
+            int bottom = (int)Math.Floor(height * (safetyInset / 2 + (region.Y + region.Height) * (1 - safetyInset)));
+            int stepX = Math.Max(1, width / 1200), stepY = Math.Max(1, height / 1200);
+            int count = 0, nonOpaque = 0;
+            double red = 0, green = 0, blue = 0, luminance = 0, luminanceM2 = 0;
+            for (int y = top; y < bottom; y += stepY)
+            for (int x = left; x < right; x += stepX)
+            {
+                int offset = (y * width + x) * 4;
+                double b = pixels[offset], g = pixels[offset + 1], r = pixels[offset + 2];
+                if (pixels[offset + 3] != 255) nonOpaque++;
+                count++;
+                red += r; green += g; blue += b;
+                double value = .2126 * r + .7152 * g + .0722 * b;
+                double delta = value - luminance;
+                luminance += delta / count;
+                luminanceM2 += delta * (value - luminance);
+            }
+            return count == 0 ? default : new(count, nonOpaque, red / count, green / count,
+                blue / count, Math.Sqrt(luminanceM2 / count));
         }
         WaterGardenFieldStatistics Statistics(WaterGardenSimulation simulation)
         {
@@ -848,10 +1164,13 @@ public sealed partial class MainWindow
             float.IsFinite(duck.SurfaceX) && float.IsFinite(duck.SurfaceY) &&
             float.IsFinite(duck.VelocityX) && float.IsFinite(duck.VelocityY) &&
             float.IsFinite(duck.Height) && float.IsFinite(duck.VerticalVelocity) &&
+            float.IsFinite(duck.DropHeight) && float.IsFinite(duck.FallVelocity) &&
+            float.IsFinite(duck.SplashAge) &&
             float.IsFinite(duck.SlopeX) && float.IsFinite(duck.SlopeY) &&
             float.IsFinite(duck.Yaw) && float.IsFinite(duck.YawVelocity) && float.IsFinite(duck.Scale) &&
             duck.SurfaceX > .01f && duck.SurfaceX < .99f && duck.SurfaceY > .01f && duck.SurfaceY < .99f &&
-            Math.Abs(duck.Height) < .1f && Math.Abs(duck.SlopeX) < 2 && Math.Abs(duck.SlopeY) < 2 &&
+            Math.Abs(duck.Height) < .1f && duck.DropHeight >= 0 && duck.DropHeight < 2.6f &&
+            Math.Abs(duck.SlopeX) < 2 && Math.Abs(duck.SlopeY) < 2 &&
             duck.Scale > 0;
         static bool DuckStatesWithinTolerance(IReadOnlyList<WaterGardenDuckState> first,
             IReadOnlyList<WaterGardenDuckState> second) => first.Count == second.Count &&
@@ -862,6 +1181,9 @@ public sealed partial class MainWindow
                 Math.Abs(pair.First.VelocityY - pair.Second.VelocityY) < 1e-6f &&
                 Math.Abs(pair.First.Height - pair.Second.Height) < 1e-6f &&
                 Math.Abs(pair.First.VerticalVelocity - pair.Second.VerticalVelocity) < 1e-6f &&
+                Math.Abs(pair.First.DropHeight - pair.Second.DropHeight) < 1e-6f &&
+                Math.Abs(pair.First.FallVelocity - pair.Second.FallVelocity) < 1e-6f &&
+                Math.Abs(pair.First.SplashAge - pair.Second.SplashAge) < 1e-6f &&
                 Math.Abs(pair.First.SlopeX - pair.Second.SlopeX) < 1e-6f &&
                 Math.Abs(pair.First.SlopeY - pair.Second.SlopeY) < 1e-6f &&
                 Math.Abs(pair.First.Yaw - pair.Second.Yaw) < 1e-6f &&

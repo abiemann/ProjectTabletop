@@ -105,6 +105,10 @@ public sealed partial class BoardSession
         {
             return SelectGlobeButton(button, now);
         }
+        if (Screen == BoardScreen.WaterGarden)
+        {
+            return SelectWaterGardenButton(button, now);
+        }
         if (Screen == BoardScreen.Slots)
         {
             return SelectSlotsButton(button, now);
@@ -125,13 +129,6 @@ public sealed partial class BoardSession
         {
             // The application owns the readable dialog. This is an action on
             // Settings, not navigation; preserve the board and its references.
-        }
-        else if (button.Id == "water-garden-calm")
-        {
-            if (Screen != BoardScreen.WaterGarden) return false;
-            // Only the water field resets; stationary captions and the board
-            // session remain available to their shared hold-button detector.
-            WaterGardenResetRevision++;
         }
         else if (button.Id == "paint-save")
         {
@@ -172,7 +169,7 @@ public sealed partial class BoardSession
             if (Screen == BoardScreen.Globe) _globe.Start(now);
             Revision++;
             NavigationRevision++;
-            if (Screen == BoardScreen.WaterGarden) WaterGardenResetRevision++;
+            if (Screen == BoardScreen.WaterGarden) RequestWaterGardenReset();
             openedBoard = true;
         }
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

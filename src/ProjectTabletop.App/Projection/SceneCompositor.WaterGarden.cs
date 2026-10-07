@@ -1,5 +1,6 @@
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.Text;
 using ProjectTabletop.App.Projection.WaterGarden;
 using ProjectTabletop.Calibration;
@@ -20,12 +21,31 @@ public sealed partial class SceneCompositor
     private DateTimeOffset _waterAdvancedAt, _waterResetThrough, _waterFrameTime;
     private Vector2? _waterTip, _waterSurfaceTip;
     private Homography? _waterCameraMap, _waterSurfaceMap;
-    private long _waterNavigation = -1, _waterResetRevision = -1, _waterVisualRevision, _waterInputCount;
+    private long _waterNavigation = -1, _waterResetRevision = -1;
+    private int _waterAppliedDuckCount;
+    private long _waterVisualRevision, _waterInputCount;
     private bool _waterWasActive;
     private CanvasRenderTarget? _waterFrameTarget;
     private (long Visual, int Feedback)? _waterRenderedFrame;
 
     public double WaterGardenPreviewAspect { get { lock (_gate) return PaintBoardAspect(); } }
+    public bool WaterGardenDrawerOpen { get { lock (_gate) return _boardSession.WaterGardenDrawerOpen; } }
+    public double GetWaterGardenDrawerProgress(DateTimeOffset now)
+    {
+        lock (_gate) return _boardSession.GetWaterGardenDrawerProgress(now);
+    }
+
+    public bool TickWaterGarden(DateTimeOffset now)
+    {
+        lock (_gate) return _boardSession.TickWaterGarden(now);
+    }
+
+    private bool HasWaterGardenDrawerAnimation(DateTimeOffset now)
+    {
+        _boardSession.TickWaterGarden(now);
+        return _boardSession.WaterGardenDrawerOpen &&
+            _boardSession.GetWaterGardenDrawerProgress(now) < 1;
+    }
 
     internal sealed record WaterGardenDiagnostics(bool Active, bool TipVisible, Point2? BoardTip,
         DateTimeOffset SourceTime, long InputCount, int PendingDisturbances, object? Simulation);
@@ -35,6 +55,7 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             SyncWaterGardenSession();
+            ApplyWaterDuckAdds();
             ExpireWaterStick(_waterClock());
             return new(_waterWasActive, _waterTip is not null,
                 _waterTip is { } tip ? new Point2(tip.X, tip.Y) : null, _waterFrameTime,
@@ -61,6 +82,12 @@ public sealed partial class SceneCompositor
             if (_boardSession.Screen != BoardScreen.WaterGarden) return false;
             bool accepted = _boardSession.ActivateButton(id, _waterClock());
             SyncWaterGardenSession();
+            if (accepted)
+            {
+                ApplyWaterDuckAdds();
+                _waterVisualRevision++;
+                _waterRenderedFrame = null;
+            }
             return accepted;
         }
     }
@@ -107,7 +134,7 @@ public sealed partial class SceneCompositor
             drawing.Transform = BoardRasterTransform(_waterFrameTarget);
             DrawWaterGardenSurface(drawing, now);
             DrawWaterGardenRocks(drawing);
-            DrawWaterGardenControls(drawing, _boardSession.Buttons, [], feedback);
+            DrawWaterGardenControls(drawing, _boardSession.Buttons, [], feedback, now);
             _waterRenderedFrame = key;
         }
         return _waterFrameTarget!;
@@ -243,6 +270,7 @@ public sealed partial class SceneCompositor
         _waterSurfaceMap = _boardSurfaceMap;
         _waterNavigation = _boardSession.NavigationRevision;
         _waterResetRevision = _boardSession.WaterGardenResetRevision;
+        _waterAppliedDuckCount = 0;
         _waterWasActive = active;
         if (!active || registrationChanged) DisposeWaterGardenResources();
         else _waterSimulation?.Reset();
@@ -252,7 +280,9 @@ public sealed partial class SceneCompositor
 
     private long WaterGardenVisualRevision(DateTimeOffset now)
     {
+        _boardSession.TickWaterGarden(now);
         SyncWaterGardenSession();
+        ApplyWaterDuckAdds();
         ExpireWaterStick(now);
         AdvanceWaterGarden(now);
         return unchecked(_waterVisualRevision * 1000000007 + now.UtcTicks / (TimeSpan.TicksPerSecond / 60));
@@ -277,10 +307,14 @@ public sealed partial class SceneCompositor
                 _waterImages?.Image("warm-limestone.png") ??
                 throw new InvalidOperationException("Water Garden basin artwork was not loaded before rendering."),
                 _waterImages?.Image("wet-slate.png") ??
-                throw new InvalidOperationException("Water Garden cascade artwork was not loaded before rendering."));
+                throw new InvalidOperationException("Water Garden cascade artwork was not loaded before rendering."),
+                _waterImages?.Image("sand-ground.png") ??
+                throw new InvalidOperationException("Water Garden sand artwork was not loaded before rendering."));
             _waterDevice = ds.Device;
             _waterAdvancedAt = now;
+            _waterAppliedDuckCount = 0;
         }
+        ApplyWaterDuckAdds();
         AdvanceWaterGarden(now);
         while (_waterDisturbances.TryDequeue(out var ripple))
             _waterSimulation.AddDisturbance(ripple.Position, .034f, ripple.Strength);
@@ -289,27 +323,92 @@ public sealed partial class SceneCompositor
         _waterSimulation.Draw(ds, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
     }
 
+    private void ApplyWaterDuckAdds()
+    {
+        if (_waterSimulation is null) return;
+        bool added = false;
+        // Reconstruct the current session's added ducks after a registration or
+        // device change. Reset starts at ten again and clears this count.
+        while (_waterAppliedDuckCount < _boardSession.WaterGardenAddedDuckCount)
+        {
+            if (!_waterSimulation.AddDuck()) break;
+            _waterAppliedDuckCount++;
+            added = true;
+        }
+        if (added)
+        {
+            _waterVisualRevision++;
+            _waterRenderedFrame = null;
+        }
+    }
+
     private static readonly Color WaterInk = Color.FromArgb(255, 30, 49, 45);
     private static readonly Color WaterStone = Color.FromArgb(255, 211, 215, 196);
 
     private void DrawWaterGardenControls(CanvasDrawingSession ds, IReadOnlyList<BoardButton> buttons,
-        IReadOnlyList<string> hovered, IReadOnlyList<BoardFingerSelectionFeedback> feedback)
+        IReadOnlyList<string> hovered, IReadOnlyList<BoardFingerSelectionFeedback> feedback, DateTimeOffset now)
     {
-        foreach (var button in buttons)
+        var drawerButtons = buttons.Where(button => !IsBoardDrawerHandle(button)).ToArray();
+        if (_boardSession.WaterGardenDrawerOpen && drawerButtons.Length > 0)
         {
-            var b = button.Bounds;
-            var rect = new Rect(b.X * BoardSurfaceSize, b.Y * BoardSurfaceSize,
-                b.Width * BoardSurfaceSize, b.Height * BoardSurfaceSize);
-            float radius = BoardButtonCornerRadius(button);
-            ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 5, rect.Width, rect.Height), radius, radius,
-                Color.FromArgb(170, 9, 28, 26));
-            ds.FillRoundedRectangle(rect, radius, radius, WaterStone);
-            ds.DrawRoundedRectangle(new Rect(rect.X + 2, rect.Y + 2, rect.Width - 4, rect.Height - 4), radius - 2, radius - 2,
-                Color.FromArgb(255, 239, 239, 221), 2);
-            using var text = PaintButtonTextFormat();
-            DrawWaterText(ds, button.Label, new Rect(rect.X + 20, rect.Y + 6, rect.Width - 40, rect.Height - 18), WaterInk, text);
+            using var clip = CanvasGeometry.CreateRectangle(ds.Device,
+                new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
+            using var layer = ds.CreateLayer(1, clip);
+            var previous = ds.Transform;
+            float rowTop = (float)drawerButtons.Min(button => button.Bounds.Y) * BoardSurfaceSize;
+            float progress = (float)_boardSession.GetWaterGardenDrawerProgress(now);
+            ds.Transform = Matrix3x2.CreateTranslation(0, BoardDrawerSlide(progress, rowTop)) * previous;
+            try
+            {
+                foreach (var button in drawerButtons)
+                    DrawWaterGardenButton(ds, button, hovered.Contains(button.Id), feedback);
+            }
+            finally { ds.Transform = previous; }
+        }
+        // The fixed handle remains available while its three actions rise.
+        foreach (var button in buttons.Where(IsBoardDrawerHandle))
+            DrawWaterGardenButton(ds, button, hovered.Contains(button.Id), feedback);
+    }
+
+    private void DrawWaterGardenButton(CanvasDrawingSession ds, BoardButton button, bool hovered,
+        IReadOnlyList<BoardFingerSelectionFeedback> feedback)
+    {
+        var b = button.Bounds;
+        var rect = new Rect(b.X * BoardSurfaceSize, b.Y * BoardSurfaceSize,
+            b.Width * BoardSurfaceSize, b.Height * BoardSurfaceSize);
+        float radius = BoardButtonCornerRadius(button);
+        ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 5, rect.Width, rect.Height), radius, radius,
+            Color.FromArgb(170, 9, 28, 26));
+        ds.FillRoundedRectangle(rect, radius, radius, WaterStone);
+        ds.DrawRoundedRectangle(new Rect(rect.X + 2, rect.Y + 2, rect.Width - 4, rect.Height - 4), radius - 2, radius - 2,
+            hovered ? Color.FromArgb(255, 151, 174, 134) : Color.FromArgb(255, 239, 239, 221), hovered ? 3 : 2);
+        if (IsBoardDrawerHandle(button))
+        {
+            using var arrow = CanvasGeometry.CreatePolygon(ds.Device, DrawerArrowVertices(button, PaintBoardAspect()));
+            ds.FillGeometry(arrow, WaterInk);
+            DrawButtonFingerSelectionFeedback(ds, button, feedback, WaterInk, showCaption: false);
+        }
+        else
+        {
+            using var text = WaterGardenButtonTextFormat();
+            DrawWaterText(ds, button.Label, WaterGardenButtonTextRectangle(button),
+                button.Enabled ? WaterInk : Color.FromArgb(255, 104, 115, 107), text);
             DrawButtonFingerSelectionFeedback(ds, button, feedback, WaterInk);
         }
+    }
+
+    private static Rect WaterGardenButtonTextRectangle(BoardButton button)
+    {
+        var b = button.Bounds;
+        return new Rect(b.X * BoardSurfaceSize + 10, b.Y * BoardSurfaceSize + 6,
+            b.Width * BoardSurfaceSize - 20, b.Height * BoardSurfaceSize - 18);
+    }
+
+    private static CanvasTextFormat WaterGardenButtonTextFormat()
+    {
+        var format = PaintButtonTextFormat();
+        format.FontSize = 28;
+        return format;
     }
 
     private void DrawWaterText(CanvasDrawingSession ds, string text, Rect bounds, Color color, CanvasTextFormat format)
@@ -327,15 +426,15 @@ public sealed partial class SceneCompositor
 
     private HandTrackingBounds WaterGardenButtonTextRegion(CanvasDevice device, BoardButton button)
     {
-        var b = button.Bounds;
         float aspect = (float)PaintBoardAspect();
-        using var format = PaintButtonTextFormat();
+        using var format = WaterGardenButtonTextFormat();
         format.FontSize *= Math.Min(1, aspect);
+        var rectangle = WaterGardenButtonTextRectangle(button);
         using var layout = new CanvasTextLayout(device, button.Label, format,
-            (float)(b.Width * BoardSurfaceSize - 40) * aspect, (float)(b.Height * BoardSurfaceSize - 18));
+            (float)rectangle.Width * aspect, (float)rectangle.Height);
         var ink = layout.DrawBounds;
         return ButtonInkRegion(button, new Rect(ink.X / aspect, ink.Y, ink.Width / aspect, ink.Height),
-            b.X * BoardSurfaceSize + 20, b.Y * BoardSurfaceSize + 6);
+            rectangle.X, rectangle.Y);
     }
 
     private void DisposeWaterGardenResources()
@@ -347,6 +446,7 @@ public sealed partial class SceneCompositor
         _waterRenderedFrame = null;
         _waterDevice = null;
         _waterAdvancedAt = default;
+        _waterAppliedDuckCount = 0;
         ClearWaterStick();
     }
 }

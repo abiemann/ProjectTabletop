@@ -225,6 +225,10 @@
       "sha256": "85c5f3209c14d5c384ddbf47c09a867a3b9e90a6c01c40f954d932a76c67fba0"
     },
     {
+      "file": "src/ProjectTabletop.App/Assets/WaterGarden/sand-ground.png",
+      "sha256": "525f5eb810a409c343ef9f8e95403f60e6d517980c8e7efd11d2424f5f1ffe86"
+    },
+    {
       "file": "src/ProjectTabletop.App/Assets/WaterGarden/warm-limestone.png",
       "sha256": "bcd339092f0100a53e21fad7e11bf7bf183f9d453efdff3a537f3b4bbaf1406a"
     },
@@ -306,11 +310,11 @@
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterDuckDynamicsShader.cs",
-      "sha256": "c19fc724cd7c531c8627fb0abd49b1a79ceec7da9b48998fcc19b24e9a0df67f"
+      "sha256": "0dc35659e32224d8bf98d67e2100bcb7144507f26a946aaaef8e7c14126a73fd"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterDuckRendering.cs",
-      "sha256": "7ba534912cb7d2e7c5c1f8c5fce2839f0c5d5adbd4bcc6596c9586f6b4d5b189"
+      "sha256": "2b917b72a52b0f485a77416cd388a6c90769ce777d9a0a2bfa99e0201d38f0af"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterFountainFluid.cs",
@@ -334,7 +338,7 @@
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterGardenSimulation.cs",
-      "sha256": "e1f5c23539de32c68694508b625c10ffdee1ba3f1dfa24e5ee59a7e0aea4e216"
+      "sha256": "608db3418c6249198cd903511cfecd4f19e58c05c477cc827c5c731a47bf42ea"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterGardenView.cs",
@@ -354,7 +358,7 @@
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterSurfaceShader.cs",
-      "sha256": "207c345c3d3fe7a3c68a5c1a1a2fc9dcd09ec280c8b40bf24ce7b4b5bb3c5425"
+      "sha256": "ff822278b616a1c4e6687be61e90f4399cea42a8e9729949fbea716cf50a4f7a"
     },
     {
       "file": "src/ProjectTabletop.App/SlotsRendering/Assets/slot-menu-dragon.png",
@@ -386,7 +390,7 @@
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.Native.cs",
-      "sha256": "13afc7e0b164c11c338e4af9b9b7b3b0d85b72be49d61fb4011e929db37eba5d"
+      "sha256": "211f0cbfe54724fec54709b81985a1180fa11f2a7b4a24cb213e16d1ebc6f99e"
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.cs",

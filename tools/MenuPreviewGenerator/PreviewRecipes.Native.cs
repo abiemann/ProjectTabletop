@@ -153,6 +153,7 @@ internal sealed partial class PreviewRecipes
             "src/ProjectTabletop.Interaction/GlobeHome.cs",
             "src/ProjectTabletop.App/SlotsRendering/Assets/slot-menu-dragon.png",
             "src/ProjectTabletop.App/Assets/WaterGarden/moss-rocks.png",
+            "src/ProjectTabletop.App/Assets/WaterGarden/sand-ground.png",
             "src/ProjectTabletop.App/Assets/WaterGarden/warm-limestone.png",
             "src/ProjectTabletop.App/Assets/WaterGarden/wet-slate.png",
             "src/ProjectTabletop.App/GlobeRendering/Assets/earth-day-8192.png",

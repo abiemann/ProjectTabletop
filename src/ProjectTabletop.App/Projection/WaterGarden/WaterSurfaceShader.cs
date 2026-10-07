@@ -7,25 +7,27 @@ namespace ProjectTabletop.App.Projection.WaterGarden;
 // MIT WebGL Water (2011); see THIRD_PARTY_NOTICES.md. The pebble bed and environment
 // are original. Caustic light is a bounded local Jacobian approximation, not a port
 // of the demo's displaced-mesh/raster-derivative caustics stage.
-[D2DInputCount(6)]
+[D2DInputCount(7)]
 [D2DInputComplex(0)]
 [D2DInputComplex(1)]
 [D2DInputComplex(2)]
 [D2DInputComplex(3)]
 [D2DInputComplex(4)]
 [D2DInputComplex(5)]
+[D2DInputComplex(6)]
 [D2DInputDescription(0, D2D1Filter.MinMagMipLinear)]
 [D2DInputDescription(1, D2D1Filter.MinMagMipLinear)]
 [D2DInputDescription(2, D2D1Filter.MinMagMipPoint)]
 [D2DInputDescription(3, D2D1Filter.MinMagMipLinear)]
 [D2DInputDescription(4, D2D1Filter.MinMagMipLinear)]
 [D2DInputDescription(5, D2D1Filter.MinMagMipLinear)]
+[D2DInputDescription(6, D2D1Filter.MinMagMipLinear)]
 [D2DRequiresScenePosition]
 [D2DShaderProfile(D2D1ShaderProfile.PixelShader50)]
 [D2DGeneratedPixelShaderDescriptor]
 internal readonly partial struct WaterSurfaceShader(Float2 fieldSize, Float2 size,
     float aspect, float time, int ambientEnabled, Float4 camera, Float2 centre, float rimHeight,
-    Float2 duckStateSize, float fountainFlow,
+    Float2 duckStateSize, int activeDuckCount, Float2 duckSplashPosition, float fountainFlow,
     Float3 fountainVolumeMin, Float3 fountainVolumeSize, Float3 fountainGridSize,
     Float2 fountainAtlasTiles) : ID2D1PixelShader
 {
@@ -91,6 +93,31 @@ internal readonly partial struct WaterSurfaceShader(Float2 fieldSize, Float2 siz
         sky = Hlsl.Lerp(sky, new Float3(.98f, .99f, .96f), openSky);
         float foliage = (1 - Hlsl.SmoothStep(.28f, .63f, ray.Z)) * Hlsl.SmoothStep(.30f, .60f, Noise(position * 1.8f));
         return new Float4(Hlsl.Lerp(sky, new Float3(.12f, .19f, .13f), foliage), openSky);
+    }
+
+    private Float3 SandGround(Float2 ground)
+    {
+        // Two differently oriented, edge-reflected grains mask the symmetry of
+        // any one photographic tile across wide boards. Both use physical ground
+        // coordinates, so their apparent scale recedes with the basin camera.
+        Float2 uv = ground / 1.4f;
+        Float2 tile = Hlsl.Abs(Hlsl.Frac(uv + new Float2(.43f, .31f)) * 2 - 1);
+        Float2 secondary = Hlsl.Abs(Hlsl.Frac(new Float2(uv.Y * 1.07f, uv.X * .93f) +
+            new Float2(.17f, .62f)) * 2 - 1);
+        Float3 sand = Hlsl.Lerp(D2D.SampleInputAtPosition(6, tile * (size - 1) + .5f).XYZ,
+            D2D.SampleInputAtPosition(6, secondary * (size - 1) + .5f).XYZ, .35f);
+
+        // The limestone sits just above the ground. Its rounded outline, rather
+        // than a screen-space rectangle, carries a tight contact shadow and a
+        // softer small cast shadow in the direction opposite the garden light.
+        Float2 halfSize = new Float2(aspect * .5f, .5f);
+        float radius = WaterGardenView.PondCornerRadius * Hlsl.Min(aspect, 1);
+        float contactDistance = RoundedRectangleDistance(ground, halfSize, radius);
+        float castDistance = RoundedRectangleDistance(ground - new Float2(.035f, .042f),
+            halfSize, radius);
+        float contact = 1 - Hlsl.SmoothStep(0, .045f, contactDistance);
+        float cast = 1 - Hlsl.SmoothStep(0, .13f, castDistance);
+        return sand * (1 - .20f * contact - .08f * cast);
     }
 
     public Float4 Execute()
@@ -173,8 +200,18 @@ internal readonly partial struct WaterSurfaceShader(Float2 fieldSize, Float2 siz
         float visibleDistance = inWater ? Hlsl.Min(planeDistance, ducks.W) : 10000;
         if (!inWater)
         {
-            float paper = Noise(screen * size * .34f);
-            color = new Float3(.86f, .87f, .82f) + (paper - .5f) * .008f;
+            // Intersect the same camera ray used for the pool with a plane below
+            // the stone base. This makes sand grain recede in the pool's viewing
+            // direction instead of stretching a photograph over screen pixels.
+            const float groundZ = -.066f;
+            float groundDistance = (groundZ - eye.Z) / incoming.Z;
+            Float2 ground = eye.XY + incoming.XY * groundDistance;
+            // An airborne duck can project above the far rim or over the sand.
+            // Compare its true ray depth with the ground rather than erasing it
+            // when the pixel does not intersect the water surface.
+            bool duckInFront = ducks.W < groundDistance;
+            color = duckInFront ? ducks.XYZ : SandGround(ground);
+            visibleDistance = duckInFront ? ducks.W : groundDistance;
         }
         if (basin.W < 1000 && basin.W < ducks.W && (!inWater || basin.W < planeDistance))
         {

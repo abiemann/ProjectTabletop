@@ -22,7 +22,7 @@ public sealed partial class MainWindow
             lock (_eyeTipGate)
             {
                 // A toggle or camera change after entry supersedes this queued
-                // request. Status refreshes and Calm Water never re-enable it.
+                // request. Status refreshes and Reset never re-enable it.
                 if (_eyeTipGeneration != trackingGeneration || _eyeTipEnabled ||
                     _eyeTipCameraId != _selectedCameraId ||
                     (LearnedEyeTipRadiusLocked() is null && LearnedColorTipProfileLocked() is null)) return;
@@ -41,7 +41,7 @@ public sealed partial class MainWindow
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
         SetStatus(_scene.HasBoardMediaClip
-            ? "Water Garden: move the learned stick tip over the board to disturb the water. Hold Calm Water to settle it, or Exit to return to the menu."
+            ? "Water Garden: move the learned stick tip over the water. Open the bottom-left arrow for Exit, Reset, and Duck+."
             : "Water Garden selected. Scan the board and learn the coloured tip or eye sticker.");
     }
 

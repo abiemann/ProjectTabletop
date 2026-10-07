@@ -5,7 +5,7 @@ public sealed partial class BoardSession
     private static TimeSpan BottomDrawerOpeningDuration => TimeSpan.FromMilliseconds(300);
     private static readonly BoardRect BottomDrawerHandleBounds = new(.01, .87, .18, .12);
 
-    // Both edge drawers use the same entrance and fresh-input policy. Their
+    // The edge drawers use the same entrance and fresh-input policy. Their
     // contents and action semantics remain owned by their respective boards.
     private sealed class BottomDrawerState
     {
@@ -18,6 +18,7 @@ public sealed partial class BoardSession
 
     private readonly BottomDrawerState _globeDrawer = new();
     private readonly BottomDrawerState _photoCopyDrawer = new();
+    private readonly BottomDrawerState _waterGardenDrawer = new();
 
     private double BottomDrawerProgress(BottomDrawerState drawer, BoardScreen screen, DateTimeOffset now) =>
         Screen == screen && drawer.Open && drawer.OpenedAt is { } opened
@@ -54,12 +55,14 @@ public sealed partial class BoardSession
     {
         AdvanceBottomDrawer(_globeDrawer, BoardScreen.Globe, now);
         AdvanceBottomDrawer(_photoCopyDrawer, BoardScreen.PhotoCopy, now);
+        AdvanceBottomDrawer(_waterGardenDrawer, BoardScreen.WaterGarden, now);
     }
 
     private bool BottomDrawerHoldFrameIsCurrent(DateTimeOffset frameTime) => Screen switch
     {
         BoardScreen.Globe => frameTime > _globeDrawer.InputReadyAfter,
         BoardScreen.PhotoCopy => frameTime > _photoCopyDrawer.InputReadyAfter,
+        BoardScreen.WaterGarden => frameTime > _waterGardenDrawer.InputReadyAfter,
         _ => true
     };
 
@@ -73,7 +76,7 @@ public sealed partial class BoardSession
 
     private void ClearBottomDrawers(DateTimeOffset now)
     {
-        foreach (var drawer in new[] { _globeDrawer, _photoCopyDrawer })
+        foreach (var drawer in new[] { _globeDrawer, _photoCopyDrawer, _waterGardenDrawer })
         {
             ClearBottomDrawerUi(drawer);
             drawer.ObservedAt = Later(drawer.ObservedAt, now);

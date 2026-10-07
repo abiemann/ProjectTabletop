@@ -16,6 +16,8 @@ programmatic image editing has been applied.
 
 The garden uses a fixed close oblique camera, with larger procedural pebbles and
 perspective-rendered warm limestone walls with rounded corners and softened edges.
+The same camera projects original fine-grained sand artwork onto the ground
+beneath the basin, with rounded contact shading along its footprint.
 A low layered wet-stone cascade stands at the far center of the pond. Its
 irregular ledges are native three-dimensional geometry. A bounded particle
 simulation moves water over the stone face; a reconstructed three-dimensional
@@ -35,8 +37,8 @@ Ten tiny yellow rubber ducks use original analytic three-dimensional geometry,
 including rounded bodies, wings, bills and eyes. GPU buoyancy samples the actual
 water surface so the ducks bob and tilt. Local currents from measured cascade
 landings carry them outward, and confirmed moving stick strokes push nearby ducks
-aside; the water reflects the same moving geometry. **Calm Water** restores their
-starting positions and clears their motion.
+aside; the water reflects the same moving geometry. **Duck+** adds one duck at a
+time up to twenty, while **Reset** restores the original ten and clears their motion.
 The ducks introduce no image asset or additional dependency.
 
 ## Selected output and alpha inspection
@@ -73,6 +75,30 @@ Generation prompt:
 
 ```text
 Use case: photorealistic-natural. Asset type: seamless square diffuse albedo material texture for native 3D game geometry. Create an original richly detailed dark wet layered slate and weathered basalt rock surface inspired by natural stacked garden-fountain stones: thin irregular horizontal mineral strata, charcoal graphite and deep olive-gray stone, restrained muted umber and blue-violet mineral undertones, tiny seams and worn rough edges in the material only, occasional subtle olive moss staining in crevices. It should feel like real damp water-darkened rock with natural visual variation and refined high-quality detail. Perfectly flat orthographic material scan filling the frame edge-to-edge, horizontally and vertically seamless, even diffuse light without shadows or specular highlights because the renderer adds shading and wet gloss. No individual rock object or pile, no waterfall or water, no background scene, no border, no text, no logos, no photo reproduction. Avoid uniform gray concrete, plastic, artificial glitter, strong regular stripes, big cracks, white speckles, or baked directional light. Opaque square PNG texture.
+```
+
+### Sand ground material
+
+`sand-ground.png` is an original opaque, 1254 × 1254 RGB sand texture generated
+on 2026-10-06 with OpenAI's built-in `image_gen` tool. The supplied sand
+photograph guided its fine grain and muted beige colour; no reference pixels,
+watermark or branding are included. The renderer maps the texture onto the
+ground plane using the Water Garden camera so its apparent grain and direction
+recede with the basin. The earlier Water Garden menu thumbnail remains unchanged.
+
+Source: `exec-93464ed3-235c-4b51-ae5d-1ed2132ca452.png`.
+SHA-256: `525f5eb810a409c343ef9f8e95403f60e6d517980c8e7efd11d2424f5f1ffe86`.
+
+Generation prompt:
+
+```text
+Use case: photorealistic-natural
+Asset type: original seamless ground-material texture for a perspective-mapped 3D water garden, to sit quietly behind a stone basin.
+Primary request: ultra-fine natural beige beach sand like the user's reference, with tiny realistic individual grains and a few broad, shallow wind-swept tonal bands. Make it calmer and much less contrasty/coarse than the previous generated version; avoid obvious chunky gravel or orange saturation.
+Composition/framing: square directly overhead orthographic material view, consistent grain size from edge to edge, no horizon, no baked perspective, no vignette. Opposite edges should transition smoothly for tiling.
+Lighting/mood: soft warm daylight, subtle micro-shadows in the grain, restrained variation.
+Color palette: muted pale tan, honey-beige and small cool-grey mineral flecks.
+Constraints: sand only, no pebbles larger than grains, rocks, shells, footprints, objects, plants, water, controls, text, logos or watermark.
 ```
 
 ### Moss-rock cutout

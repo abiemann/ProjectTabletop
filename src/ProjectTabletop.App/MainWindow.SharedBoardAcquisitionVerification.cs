@@ -85,7 +85,12 @@ public sealed partial class MainWindow
                 VerifyButtons("Globe drawer");
             }
         }
-        scene.ShowWaterGarden(); VerifyButtons("Water Garden");
+        scene.ShowWaterGarden(); VerifyButtons("Water Garden/closed");
+        Require(scene.ActivateWaterGardenButton("water-drawer-open"),
+            "The Water Garden acquisition drawer could not open.");
+        now += BoardSession.WaterGardenDrawerOpeningDuration;
+        scene.TickWaterGarden(now);
+        VerifyButtons("Water Garden/open");
         scene.ShowBlackjack(); VerifyButtons("Blackjack betting");
         Require(scene.CurrentBoardButtons.Any(button => button.Id == "bj-reset" && button.Label == "Your Chips" &&
                     button.Bounds == new BoardRect(.742, .055, .198, .09)) &&
@@ -134,7 +139,7 @@ public sealed partial class MainWindow
             menuScrollArrowUsesSharedCaptionEvidence = selectedBoard is null or BoardScreen.Menu,
             intactReflectiveSpinCaptionChecked = selectedBoard is null or BoardScreen.Slots,
             waterGardenCaptionCorruptionAndIntactReflectanceChecked =
-                tested.Count(label => label.StartsWith("Water Garden/", StringComparison.Ordinal)) == 2,
+                tested.Count(label => label.StartsWith("Water Garden/", StringComparison.Ordinal)) == 5,
             liveHardwareUnchanged = true };
 
         void VerifyButtons(string label)
@@ -244,7 +249,9 @@ public sealed partial class MainWindow
                 // gold Deal button. Actual skin/projector contrast is evaluated
                 // in recorded camera captures, not asserted by a painted patch.
                 bool arrow = button.Id is "globe-drawer-open" or "globe-drawer-close" or
-                    "photo-drawer-open" or "photo-drawer-close" or "menu-scroll-down" or "menu-scroll-up";
+                    "photo-drawer-open" or "photo-drawer-close" or
+                    "water-drawer-open" or "water-drawer-close" or
+                    "menu-scroll-down" or "menu-scroll-up";
                 if (screen == BoardScreen.Roulette && !button.IsHold)
                 {
                     // Roulette's compact numbers, outside labels and chip values
@@ -281,9 +288,18 @@ public sealed partial class MainWindow
                             (int)center.Y - stripeHeight / 2, stripeWidth, stripeHeight, 75, 95, 185);
                 }
                 else
+                {
+                    // Menu cards are much wider than the compact game controls.
+                    // Give their four simulated fingers a proportional footprint
+                    // so the obstruction covers the same share of the caption.
+                    bool menuCard = screen == BoardScreen.Menu;
+                    int fingerWidth = loneBack ? 49 : menuCard ? 30 : 18;
+                    int fingerStep = loneBack ? 55 : menuCard ? 36 : 20;
+                    int left = loneBack ? 107 : menuCard ? 69 : 38;
                     for (int finger = 0; finger < 4; finger++)
-                        Fill(occupied, (int)center.X - (loneBack ? 107 : 38) + finger * (loneBack ? 55 : 20),
-                            (int)center.Y - height / 2, loneBack ? 49 : 18, height, 75, 95, 185);
+                        Fill(occupied, (int)center.X - left + finger * fingerStep,
+                            (int)center.Y - height / 2, fingerWidth, height, 75, 95, 185);
+                }
                 var occupiedTracker = new HandAcquisitionPresenceTracker();
                 var firstArrival = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
                     context, occupiedTracker, now);
@@ -569,6 +585,16 @@ public sealed partial class MainWindow
                 // session so testing a full Exit cannot close the optical fixture.
                 var pressBoard = new BoardSession();
                 pressBoard.ShowWaterGarden(now);
+                if (button.Id != "water-drawer-open")
+                {
+                    now += TimeSpan.FromMilliseconds(100);
+                    Require(pressBoard.ActivateButton("water-drawer-open", now),
+                        "The isolated Water Garden press could not open its drawer.");
+                    now += BoardSession.WaterGardenDrawerOpeningDuration;
+                    Require(pressBoard.TickWaterGarden(now),
+                        "The isolated Water Garden drawer did not settle.");
+                }
+                now += TimeSpan.FromMilliseconds(100);
                 var clear = tracker.Update(size, size, size * 4, empty,
                     hold.SearchPolygon, hold.ExpectedScene, now, now);
                 Require(pressBoard.ObserveHeldButtons(hold.HeldButtons(clear), now, now,
@@ -585,8 +611,18 @@ public sealed partial class MainWindow
                         "Broken Water Garden lettering did not activate " + button.Label + " after its own full second.");
                     now += TimeSpan.FromMilliseconds(100);
                 }
-                Require(button.Id == "menu" ? pressBoard.Screen == BoardScreen.Menu :
-                        pressBoard.Screen == BoardScreen.WaterGarden && pressBoard.WaterGardenResetRevision == 2,
+                bool acted = button.Id switch
+                {
+                    "water-drawer-open" => pressBoard.WaterGardenDrawerOpen,
+                    "water-drawer-close" => !pressBoard.WaterGardenDrawerOpen,
+                    "water-garden-exit" => pressBoard.Screen == BoardScreen.Menu,
+                    "water-garden-reset" => pressBoard.Screen == BoardScreen.WaterGarden &&
+                        pressBoard.WaterGardenResetRevision == 2,
+                    "water-garden-duck-add" => pressBoard.Screen == BoardScreen.WaterGarden &&
+                        pressBoard.WaterGardenDuckAddRevision == 1,
+                    _ => false
+                };
+                Require(acted,
                     "The isolated rendered-caption press did not perform " + button.Label + " exactly once.");
             }
             Feed(empty);

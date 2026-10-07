@@ -36,7 +36,8 @@ internal static class BoardInteractionRegression
             Require(session.Buttons.Count >= 1 && (session.Buttons[0].Destination == BoardScreen.Menu ||
                 button.Destination == BoardScreen.CrownDeed && session.Buttons[0].Id == "mp-exit" ||
                 button.Destination == BoardScreen.Globe && session.Buttons[0].Id == "globe-drawer-open" ||
-                button.Destination == BoardScreen.PhotoCopy && session.Buttons[0].Id == "photo-drawer-open"),
+                button.Destination == BoardScreen.PhotoCopy && session.Buttons[0].Id == "photo-drawer-open" ||
+                button.Destination == BoardScreen.WaterGarden && session.Buttons[0].Id == "water-drawer-open"),
                 "An application lacks a back-to-menu target.");
             if (button.Destination == BoardScreen.CrownDeed)
             {
@@ -91,10 +92,38 @@ internal static class BoardInteractionRegression
                         .SequenceEqual(["menu"]) && session.Screen == BoardScreen.Menu,
                     "Photo Copy's drawer Exit did not return to the launcher.");
             }
-            else if (button.Destination is BoardScreen.Slots or BoardScreen.WaterGarden)
+            else if (button.Destination == BoardScreen.WaterGarden)
             {
-                // These boards use single-action holds on the viewer's edge row.
-                string exitId = button.Destination == BoardScreen.Slots ? "slot-exit" : "menu";
+                Require(session.Buttons.Single() is { Id: "water-drawer-open", Hold: BoardButtonHold.Once } &&
+                    Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is null &&
+                    !session.WaterGardenDrawerOpen, "A pinch selected Water Garden's up-arrow.");
+                session.ObserveHeldButtons([], Time(time + 30), Time(time + 30), ["water-drawer-open"]);
+                for (int held = 100; held < 1100; held += 100)
+                    Require(session.ObserveHeldButtons(["water-drawer-open"], Time(time + held),
+                            Time(time + held), []).Count == 0,
+                        "Water Garden's up-arrow opened before a full caption hold.");
+                Require(session.ObserveHeldButtons(["water-drawer-open"], Time(time + 1100),
+                            Time(time + 1100), []).SequenceEqual(["water-drawer-open"]) &&
+                        session.WaterGardenDrawerOpen && session.TickWaterGarden(Time(time + 1400)),
+                    "Water Garden's held up-arrow did not reveal the settled actions.");
+                var exit = session.Buttons.Single(item => item.Id == "water-garden-exit");
+                Require(Update(session, time + 1410, Over(exit, ++eventId, time + 1410)) is null &&
+                    session.Screen == BoardScreen.WaterGarden,
+                    "A pinch selected Water Garden's long-press EXIT.");
+                session.ObserveHeldButtons([], Time(time + 1420), Time(time + 1420), ["water-garden-exit"]);
+                for (int held = 1500; held < 2500; held += 100)
+                    Require(session.ObserveHeldButtons(["water-garden-exit"], Time(time + held),
+                            Time(time + held), []).Count == 0,
+                        "Water Garden's EXIT acted before a full caption hold.");
+                Require(session.ObserveHeldButtons(["water-garden-exit"], Time(time + 2500),
+                            Time(time + 2500), []).SequenceEqual(["water-garden-exit"]) &&
+                        session.Screen == BoardScreen.Menu,
+                    "Water Garden's revealed long-press EXIT did not return to the launcher.");
+            }
+            else if (button.Destination == BoardScreen.Slots)
+            {
+                // Slots uses a single-action hold on the viewer's edge row.
+                string exitId = "slot-exit";
                 Require(session.Buttons.All(item => item.Hold == BoardButtonHold.Once) && session.Buttons[0].Id == exitId,
                     button.Destination + " bottom controls are not long-press buttons led by Exit.");
                 Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is null &&

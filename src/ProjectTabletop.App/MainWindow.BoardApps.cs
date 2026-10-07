@@ -68,7 +68,7 @@ public sealed partial class MainWindow
              roulette ? _scene.RouletteState.Status :
              crownDeed ? _scene.CrownDeedState.Status :
              globe ? "Earth spins slowly. Open the ^ drawer for Zoom + and Zoom -; its Exit returns to the menu." :
-             water ? "Move the calibrated eye-tip stick close to the board. Hold Calm Water or Exit for a second, or click those controls here." :
+             water ? "Move the calibrated stick tip across the water. Open the bottom-left arrow for Exit, Reset, and Duck+; you can also click those controls here." :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :
              _scene.CurrentBoardScreen == BoardScreen.PhotoCopy ? _scene.PhotoCopyStatus :
