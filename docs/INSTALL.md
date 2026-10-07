@@ -1,4 +1,4 @@
-# Install Project Tabletop 1.0
+# Install Project Tabletop 1.1
 
 ## Requirements
 
@@ -6,19 +6,21 @@
 - For projection: a projector configured as an **extended** display, separate from the laptop controls, and a Windows-compatible camera with the whole board in view.
 - A fixed, matte board with visible edges and suitable room lighting.
 
-The setup includes .NET, the Windows App SDK, the native Visual C++ runtime, artwork and hand models. No SDK, Visual Studio, model download or online account is required to run the installed application. GitHub authentication is required to download from a private repository. ARM64 and 32-bit Windows are not supported by this installer.
+The setup includes .NET, the Windows App SDK, the native Visual C++ runtime, artwork and hand models. No SDK, Visual Studio, model download or online account is required to run the installed application. ARM64 and 32-bit Windows are not supported by this installer.
 
 ## Install and start
 
 1. Open the repository's [latest release](https://github.com/abiemann/ProjectTabletop/releases/latest).
-2. Download `ProjectTabletop-1.0.0-win-x64-setup.exe`. The automatically generated **Source code** archives are for developers, not the Windows setup.
-3. Optionally compare `Get-FileHash .\ProjectTabletop-1.0.0-win-x64-setup.exe -Algorithm SHA256` with `SHA256SUMS.txt` from the same release.
+2. Download `ProjectTabletop-1.1.0-win-x64-setup.exe`. The automatically generated **Source code** archives are for developers, not the Windows setup.
+3. Optionally compare `Get-FileHash .\ProjectTabletop-1.1.0-win-x64-setup.exe -Algorithm SHA256` with `SHA256SUMS.txt` from the same release.
 4. Run setup. It installs for your Windows account under `%LOCALAPPDATA%\Programs\ProjectTabletop` and adds **Project Tabletop** to Start. An optional desktop shortcut is available.
-5. Launch **Project Tabletop**. The first release is unsigned; Windows may show an unknown-publisher or reputation warning. The checksums identify the release files but are not a signing certificate.
+5. Launch **Project Tabletop**. The setup is unsigned; Windows may show an unknown-publisher or reputation warning. The checksums identify the release files but are not a signing certificate.
 
-Select the projector and open its output. Select the overhead camera, allow camera access in Windows if prompted, and start board setup. Keep the board still through the black/white scan and five alignment spots. Keep hands near the board surface. Use palm-down grouped fingers, aim with the middle fingertip, and separate the index sideways to select; pinch also works on gesture controls. Long-press controls require covering their stationary lettering for a second and uncovering it before another press.
+Select the overhead camera and projector. Click **Start camera**, then **Open output**, then **Start board setup**; allow camera access in Windows if prompted. Keep the board still through the black/white scan and five alignment spots. Keep hands near the board surface. Use palm-down grouped fingers, aim with the middle fingertip, and separate the index sideways to select; pinch also works on gesture controls. Long-press controls require visibly breaking their stationary lettering for a second. Most controls require uncovering before another press; Globe zoom and Water Garden's **Duck+** repeat while their lettering stays covered.
 
-Blackjack, Crown & Deed, Globe and other available laptop previews can be explored without opening projector output. Read the [README](https://github.com/abiemann/ProjectTabletop/blob/main/README.md) for each board's controls and capture behavior.
+Blackjack, Crown & Deed, Globe, Water Garden and other available laptop previews can be explored without opening projector output. Read the [README](https://github.com/abiemann/ProjectTabletop/blob/v1.1.0/README.md) for each board's controls and capture behavior.
+
+To stir **Water Garden** with a real stick, attach a coloured tip or an eye sticker and learn it in the laptop's **Hand interaction** panel. See [stick-tip tracking](https://github.com/abiemann/ProjectTabletop/blob/v1.1.0/README.md#stick-tip-tracking) for the setup steps. While the tip is detected over the water, the garden's bottom controls are disabled; move it away and uncover the control before starting a new press.
 
 Open **Settings**, then select **Licenses and notices** in the laptop Settings panel, or select **Licenses** on the projected Settings board. Both open the readable license viewer on the laptop. Choose a document to view and copy its text. **Open selected file** opens the original document, and **Open all dependency notices** opens the installed license collection. Hand-model licenses and credits are included in the same selector. The laptop Settings panel works without a camera or projector.
 

@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Authors>Alexander Biemann</Authors>
     <Product>Project Tabletop</Product>
     <RepositoryUrl>https://github.com/abiemann/ProjectTabletop</RepositoryUrl>

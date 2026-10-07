@@ -173,7 +173,7 @@
       "projecttabletop.calibration.verification": {
         "type": "Project",
         "dependencies": {
-          "ProjectTabletop.Calibration": "[1.0.0, )"
+          "ProjectTabletop.Calibration": "[1.1.0, )"
         }
       },
       "projecttabletop.interaction": {
@@ -182,7 +182,7 @@
       "projecttabletop.interaction.verification": {
         "type": "Project",
         "dependencies": {
-          "ProjectTabletop.Interaction": "[1.0.0, )"
+          "ProjectTabletop.Interaction": "[1.1.0, )"
         }
       },
       "projecttabletop.vision": {
@@ -195,7 +195,7 @@
       "projecttabletop.vision.regression": {
         "type": "Project",
         "dependencies": {
-          "ProjectTabletop.Vision": "[1.0.0, )"
+          "ProjectTabletop.Vision": "[1.1.0, )"
         }
       }
     }

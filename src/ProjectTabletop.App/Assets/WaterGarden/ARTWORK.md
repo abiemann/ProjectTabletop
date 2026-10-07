@@ -77,7 +77,7 @@ Use case: stylized-concept. Asset type: production game-menu thumbnail banner fo
 honey-beige limestone mineral detail is mapped across the pond's thin rounded
 walls and softened lips. The geometry and lighting
 are native shaders; the supplied reference photograph's pixels are not used.
-The menu thumbnail uses the updated generated illustration documented below.
+The menu thumbnail uses the updated generated illustration documented above.
 
 Source: `exec-f609169a-518b-4646-b25d-6169384311bb.png`.
 SHA-256: `bcd339092f0100a53e21fad7e11bf7bf183f9d453efdff3a537f3b4bbaf1406a`.
