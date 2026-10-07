@@ -225,11 +225,11 @@ public sealed partial class SceneCompositor
             // Small camera jitter does not pump waves into a resting stick. A
             // jump/reacquisition starts locally instead of drawing across gaps.
             if (previous is null || distance > .18f)
-                QueueWaterDisturbance(point, .005f);
+                QueueWaterDisturbance(point, .012f);
             else if (distance >= .0035f)
             {
                 int count = Math.Clamp((int)Math.Ceiling(distance / .013), 1, 6);
-                float strength = Math.Clamp(distance * .10f, .0015f, .004f) / MathF.Sqrt(count);
+                float strength = Math.Clamp(distance * .28f, .004f, .012f) / MathF.Sqrt(count);
                 for (int i = 1; i <= count; i++)
                     QueueWaterDisturbance(Vector2.Lerp(previous.Value, point, (float)i / count), strength);
                 // One accepted marker movement transfers momentum to nearby
@@ -379,7 +379,7 @@ public sealed partial class SceneCompositor
         ApplyWaterDuckAdds();
         AdvanceWaterGarden(now);
         while (_waterDisturbances.TryDequeue(out var ripple))
-            _waterSimulation.AddDisturbance(ripple.Position, .034f, ripple.Strength);
+            _waterSimulation.AddDisturbance(ripple.Position, .046f, ripple.Strength);
         while (_waterStickStrokes.TryDequeue(out var stroke))
             _waterSimulation.AddStickStroke(stroke.Previous, stroke.Current, stroke.Strength);
         _waterSimulation.Draw(ds, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));

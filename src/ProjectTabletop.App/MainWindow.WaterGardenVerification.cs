@@ -319,8 +319,9 @@ public sealed partial class MainWindow
             "A detected water stick failed to disarm every action and the drawer handle.");
         Draw(scene, target);
         var injected = Statistics(water);
-        Require(IsFinite(injected) && injected.MaximumHeight > .0001 && injected.TotalEnergy > 0,
-            "A confirmed eye tip did not disturb the GPU water field.");
+        Require(IsFinite(injected) && injected.MinimumHeight < -.007 &&
+                injected.MaximumHeight > .0001 && injected.TotalEnergy > 0,
+            $"A confirmed eye tip did not make the deeper local water disturbance: {injected}.");
         var firstPixels = Pixels(target);
         Require(ChangedPixels(blank, firstPixels, new(.35, .35, .30, .30)) > 20,
             "The GPU disturbance did not change the visible water.");
@@ -397,9 +398,10 @@ public sealed partial class MainWindow
             Draw(scene, target);
             var surfacePoint = WaterGardenView.ScreenToSurface(boardPoint);
             var probe = water.GetFieldProbe(surfacePoint);
-            var emptyProbe = water.GetFieldProbe(surfacePoint + new Vector2(.09f, 0));
+            var emptyProbe = water.GetFieldProbe(surfacePoint + new Vector2(.16f, 0));
             var visibleChange = WaterChangeCentroid(beforeTouch, Pixels(target));
-            Require(double.IsFinite(probe.Height) && probe.Height < -.0001 && Math.Abs(emptyProbe.Height) < 1e-8,
+            Require(double.IsFinite(probe.Height) && probe.Height < -.007 &&
+                    Math.Abs(emptyProbe.Height) < 1e-8,
                 $"The {label} camera observation did not place a local depression at the inverse-projected GPU field position: " +
                 $"centre height={probe.Height:G9}, offset height={emptyProbe.Height:G9}.");
             Require(visibleChange.Count > 20 &&
@@ -561,6 +563,101 @@ public sealed partial class MainWindow
                 launchedAfterQueue, stagedQueueDrained = true,
                 addedDucksPreserveWaterAndExistingDucks = true,
                 boundedAfterSettling = true, repeatedResetDeterministic = true };
+        }
+
+        // A swept marker should hit a hull between observed endpoints and
+        // transfer momentum before either the water solver or wake advances.
+        // The same physical 0.14-unit stroke is checked at three board aspects.
+        var stickContactPhysics = new List<object>();
+        foreach (var (label, aspect) in new[]
+                 { ("square", 1.0), ("portrait", .6), ("wide", 1.8) })
+        using (var contactWater = new WaterGardenSimulation(device, 256, 256, aspect))
+        {
+            contactWater.SetAmbientEnabledForVerification(false);
+            contactWater.SetFountainEnabledForVerification(false);
+            var start = DuckStates(contactWater);
+            var subject = start[0];
+            float scale = (float)Math.Min(aspect, 1);
+            float halfSpan = .07f / (float)aspect;
+            var beforeField = Statistics(contactWater);
+            var left = new Vector2(subject.SurfaceX - halfSpan, subject.SurfaceY);
+            var right = new Vector2(subject.SurfaceX + halfSpan, subject.SurfaceY);
+            contactWater.AddStickStroke(left, right, .5f);
+            var direct = DuckStates(contactWater)[0];
+            double expectedVelocity = .19 * scale;
+            Require(Math.Abs(direct.SurfaceX - subject.SurfaceX) < 1e-7 &&
+                    Math.Abs(direct.SurfaceY - subject.SurfaceY) < 1e-7 &&
+                    direct.VelocityX > expectedVelocity * .8 &&
+                    direct.VelocityX <= WaterGardenDucks.MaximumSpeed * scale + 1e-5 &&
+                    Math.Abs(direct.VelocityY) < .003 &&
+                    contactWater.GetDiagnostics().SimulationSteps == 0 &&
+                    Statistics(contactWater) == beforeField,
+                $"The {label} swept stick failed to push a duck before the next water step: " +
+                $"velocity=({direct.VelocityX:G6},{direct.VelocityY:G6}), " +
+                $"expected={expectedVelocity:G6}.");
+            contactWater.AddStickStroke(left, right, .5f);
+            var duplicate = DuckStates(contactWater)[0];
+            Require(Math.Abs(duplicate.VelocityX - direct.VelocityX) < 1e-6 &&
+                    Math.Abs(duplicate.VelocityY - direct.VelocityY) < 1e-6,
+                $"Repeated {label} camera stroke samples stacked another immediate duck impulse.");
+
+            contactWater.Reset();
+            float glancingOffset = .015f * scale;
+            contactWater.AddStickStroke(
+                left - new Vector2(0, glancingOffset),
+                right - new Vector2(0, glancingOffset), .5f);
+            var glancing = DuckStates(contactWater)[0];
+            Require(glancing.VelocityX > .02f * scale && glancing.VelocityY > .02f * scale &&
+                    Math.Abs(glancing.SurfaceY - subject.SurfaceY) < 1e-7,
+                $"The {label} glancing stick contact did not deflect the duck laterally: " +
+                $"velocity=({glancing.VelocityX:G6},{glancing.VelocityY:G6}).");
+
+            contactWater.Reset();
+            float missOffset = .05f * scale;
+            var beforeMiss = DuckStates(contactWater);
+            contactWater.AddStickStroke(
+                left - new Vector2(0, missOffset),
+                right - new Vector2(0, missOffset), .5f);
+            Require(beforeMiss.SequenceEqual(DuckStates(contactWater)),
+                $"A {label} stick path outside the hull and tip radii applied a contact impulse.");
+
+            contactWater.Reset();
+            var beforeRejected = DuckStates(contactWater);
+            contactWater.AddStickStroke(left, left, 1);
+            contactWater.AddStickStroke(
+                new(subject.SurfaceX, subject.SurfaceY - .10f),
+                new(subject.SurfaceX, subject.SurfaceY + .10f), 1);
+            Require(beforeRejected.SequenceEqual(DuckStates(contactWater)),
+                $"A stationary or implausibly long {label} stick observation pushed a duck.");
+
+            contactWater.Reset();
+            Require(contactWater.AddDuck(), $"The {label} airborne exclusion fixture could not add a duck.");
+            var airborneBefore = DuckStates(contactWater)[10];
+            Require(airborneBefore.DropHeight > airborneBefore.Scale * 1.5f,
+                $"The {label} added duck did not begin above the stick contact plane.");
+            var drop = WaterGardenView.ScreenToSurface(new(.5f, .5f));
+            contactWater.AddStickStroke(
+                new(drop.X - halfSpan, drop.Y), new(drop.X + halfSpan, drop.Y), .5f);
+            var airborneAfter = DuckStates(contactWater)[10];
+            Require(airborneAfter == airborneBefore,
+                $"The {label} stick pushed a duck still falling above the water.");
+
+            if (label == "square")
+            {
+                contactWater.Reset();
+                contactWater.AddStickStroke(left, right, .5f);
+                for (int frame = 0; frame < 180; frame++) contactWater.Advance(1.0 / 30);
+                var settled = DuckStates(contactWater);
+                Require(settled.All(DuckIsFiniteAndInside) &&
+                        Math.Abs(settled[0].VelocityX) < direct.VelocityX * .25 &&
+                        Statistics(contactWater).TotalEnergy == 0,
+                    "The contact-shoved ducks did not settle safely in a flat pond.");
+            }
+            stickContactPhysics.Add(new { label, aspect, expectedVelocity,
+                directVelocity = new { x = direct.VelocityX, y = direct.VelocityY },
+                glancingVelocity = new { x = glancing.VelocityX, y = glancing.VelocityY },
+                preStepContact = true, duplicateBounded = true, nearMissRejected = true,
+                stationaryAndJumpRejected = true, airborneUnaffected = true });
         }
 
         // Place one otherwise-still resident directly in the falling hull's
@@ -1030,7 +1127,8 @@ public sealed partial class MainWindow
                 innerRingFrame, outerRingFrame, maximumInnerRing, maximumOuterRing,
                 innerRingCardinals },
             queuedDucksAtCapacity = fullDuckStates.Count,
-            duckPhysics, duckDropCollision, fountainPhysics, visibleDuckPixels, visibleFullDuckPixels,
+            duckPhysics, stickContactPhysics, duckDropCollision, fountainPhysics,
+            visibleDuckPixels, visibleFullDuckPixels,
             fullDuckDrawMilliseconds,
             sameClockDuckStateStable = true,
             sameClockFountainStable = true,

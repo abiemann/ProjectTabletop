@@ -9,6 +9,7 @@ internal static class WaterGardenDucks
     public const int MaximumCount = 20;
     public const int Rows = 5;
     public const int StickWakeCount = 8;
+    public const float MaximumSpeed = .24f;
 }
 
 // Each column describes one floating hull. Rows contain position/heading,
@@ -130,7 +131,7 @@ internal readonly partial struct WaterDuckDynamicsShader(Float2 fieldSize, float
     {
         Float2 delta = (position - wake.XY) * metric;
         float distance = Hlsl.Length(delta);
-        float radius = .060f * Hlsl.Min(aspect, 1);
+        float radius = .070f * Hlsl.Min(aspect, 1);
         float falloff = Hlsl.Exp(-.5f * distance * distance / (radius * radius));
         Float2 radial = delta / Hlsl.Max(distance, .0001f);
         Float2 stroke = new Float2(Hlsl.Cos(wake.W), Hlsl.Sin(wake.W));
@@ -238,10 +239,10 @@ internal readonly partial struct WaterDuckDynamicsShader(Float2 fieldSize, float
         acceleration = Hlsl.Clamp(acceleration, new Float2(-.12f, -.12f), new Float2(.12f, .12f));
         velocity = (velocity + acceleration * dt) * Hlsl.Exp(-1.35f * dt);
         float speed = Hlsl.Length(velocity);
-        // Preserve a real sideways rebound from duck contact. Ambient, stick,
-        // and fountain acceleration remain bounded above; the larger speed cap
-        // matters chiefly after a collision impulse.
-        float maximumSpeed = .16f * Hlsl.Min(aspect, 1);
+        // Preserve a direct stick shove or sideways rebound from duck contact.
+        // Ambient and wake acceleration remain bounded above; contact can move
+        // a hull faster briefly before water drag brings it back to a slow drift.
+        float maximumSpeed = WaterGardenDucks.MaximumSpeed * Hlsl.Min(aspect, 1);
         velocity *= Hlsl.Min(1, maximumSpeed / Hlsl.Max(speed, .000001f));
 
         // Integrate the new toy above the same buoyant water plane as the

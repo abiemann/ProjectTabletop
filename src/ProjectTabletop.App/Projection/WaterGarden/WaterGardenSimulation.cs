@@ -55,6 +55,7 @@ internal sealed class WaterGardenSimulation : IDisposable
     private readonly PixelShaderEffect<WaterSurfaceShader> _surfaceEffect = new();
     private readonly PixelShaderEffect<WaterDuckInitializeShader> _duckInitializeEffect = new();
     private readonly PixelShaderEffect<WaterDuckSpawnShader> _duckSpawnEffect = new();
+    private readonly PixelShaderEffect<WaterDuckStickContactShader> _duckStickContactEffect = new();
     private readonly PixelShaderEffect<WaterDuckDynamicsShader> _duckDynamicsEffect = new();
     private readonly Transform2DEffect _surfaceField = new();
     private readonly Transform2DEffect _surfaceDucks = new();
@@ -353,6 +354,13 @@ internal sealed class WaterGardenSimulation : IDisposable
         Vector2 delta = (current - previous) * new Vector2(_aspect, 1);
         float distance = delta.Length();
         if (distance < .0035f || distance > .18f || strength <= 0) return;
+        _duckStickContactEffect.ConstantBuffer = new WaterDuckStickContactShader(_aspect,
+            _activeDuckCount, new Float2(previous.X, previous.Y), new Float2(current.X, current.Y),
+            Math.Clamp(strength, 0, 1));
+        Run(_duckStickContactEffect, _nextDucks, _ducks);
+        (_ducks, _nextDucks) = (_nextDucks, _ducks);
+        Revision++;
+        BindSurface();
         Vector2 midpoint = (previous + current) * .5f;
         Vector2 direction = delta / distance;
         int slot = -1, weakest = 0;
@@ -373,7 +381,7 @@ internal sealed class WaterGardenSimulation : IDisposable
         }
         bool merged = slot >= 0;
         if (!merged) slot = weakest;
-        float added = .055f + .060f * Math.Clamp(strength, 0, 1);
+        float added = .075f + .085f * Math.Clamp(strength, 0, 1);
         if (merged)
         {
             float previousStrength = _stickWakeStrength[slot];
@@ -381,7 +389,7 @@ internal sealed class WaterGardenSimulation : IDisposable
             _stickWakePosition[slot] = (_stickWakePosition[slot] * previousStrength + midpoint * added) / combined;
             Vector2 blended = _stickWakeDirection[slot] * previousStrength + direction * added;
             _stickWakeDirection[slot] = Vector2.Normalize(blended);
-            _stickWakeStrength[slot] = Math.Min(.14f, previousStrength * .65f + added);
+            _stickWakeStrength[slot] = Math.Min(.18f, previousStrength * .65f + added);
         }
         else
         {
@@ -678,6 +686,7 @@ internal sealed class WaterGardenSimulation : IDisposable
         _surfaceField.Dispose();
         _duckInitializeEffect.Dispose();
         _duckSpawnEffect.Dispose();
+        _duckStickContactEffect.Dispose();
         _duckDynamicsEffect.Dispose();
         _surfaceDucks.Dispose();
         _surfaceStone.Dispose();
