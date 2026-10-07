@@ -25,6 +25,8 @@ public sealed partial class SceneCompositor
     private int _waterAppliedDuckCount;
     private long _waterVisualRevision, _waterInputCount;
     private bool _waterWasActive;
+    private bool _waterIntroPending;
+    private float _waterEntranceProgress = 1;
     private CanvasRenderTarget? _waterFrameTarget;
     private (long Visual, int Feedback)? _waterRenderedFrame;
 
@@ -134,6 +136,7 @@ public sealed partial class SceneCompositor
             drawing.Transform = BoardRasterTransform(_waterFrameTarget);
             DrawWaterGardenSurface(drawing, now);
             DrawWaterGardenRocks(drawing);
+            DrawWaterGardenTitle(drawing, now);
             DrawWaterGardenControls(drawing, _boardSession.Buttons, [], feedback, now);
             _waterRenderedFrame = key;
         }
@@ -171,6 +174,15 @@ public sealed partial class SceneCompositor
                 if (now - _waterFrameTime > TimeSpan.FromMilliseconds(250)) ClearWaterStick();
                 return false;
             }
+            // During the dolly-in the screen-to-water inverse changes each
+            // frame. Wait for the settled calibrated view before accepting a
+            // physical stick location, then reacquire it locally.
+            if (WaterGardenEntranceProgress(now) < 1)
+            {
+                ClearWaterStick();
+                _waterFrameTime = frameTime;
+                return false;
+            }
 
             Point2 uv;
             try
@@ -186,7 +198,7 @@ public sealed partial class SceneCompositor
             }
             var boardPoint = new Vector2((float)uv.X, (float)uv.Y);
             if (!double.IsFinite(uv.X) || !double.IsFinite(uv.Y) || uv.X < .025 || uv.X > .975 ||
-                uv.Y < .12 || uv.Y > .82 || IsWaterGardenRock(uv.X, uv.Y) ||
+                uv.Y < .12 || uv.Y > .87 || IsWaterGardenRock(uv.X, uv.Y) ||
                 !WaterGardenView.ContainsWater(boardPoint, (float)PaintBoardAspect()) ||
                 WaterFountainLayout.OccludesSurface(boardPoint, (float)PaintBoardAspect()))
             {
@@ -253,6 +265,8 @@ public sealed partial class SceneCompositor
 
     private void SyncWaterGardenSession()
     {
+        bool entered = _boardSession.Screen == BoardScreen.WaterGarden &&
+            _waterNavigation != _boardSession.NavigationRevision;
         bool active = !_disposed && _boardSession.Screen == BoardScreen.WaterGarden &&
             !_blackOutput && !_boardSetup && _calibrationTarget < 0 && !IsBoardRevealActive &&
             _boardCameraMap is not null && _boardSurfaceMap is not null;
@@ -272,6 +286,19 @@ public sealed partial class SceneCompositor
         _waterResetRevision = _boardSession.WaterGardenResetRevision;
         _waterAppliedDuckCount = 0;
         _waterWasActive = active;
+        if (entered)
+        {
+            // Start the entrance on the first rendered frame, after artwork
+            // finishes loading, so users see the whole move.
+            _waterIntroPending = true;
+            _waterIntroStartedAt = default;
+            _waterEntranceProgress = 0;
+        }
+        else if (_boardSession.Screen != BoardScreen.WaterGarden)
+        {
+            _waterIntroPending = false;
+            _waterEntranceProgress = 1;
+        }
         if (!active || registrationChanged) DisposeWaterGardenResources();
         else _waterSimulation?.Reset();
         _waterVisualRevision++;
@@ -297,6 +324,12 @@ public sealed partial class SceneCompositor
 
     private void DrawWaterGardenSurface(CanvasDrawingSession ds, DateTimeOffset now)
     {
+        if (_waterIntroPending)
+        {
+            ResetWaterGardenIntro(now);
+            _waterIntroPending = false;
+        }
+        _waterEntranceProgress = WaterGardenEntranceProgress(now);
         if (_waterSimulation is null || _waterDevice != ds.Device)
         {
             _waterSimulation?.Dispose();
@@ -314,6 +347,7 @@ public sealed partial class SceneCompositor
             _waterAdvancedAt = now;
             _waterAppliedDuckCount = 0;
         }
+        _waterSimulation.SetEntranceProgress(_waterEntranceProgress);
         ApplyWaterDuckAdds();
         AdvanceWaterGarden(now);
         while (_waterDisturbances.TryDequeue(out var ripple))
@@ -321,6 +355,14 @@ public sealed partial class SceneCompositor
         while (_waterStickStrokes.TryDequeue(out var stroke))
             _waterSimulation.AddStickStroke(stroke.Previous, stroke.Current, stroke.Strength);
         _waterSimulation.Draw(ds, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
+    }
+
+    private float WaterGardenEntranceProgress(DateTimeOffset now)
+    {
+        if (_waterIntroPending) return 0;
+        if (_waterIntroStartedAt == default) return 1;
+        return Math.Clamp((float)(now - _waterIntroStartedAt).TotalSeconds /
+            WaterGardenView.EntranceDurationSeconds, 0, 1);
     }
 
     private void ApplyWaterDuckAdds()
@@ -439,6 +481,7 @@ public sealed partial class SceneCompositor
 
     private void DisposeWaterGardenResources()
     {
+        DisposeWaterGardenTitle();
         _waterSimulation?.Dispose();
         _waterSimulation = null;
         _waterFrameTarget?.Dispose();

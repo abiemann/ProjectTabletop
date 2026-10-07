@@ -14,7 +14,7 @@ internal static class WaterGardenRockLayout
         double margin = .02 / aspect;
         double farHeight = .18 * scale, farWidth = farHeight * imageAspect / aspect;
         double nearHeight = .29 * scale, nearWidth = nearHeight * imageAspect / aspect;
-        const double farTop = .205, nearBottom = .745;
+        const double farTop = .24, nearBottom = .745;
         double nearTop = nearBottom - nearHeight;
         double farEdge = Math.Max(LeftWaterEdge(farTop, aspect), LeftWaterEdge(farTop + farHeight, aspect));
         double nearEdge = Math.Max(LeftWaterEdge(nearTop, aspect), LeftWaterEdge(nearBottom, aspect));

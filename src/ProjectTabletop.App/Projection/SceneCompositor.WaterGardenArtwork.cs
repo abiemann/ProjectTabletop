@@ -1,6 +1,7 @@
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Effects;
 using ProjectTabletop.App.Projection.WaterGarden;
+using System.Numerics;
 using Windows.Foundation;
 using Windows.UI;
 
@@ -62,14 +63,37 @@ public sealed partial class SceneCompositor
             images.Image("sand-ground.png") is not null;
     }
 
-    private (Rect First, Rect Second) WaterGardenRockPlacements() =>
-        WaterGardenRockLayout.GetPlacements(PaintBoardAspect(),
+    private (Rect First, Rect Second) WaterGardenRockPlacements(float entranceProgress = 1)
+    {
+        var (first, second) = WaterGardenRockLayout.GetPlacements(PaintBoardAspect(),
             _waterRockWidth / (double)Math.Max(1, _waterRockHeight));
+        if (entranceProgress >= 1) return (first, second);
+        var camera = WaterGardenView.CameraAt(entranceProgress);
+        var final = WaterGardenView.CameraAt(1);
+        return (Move(first), Move(second));
+
+        // The cutout rocks are a separate overlay. Anchor each one at its
+        // waterline so it follows the same camera move as the 3D pond below.
+        Rect Move(Rect bounds)
+        {
+            var foot = new Vector2((float)(bounds.X + bounds.Width / 2),
+                (float)(bounds.Y + bounds.Height));
+            var surface = WaterGardenView.ScreenToSurface(foot);
+            float worldY = surface.Y - .5f;
+            var moved = WaterGardenView.Project(new Vector3(surface.X - .5f, worldY, 0), 1, camera);
+            float apparentScale = (camera.Zoom * camera.Distance /
+                    (camera.Distance - worldY * camera.SinTilt)) /
+                (final.Zoom * final.Distance /
+                    (final.Distance - worldY * final.SinTilt));
+            double width = bounds.Width * apparentScale, height = bounds.Height * apparentScale;
+            return new Rect(moved.X - width / 2, moved.Y - height, width, height);
+        }
+    }
 
     private void DrawWaterGardenRocks(CanvasDrawingSession ds)
     {
         if (_waterImages?.Image("moss-rocks.png") is not { } rocks) return;
-        var (first, second) = WaterGardenRockPlacements();
+        var (first, second) = WaterGardenRockPlacements(_waterEntranceProgress);
         Draw(first); Draw(second);
         void Draw(Rect bounds)
         {

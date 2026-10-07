@@ -85,6 +85,9 @@ internal sealed class WaterGardenSimulation : IDisposable
     private int _disturbances;
     private bool _ambientEnabled = true;
     private bool _fountainEnabled = true;
+    // Direct simulation callers use the settled, calibrated view. The board
+    // compositor explicitly starts a new session at the establishing view.
+    private float _entranceProgress = 1f;
     private long _fountainImpacts;
     private int _duckCount = WaterGardenDucks.InitialCount;
     private int _activeDuckCount = WaterGardenDucks.InitialCount;
@@ -223,6 +226,17 @@ internal sealed class WaterGardenSimulation : IDisposable
     public int FieldHeight { get; }
     public long Revision { get; private set; }
     public ICanvasImage Output => _surfaceEffect;
+
+    public void SetEntranceProgress(float progress)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!float.IsFinite(progress)) throw new ArgumentOutOfRangeException(nameof(progress));
+        progress = Math.Clamp(progress, 0, 1);
+        if (MathF.Abs(progress - _entranceProgress) < 1e-5f) return;
+        _entranceProgress = progress;
+        Revision++;
+        BindSurface();
+    }
 
     public WaterGardenDiagnostics GetDiagnostics() => new(FieldWidth, FieldHeight,
         (int)_bedSize.X, (int)_bedSize.Y, _steps, _simulatedSeconds, _droppedSeconds,
@@ -635,10 +649,11 @@ internal sealed class WaterGardenSimulation : IDisposable
         _surfaceEffect.Sources[6] = _surfaceSand;
         Vector3 fountainMinimum = _fountainFluid.WorldMinimum;
         Vector3 fountainSize = _fountainFluid.WorldSize;
+        WaterGardenCamera camera = WaterGardenView.CameraAt(_entranceProgress);
         _surfaceEffect.ConstantBuffer = new WaterSurfaceShader(_fieldSize, _bedSize, _aspect,
             (float)_simulatedSeconds, _ambientEnabled ? 1 : 0,
-            new Float4(WaterGardenView.SinTilt, WaterGardenView.CosTilt, WaterGardenView.Distance, WaterGardenView.Zoom),
-            new Float2(WaterGardenView.CentreX, WaterGardenView.CentreY), WaterGardenView.RimHeight,
+            new Float4(camera.SinTilt, camera.CosTilt, camera.Distance, camera.Zoom),
+            new Float2(camera.CentreX, camera.CentreY), WaterGardenView.RimHeight,
             new Float2(WaterGardenDucks.MaximumCount, WaterGardenDucks.Rows), _activeDuckCount,
             new Float2(_duckSplashPosition.X, _duckSplashPosition.Y),
             _fountainFluid.ParticleCount > 0 ? 1f : 0f,

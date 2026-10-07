@@ -334,15 +334,15 @@
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterGardenRockLayout.cs",
-      "sha256": "15c016ff724abf97a1aa4f48c50e259cf903b04ea70913616f35f457ec50cc27"
+      "sha256": "a30cb1b910c6d8c627439265c4081d6a6eaeea82ecbf9661bdc4f16f9e4952a6"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterGardenSimulation.cs",
-      "sha256": "608db3418c6249198cd903511cfecd4f19e58c05c477cc827c5c731a47bf42ea"
+      "sha256": "e4479b7215effed653aa3d4115bde413a411dd88f0457137bbf0789a0c2be478"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterGardenView.cs",
-      "sha256": "cddabf5ef3ebd6d95d58f52ba814809ed3d8d5f492c80040d4fb09e1bf9058e2"
+      "sha256": "f76d248bbb2abd346a0e11528620556551180ae9e3adc61dc1679a9db98339f1"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterSimulationShaders.cs",

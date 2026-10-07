@@ -76,6 +76,18 @@ public sealed partial class MainWindow
                 !WaterGardenView.ContainsWater(WaterGardenView.SurfaceToScreen(new(.5f, .98f))) &&
                 !WaterGardenView.ContainsWater(new(float.NaN, .5f)),
             "The water hit region accepted a point outside the trapezoid, behind the near rim, or non-finite.");
+        static float FarWidth(float progress)
+        {
+            var camera = WaterGardenView.CameraAt(progress);
+            var left = WaterGardenView.Project(new(-.5f, -.5f, 0), 1, camera);
+            var right = WaterGardenView.Project(new(.5f, -.5f, 0), 1, camera);
+            return right.X - left.X;
+        }
+        Require(FarWidth(0) < FarWidth(.5f) && FarWidth(.5f) < FarWidth(1) &&
+                FarWidth(1) > FarWidth(0) * 1.2f &&
+                Vector2.Distance(WaterGardenView.Project(new(0, 0, 0), 1,
+                    WaterGardenView.CameraAt(1)), WaterGardenView.Project(new(0, 0, 0), 1)) < 1e-6f,
+            "The Water Garden entrance did not move smoothly from a wider view to the calibrated close view.");
         var device = CanvasDevice.GetSharedDevice();
         double drawMilliseconds = 0, readbackMilliseconds = 0;
         int renderedFrames = 0;
@@ -84,6 +96,30 @@ public sealed partial class MainWindow
         using var scene = NewScene(1, out double inset);
         await scene.EnsureBoardArtworkResourcesAsync(device, BoardScreen.WaterGarden);
         Draw(scene, target);
+        var wideFrame = Pixels(target);
+        await Save(target, "water-entrance-wide");
+        now += TimeSpan.FromSeconds(WaterGardenView.EntranceDurationSeconds / 2);
+        Draw(scene, target);
+        await Save(target, "water-entrance-moving");
+        now += TimeSpan.FromSeconds(WaterGardenView.EntranceDurationSeconds / 2);
+        Draw(scene, target);
+        var settledFrame = Pixels(target);
+        Require(ChangedPixels(wideFrame, settledFrame, new(.12, .12, .76, .72)) > 10000,
+            "The rendered Water Garden did not visibly move from the establishing view to the closer pond.");
+        await Save(target, "water-entrance-settled");
+        now += TimeSpan.FromSeconds(.9);
+        Draw(scene, target);
+        var writingFrame = Pixels(target);
+        await Save(target, "water-title-writing");
+        now += TimeSpan.FromSeconds(1.8);
+        Draw(scene, target);
+        var writtenFrame = Pixels(target);
+        Require(ChangedPixels(settledFrame, writingFrame, new(.045, .02, .27, .14)) > 40 &&
+                ChangedPixels(settledFrame, writingFrame, new(.685, .02, .27, .14)) > 20 &&
+                ChangedPixels(writingFrame, writtenFrame, new(.045, .02, .27, .14)) > 40 &&
+                ChangedPixels(writingFrame, writtenFrame, new(.685, .02, .27, .14)) > 40,
+            "The white Water and Garden script did not write progressively after the camera settled.");
+        await Save(target, "water-title-complete");
         Require(scene.CurrentBoardButtons.Single() is { Id: "water-drawer-open", Label: "^", Enabled: true },
             "The initial water board did not show only the bottom-left up-arrow.");
         await Save(target, "water-square-closed-drawer");
@@ -306,7 +342,7 @@ public sealed partial class MainWindow
         // GPU field -> shader projection path. Pixel centroids must stay under
         // the physical tip at both depths, independently of CPU round trips.
         foreach (var (label, boardPoint) in new[]
-                 { ("far", new Vector2(.55f, .28f)), ("near", new Vector2(.50f, .68f)) })
+                 { ("far", new Vector2(.72f, .32f)), ("near", new Vector2(.50f, .68f)) })
         {
             now += TimeSpan.FromMilliseconds(20);
             Require(scene.ActivateWaterGardenButton("water-garden-reset"), "Perspective touch fixture could not reset its field.");
@@ -815,6 +851,8 @@ public sealed partial class MainWindow
             using var aspectScene = NewScene(width / (double)height, out double aspectInset);
             await aspectScene.EnsureBoardArtworkResourcesAsync(device, BoardScreen.WaterGarden);
             using var output = new CanvasRenderTarget(device, width, height, 96);
+            Draw(aspectScene, output);
+            now += TimeSpan.FromSeconds(WaterGardenView.EntranceDurationSeconds + 2.7);
             Draw(aspectScene, output);
             var initialAspectPixels = Pixels(output);
             CheckSandGround(initialAspectPixels, width, height, aspectInset, label);
