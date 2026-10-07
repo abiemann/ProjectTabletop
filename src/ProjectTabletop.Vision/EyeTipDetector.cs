@@ -27,7 +27,7 @@ public static class EyeTipDetector
             throw new ArgumentException("Invalid BGRA dimensions, stride, or buffer length.");
         options?.Validate();
         EyeTipProjectionMatcher? projection = options?.ProjectionFrames is null ? null :
-            new(options.ProjectionFrames, options.FrameTime == default ? DateTimeOffset.UtcNow : options.FrameTime);
+            new(options.ProjectionFrames, options.FrameTime);
         if (projection is { Ready: false }) return new([], "waiting-for-projected-eye-reference");
 
         using Mat source = Mat.FromPixelData(height, width, MatType.CV_8UC4, bgra, stride);

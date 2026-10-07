@@ -80,7 +80,7 @@ public static class ColorTipDetector
             !double.IsFinite(preferred.Y) || preferred.X < 0 || preferred.Y < 0))
             throw new ArgumentException("Invalid preferred colour-tip center.");
         EyeTipProjectionMatcher? projection = options?.ProjectionFrames is null ? null :
-            new(options.ProjectionFrames, options.FrameTime == default ? DateTimeOffset.UtcNow : options.FrameTime);
+            new(options.ProjectionFrames, options.FrameTime);
         if (projection is { Ready: false }) return new([], "waiting-for-projected-tip-reference");
         var image = new ColorImage(width, height, stride, bgra);
         using Mat mask = image.Mask(profile);

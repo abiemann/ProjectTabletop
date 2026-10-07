@@ -135,7 +135,6 @@ public sealed partial class MainWindow
     {
         if (!_camera.IsRunning || !_cameraWanted || _camera.ActiveDeviceId != _selectedCameraId)
         { SetStatus("Start the selected webcam before learning the eye tip."); return; }
-        lock (_eyeTipGate) DeactivateColorTipForCameraLocked();
         SetStickTrackingEnabled(true);
         _frozenFrame = null;
         lock (_eyeTipGate)
@@ -156,6 +155,7 @@ public sealed partial class MainWindow
         }
         ResetEyeTipTracking("eye-marker-not-learned");
         SaveEyeTipSettings();
+        SaveColorTipSettings();
         UpdateEyeTipStatus();
     }
 
@@ -182,7 +182,6 @@ public sealed partial class MainWindow
             throw new InvalidOperationException("Start the selected webcam and wait for a fresh camera frame.");
         if (!double.IsFinite(x) || !double.IsFinite(y) || x < 0 || y < 0 || x >= frame.Width || y >= frame.Height)
             throw new ArgumentException("Provide x and y inside the raw camera frame.");
-        lock (_eyeTipGate) DeactivateColorTipForCameraLocked();
         // Serialize learning with inference; neither operation queues a camera-frame backlog.
         SetStickTrackingEnabled(true);
         _frozenFrame = null;
@@ -199,34 +198,33 @@ public sealed partial class MainWindow
             await _eyeTipDetectorGate.WaitAsync();
             try
             {
-                var reference = _scene.HasBoardMediaClip && _scene.CurrentBoardScreen != BoardScreen.Media
-                    ? _scene.GetEyeTipProjectionFrames() : null;
                 return EyeTipDetector.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-                    new(PreferredCenter: new(x, y), ProjectionFrames: reference, FrameTime: frame.Timestamp));
+                    new(PreferredCenter: new(x, y), ProjectionFrames: StickTipProjectionReference(),
+                        FrameTime: frame.Timestamp));
             }
             finally { _eyeTipDetectorGate.Release(); }
         });
         double elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        bool colorModeChanged;
         lock (_eyeTipGate)
         {
             if (_closing || generation != _eyeTipGeneration || cameraId != _eyeTipCameraId ||
                 !EyeTipFrameFresh(frame, MonotonicClock.UtcNow))
                 throw new InvalidOperationException("The camera changed or the learning frame expired. Click the pupil again.");
-            var near = detection.Candidates.Select(item => (Item: item,
-                    Distance: Math.Sqrt(Math.Pow(item.Center.X - x, 2) + Math.Pow(item.Center.Y - y, 2))))
-                .Where(item => item.Distance <= Math.Max(12, item.Item.RadiusPixels * 2.5))
-                .OrderBy(item => item.Distance).ToArray();
-            if (near.Length == 0 || (near.Length > 1 && near[1].Distance - near[0].Distance < 4))
+            if (NearestStickTipCandidate(detection.Candidates, x, y, item => item.Center, item => item.RadiusPixels)
+                is not { } chosen)
             {
                 _eyeTipPreview = new(frame, detection, new(null, false, "click-the-black-pupil"), elapsed);
                 _eyeTipReason = "click-the-black-pupil";
                 throw new InvalidOperationException("No unambiguous black pupil with a white surround is near that point.");
             }
-            var chosen = near[0].Item;
             double normalizedRadius = chosen.RadiusPixels / frame.Width;
             if (normalizedRadius is < .0001 or > .1 || !double.IsFinite(normalizedRadius))
                 throw new InvalidOperationException("The eye marker is outside the supported camera scale.");
             _eyeTipProfiles[cameraId] = normalizedRadius;
+            // Only a learned eye replaces this camera's colour mode; an
+            // abandoned learning attempt leaves the saved colour tip active.
+            colorModeChanged = SelectEyeTipModeLocked();
             // Invalidate inference that started while the user-selected identity was being learned.
             _eyeTipGeneration++;
             _eyeTipTracker.Acquire(chosen, frame.Timestamp);
@@ -237,6 +235,7 @@ public sealed partial class MainWindow
             PublishWaterStickTipLocked();
         }
         SaveEyeTipSettings();
+        if (colorModeChanged) SaveColorTipSettings();
         UpdateEyeTipStatus();
         CameraCanvas.Invalidate();
         return GetStickTipStatus();
@@ -263,7 +262,7 @@ public sealed partial class MainWindow
         lock (_eyeTipGate)
         {
             var now = Stopwatch.GetTimestamp();
-            var colorProfile = LearnedColorTipProfileLocked();
+            var colorProfile = ActiveColorTipProfileLocked();
             if (_closing || !_eyeTipEnabled || _eyeTipDetecting || _colorTipLearning ||
                 (!_eyeTipLearning && colorProfile is null && LearnedEyeTipRadiusLocked() is null) ||
                 _eyeTipCameraId != _cameraWantedDeviceId || frame.Timestamp < _eyeTipNotBefore ||
@@ -286,10 +285,8 @@ public sealed partial class MainWindow
                         var colorStarted = Stopwatch.GetTimestamp();
                         try
                         {
-                            var reference = _scene.HasBoardMediaClip && _scene.CurrentBoardScreen != BoardScreen.Media
-                                ? _scene.GetEyeTipProjectionFrames() : null;
                             colorDetection = ColorTipDetector.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-                                colorProfile, new(colorCenter, reference, frame.Timestamp));
+                                colorProfile, new(colorCenter, StickTipProjectionReference(), frame.Timestamp));
                         }
                         finally { _eyeTipDetectorGate.Release(); }
                         PublishColorTipDetection(frame, colorDetection, Stopwatch.GetElapsedTime(colorStarted).TotalMilliseconds, generation);
@@ -299,10 +296,8 @@ public sealed partial class MainWindow
                     var started = Stopwatch.GetTimestamp();
                     try
                     {
-                        var reference = _scene.HasBoardMediaClip && _scene.CurrentBoardScreen != BoardScreen.Media
-                            ? _scene.GetEyeTipProjectionFrames() : null;
                         detected = EyeTipDetector.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-                            new(expectedRadius, preferredCenter, reference, frame.Timestamp));
+                            new(expectedRadius, preferredCenter, StickTipProjectionReference(), frame.Timestamp));
                     }
                     finally { _eyeTipDetectorGate.Release(); }
                     double elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
@@ -385,7 +380,7 @@ public sealed partial class MainWindow
     {
         lock (_eyeTipGate)
         {
-            if (_colorTipLearning || LearnedColorTipProfileLocked() is not null) return GetColorTipStatusLocked();
+            if (ColorTipModeActiveLocked()) return GetColorTipStatusLocked();
             var now = MonotonicClock.UtcNow;
             var preview = _eyeTipPreview;
             bool fresh = preview is not null && EyeTipFrameFresh(preview.Frame, now);
@@ -416,7 +411,7 @@ public sealed partial class MainWindow
     {
         lock (_eyeTipGate)
         {
-            if (_colorTipLearning || LearnedColorTipProfileLocked() is not null)
+            if (ColorTipModeActiveLocked())
             {
                 EyeTipStatusText.Text = ColorTipStatusTextLocked();
                 return;
@@ -440,7 +435,7 @@ public sealed partial class MainWindow
     private void DrawEyeTipPreview(CanvasDrawingSession ds, CameraFrame frame, Rect rect)
     {
         lock (_eyeTipGate)
-            if (_colorTipLearning || LearnedColorTipProfileLocked() is not null)
+            if (ColorTipModeActiveLocked())
             { DrawColorTipPreview(ds, frame, rect); return; }
         EyeTipPreview? preview;
         bool learning;
@@ -455,27 +450,54 @@ public sealed partial class MainWindow
         DrawEyeTipMarkers(ds, preview, rect, learning);
     }
 
-    private static void DrawEyeTipMarkers(CanvasDrawingSession ds, EyeTipPreview preview, Rect rect, bool candidates)
+    private static void DrawEyeTipMarkers(CanvasDrawingSession ds, EyeTipPreview preview, Rect rect, bool candidates) =>
+        DrawStickTipMarkers(ds, preview.Frame, rect,
+            candidates ? preview.Detection.Candidates.Select(eye => (eye.Center, eye.RadiusPixels)) : [],
+            preview.Track.Observation is { } tip ? (tip.Center, tip.RadiusPixels) : null, preview.Track.Confirmed);
+
+    // Shared by the eye and colour previews: gold candidates, then the
+    // associated tip, lime once confirmed across fresh frames.
+    private static void DrawStickTipMarkers(CanvasDrawingSession ds, CameraFrame frame, Rect rect,
+        IEnumerable<(PixelPoint Center, double Radius)> candidates, (PixelPoint Center, double Radius)? tip, bool confirmed)
     {
-        Vector2 Point(EyeTipObservation eye) => new((float)(rect.X + eye.Center.X / preview.Frame.Width * rect.Width),
-            (float)(rect.Y + eye.Center.Y / preview.Frame.Height * rect.Height));
-        float Radius(EyeTipObservation eye) => Math.Max(5, (float)(eye.RadiusPixels / preview.Frame.Width * rect.Width) + 3);
-        if (candidates) foreach (var eye in preview.Detection.Candidates)
-            ds.DrawCircle(Point(eye), Radius(eye), Colors.Gold, 1.5f);
-        if (preview.Track.Observation is { } tip)
+        Vector2 Point(PixelPoint center) => new((float)(rect.X + center.X / frame.Width * rect.Width),
+            (float)(rect.Y + center.Y / frame.Height * rect.Height));
+        float Radius(double radius) => Math.Max(5, (float)(radius / frame.Width * rect.Width) + 3);
+        foreach (var candidate in candidates)
+            ds.DrawCircle(Point(candidate.Center), Radius(candidate.Radius), Colors.Gold, 1.5f);
+        if (tip is { } current)
         {
-            var center = Point(tip);
-            float radius = Radius(tip);
+            var center = Point(current.Center);
+            float radius = Radius(current.Radius);
+            var color = confirmed ? Colors.Lime : Colors.Gold;
             ds.DrawCircle(center, radius + 2, Colors.Black, 4);
-            ds.DrawCircle(center, radius + 2, preview.Track.Confirmed ? Colors.Lime : Colors.Gold, 2);
-            ds.FillCircle(center, 1.5f, preview.Track.Confirmed ? Colors.Lime : Colors.Gold);
+            ds.DrawCircle(center, radius + 2, color, 2);
+            ds.FillCircle(center, 1.5f, color);
         }
+    }
+
+    // No board clip means stand-alone detection. A board whose reference is
+    // not ready yet returns an empty history, so the detector waits for it.
+    private IReadOnlyList<EyeTipProjectionFrame>? StickTipProjectionReference() =>
+        _scene.HasBoardMediaClip && _scene.CurrentBoardScreen != BoardScreen.Media
+            ? _scene.GetEyeTipProjectionFrames() : null;
+
+    // The candidate a learning click identifies, or null when none is within
+    // reach or a second candidate is nearly as close.
+    private static T? NearestStickTipCandidate<T>(IEnumerable<T> candidates, double x, double y,
+        Func<T, PixelPoint> center, Func<T, double> radius) where T : class
+    {
+        var near = candidates.Select(item => (Item: item,
+                Distance: Math.Sqrt(Math.Pow(center(item).X - x, 2) + Math.Pow(center(item).Y - y, 2))))
+            .Where(item => item.Distance <= Math.Max(12, radius(item.Item) * 2.5))
+            .OrderBy(item => item.Distance).ToArray();
+        return near.Length == 0 || (near.Length > 1 && near[1].Distance - near[0].Distance < 4) ? null : near[0].Item;
     }
 
     private async Task<object> CaptureStickTipAsync()
     {
         ColorTipPreview? colorPreview;
-        lock (_eyeTipGate) colorPreview = _eyeTipEnabled && LearnedColorTipProfileLocked() is not null &&
+        lock (_eyeTipGate) colorPreview = _eyeTipEnabled && ActiveColorTipProfileLocked() is not null &&
             _colorTipPreview is { } colorCurrent && EyeTipFrameFresh(colorCurrent.Frame, MonotonicClock.UtcNow) ? colorCurrent : null;
         EyeTipPreview? preview;
         lock (_eyeTipGate) preview = _eyeTipEnabled && _cameraWanted && _camera.IsRunning &&

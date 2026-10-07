@@ -1,8 +1,6 @@
 using System.Diagnostics;
-using System.Numerics;
 using System.Text.Json;
 using Microsoft.Graphics.Canvas;
-using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using ProjectTabletop.App.Camera;
 using ProjectTabletop.Interaction;
@@ -56,6 +54,11 @@ public sealed partial class MainWindow
         _colorTipModes.TryGetValue(id, out var mode) && mode == "color" &&
         _colorTipProfiles.TryGetValue(id, out var profile) ? profile : null;
 
+    // Learning an eye pauses, but does not replace, the camera's saved colour mode.
+    private ColorTipProfile? ActiveColorTipProfileLocked() => _eyeTipLearning ? null : LearnedColorTipProfileLocked();
+
+    private bool ColorTipModeActiveLocked() => _colorTipLearning || ActiveColorTipProfileLocked() is not null;
+
     private void ResetColorTipTrackingLocked()
     {
         _colorTipLearning = false;
@@ -63,14 +66,15 @@ public sealed partial class MainWindow
         _colorTipTracker.Reset();
     }
 
-    private void DeactivateColorTipForCameraLocked()
+    /// <summary>Makes a newly learned eye this camera's marker. Returns whether the
+    /// saved colour mode changed; the caller saves it after releasing the lock.</summary>
+    private bool SelectEyeTipModeLocked()
     {
         ResetColorTipTrackingLocked();
-        if (_eyeTipCameraId is { } id && _colorTipProfiles.ContainsKey(id))
-        {
-            _colorTipModes[id] = "eye";
-            SaveColorTipSettingsLocked();
-        }
+        if (_eyeTipCameraId is not { } id || !_colorTipProfiles.ContainsKey(id) ||
+            _colorTipModes.GetValueOrDefault(id) == "eye") return false;
+        _colorTipModes[id] = "eye";
+        return true;
     }
 
     private void ForgetColorTipForCameraLocked()
@@ -80,15 +84,17 @@ public sealed partial class MainWindow
         {
             _colorTipProfiles.Remove(id);
             _colorTipModes.Remove(id);
-            SaveColorTipSettingsLocked();
         }
     }
 
-    private void SaveColorTipSettingsLocked()
+    // Snapshot under the tracking lock, but write outside it: the preview, the
+    // expiry timer and detection publishing must never wait on disk I/O.
+    private void SaveColorTipSettings()
     {
         try
         {
-            var saved = new ColorTipSettings(1, new(_colorTipProfiles, StringComparer.Ordinal),
+            ColorTipSettings saved;
+            lock (_eyeTipGate) saved = new(1, new(_colorTipProfiles, StringComparer.Ordinal),
                 new(_colorTipModes, StringComparer.Ordinal));
             Directory.CreateDirectory(_appDataDirectory);
             string temporary = ColorTipSettingsPath + ".tmp";
@@ -157,10 +163,9 @@ public sealed partial class MainWindow
             try
             {
                 var profile = ColorTipDetector.Learn(frame.Width, frame.Height, frame.Stride, frame.Bgra, new(x, y));
-                var reference = _scene.HasBoardMediaClip && _scene.CurrentBoardScreen != BoardScreen.Media
-                    ? _scene.GetEyeTipProjectionFrames() : null;
                 var detection = ColorTipDetector.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra, profile,
-                    new(PreferredCenter: new(x, y), ProjectionFrames: reference, FrameTime: frame.Timestamp));
+                    new(PreferredCenter: new(x, y), ProjectionFrames: StickTipProjectionReference(),
+                        FrameTime: frame.Timestamp));
                 return (Profile: profile, Detection: detection);
             }
             finally { _eyeTipDetectorGate.Release(); }
@@ -171,18 +176,13 @@ public sealed partial class MainWindow
             if (_closing || generation != _eyeTipGeneration || cameraId != _eyeTipCameraId ||
                 !EyeTipFrameFresh(frame, MonotonicClock.UtcNow))
                 throw new InvalidOperationException("The camera changed or the learning frame expired. Click the coloured tip again.");
-            var near = learned.Detection.Candidates.Select(item => (Item: item,
-                    Distance: Math.Sqrt(Math.Pow(item.Center.X - x, 2) + Math.Pow(item.Center.Y - y, 2))))
-                .Where(item => item.Distance <= Math.Max(12, item.Item.RadiusPixels * 2.5))
-                .OrderBy(item => item.Distance).ToArray();
-            if (!learned.Profile.IsValid || near.Length == 0 ||
-                (near.Length > 1 && near[1].Distance - near[0].Distance < 4))
+            if (!learned.Profile.IsValid || NearestStickTipCandidate(learned.Detection.Candidates, x, y,
+                item => item.Center, item => item.RadiusPixels) is not { } chosen)
             {
                 _colorTipPreview = new(frame, learned.Detection, new(null, false, "click-the-coloured-tip"), elapsed);
                 _eyeTipReason = "click-the-coloured-tip";
                 throw new InvalidOperationException("Click inside one clearly coloured tip, away from similarly coloured objects.");
             }
-            var chosen = near[0].Item;
             _colorTipProfiles[cameraId] = learned.Profile;
             _colorTipModes[cameraId] = "color";
             _eyeTipGeneration++;
@@ -193,9 +193,9 @@ public sealed partial class MainWindow
             _colorTipPreview = new(frame, learned.Detection, new(chosen, false, "confirming-colour-marker"), elapsed);
             _colorTipLearning = false;
             _eyeTipReason = "confirming-colour-marker";
-            SaveColorTipSettingsLocked();
             PublishWaterStickTipLocked();
         }
+        SaveColorTipSettings();
         UpdateEyeTipStatus();
         CameraCanvas.Invalidate();
         return GetStickTipStatus();
@@ -212,6 +212,7 @@ public sealed partial class MainWindow
                 ? $"Coloured tip tracked at ({tip.Center.X:F0}, {tip.Center.Y:F0}) camera pixels. Move it over Water Garden to disturb the surface." :
             _eyeTipReason.Contains("ambiguous", StringComparison.Ordinal) ? "Several colours match. Move the pin clear of other matching objects, or learn it again." :
             _eyeTipReason.Contains("confirming", StringComparison.Ordinal) ? "Confirming the coloured tip across fresh camera frames…" :
+            _eyeTipReason == "waiting-for-projected-tip-reference" ? "Waiting for the current board image before tracking the coloured tip." :
             _eyeTipReason.StartsWith("Detection failed:", StringComparison.Ordinal) ? _eyeTipReason :
                 "Coloured tip not visible. Keep its coloured surface facing the camera.";
         return _colorTipSettingsError is null ? message : message + " " + _colorTipSettingsError;
@@ -257,20 +258,8 @@ public sealed partial class MainWindow
         DrawColorTipMarkers(ds, preview, rect, learning);
     }
 
-    private static void DrawColorTipMarkers(CanvasDrawingSession ds, ColorTipPreview preview, Rect rect, bool candidates)
-    {
-        Vector2 Point(ColorTipObservation tip) => new((float)(rect.X + tip.Center.X / preview.Frame.Width * rect.Width),
-            (float)(rect.Y + tip.Center.Y / preview.Frame.Height * rect.Height));
-        float Radius(ColorTipObservation tip) => Math.Max(5, (float)(tip.RadiusPixels / preview.Frame.Width * rect.Width) + 3);
-        if (candidates) foreach (var candidate in preview.Detection.Candidates)
-            ds.DrawCircle(Point(candidate), Radius(candidate), Colors.Gold, 1.5f);
-        if (preview.Track.Observation is { } tip)
-        {
-            var center = Point(tip);
-            float radius = Radius(tip);
-            ds.DrawCircle(center, radius + 2, Colors.Black, 4);
-            ds.DrawCircle(center, radius + 2, preview.Track.Confirmed ? Colors.Lime : Colors.Gold, 2);
-            ds.FillCircle(center, 1.5f, preview.Track.Confirmed ? Colors.Lime : Colors.Gold);
-        }
-    }
+    private static void DrawColorTipMarkers(CanvasDrawingSession ds, ColorTipPreview preview, Rect rect, bool candidates) =>
+        DrawStickTipMarkers(ds, preview.Frame, rect,
+            candidates ? preview.Detection.Candidates.Select(tip => (tip.Center, tip.RadiusPixels)) : [],
+            preview.Track.Observation is { } tip ? (tip.Center, tip.RadiusPixels) : null, preview.Track.Confirmed);
 }

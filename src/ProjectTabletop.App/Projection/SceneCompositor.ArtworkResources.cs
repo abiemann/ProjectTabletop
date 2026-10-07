@@ -14,7 +14,7 @@ public sealed partial class SceneCompositor
         BoardScreen.Slots => _slotArtworkAttempted,
         BoardScreen.Roulette => _rouletteArtworkPublished,
         BoardScreen.CrownDeed => CrownDeedResourcesReady,
-        BoardScreen.WaterGarden => _waterArtworkPublished,
+        BoardScreen.WaterGarden => WaterGardenArtworkReady,
         _ => true
     };
 
@@ -79,6 +79,7 @@ public sealed partial class SceneCompositor
             BoardScreen.Slots => _slotImages?.Error,
             BoardScreen.Roulette => _rouletteImages?.Error,
             BoardScreen.CrownDeed => CrownDeedResourcesError,
+            BoardScreen.WaterGarden => WaterGardenArtworkError,
             _ => null
         };
         drawing.DrawText(error is null ? "Loading…" : "Could not load board",

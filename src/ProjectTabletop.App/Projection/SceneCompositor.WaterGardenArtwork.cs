@@ -9,8 +9,21 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
+    // The simulation cannot render without these; the rock cutouts are optional.
+    private static readonly string[] WaterGardenBasinFiles = ["warm-limestone.png", "wet-slate.png", "sand-ground.png"];
     private BitmapAssetSet? _waterImages;
     private bool _waterArtworkPublished;
+
+    private bool WaterGardenBasinLoaded => _waterImages is { } images &&
+        WaterGardenBasinFiles.All(file => images.Image(file) is not null);
+
+    private bool WaterGardenArtworkReady => _waterArtworkPublished && WaterGardenBasinLoaded;
+
+    private string? WaterGardenArtworkError => _waterImages is not { } images ? null :
+        images.Error ?? (!images.IsLoaded ? null : WaterGardenBasinFiles
+            .Where(file => images.Image(file) is null)
+            .Select(file => file + ": " + images.Errors.GetValueOrDefault(file, "not loaded"))
+            .FirstOrDefault());
     private byte[]? _waterRockPixels;
     private int _waterRockWidth, _waterRockHeight;
     private ShadowEffect? _waterRockShadow;
@@ -39,8 +52,7 @@ public sealed partial class SceneCompositor
     {
         var images = GetWaterGardenImages(device);
         if (!images.IsLoaded) return false;
-        if (_waterArtworkPublished) return images.Image("warm-limestone.png") is not null &&
-            images.Image("wet-slate.png") is not null && images.Image("sand-ground.png") is not null;
+        if (_waterArtworkPublished) return WaterGardenBasinLoaded;
         if (images.Image("moss-rocks.png") is { } rocks)
         {
             _waterRockWidth = (int)rocks.SizeInPixels.Width;
@@ -59,8 +71,7 @@ public sealed partial class SceneCompositor
         _waterArtworkPublished = true;
         _waterRenderedFrame = null;
         InvalidateBoardArtworkSurface();
-        return images.Image("warm-limestone.png") is not null && images.Image("wet-slate.png") is not null &&
-            images.Image("sand-ground.png") is not null;
+        return WaterGardenBasinLoaded;
     }
 
     private (Rect First, Rect Second) WaterGardenRockPlacements(float entranceProgress = 1)

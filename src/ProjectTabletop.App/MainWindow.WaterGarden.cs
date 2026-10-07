@@ -53,7 +53,7 @@ public sealed partial class MainWindow
         var now = MonotonicClock.UtcNow;
         PixelPoint? observation = null;
         var sourceTime = now;
-        if (LearnedColorTipProfileLocked() is not null)
+        if (ActiveColorTipProfileLocked() is not null)
         {
             if (_colorTipPreview is { Track: { Confirmed: true, Observation: { } colour } } colorPreview &&
                 EyeTipFrameFresh(colorPreview.Frame, now))

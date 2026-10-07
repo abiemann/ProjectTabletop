@@ -9,7 +9,8 @@ public sealed record EyeTipProjectionFrame(int Width, int Height, byte[] Bgra,
 
 /// <summary>Optional learned scale, clicked/associated location, and current projected scene.
 /// A supplied projection history limits candidates to that board and rejects its printed marks;
-/// it never supplies positive evidence of a physical eye. Null preserves stand-alone detection.</summary>
+/// it never supplies positive evidence of a physical eye. Null preserves stand-alone detection.
+/// FrameTime is required with a projection history and must use the clock of RenderedAt.</summary>
 public sealed record EyeTipDetectionOptions(double? ExpectedRadiusPixels = null,
     PixelPoint? PreferredCenter = null, IReadOnlyList<EyeTipProjectionFrame>? ProjectionFrames = null,
     DateTimeOffset FrameTime = default)
@@ -37,6 +38,10 @@ internal sealed class EyeTipProjectionMatcher
 
     public EyeTipProjectionMatcher(IReadOnlyList<EyeTipProjectionFrame> frames, DateTimeOffset frameTime)
     {
+        // RenderedAt comes from the caller's clock (the app's MonotonicClock).
+        // A wall-clock default could disagree with it and reject every frame.
+        if (frameTime == default)
+            throw new ArgumentException("Provide FrameTime, from the clock that stamped RenderedAt, with projection frames.");
         _frames = frames.Take(8).Where(frame => Valid(frame) &&
             // The renderer can publish its current copy just after this camera exposure.
             // This is only a negative artwork veto, never a source of future tip coordinates.

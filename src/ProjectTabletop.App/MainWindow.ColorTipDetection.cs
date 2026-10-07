@@ -25,7 +25,15 @@ public sealed partial class MainWindow
             if (_colorTipPreview is { } previous &&
                 (previous.Frame.Width != frame.Width || previous.Frame.Height != frame.Height))
                 _colorTipTracker.Reset();
-            var track = _colorTipTracker.Update(detection, frame.Timestamp, now);
+            ColorTipTrackResult track;
+            if (detection.Reason == "waiting-for-projected-tip-reference")
+            {
+                // As on the eye path: a missing board reference is not a lost
+                // tip. Require fresh confirmation once the reference arrives.
+                _colorTipTracker.Reset();
+                track = new(null, false, detection.Reason);
+            }
+            else track = _colorTipTracker.Update(detection, frame.Timestamp, now);
             _colorTipPreview = new(frame, detection, track, milliseconds);
             _eyeTipPreview = null;
             _eyeTipReason = track.Reason;

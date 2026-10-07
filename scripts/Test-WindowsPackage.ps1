@@ -37,7 +37,7 @@ foreach ($model in $modelHashes.Keys) {
     }
 }
 foreach ($assetDirectory in 'Assets/MenuPreviews', 'Assets/Roulette', 'Assets/CrownDeed',
-        'Assets/CrownDeed/Pieces', 'SlotsRendering/Assets', 'GlobeRendering/Assets') {
+        'Assets/CrownDeed/Pieces', 'Assets/WaterGarden', 'SlotsRendering/Assets', 'GlobeRendering/Assets') {
     $source = Join-Path $repo "src/ProjectTabletop.App/$assetDirectory"
     foreach ($asset in Get-ChildItem -LiteralPath $source -File | Where-Object { $_.Extension -in '.png', '.jpg', '.jpeg' }) {
         $destination = Join-Path $root "$assetDirectory/$($asset.Name)"
