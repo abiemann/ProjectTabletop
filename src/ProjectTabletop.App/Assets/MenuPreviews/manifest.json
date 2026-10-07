@@ -38,7 +38,8 @@
     "seed": "101 \u002B dropIndex * 37"
   },
   "waterGarden": {
-    "composition": "Native clear-water surface over original procedural river stones.",
+    "composition": "Native clear-water surface with a large moss-rock close-up anchored on the right.",
+    "retainedIllustration": true,
     "attribution": "Evan Wallace WebGL Water, MIT; see THIRD_PARTY_NOTICES.md"
   },
   "assets": [
@@ -107,8 +108,8 @@
       "file": "water-garden.png",
       "width": 2304,
       "height": 512,
-      "sha256": "82e772c393eb2d6cb049f59db3061fcd50827ca182c5effd5f220495fddf093b",
-      "bytes": 1698457,
+      "sha256": "f7a22e9fcb2991338f60df9f3dfa5e2616c1ec4812502bdb85ce4a6d2b83d245",
+      "bytes": 1903318,
       "pngColorType": 6,
       "alpha": {
         "transparent": 0,
@@ -224,6 +225,14 @@
       "sha256": "85c5f3209c14d5c384ddbf47c09a867a3b9e90a6c01c40f954d932a76c67fba0"
     },
     {
+      "file": "src/ProjectTabletop.App/Assets/WaterGarden/warm-limestone.png",
+      "sha256": "bcd339092f0100a53e21fad7e11bf7bf183f9d453efdff3a537f3b4bbaf1406a"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Assets/WaterGarden/wet-slate.png",
+      "sha256": "d1b2d77689d50f553916842714086147fc3e056c031fd6b80289ae96a148c35f"
+    },
+    {
       "file": "src/ProjectTabletop.App/GlobeRendering/Assets/earth-clouds-2048.jpg",
       "sha256": "daddaad84d7a33bbbc86cdda3f591099f57cee8607b7bcf3b67eb7e4f7a1c793"
     },
@@ -293,35 +302,59 @@
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/PebbleBedShader.cs",
-      "sha256": "c7dbbe675f29abcac6d707e223ffaa13c9bef9abd432dcc6ff5e52c4c736f766"
+      "sha256": "c1df6e385bec27928a594f4ce27a6f0268f3e71e2f1e62d217665cd2b0454d8b"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterDuckDynamicsShader.cs",
-      "sha256": "f0f741a37728984f2606632203d39e8535844f01309d02cfce892ae04e98e978"
+      "sha256": "2349f2ca49528a3b452c8afc9aa5610f06309cd1511f8c8d0d525c856b80962e"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterDuckRendering.cs",
       "sha256": "7ba534912cb7d2e7c5c1f8c5fce2839f0c5d5adbd4bcc6596c9586f6b4d5b189"
     },
     {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterFountainFluid.cs",
+      "sha256": "c04edbe96485693cc33a6b3dcd506df610f56e3501036e2733090dd0d1f38086"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterFountainLayout.cs",
+      "sha256": "02b52d500267ded906b245a71a556d293390fec1ef2d4fde541a87751759807d"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterFountainRendering.cs",
+      "sha256": "44a938309e3b19d65c963330d0eb438fc3797ca7dcde3c236094adb4ab64e4ac"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterFountainVolumeRendering.cs",
+      "sha256": "c35ccb3032aefc39e68af2b57dc608777a39a54198e8ac441219db900e3f3503"
+    },
+    {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterGardenRockLayout.cs",
-      "sha256": "9134ad248742037927ad688675d293fb71397baed24844a214af47ab4649bea8"
+      "sha256": "15c016ff724abf97a1aa4f48c50e259cf903b04ea70913616f35f457ec50cc27"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterGardenSimulation.cs",
-      "sha256": "0f3c339dfc502c6d9aee09e805fec0dbaf00ae2f71f0af928846c1af337ffdca"
+      "sha256": "fd7f352edf08a00715575afcb75d7df9ef636bd49e517e1f049f609da87e209e"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterGardenView.cs",
-      "sha256": "55acb34335cd7ffe1e6bb3daa4d20219791c4ae72dabcde7e83e6d5fee0ac875"
+      "sha256": "cddabf5ef3ebd6d95d58f52ba814809ed3d8d5f492c80040d4fb09e1bf9058e2"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterSimulationShaders.cs",
-      "sha256": "109a198fcd03238e487f2b603be9d460392450110785d572e89d153074197a09"
+      "sha256": "dfeaff055ad07fd6ba7b03413c815c22974bd6ccadd9e77674900ab770a1ce4e"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterStoneGeometry.cs",
+      "sha256": "b7e3846746309a6a04760db0986a4085746738bd2919bdc57d7793b94f414652"
+    },
+    {
+      "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterStoneTexture.cs",
+      "sha256": "9f26aa00844ae14f804d59d284bfae60c6259d65a51084fa8e1879421b31c608"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterSurfaceShader.cs",
-      "sha256": "c474fdc45521fd81792d7e2ce357696192f0758fc4fb3cf91f7d8d9e5cab0de8"
+      "sha256": "207c345c3d3fe7a3c68a5c1a1a2fc9dcd09ec280c8b40bf24ce7b4b5bb3c5425"
     },
     {
       "file": "src/ProjectTabletop.App/SlotsRendering/Assets/slot-menu-dragon.png",
@@ -353,11 +386,11 @@
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.Native.cs",
-      "sha256": "36d3e9ffff97b8a1b8d94044a6cef26ce3b8c17cfa771bd17c98b0fe164c7ac1"
+      "sha256": "13afc7e0b164c11c338e4af9b9b7b3b0d85b72be49d61fb4011e929db37eba5d"
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.cs",
-      "sha256": "e13221cd35ad716980bb0be9f3118cab665f9ddc3ad496ba92610d7e8e03b988"
+      "sha256": "54365d6f81d1f24aacf37bdd8378d52015eef43202ff453d0d261004a102ba3c"
     },
     {
       "file": "tools/MenuPreviewGenerator/Program.cs",

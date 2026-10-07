@@ -14,7 +14,8 @@ namespace ProjectTabletop.App.Projection.WaterGarden;
 
 internal sealed record WaterGardenDiagnostics(int FieldWidth, int FieldHeight,
     int BedWidth, int BedHeight, long SimulationSteps, double SimulatedSeconds,
-    double DroppedSeconds, int DisturbanceCount, double WaveSpeed, string BufferFormat, int DuckCount);
+    double DroppedSeconds, int DisturbanceCount, double WaveSpeed, string BufferFormat, int DuckCount,
+    bool FountainEnabled, long FountainImpactCount);
 
 internal sealed record WaterGardenFieldStatistics(double HeightMass, double MinimumHeight,
     double MaximumHeight, double MaximumSpeed, double TotalEnergy, int NonFiniteValues);
@@ -29,7 +30,8 @@ internal sealed record WaterGardenDuckState(int Index, float SurfaceX, float Sur
 
 /// <summary>Signed height-field water with a retained pebble substrate. The wave solver and
 /// refraction principles adapt Evan Wallace's MIT WebGL Water; see THIRD_PARTY_NOTICES.md.
-/// All simulation and visible rendering stay on the GPU. Optical caustics use a bounded
+/// Pond simulation and visible rendering run on the GPU; a bounded CPU particle
+/// solver supplies the three-dimensional rock-face flow. Optical caustics use a bounded
 /// local focusing approximation, not the original demo's displaced caustic mesh.</summary>
 internal sealed class WaterGardenSimulation : IDisposable
 {
@@ -39,6 +41,7 @@ internal sealed class WaterGardenSimulation : IDisposable
     private readonly float _waveSpeed;
     private readonly Float2 _fieldSize;
     private readonly Float2 _bedSize;
+    private readonly WaterFountainFluid _fountainFluid;
     private CanvasRenderTarget _field;
     private CanvasRenderTarget _next;
     private CanvasRenderTarget _ducks;
@@ -51,15 +54,34 @@ internal sealed class WaterGardenSimulation : IDisposable
     private readonly PixelShaderEffect<WaterDuckDynamicsShader> _duckDynamicsEffect = new();
     private readonly Transform2DEffect _surfaceField = new();
     private readonly Transform2DEffect _surfaceDucks = new();
+    private readonly Transform2DEffect _surfaceStone = new();
+    private readonly Transform2DEffect _surfaceWetStone = new();
+    private readonly Transform2DEffect _surfaceFountainVolume = new();
+    private readonly CanvasBitmap? _ownedStoneTexture;
+    private readonly CanvasBitmap? _ownedWetStoneTexture;
+    private readonly CanvasBitmap? _fountainAtlas;
+    private readonly Vector2[] _fountainLandingPosition = new Vector2[4];
+    private readonly float[] _fountainLandingMomentum = new float[4];
     private double _accumulator;
     private double _simulatedSeconds;
     private double _droppedSeconds;
     private long _steps;
     private int _disturbances;
     private bool _ambientEnabled = true;
+    private bool _fountainEnabled = true;
+    private long _fountainImpacts;
+    private long _uploadedFountainRevision = -1;
     private bool _disposed;
 
     public WaterGardenSimulation(CanvasDevice device, int fieldWidth, int fieldHeight, double aspect)
+        : this(device, fieldWidth, fieldHeight, aspect, null)
+    {
+    }
+
+    // Production supplies the asynchronously preloaded, artwork-owned bitmap.
+    // The four-argument verification/generator path owns its file-backed copy.
+    public WaterGardenSimulation(CanvasDevice device, int fieldWidth, int fieldHeight, double aspect,
+        CanvasBitmap? stoneTexture, CanvasBitmap? wetStoneTexture = null)
     {
         ArgumentNullException.ThrowIfNull(device);
         if (fieldWidth is < 32 or > 2048 || fieldHeight is < 32 or > 2048)
@@ -71,6 +93,7 @@ internal sealed class WaterGardenSimulation : IDisposable
         FieldWidth = fieldWidth;
         FieldHeight = fieldHeight;
         _aspect = (float)aspect;
+        _fountainFluid = new WaterFountainFluid(_aspect);
         _fieldSize = new(fieldWidth, fieldHeight);
         // The physical domain is aspect by one. Bound c*dt/dx and c*dt/dy so
         // changing quality or board orientation cannot destabilize the wave stencil.
@@ -93,6 +116,33 @@ internal sealed class WaterGardenSimulation : IDisposable
         var allocated = new List<CanvasRenderTarget>();
         try
         {
+            CanvasBitmap stone = stoneTexture ?? (_ownedStoneTexture = CanvasBitmap.LoadAsync(device,
+                Path.Combine(AppContext.BaseDirectory, "Assets", "WaterGarden", "warm-limestone.png"),
+                96).AsTask().GetAwaiter().GetResult());
+            _surfaceStone.Source = stone;
+            _surfaceStone.TransformMatrix = Matrix3x2.CreateScale(bedWidth / (float)stone.Size.Width,
+                bedHeight / (float)stone.Size.Height);
+            _surfaceStone.InterpolationMode = CanvasImageInterpolation.Linear;
+            _surfaceStone.BorderMode = EffectBorderMode.Hard;
+            CanvasBitmap wetStone = wetStoneTexture ?? (_ownedWetStoneTexture = CanvasBitmap.LoadAsync(device,
+                Path.Combine(AppContext.BaseDirectory, "Assets", "WaterGarden", "wet-slate.png"),
+                96).AsTask().GetAwaiter().GetResult());
+            _surfaceWetStone.Source = wetStone;
+            _surfaceWetStone.TransformMatrix = Matrix3x2.CreateScale(bedWidth / (float)wetStone.Size.Width,
+                bedHeight / (float)wetStone.Size.Height);
+            _surfaceWetStone.InterpolationMode = CanvasImageInterpolation.Linear;
+            _surfaceWetStone.BorderMode = EffectBorderMode.Hard;
+            _fountainAtlas = CanvasBitmap.CreateFromBytes(device, _fountainFluid.BuildDensityAtlas(),
+                WaterFountainFluid.AtlasWidth, WaterFountainFluid.AtlasHeight,
+                DirectXPixelFormat.R32G32B32A32Float, 96, CanvasAlphaMode.Ignore);
+            _surfaceFountainVolume.Source = _fountainAtlas;
+            _surfaceFountainVolume.TransformMatrix = Matrix3x2.CreateScale(
+                bedWidth / (float)WaterFountainFluid.AtlasWidth,
+                bedHeight / (float)WaterFountainFluid.AtlasHeight);
+            _surfaceFountainVolume.InterpolationMode = CanvasImageInterpolation.Linear;
+            _surfaceFountainVolume.BorderMode = EffectBorderMode.Hard;
+            _surfaceFountainVolume.BufferPrecision = CanvasBufferPrecision.Precision32Float;
+            _uploadedFountainRevision = _fountainFluid.Revision;
             CanvasRenderTarget Field()
             {
                 var target = new CanvasRenderTarget(device, fieldWidth, fieldHeight, 96,
@@ -135,6 +185,9 @@ internal sealed class WaterGardenSimulation : IDisposable
         {
             foreach (var target in allocated) target.Dispose();
             DisposeEffects();
+            _ownedStoneTexture?.Dispose();
+            _ownedWetStoneTexture?.Dispose();
+            _fountainAtlas?.Dispose();
             throw;
         }
     }
@@ -146,7 +199,19 @@ internal sealed class WaterGardenSimulation : IDisposable
 
     public WaterGardenDiagnostics GetDiagnostics() => new(FieldWidth, FieldHeight,
         (int)_bedSize.X, (int)_bedSize.Y, _steps, _simulatedSeconds, _droppedSeconds,
-        _disturbances, _waveSpeed, "RGBA32Float (height, vertical velocity, reserved, opaque)", WaterGardenDucks.Count);
+        _disturbances, _waveSpeed, "RGBA32Float (height, vertical velocity, reserved, opaque)", WaterGardenDucks.Count,
+        _fountainEnabled, _fountainImpacts);
+
+    public WaterFountainFluidDiagnostics GetFountainDiagnostics() => _fountainFluid.GetDiagnostics();
+
+    public void SetFountainEnabled(bool enabled)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_fountainEnabled == enabled) return;
+        _fountainEnabled = enabled;
+        Revision++;
+        BindSurface();
+    }
 
     public void AddDisturbance(Vector2 center, float radius, float strength)
     {
@@ -175,6 +240,36 @@ internal sealed class WaterGardenSimulation : IDisposable
         int steps = Math.Min(MaximumStepsPerAdvance, (int)Math.Floor((_accumulator + 1e-9) / FixedStep));
         for (int i = 0; i < steps; i++)
         {
+            _fountainFluid.Advance(FixedStep, _fountainEnabled);
+            foreach (WaterFountainImpact impact in _fountainFluid.DrainImpacts())
+            {
+                // Only actual parcels crossing the pond surface create waves.
+                // Four spatial bins retain distinct landing spots without making
+                // every parcel a separate full-field GPU disturbance pass.
+                int bin = Math.Clamp((int)((impact.Position.X - .5f) * _aspect /
+                    (.42f * MathF.Min(_aspect, 1)) * 4 + 2), 0, 3);
+                _fountainLandingPosition[bin] += impact.Position * impact.NormalMomentum;
+                _fountainLandingMomentum[bin] += impact.NormalMomentum;
+                _fountainImpacts += impact.Particles;
+            }
+            if (_steps % 12 == 11)
+            {
+                for (int bin = 0; bin < _fountainLandingMomentum.Length; bin++)
+                {
+                    float momentum = _fountainLandingMomentum[bin];
+                    if (momentum > 0)
+                    {
+                        Vector2 landing = _fountainLandingPosition[bin] / momentum;
+                        float pulse = Math.Clamp(momentum * 150f, 0, .0015f);
+                        _disturbanceEffect.ConstantBuffer = new WaterDisturbanceShader(_fieldSize, _aspect,
+                            new Float2(landing.X, landing.Y), .018f, pulse);
+                        Run(_disturbanceEffect, _next, _field);
+                        (_field, _next) = (_next, _field);
+                    }
+                    _fountainLandingPosition[bin] = Vector2.Zero;
+                    _fountainLandingMomentum[bin] = 0;
+                }
+            }
             _stepEffect.ConstantBuffer = new WaterStepShader(_fieldSize, _aspect, (float)FixedStep, _waveSpeed);
             Run(_stepEffect, _next, _field);
             (_field, _next) = (_next, _field);
@@ -200,6 +295,10 @@ internal sealed class WaterGardenSimulation : IDisposable
         _accumulator = _simulatedSeconds = _droppedSeconds = 0;
         _steps = 0;
         _disturbances = 0;
+        _fountainImpacts = 0;
+        _fountainFluid.Reset();
+        Array.Clear(_fountainLandingPosition);
+        Array.Clear(_fountainLandingMomentum);
         Revision++;
         BindSurface();
     }
@@ -207,6 +306,7 @@ internal sealed class WaterGardenSimulation : IDisposable
     public void Draw(CanvasDrawingSession drawing, Rect bounds)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        UpdateFountainAtlas();
         Matrix3x2 original = drawing.Transform;
         try
         {
@@ -219,6 +319,8 @@ internal sealed class WaterGardenSimulation : IDisposable
     }
 
 #if DEBUG
+    public void SetFountainEnabledForVerification(bool enabled) => SetFountainEnabled(enabled);
+
     public void SetAmbientEnabledForVerification(bool enabled)
     {
         _ambientEnabled = enabled;
@@ -317,11 +419,28 @@ internal sealed class WaterGardenSimulation : IDisposable
         _surfaceEffect.Sources[1] = _bed;
         _surfaceDucks.Source = _ducks;
         _surfaceEffect.Sources[2] = _surfaceDucks;
+        _surfaceEffect.Sources[3] = _surfaceStone;
+        _surfaceEffect.Sources[4] = _surfaceWetStone;
+        _surfaceEffect.Sources[5] = _surfaceFountainVolume;
+        Vector3 fountainMinimum = _fountainFluid.WorldMinimum;
+        Vector3 fountainSize = _fountainFluid.WorldSize;
         _surfaceEffect.ConstantBuffer = new WaterSurfaceShader(_fieldSize, _bedSize, _aspect,
             (float)_simulatedSeconds, _ambientEnabled ? 1 : 0,
             new Float4(WaterGardenView.SinTilt, WaterGardenView.CosTilt, WaterGardenView.Distance, WaterGardenView.Zoom),
             new Float2(WaterGardenView.CentreX, WaterGardenView.CentreY), WaterGardenView.RimHeight,
-            new Float2(WaterGardenDucks.Count, WaterGardenDucks.Rows));
+            new Float2(WaterGardenDucks.Count, WaterGardenDucks.Rows),
+            _fountainFluid.ParticleCount > 0 ? 1f : 0f,
+            new Float3(fountainMinimum.X, fountainMinimum.Y, fountainMinimum.Z),
+            new Float3(fountainSize.X, fountainSize.Y, fountainSize.Z),
+            new Float3(WaterFountainFluid.GridX, WaterFountainFluid.GridY, WaterFountainFluid.GridZ),
+            new Float2(WaterFountainFluid.AtlasTiles, WaterFountainFluid.AtlasTiles));
+    }
+
+    private void UpdateFountainAtlas()
+    {
+        if (_uploadedFountainRevision == _fountainFluid.Revision) return;
+        _fountainAtlas!.SetPixelBytes(_fountainFluid.BuildDensityAtlas());
+        _uploadedFountainRevision = _fountainFluid.Revision;
     }
 
     private void DisposeEffects()
@@ -333,6 +452,9 @@ internal sealed class WaterGardenSimulation : IDisposable
         _duckInitializeEffect.Dispose();
         _duckDynamicsEffect.Dispose();
         _surfaceDucks.Dispose();
+        _surfaceStone.Dispose();
+        _surfaceWetStone.Dispose();
+        _surfaceFountainVolume.Dispose();
     }
 
     public void Dispose()
@@ -345,5 +467,8 @@ internal sealed class WaterGardenSimulation : IDisposable
         _bed.Dispose();
         _ducks.Dispose();
         _nextDucks.Dispose();
+        _ownedStoneTexture?.Dispose();
+        _ownedWetStoneTexture?.Dispose();
+        _fountainAtlas?.Dispose();
     }
 }

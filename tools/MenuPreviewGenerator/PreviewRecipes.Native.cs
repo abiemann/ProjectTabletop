@@ -68,9 +68,17 @@ internal sealed partial class PreviewRecipes
         var comparisonRecords = new List<object>();
         foreach (var (screen, stem) in Boards)
         {
-            using var image = recipes.Render(device, screen, ImageWidth, ImageHeight, legacy: false);
+            // This approved illustration intentionally predates the rear fountain.
+            // Keep its exact pixels when other board artwork is regenerated.
+            string retainedWater = Path.Combine(root, "src/ProjectTabletop.App/Assets/MenuPreviews/water-garden.png");
+            using CanvasBitmap image = screen == BoardScreen.WaterGarden
+                ? await CanvasBitmap.LoadAsync(device, retainedWater, 96).AsTask()
+                : recipes.Render(device, screen, ImageWidth, ImageHeight, legacy: false);
             string path = Path.Combine(output, stem + ".png");
-            await image.SaveAsync(path, CanvasBitmapFileFormat.Png).AsTask();
+            if (screen != BoardScreen.WaterGarden)
+                await image.SaveAsync(path, CanvasBitmapFileFormat.Png).AsTask();
+            else if (!Path.GetFullPath(path).Equals(Path.GetFullPath(retainedWater), StringComparison.OrdinalIgnoreCase))
+                File.Copy(retainedWater, path, overwrite: true);
             // Validate the saved file, including its PNG colour type, rather
             // than assuming encoding retained the render target's alpha.
             byte[] encoded = File.ReadAllBytes(path);
@@ -145,6 +153,8 @@ internal sealed partial class PreviewRecipes
             "src/ProjectTabletop.Interaction/GlobeHome.cs",
             "src/ProjectTabletop.App/SlotsRendering/Assets/slot-menu-dragon.png",
             "src/ProjectTabletop.App/Assets/WaterGarden/moss-rocks.png",
+            "src/ProjectTabletop.App/Assets/WaterGarden/warm-limestone.png",
+            "src/ProjectTabletop.App/Assets/WaterGarden/wet-slate.png",
             "src/ProjectTabletop.App/GlobeRendering/Assets/earth-day-8192.png",
             "src/ProjectTabletop.App/GlobeRendering/Assets/earth-clouds-2048.jpg"
         ];
@@ -173,7 +183,8 @@ internal sealed partial class PreviewRecipes
                 imagery = "NASA Blue Marble; credits and source URLs in THIRD_PARTY_NOTICES.md" },
             paint = new { fieldWidth = 432, fieldHeight = 96, updates = 60, fixedStepsPerUpdate = 4, shaderPassesPerStep = 14,
                 seed = "101 + dropIndex * 37" },
-            waterGarden = new { composition = "Native clear-water surface over original procedural river stones.",
+            waterGarden = new { composition = "Native clear-water surface with a large moss-rock close-up anchored on the right.",
+                retainedIllustration = true,
                 attribution = "Evan Wallace WebGL Water, MIT; see THIRD_PARTY_NOTICES.md" },
             assets, sources
         }, options) + Environment.NewLine);

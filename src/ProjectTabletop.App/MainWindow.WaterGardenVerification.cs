@@ -81,6 +81,7 @@ public sealed partial class MainWindow
             "Eye tracking did not retain a bounded, calibrated projection reference between camera samples.");
         var water = Simulation(scene);
         water.SetAmbientEnabledForVerification(false);
+        water.SetFountainEnabledForVerification(false);
         now += TimeSpan.FromSeconds(1.0 / 60);
         Draw(scene, target);
         var blank = Pixels(target);
@@ -88,8 +89,8 @@ public sealed partial class MainWindow
         var initialDucks = DuckStates(water);
         Require(IsFinite(calm) && calm.TotalEnergy == 0 && calm.MaximumHeight == 0,
             "A new Water Garden did not create a finite, calm GPU field.");
-        Require(initialDucks.Count == 5 && initialDucks.All(DuckIsFiniteAndInside),
-            "A new Water Garden did not create five finite floating ducks inside the basin.");
+        Require(initialDucks.Count == 10 && initialDucks.All(DuckIsFiniteAndInside),
+            "A new Water Garden did not create ten finite floating ducks inside the basin.");
         var visibleDuckPixels = initialDucks.Select(duck => YellowPixels(blank,
             WaterGardenView.SurfaceToScreen(new(duck.SurfaceX, duck.SurfaceY)))).ToArray();
         Require(visibleDuckPixels.All(count => count > 4),
@@ -212,6 +213,7 @@ public sealed partial class MainWindow
         using (var duckWater = new WaterGardenSimulation(device, 256, 256, 1))
         {
             duckWater.SetAmbientEnabledForVerification(false);
+            duckWater.SetFountainEnabledForVerification(false);
             var start = DuckStates(duckWater);
             for (int frame = 0; frame < 60; frame++) duckWater.Advance(1.0 / 30);
             Require(DuckStatesWithinTolerance(start, DuckStates(duckWater)),
@@ -252,6 +254,166 @@ public sealed partial class MainWindow
             duckPhysics = new { count = start.Count, ambientDisabledCalmStable = true,
                 maximumHeave, maximumSlope, maximumDrift, simulatedSecondsAfterImpulse = 6,
                 boundedAfterSettling = true, repeatedResetDeterministic = true };
+        }
+
+        // No stick input or ambient motion can satisfy this fixture. Persistent
+        // 3D parcels must contact the stone, take time to reach the pond, and feed
+        // the actual wave field. Replaying Calm must reproduce both simulations.
+        object fountainPhysics;
+        using (var fountainWater = new WaterGardenSimulation(device, 256, 256, 1))
+        {
+            fountainWater.SetAmbientEnabledForVerification(false);
+            Require(fountainWater.GetDiagnostics().FountainEnabled,
+                "The Water Garden fountain was not enabled by default.");
+            var fluid = Fountain(fountainWater);
+            byte[] calmRockPixels;
+            using (var calmRocks = new CanvasRenderTarget(device, 1536, 1536, 96))
+            {
+                using (var drawing = calmRocks.CreateDrawingSession())
+                    fountainWater.Draw(drawing, new Windows.Foundation.Rect(0, 0, 1536, 1536));
+                calmRockPixels = Pixels(calmRocks);
+            }
+            // This probe lies ahead of the whole particle domain, so only a
+            // propagated pond wave can reach it, regardless of the landing path.
+            var neighbour = new Vector2(.5f, .5f + fluid.WorldMaximum.Y + .08f);
+            double maximumNeighbourHeight = 0;
+            double maximumMass = 0, maximumHeight = 0, maximumSpeed = 0;
+            WaterGardenFieldStatistics? firstFlow = null;
+            IReadOnlyList<WaterGardenDuckState>? firstFlowDucks = null;
+            WaterFountainFluidDiagnostics? firstFlowFluid = null;
+            byte[]? firstFlowAtlas = null;
+            long firstFlowImpacts = 0;
+            int firstFlowFrame = 0, maximumParticles = 0, maximumOccupiedVoxels = 0;
+            double? firstEmissionSeconds = null, firstImpactSeconds = null;
+            bool airborneBeforeImpact = false;
+            for (int frame = 1; frame <= 600; frame++)
+            {
+                fountainWater.Advance(1.0 / 30);
+                var currentFluid = fountainWater.GetFountainDiagnostics();
+                var currentPond = fountainWater.GetDiagnostics();
+                Require(FountainIsFiniteAndConserved(currentFluid) &&
+                        currentFluid.Steps == currentPond.SimulationSteps &&
+                        currentFluid.PoolImpactParticles == currentPond.FountainImpactCount,
+                    "The fountain lost finite particle state, parcel conservation, or a real pond arrival: " +
+                    System.Text.Json.JsonSerializer.Serialize(new { currentFluid, currentPond }));
+                maximumParticles = Math.Max(maximumParticles, currentFluid.ParticleCount);
+                if (currentFluid.EmittedParticles > 0) firstEmissionSeconds ??= frame / 30.0;
+                if (currentFluid.PoolImpactParticles > 0) firstImpactSeconds ??= frame / 30.0;
+                airborneBeforeImpact |= currentFluid.ParticleCount > 0 && currentFluid.PoolImpactParticles == 0;
+                if (frame == 30)
+                    Require(currentFluid is { ParticleCount: 0, EmittedParticles: 0, PoolImpactParticles: 0 } &&
+                            Statistics(fountainWater).TotalEnergy == 0,
+                        "The fountain emitted parcels or disturbed the first quiet second after Calm Water.");
+                if (frame >= 60 && frame % 15 == 0)
+                {
+                    var probe = fountainWater.GetFieldProbe(neighbour);
+                    Require(double.IsFinite(probe.Height) && double.IsFinite(probe.Velocity),
+                        "The fountain's neighbouring wave probe became non-finite.");
+                    maximumNeighbourHeight = Math.Max(maximumNeighbourHeight, Math.Abs(probe.Height));
+                }
+                if (firstFlow is null && frame >= 90 && frame % 15 == 0 && currentFluid.PoolImpactParticles > 0)
+                {
+                    var candidate = Statistics(fountainWater);
+                    if (candidate.TotalEnergy > 0)
+                    {
+                        firstFlow = candidate;
+                        firstFlowFrame = frame;
+                        firstFlowDucks = DuckStates(fountainWater);
+                        firstFlowImpacts = currentPond.FountainImpactCount;
+                        var volume = FountainVolume(fluid);
+                        Require(volume.Occupied > 0 && volume.Width > 2 && volume.Depth > 2 && volume.Height > 2 &&
+                                fluid.GetDiagnostics().RockContacts > 0,
+                            "The flowing fountain did not reconstruct a three-dimensional volume after contacting its stone.");
+                        firstFlowFluid = fluid.GetDiagnostics();
+                        firstFlowAtlas = (byte[])fluid.BuildDensityAtlas().Clone();
+                    }
+                }
+                if (frame % 150 != 0) continue;
+                var densityVolume = FountainVolume(fluid);
+                currentFluid = fluid.GetDiagnostics();
+                maximumOccupiedVoxels = Math.Max(maximumOccupiedVoxels, densityVolume.Occupied);
+                var field = Statistics(fountainWater);
+                maximumMass = Math.Max(maximumMass, Math.Abs(field.HeightMass));
+                maximumHeight = Math.Max(maximumHeight, Math.Max(Math.Abs(field.MinimumHeight), Math.Abs(field.MaximumHeight)));
+                maximumSpeed = Math.Max(maximumSpeed, field.MaximumSpeed);
+                Require(IsFinite(field) && maximumMass < 2e-5 && maximumHeight < .03 && maximumSpeed < .3 &&
+                        DuckStates(fountainWater).All(DuckIsFiniteAndInside) &&
+                        FountainIsFiniteAndConserved(currentFluid) && currentFluid.ParticleCount > 0 &&
+                        currentFluid.RockContacts > 0 && densityVolume.Occupied > 0,
+                    $"The continuously running fountain became unbounded or filled the basin: " +
+                    $"seconds={frame / 30.0:G4}, mass={maximumMass:G6}, height={maximumHeight:G6}, speed={maximumSpeed:G6}.");
+            }
+            long impactsAfterTwentySeconds = fountainWater.GetDiagnostics().FountainImpactCount;
+            var finalFluid = fluid.GetDiagnostics();
+            Require(impactsAfterTwentySeconds > 0 && maximumNeighbourHeight > 1e-7 &&
+                    firstFlow is not null && firstFlowFrame > 0 && airborneBeforeImpact &&
+                    firstEmissionSeconds is { } emissionSeconds && firstImpactSeconds is { } impactSeconds &&
+                    impactSeconds > emissionSeconds &&
+                    maximumParticles > 0 && maximumOccupiedVoxels > 0 && finalFluid.RockContacts > 0,
+                "The fountain did not carry persistent parcels over the rock into a propagating pond wave.");
+            using (var steady = new CanvasRenderTarget(device, 1536, 1536, 96))
+            {
+                using (var drawing = steady.CreateDrawingSession())
+                    fountainWater.Draw(drawing, new Windows.Foundation.Rect(0, 0, 1536, 1536));
+                byte[] flowingPixels = Pixels(steady);
+                int visibleRockFlowPixels = 0;
+                for (int y = 130; y < 480; y++)
+                for (int x = 580; x < 960; x++)
+                {
+                    int pixel = (y * 1536 + x) * 4;
+                    if (Math.Abs(flowingPixels[pixel] - calmRockPixels[pixel]) > 12 ||
+                        Math.Abs(flowingPixels[pixel + 1] - calmRockPixels[pixel + 1]) > 12 ||
+                        Math.Abs(flowingPixels[pixel + 2] - calmRockPixels[pixel + 2]) > 12)
+                        visibleRockFlowPixels++;
+                }
+                Require(visibleRockFlowPixels > 1500,
+                    $"The 3D fountain was physically active but not visibly rendered over the rock: " +
+                    $"{visibleRockFlowPixels} changed pixels.");
+                await Save(steady, "water-fountain-steady");
+            }
+            fountainWater.Reset();
+            var resetVolume = FountainVolume(fluid);
+            Require(fountainWater.GetDiagnostics() is { FountainEnabled: true, FountainImpactCount: 0 } &&
+                    fluid.GetDiagnostics() is { ParticleCount: 0, EmittedParticles: 0, PoolImpactParticles: 0,
+                        EscapedParticles: 0, RockContacts: 0, Steps: 0 } && resetVolume.Occupied == 0 &&
+                    Statistics(fountainWater).TotalEnergy == 0,
+                "Calm Water failed to clear fountain particles, density, waves or impact history.");
+            for (int frame = 0; frame < firstFlowFrame; frame++) fountainWater.Advance(1.0 / 30);
+            var resumedFlow = Statistics(fountainWater);
+            var resumedFlowDucks = DuckStates(fountainWater);
+            var resumedDiagnostics = fountainWater.GetDiagnostics();
+            _ = FountainVolume(fluid);
+            var resumedFluid = fluid.GetDiagnostics();
+            // Replaying a float32 GPU field can differ in its last few bits
+            // across texture realizations; CPU parcels and volume remain exact.
+            Require(resumedDiagnostics.FountainImpactCount == firstFlowImpacts &&
+                    resumedDiagnostics.SimulationSteps == firstFlowFrame * 4 &&
+                    Math.Abs(resumedDiagnostics.SimulatedSeconds - firstFlowFrame / 30.0) < 1e-9 &&
+                    resumedFluid == firstFlowFluid && firstFlowAtlas is not null &&
+                    firstFlowAtlas.AsSpan().SequenceEqual(fluid.BuildDensityAtlas()) &&
+                    firstFlow is not null && IsFinite(resumedFlow) &&
+                    Math.Abs(resumedFlow.HeightMass - firstFlow.HeightMass) < 1e-10 &&
+                    Math.Abs(resumedFlow.TotalEnergy - firstFlow.TotalEnergy) < 1e-10 &&
+                    Math.Abs(resumedFlow.MinimumHeight - firstFlow.MinimumHeight) < 1e-8 &&
+                    Math.Abs(resumedFlow.MaximumHeight - firstFlow.MaximumHeight) < 1e-8 &&
+                    Math.Abs(resumedFlow.MaximumSpeed - firstFlow.MaximumSpeed) < 1e-8 &&
+                    firstFlowDucks is not null && resumedFlowDucks.All(DuckIsFiniteAndInside) &&
+                    DuckStatesWithinTolerance(firstFlowDucks, resumedFlowDucks),
+                "The fountain did not resume reproducibly after Calm Water. " +
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    initialImpacts = firstFlowImpacts, firstFlowFrame, resumedDiagnostics,
+                    initialFluid = firstFlowFluid, resumedFluid,
+                    initialField = firstFlow, resumedField = resumedFlow,
+                    initialDucks = firstFlowDucks, resumedDucks = resumedFlowDucks
+                }));
+            fountainPhysics = new { simulatedSeconds = 20, impactsAfterTwentySeconds,
+                maximumNeighbourHeight, maximumMass, maximumHeight, maximumSpeed,
+                maximumParticles, maximumOccupiedVoxels, firstEmissionSeconds, firstImpactSeconds,
+                firstFlowSeconds = firstFlowFrame / 30.0, finalFluid,
+                realParcelArrivalsMatchImpacts = true, particleConservation = true,
+                occupiedThreeDimensionalDensity = true, stoneCollisions = true,
+                drivesWavesWithoutStick = true, initialCalmSecond = true, resetReproducible = true };
         }
 
         now += TimeSpan.FromMilliseconds(20);
@@ -321,7 +483,16 @@ public sealed partial class MainWindow
             await aspectScene.EnsureBoardArtworkResourcesAsync(device, BoardScreen.WaterGarden);
             using var output = new CanvasRenderTarget(device, width, height, 96);
             Draw(aspectScene, output);
+            var initialAspectPixels = Pixels(output);
             var aspectWater = Simulation(aspectScene);
+            // Allow actual parcels to travel over the rock before capturing the
+            // falling water. Advance at the normal cadence without rendering 4K
+            // frames for every physics step; do not assume an analytic impact time.
+            for (int frame = 0; frame < 240; frame++)
+            {
+                aspectWater.Advance(1.0 / 30);
+                if (frame >= 71 && aspectWater.GetFountainDiagnostics().PoolImpactParticles > 0) break;
+            }
             now += TimeSpan.FromMilliseconds(20);
             Require(aspectScene.SetWaterStickTip(CameraPoint(.45, .48, aspectInset), now),
                 $"The {label} camera mapping rejected its input.");
@@ -332,11 +503,35 @@ public sealed partial class MainWindow
             }
             var statistics = Statistics(aspectWater);
             var diagnostics = aspectWater.GetDiagnostics();
+            var fountainState = aspectWater.GetFountainDiagnostics();
             Require(IsFinite(statistics) && statistics.TotalEnergy > 0 &&
+                    diagnostics.FountainEnabled && diagnostics.FountainImpactCount > 0 &&
+                    FountainIsFiniteAndConserved(fountainState) && fountainState.ParticleCount > 0 &&
+                    fountainState.OccupiedVoxels > 0 && fountainState.RockContacts > 0 &&
+                    fountainState.PoolImpactParticles == diagnostics.FountainImpactCount &&
                     DuckStates(aspectWater).All(DuckIsFiniteAndInside) &&
                     Math.Max(diagnostics.FieldWidth, diagnostics.FieldHeight) == 512,
                 $"The {label} native render produced an invalid or unbounded simulation.");
-            aspects.Add(new { width, height, diagnostics, statistics });
+            long fountainRevision = aspectWater.Revision;
+            var fountainDucks = DuckStates(aspectWater);
+            Draw(aspectScene, preview, isPreview: true);
+            DrawRawPreview(aspectScene, preview);
+            Draw(aspectScene, output);
+            Require(aspectWater.Revision == fountainRevision &&
+                    aspectWater.GetDiagnostics().FountainImpactCount == diagnostics.FountainImpactCount &&
+                    aspectWater.GetFountainDiagnostics() == fountainState &&
+                    fountainDucks.SequenceEqual(DuckStates(aspectWater)),
+                "A same-clock preview/output draw advanced fountain particles, duplicated impacts or moved its ducks.");
+            var flowingAspectPixels = Pixels(output);
+            foreach (var button in aspectScene.CurrentBoardButtons)
+            {
+                var b = button.Bounds;
+                Require(ChangedPixels(initialAspectPixels, flowingAspectPixels,
+                        new(b.X + .025, b.Y + .018, b.Width - .05, b.Height - .036),
+                        width, height, aspectInset) == 0,
+                    $"The {label} fountain changed the stationary {button.Label} caption or its opaque interior.");
+            }
+            aspects.Add(new { width, height, diagnostics, statistics, fountainState });
             await Save(output, "water-" + label + "-native");
         }
 
@@ -372,7 +567,8 @@ public sealed partial class MainWindow
                 _scene.HasBoardMediaClip, _scene.GetBoardFacingDegrees()),
             "Water Garden verification changed the live camera, projector or board registration.");
         return new { passed = true, propagatedHeight, injected, propagating, decayed, reset,
-            duckPhysics, visibleDuckPixels, sameClockDuckStateStable = true,
+            duckPhysics, fountainPhysics, visibleDuckPixels, sameClockDuckStateStable = true,
+            sameClockFountainStable = true,
             perspectiveRoundTrips, perspectiveTouches, trapezoidAndRimOcclusionRejected = true,
             boundedEyeProjectionReference = true,
             sameClockDrawStable = true, stationaryCaptionPixelsStable = true, freshCalibratedStickMapping = true,
@@ -446,17 +642,19 @@ public sealed partial class MainWindow
             await output.SaveAsync(path, CanvasBitmapFileFormat.Png);
             images.Add(new { name, path });
         }
-        int ChangedPixels(byte[] first, byte[] second, BoardRect region)
+        int ChangedPixels(byte[] first, byte[] second, BoardRect region,
+            int imageWidth = 1000, int imageHeight = 1000, double? safetyInset = null)
         {
             int count = 0;
-            int left = (int)Math.Ceiling(1000 * (inset / 2 + region.X * (1 - inset)));
-            int top = (int)Math.Ceiling(1000 * (inset / 2 + region.Y * (1 - inset)));
-            int right = (int)Math.Floor(1000 * (inset / 2 + (region.X + region.Width) * (1 - inset)));
-            int bottom = (int)Math.Floor(1000 * (inset / 2 + (region.Y + region.Height) * (1 - inset)));
+            double padding = safetyInset ?? inset;
+            int left = (int)Math.Ceiling(imageWidth * (padding / 2 + region.X * (1 - padding)));
+            int top = (int)Math.Ceiling(imageHeight * (padding / 2 + region.Y * (1 - padding)));
+            int right = (int)Math.Floor(imageWidth * (padding / 2 + (region.X + region.Width) * (1 - padding)));
+            int bottom = (int)Math.Floor(imageHeight * (padding / 2 + (region.Y + region.Height) * (1 - padding)));
             for (int y = top; y < bottom; y++)
             for (int x = left; x < right; x++)
             {
-                int offset = (y * 1000 + x) * 4;
+                int offset = (y * imageWidth + x) * 4;
                 if (!first.AsSpan(offset, 4).SequenceEqual(second.AsSpan(offset, 4))) count++;
             }
             return count;
@@ -501,10 +699,47 @@ public sealed partial class MainWindow
         static WaterGardenSimulation Simulation(SceneCompositor drawingScene) =>
             typeof(SceneCompositor).GetField("_waterSimulation", BindingFlags.Instance | BindingFlags.NonPublic)
                 ?.GetValue(drawingScene) as WaterGardenSimulation ?? throw new InvalidOperationException("No GPU water simulation was allocated.");
+        static WaterFountainFluid Fountain(WaterGardenSimulation simulation) =>
+            typeof(WaterGardenSimulation).GetField("_fountainFluid", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.GetValue(simulation) as WaterFountainFluid ?? throw new InvalidOperationException("No three-dimensional fountain simulation was allocated.");
+        static (int Occupied, int Width, int Depth, int Height) FountainVolume(WaterFountainFluid fluid)
+        {
+            fluid.BuildDensityAtlas();
+            var values = fluid.DensityAtlas;
+            int occupied = 0, left = int.MaxValue, back = int.MaxValue, bottom = int.MaxValue;
+            int right = int.MinValue, front = int.MinValue, top = int.MinValue;
+            for (int offset = 0; offset < values.Length; offset += 4)
+            {
+                Require(float.IsFinite(values[offset]) && values[offset] >= 0 &&
+                        float.IsFinite(values[offset + 1]) && float.IsFinite(values[offset + 2]) &&
+                        float.IsFinite(values[offset + 3]),
+                    "The fountain reconstructed a non-finite density or velocity voxel.");
+                if (values[offset] < .20f) continue;
+                int atlasX = offset / 4 % WaterFountainFluid.AtlasWidth;
+                int atlasY = offset / 4 / WaterFountainFluid.AtlasWidth;
+                int x = atlasX % WaterFountainFluid.GridX, y = atlasY % WaterFountainFluid.GridY;
+                int z = atlasY / WaterFountainFluid.GridY * WaterFountainFluid.AtlasTiles +
+                    atlasX / WaterFountainFluid.GridX;
+                occupied++;
+                left = Math.Min(left, x); right = Math.Max(right, x);
+                back = Math.Min(back, y); front = Math.Max(front, y);
+                bottom = Math.Min(bottom, z); top = Math.Max(top, z);
+            }
+            Require(occupied == fluid.GetDiagnostics().OccupiedVoxels,
+                "The fountain's occupied-voxel diagnostics differed from its actual density volume.");
+            return occupied == 0 ? (0, 0, 0, 0) :
+                (occupied, right - left + 1, front - back + 1, top - bottom + 1);
+        }
         static bool IsFinite(WaterGardenFieldStatistics statistics) => statistics.NonFiniteValues == 0 &&
             double.IsFinite(statistics.HeightMass) && double.IsFinite(statistics.MinimumHeight) &&
             double.IsFinite(statistics.MaximumHeight) && double.IsFinite(statistics.MaximumSpeed) &&
             double.IsFinite(statistics.TotalEnergy);
+        static bool FountainIsFiniteAndConserved(WaterFountainFluidDiagnostics fluid) =>
+            fluid.NonFiniteParticles == 0 && fluid.ParticleCount >= 0 && fluid.ParticleCount <= fluid.Capacity &&
+            double.IsFinite(fluid.SimulatedSeconds) && double.IsFinite(fluid.MaximumSpeed) &&
+            double.IsFinite(fluid.MaximumDensity) && double.IsFinite(fluid.AtlasMaximumDensity) &&
+            fluid.MaximumSpeed >= 0 && fluid.MaximumDensity >= 0 && fluid.AtlasMaximumDensity >= 0 &&
+            fluid.EmittedParticles == fluid.ParticleCount + fluid.PoolImpactParticles + fluid.EscapedParticles;
         static bool DuckIsFiniteAndInside(WaterGardenDuckState duck) =>
             float.IsFinite(duck.SurfaceX) && float.IsFinite(duck.SurfaceY) &&
             float.IsFinite(duck.VelocityX) && float.IsFinite(duck.VelocityY) &&

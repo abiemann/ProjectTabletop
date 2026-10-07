@@ -179,13 +179,10 @@ internal sealed partial class PreviewRecipes
         Call(water, "AddDisturbance", new Vector2(1 - 95 / span, .52f), .05f, .006f);
         for (int step = 0; step < 36; step++) Call(water, "Advance", 1 / 60.0);
         Call(water, "Draw", ds, new Rect(0, 0, span, MenuPreviewUnits));
-        var layout = _app.GetType("ProjectTabletop.App.Projection.WaterGarden.WaterGardenRockLayout", true)!;
-        var (far, near) = ((Rect, Rect))layout.GetMethod("GetPlacements")!.Invoke(null,
-            [aspect, _waterRocks.Size.Width / _waterRocks.Size.Height])!;
-        foreach (var bounds in new[] { far, near })
-            ds.DrawImage(_waterRocks, new Rect(bounds.X * span, bounds.Y * MenuPreviewUnits,
-                bounds.Width * span, bounds.Height * MenuPreviewUnits),
-                new Rect(0, 0, _waterRocks.Size.Width, _waterRocks.Size.Height));
+        // Keep the established close-up focal artwork legible in a narrow menu
+        // tile. The playable basin has its own inset rock placements.
+        ds.DrawImage(_waterRocks, new Rect(span - 156, -13, 172, 172),
+            new Rect(0, 0, _waterRocks.Size.Width, _waterRocks.Size.Height));
         return water;
     }
 

@@ -5,7 +5,7 @@ namespace ProjectTabletop.App.Projection.WaterGarden;
 
 internal static class WaterGardenDucks
 {
-    public const int Count = 5;
+    public const int Count = 10;
     public const int Rows = 4;
 }
 
@@ -30,6 +30,11 @@ internal readonly partial struct WaterDuckInitializeShader(float aspect) : ID2D1
         else if (index == 2) { position = new Float2(.42f, .51f); yaw = .8f; scale = .023f; }
         else if (index == 3) { position = new Float2(.67f, .64f); yaw = -.5f; scale = .021f; }
         else if (index == 4) { position = new Float2(.32f, .74f); yaw = 2.1f; scale = .025f; }
+        else if (index == 5) { position = new Float2(.45f, .36f); yaw = -.3f; scale = .023f; }
+        else if (index == 6) { position = new Float2(.62f, .46f); yaw = 1.6f; scale = .022f; }
+        else if (index == 7) { position = new Float2(.27f, .55f); yaw = -2.2f; scale = .024f; }
+        else if (index == 8) { position = new Float2(.49f, .72f); yaw = .4f; scale = .021f; }
+        else if (index == 9) { position = new Float2(.75f, .51f); yaw = 2.8f; scale = .023f; }
         if (row == 0) return new Float4(position, yaw, 1);
         if (row == 2) return new Float4(0, 0, scale * Hlsl.Min(aspect, 1), 1);
         return new Float4(0, 0, 0, 1);

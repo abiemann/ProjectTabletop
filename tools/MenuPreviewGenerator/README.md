@@ -33,7 +33,12 @@ procedural pebble bed and five tiny yellow rubber ducks. The ducks use original
 analytic geometry and GPU buoyancy, with reflections in the water; no extra image
 asset or dependency is needed. Its fixed oblique camera reveals the raised slate
 rim, water depth and larger foreground rocks, with one off-centre disturbance
-allowed to spread and move the ducks before capturing the surface.
+allowed to spread and move the ducks before capturing the surface. The thumbnail
+retains one large moss-rock close-up anchored on the right for legibility at menu
+size. The playable board's inset rock layout is independent of this composition.
+This approved Water Garden illustration is retained byte-for-byte during normal
+generation, including when the playable pond's stone and fountain change. Its
+native recipe remains available for comparison, but does not overwrite the PNG.
 Crown & Deed renders its real city painting, all forty property parcels, settled
 shops, silver pieces and the original painted water into a 2400-square board.
 The saved thumbnail crops the palace and domed waterfront district, keeping the

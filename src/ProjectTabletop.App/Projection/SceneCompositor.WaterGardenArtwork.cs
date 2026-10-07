@@ -19,7 +19,8 @@ public sealed partial class SceneCompositor
         if (_waterImages is null || _waterImages.Device != device)
         {
             DisposeWaterGardenArtwork();
-            _waterImages = new(device, Path.Combine(AppContext.BaseDirectory, "Assets", "WaterGarden"), ["moss-rocks.png"]);
+            _waterImages = new(device, Path.Combine(AppContext.BaseDirectory, "Assets", "WaterGarden"),
+                ["moss-rocks.png", "warm-limestone.png", "wet-slate.png"]);
         }
         return _waterImages;
     }
@@ -37,7 +38,8 @@ public sealed partial class SceneCompositor
     {
         var images = GetWaterGardenImages(device);
         if (!images.IsLoaded) return false;
-        if (_waterArtworkPublished) return true;
+        if (_waterArtworkPublished) return images.Image("warm-limestone.png") is not null &&
+            images.Image("wet-slate.png") is not null;
         if (images.Image("moss-rocks.png") is { } rocks)
         {
             _waterRockWidth = (int)rocks.SizeInPixels.Width;
@@ -56,7 +58,7 @@ public sealed partial class SceneCompositor
         _waterArtworkPublished = true;
         _waterRenderedFrame = null;
         InvalidateBoardArtworkSurface();
-        return true;
+        return images.Image("warm-limestone.png") is not null && images.Image("wet-slate.png") is not null;
     }
 
     private (Rect First, Rect Second) WaterGardenRockPlacements() =>
@@ -97,6 +99,9 @@ public sealed partial class SceneCompositor
 
     private void DisposeWaterGardenArtwork()
     {
+        // The field borrows the stone texture from this set. Drop its effect
+        // references before replacing or disposing the device-owned artwork.
+        if (_waterImages is not null) DisposeWaterGardenResources();
         _waterRockShadow?.Dispose(); _waterRockShadow = null;
         _waterImages?.Dispose(); _waterImages = null;
         _waterRockPixels = null;

@@ -77,10 +77,10 @@ shading are created for ProjectTabletop, with approximate caustic lighting rathe
 than the upstream refracted-mesh caustics renderer. The upstream WebGL application,
 JavaScript runtime, pool-tile image and skybox images are not bundled.
 
-The garden's moss-rock cluster is original artwork generated for ProjectTabletop
-with OpenAI's built-in image-generation tool. Its prompts and provenance are in
+The garden's moss-rock cluster, warm limestone and wet slate materials are original artwork generated for ProjectTabletop
+with OpenAI's built-in image-generation tool. Their prompts and provenance are in
 [`ARTWORK.md`](https://github.com/abiemann/ProjectTabletop/blob/main/src/ProjectTabletop.App/Assets/WaterGarden/ARTWORK.md).
-It does not use pixels or branding from the reference garden video or upstream
+They do not use pixels or branding from the reference garden imagery or upstream
 WebGL Water imagery.
 
 ```text

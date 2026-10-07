@@ -41,16 +41,24 @@ internal readonly partial struct WaterDisturbanceShader(Float2 size, float aspec
 internal readonly partial struct WaterStepShader(Float2 size, float aspect, float dt,
     float waveSpeed) : ID2D1PixelShader
 {
-    private float Height(Float2 p) => D2D.SampleInputAtPosition(0,
-        Hlsl.Clamp(p, new Float2(.5f, .5f), size - .5f)).X;
+    private bool InPond(Float2 p)
+    {
+        float radius = WaterGardenView.PondCornerRadius * Hlsl.Min(aspect, 1);
+        Float2 q = Hlsl.Abs((p / size - .5f) * new Float2(aspect, 1)) -
+            new Float2(aspect * .5f - radius, .5f - radius);
+        return Hlsl.Length(Hlsl.Max(q, new Float2(0, 0))) + Hlsl.Min(Hlsl.Max(q.X, q.Y), 0) <= radius;
+    }
+
+    private float Height(Float2 p, float center) => InPond(p)
+        ? D2D.SampleInputAtPosition(0, Hlsl.Clamp(p, new Float2(.5f, .5f), size - .5f)).X : center;
 
     public Float4 Execute()
     {
         Float2 p = D2D.GetScenePosition().XY;
         Float4 field = D2D.SampleInputAtPosition(0, p);
         Float2 cell = new Float2(aspect, 1) / size;
-        float laplacian = (Height(p + new Float2(-1, 0)) + Height(p + new Float2(1, 0)) - 2 * field.X) /
-            (cell.X * cell.X) + (Height(p + new Float2(0, -1)) + Height(p + new Float2(0, 1)) - 2 * field.X) /
+        float laplacian = (Height(p + new Float2(-1, 0), field.X) + Height(p + new Float2(1, 0), field.X) - 2 * field.X) /
+            (cell.X * cell.X) + (Height(p + new Float2(0, -1), field.X) + Height(p + new Float2(0, 1), field.X) - 2 * field.X) /
             (cell.Y * cell.Y);
         Float2 uv = p / size;
         float edge = Hlsl.Min(Hlsl.Min(uv.X, 1 - uv.X) * aspect, Hlsl.Min(uv.Y, 1 - uv.Y));
@@ -58,6 +66,6 @@ internal readonly partial struct WaterStepShader(Float2 size, float aspect, floa
         float velocity = (field.Y + laplacian * waveSpeed * waveSpeed * dt) * Hlsl.Exp(-drag * dt);
         velocity = Hlsl.Clamp(velocity, -.30f, .30f);
         float height = Hlsl.Clamp(field.X + velocity * dt, -.04f, .04f);
-        return new Float4(height, velocity, 0, 1);
+        return InPond(p) ? new Float4(height, velocity, 0, 1) : new Float4(0, 0, 0, 1);
     }
 }

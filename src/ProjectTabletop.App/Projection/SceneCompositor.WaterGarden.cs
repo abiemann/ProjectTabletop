@@ -1,7 +1,6 @@
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Text;
-using Microsoft.UI.Text;
 using ProjectTabletop.App.Projection.WaterGarden;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
@@ -107,7 +106,6 @@ public sealed partial class SceneCompositor
             drawing.Transform = BoardRasterTransform(_waterFrameTarget);
             DrawWaterGardenSurface(drawing, now);
             DrawWaterGardenRocks(drawing);
-            DrawWaterGardenHeading(drawing);
             DrawWaterGardenControls(drawing, _boardSession.Buttons, [], feedback);
             _waterRenderedFrame = key;
         }
@@ -161,7 +159,8 @@ public sealed partial class SceneCompositor
             var boardPoint = new Vector2((float)uv.X, (float)uv.Y);
             if (!double.IsFinite(uv.X) || !double.IsFinite(uv.Y) || uv.X < .025 || uv.X > .975 ||
                 uv.Y < .12 || uv.Y > .82 || IsWaterGardenRock(uv.X, uv.Y) ||
-                !WaterGardenView.ContainsWater(boardPoint))
+                !WaterGardenView.ContainsWater(boardPoint, (float)PaintBoardAspect()) ||
+                WaterFountainLayout.OccludesSurface(boardPoint, (float)PaintBoardAspect()))
             {
                 ClearWaterStick();
                 _waterFrameTime = frameTime;
@@ -267,7 +266,11 @@ public sealed partial class SceneCompositor
             double aspect = PaintBoardAspect();
             int width = aspect >= 1 ? 512 : Math.Max(64, (int)Math.Round(512 * aspect));
             int height = aspect <= 1 ? 512 : Math.Max(64, (int)Math.Round(512 / aspect));
-            _waterSimulation = new(ds.Device, width, height, aspect);
+            _waterSimulation = new(ds.Device, width, height, aspect,
+                _waterImages?.Image("warm-limestone.png") ??
+                throw new InvalidOperationException("Water Garden basin artwork was not loaded before rendering."),
+                _waterImages?.Image("wet-slate.png") ??
+                throw new InvalidOperationException("Water Garden cascade artwork was not loaded before rendering."));
             _waterDevice = ds.Device;
             _waterAdvancedAt = now;
         }
@@ -324,23 +327,6 @@ public sealed partial class SceneCompositor
         var ink = layout.DrawBounds;
         return ButtonInkRegion(button, new Rect(ink.X / aspect, ink.Y, ink.Width / aspect, ink.Height),
             b.X * BoardSurfaceSize + 20, b.Y * BoardSurfaceSize + 6);
-    }
-
-    private void DrawWaterGardenHeading(CanvasDrawingSession ds)
-    {
-        using var heading = new CanvasTextFormat
-        {
-            FontFamily = "Georgia", FontSize = 33, FontWeight = FontWeights.Normal,
-            HorizontalAlignment = CanvasHorizontalAlignment.Center,
-            VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap
-        };
-        DrawWaterText(ds, "WATER GARDEN", new Rect(150, 24, 700, 52), WaterInk, heading);
-        using var hint = new CanvasTextFormat
-        {
-            FontFamily = "Segoe UI", FontSize = 17, HorizontalAlignment = CanvasHorizontalAlignment.Center,
-            VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap
-        };
-        DrawWaterText(ds, "Move the stick tip gently across the water", new Rect(90, 78, 820, 29), WaterInk, hint);
     }
 
     private void DisposeWaterGardenResources()

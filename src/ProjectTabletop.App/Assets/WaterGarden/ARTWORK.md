@@ -15,7 +15,15 @@ programmatic image editing has been applied.
 ## Scene composition
 
 The garden uses a fixed close oblique camera, with larger procedural pebbles and
-perspective-rendered slate walls and raised coping. Refraction follows the viewing
+perspective-rendered warm limestone walls with rounded corners and softened edges.
+A low layered wet-stone cascade stands at the far center of the pond. Its
+irregular ledges are native three-dimensional geometry. A bounded particle
+simulation moves water over the stone face; a reconstructed three-dimensional
+density field provides the water surface for refraction and reflections.
+Actual falling parcels drive the pond wave field where they land. The dark
+slate material is original generated imagery,
+with its prompt recorded below. It uses no pixels, plants or branding from the
+supplied photograph. Refraction follows the viewing
 ray through the water's full depth to the pebble bed or submerged wall. The original
 rock cutout is placed inside the far-left and near-right corners, with the larger
 foreground cluster emphasizing depth. Both clusters leave a visible water margin
@@ -23,13 +31,49 @@ between their silhouettes and the basin walls; their source pixels and provenanc
 are unchanged. Input uses
 the same camera projection and rock silhouettes to keep ripples on visible water.
 
-Five tiny yellow rubber ducks use original analytic three-dimensional geometry,
+Ten tiny yellow rubber ducks use original analytic three-dimensional geometry,
 including rounded bodies, wings, bills and eyes. GPU buoyancy samples the actual
 water surface so the ducks bob, tilt and drift; the water reflects the same moving
 geometry. **Calm Water** restores their starting positions and clears their motion.
 The ducks introduce no image asset or additional dependency.
 
 ## Selected output and alpha inspection
+
+### Warm limestone basin material
+
+`warm-limestone.png` is an original opaque material texture generated on
+2026-10-06 with OpenAI's built-in image-generation tool. Its warm ivory and
+honey-beige limestone mineral detail is mapped across the pond's thin rounded
+walls and softened lips. The geometry and lighting
+are native shaders; the supplied reference photograph's pixels are not used.
+The approved menu thumbnail remains the earlier saved illustration.
+
+Source: `exec-f609169a-518b-4646-b25d-6169384311bb.png`.
+SHA-256: `bcd339092f0100a53e21fad7e11bf7bf183f9d453efdff3a537f3b4bbaf1406a`.
+
+Generation prompt:
+
+```text
+Use case: photorealistic-natural. Asset type: seamless physically based base-color texture for a high-quality real-time 3D Japanese water garden's carved limestone basin walls and rounded rim. Create a perfectly flat orthographic square material scan covering the full frame edge to edge: beautiful warm ivory and pale honey-beige honed limestone, subtle cream travertine mineral clouds, delicate irregular pores, very restrained soft tan wisps and faint fossil flecks, natural quiet stone suitable for an elegant tranquil spa garden. Low contrast and harmonious warm color, real photographic mineral microdetail, not computer noise. Even diffuse shadow-free albedo illumination with no light gradient, no perspective, no raised objects, no bevels, no border, no scene, no water, no plants, no text, no watermark, no logos. Seamlessly tileable horizontally and vertically. Do not make grey concrete, salt-and-pepper granite, black speckles, checkerboard, big cracks, highly directional bands, glossy marble veins, or orange/yellow saturated sandstone. This is a material texture only, not a rendering of a basin. Opaque background, high resolution.
+```
+
+### Wet slate cascade material
+
+`wet-slate.png` is an original opaque rock material generated on 2026-10-06
+with OpenAI's built-in image-generation tool. Native geometry shapes its
+uneven stacked ledges; shader lighting adds the wet finish and flowing water.
+The supplied reference photograph's pixels are not included in the app.
+
+Source: `exec-7cb57540-28ab-4151-bad3-b90bc5d09539.png`.
+SHA-256: `d1b2d77689d50f553916842714086147fc3e056c031fd6b80289ae96a148c35f`.
+
+Generation prompt:
+
+```text
+Use case: photorealistic-natural. Asset type: seamless square diffuse albedo material texture for native 3D game geometry. Create an original richly detailed dark wet layered slate and weathered basalt rock surface inspired by natural stacked garden-fountain stones: thin irregular horizontal mineral strata, charcoal graphite and deep olive-gray stone, restrained muted umber and blue-violet mineral undertones, tiny seams and worn rough edges in the material only, occasional subtle olive moss staining in crevices. It should feel like real damp water-darkened rock with natural visual variation and refined high-quality detail. Perfectly flat orthographic material scan filling the frame edge-to-edge, horizontally and vertically seamless, even diffuse light without shadows or specular highlights because the renderer adds shading and wet gloss. No individual rock object or pile, no waterfall or water, no background scene, no border, no text, no logos, no photo reproduction. Avoid uniform gray concrete, plastic, artificial glitter, strong regular stripes, big cracks, white speckles, or baked directional light. Opaque square PNG texture.
+```
+
+### Moss-rock cutout
 
 - Source: `exec-dde3e9bc-6212-4d38-b939-fba02210262b.png`.
 - PNG dimensions: 1254 × 1254; Pillow mode: `RGBA`.

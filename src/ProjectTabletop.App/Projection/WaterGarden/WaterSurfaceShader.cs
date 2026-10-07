@@ -7,19 +7,27 @@ namespace ProjectTabletop.App.Projection.WaterGarden;
 // MIT WebGL Water (2011); see THIRD_PARTY_NOTICES.md. The pebble bed and environment
 // are original. Caustic light is a bounded local Jacobian approximation, not a port
 // of the demo's displaced-mesh/raster-derivative caustics stage.
-[D2DInputCount(3)]
+[D2DInputCount(6)]
 [D2DInputComplex(0)]
 [D2DInputComplex(1)]
 [D2DInputComplex(2)]
+[D2DInputComplex(3)]
+[D2DInputComplex(4)]
+[D2DInputComplex(5)]
 [D2DInputDescription(0, D2D1Filter.MinMagMipLinear)]
 [D2DInputDescription(1, D2D1Filter.MinMagMipLinear)]
 [D2DInputDescription(2, D2D1Filter.MinMagMipPoint)]
+[D2DInputDescription(3, D2D1Filter.MinMagMipLinear)]
+[D2DInputDescription(4, D2D1Filter.MinMagMipLinear)]
+[D2DInputDescription(5, D2D1Filter.MinMagMipLinear)]
 [D2DRequiresScenePosition]
 [D2DShaderProfile(D2D1ShaderProfile.PixelShader50)]
 [D2DGeneratedPixelShaderDescriptor]
 internal readonly partial struct WaterSurfaceShader(Float2 fieldSize, Float2 size,
     float aspect, float time, int ambientEnabled, Float4 camera, Float2 centre, float rimHeight,
-    Float2 duckStateSize) : ID2D1PixelShader
+    Float2 duckStateSize, float fountainFlow,
+    Float3 fountainVolumeMin, Float3 fountainVolumeSize, Float3 fountainGridSize,
+    Float2 fountainAtlasTiles) : ID2D1PixelShader
 {
     // camera = (sin tilt, cos tilt, distance, zoom). The host supplies the same
     // camera used to unproject tracked stick observations into the wave field.
@@ -46,41 +54,6 @@ internal readonly partial struct WaterSurfaceShader(Float2 fieldSize, Float2 siz
         if (enter.X >= enter.Y && enter.X >= enter.Z) normal = new Float3(-Hlsl.Sign(direction.X), 0, 0);
         else if (enter.Y >= enter.Z) normal = new Float3(0, -Hlsl.Sign(direction.Y), 0);
         return new Float4(normal, far >= Hlsl.Max(near, 0) ? near : 10000);
-    }
-
-    private Float4 BasinHit(Float3 origin, Float3 direction)
-    {
-        float halfWidth = aspect * .5f;
-        const float thickness = .045f;
-        Float4 hit = BoxHit(origin, direction, new Float3(-halfWidth - thickness, -.5f - thickness, -.085f),
-            new Float3(halfWidth + thickness, -.5f, rimHeight));
-        Float4 next = BoxHit(origin, direction, new Float3(-halfWidth - thickness, .5f, -.085f),
-            new Float3(halfWidth + thickness, .5f + thickness, rimHeight));
-        if (next.W < hit.W) hit = next;
-        next = BoxHit(origin, direction, new Float3(-halfWidth - thickness, -.5f, -.085f),
-            new Float3(-halfWidth, .5f, rimHeight));
-        if (next.W < hit.W) hit = next;
-        next = BoxHit(origin, direction, new Float3(halfWidth, -.5f, -.085f),
-            new Float3(halfWidth + thickness, .5f, rimHeight));
-        if (next.W < hit.W) hit = next;
-        return hit;
-    }
-
-    private Float3 Slate(Float3 p, Float3 normal)
-    {
-        Float2 grainPosition = p.XY + p.Z * new Float2(2.7f, 5.1f);
-        float grain = Noise(grainPosition * 92) * .6f + Noise(grainPosition * 410) * .4f;
-        float cloud = Noise(grainPosition * 13);
-        float vein = Hlsl.Pow(1 - Hlsl.Abs(Hlsl.Sin(p.X * 31 + p.Y * 59 + p.Z * 28 + cloud * 4)), 14);
-        Float3 stone = Hlsl.Lerp(new Float3(.32f, .37f, .35f), new Float3(.48f, .51f, .46f), cloud);
-        stone *= .91f + grain * .18f;
-        stone += vein * .025f;
-        float along = Hlsl.Abs(p.Y) >= .499f ? p.X : p.Y;
-        float joint = Hlsl.Abs(Hlsl.Frac(along * 4.6f + .32f) - .5f) / 4.6f;
-        stone *= Hlsl.Lerp(.48f, 1, Hlsl.SmoothStep(.001f, .0035f, joint));
-        float lighting = .58f + .42f * Hlsl.Saturate(Hlsl.Dot(normal, Hlsl.Normalize(new Float3(-.4f, -.55f, 1))));
-        float wetEdge = 1 - Hlsl.SmoothStep(-.014f, .019f, p.Z);
-        return stone * lighting * (1 - .24f * wetEdge);
     }
 
     private float Height(Float2 uv)
@@ -128,7 +101,7 @@ internal readonly partial struct WaterSurfaceShader(Float2 fieldSize, Float2 siz
         Float3 eye = new Float3(0, camera.Z * camera.X, camera.Z * camera.Y);
         Float3 incoming = Hlsl.Normalize(new Float3(world, 0) - eye);
         float planeDistance = Hlsl.Length(new Float3(world, 0) - eye);
-        bool inWater = uv.X >= 0 && uv.X <= 1 && uv.Y >= 0 && uv.Y <= 1;
+        bool inWater = InPond(world);
         Float2 texel = 1 / fieldSize;
         Float2 cell = new Float2(aspect, 1) / fieldSize;
         float height = Height(uv);
@@ -143,7 +116,9 @@ internal readonly partial struct WaterSurfaceShader(Float2 fieldSize, Float2 siz
         Float3 normal = Hlsl.Normalize(new Float3(-slope, 1));
         float eta = 1 / 1.333f;
         Float3 refraction = Hlsl.Refract(incoming, normal, eta);
-        float depth = .052f + .012f * Noise(uv * new Float2(aspect, 1) * 3);
+        // Keep the pebble floor above the bottom of the thinner basin walls so
+        // oblique refracted rays cannot escape beneath their rounded profile.
+        float depth = .042f + .008f * Noise(uv * new Float2(aspect, 1) * 3);
         // Keep resting parallax: a slanted ray travels through the water before
         // reaching the gravel, rather than treating the bed as a flat photograph.
         Float2 offset = refraction.XY / Hlsl.Max(.15f, -refraction.Z) * (depth + height);
@@ -151,16 +126,12 @@ internal readonly partial struct WaterSurfaceShader(Float2 fieldSize, Float2 siz
         Float3 bed = D2D.SampleInputAtPosition(1,
             Hlsl.Clamp(bedUv * size, new Float2(.5f, .5f), size - .5f)).XYZ;
         // Refracted rays can meet the inside wall before they reach the bottom.
-        if (bedUv.X < 0 || bedUv.X > 1 || bedUv.Y < 0 || bedUv.Y > 1)
+        if (!InPond((bedUv - .5f) * new Float2(aspect, 1)))
         {
-            float tx = refraction.X < 0 ? (-aspect * .5f - world.X) / refraction.X :
-                (aspect * .5f - world.X) / Hlsl.Max(.00001f, refraction.X);
-            float ty = refraction.Y < 0 ? (-.5f - world.Y) / refraction.Y :
-                (.5f - world.Y) / Hlsl.Max(.00001f, refraction.Y);
-            float wallDistance = Hlsl.Min(tx, ty);
-            Float3 wallNormal = tx < ty ? new Float3(-Hlsl.Sign(refraction.X), 0, 0) :
-                new Float3(0, -Hlsl.Sign(refraction.Y), 0);
-            bed = Slate(new Float3(world, 0) + refraction * wallDistance, wallNormal);
+            Float3 surfaceOrigin = new Float3(world, height);
+            Float4 submergedWall = BasinHit(surfaceOrigin, refraction);
+            if (submergedWall.W > 0 && submergedWall.W < 1000)
+                bed = Granite(surfaceOrigin + refraction * submergedWall.W, submergedWall.XYZ);
         }
 
         // Curvature controls the local concentration of refracted light. This gather-only
@@ -193,18 +164,31 @@ internal readonly partial struct WaterSurfaceShader(Float2 fieldSize, Float2 siz
         float sun = Hlsl.Pow(Hlsl.Saturate(Hlsl.Dot(normal, halfVector)), 110) * .29f;
         float broadSky = Hlsl.Pow(Hlsl.Saturate(Hlsl.Dot(normal, halfVector)), 24) * .026f;
         color += new Float3(1, .98f, .90f) * (sun + broadSky);
+        color = FountainPool(eye, incoming, new Float3(world, height), reflection, color, inWater);
         Float4 ducks = GardenDuckRays(eye, incoming, new Float3(world, height), reflection, color, inWater);
         color = ducks.XYZ;
         // Resolve solid geometry after the texture gathers. This keeps the D2D
         // multi-input sampling path uniform through the legacy shader compiler.
         Float4 basin = BasinHit(eye, incoming);
+        float visibleDistance = inWater ? Hlsl.Min(planeDistance, ducks.W) : 10000;
         if (!inWater)
         {
             float paper = Noise(screen * size * .34f);
             color = new Float3(.86f, .87f, .82f) + (paper - .5f) * .008f;
         }
         if (basin.W < 1000 && basin.W < ducks.W && (!inWater || basin.W < planeDistance))
-            color = Slate(eye + incoming * basin.W, basin.XYZ);
+        {
+            color = Granite(eye + incoming * basin.W, basin.XYZ);
+            visibleDistance = basin.W;
+        }
+        Float4 fountain = FountainSolidRay(eye, incoming);
+        if (fountain.W < visibleDistance)
+        {
+            color = fountain.XYZ;
+            visibleDistance = fountain.W;
+        }
+        Float4 fountainWater = FountainWaterRay(eye, incoming, color, visibleDistance);
+        if (fountainWater.W < visibleDistance) color = fountainWater.XYZ;
         return new Float4(Hlsl.Saturate(color), 1);
     }
 }

@@ -60,12 +60,12 @@ internal readonly partial struct PebbleBedShader(Float2 size, float aspect) : ID
         Float3 light = Hlsl.Normalize(new Float3(-.40f, -.48f, .82f));
         float lighting = .64f + .42f * Hlsl.Saturate(Hlsl.Dot(normal, light));
         float shoulder = .70f + .30f * Hlsl.SmoothStep(0, .45f, dome);
-        // Cool grey quartz and slate dominate; a few warmer stones prevent a monochrome
-        // noise field without making the basin read as beige sand or a blue swimming pool.
-        Float3 mineral = Hlsl.Lerp(new Float3(.31f, .34f, .34f), new Float3(.66f, .66f, .62f),
+        // Soft river-stone taupes, warm quartz and a little olive slate echo the
+        // limestone basin and moss instead of forming a monochrome gravel bed.
+        Float3 mineral = Hlsl.Lerp(new Float3(.34f, .35f, .29f), new Float3(.71f, .66f, .54f),
             Hlsl.SmoothStep(.05f, .75f, identity));
-        if (identity > .80f) mineral = Hlsl.Lerp(new Float3(.58f, .57f, .53f),
-            new Float3(.83f, .83f, .77f), (identity - .80f) / .20f);
+        if (identity > .80f) mineral = Hlsl.Lerp(new Float3(.66f, .63f, .53f),
+            new Float3(.88f, .84f, .71f), (identity - .80f) / .20f);
         if (identity < .13f) mineral *= .63f;
         float mottling = Noise(local * 3.1f + identity * 71) * .6f + Noise(local * 10 + identity * 23) * .4f;
         mineral *= .84f + mottling * .30f;

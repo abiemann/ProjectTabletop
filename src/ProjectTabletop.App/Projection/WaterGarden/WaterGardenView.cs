@@ -14,7 +14,8 @@ internal static class WaterGardenView
     public const float Zoom = .87f;
     public const float CentreX = .5f;
     public const float CentreY = .45f;
-    public const float RimHeight = .065f;
+    public const float RimHeight = .04f;
+    public const float PondCornerRadius = .18f;
     public const float SurfaceEdgeMargin = .004f;
     private const float FocalLength = Zoom * Distance;
 
@@ -46,13 +47,18 @@ internal static class WaterGardenView
             FocalLength * (world.Y * CosTilt - world.Z * SinTilt) / denominator + CentreY);
     }
 
-    public static bool ContainsWater(Vector2 screen)
+    public static bool ContainsWater(Vector2 screen, float aspect = 1)
     {
         var surface = ScreenToSurface(screen);
         if (!IsFinite(surface) ||
             surface.X < SurfaceEdgeMargin || surface.X > 1 - SurfaceEdgeMargin ||
             surface.Y < SurfaceEdgeMargin || surface.Y > 1 - SurfaceEdgeMargin)
             return false;
+        float radius = PondCornerRadius * Math.Min(aspect, 1);
+        var q = Vector2.Abs(new((surface.X - .5f) * aspect, surface.Y - .5f)) -
+            new Vector2(aspect * .5f - radius, .5f - radius);
+        float roundedDistance = Vector2.Max(q, Vector2.Zero).Length() + Math.Min(Math.Max(q.X, q.Y), 0) - radius;
+        if (roundedDistance > -SurfaceEdgeMargin) return false;
         // The raised near rim hides a narrow strip of the water plane. Follow
         // the sight line toward the camera to reject pixels landing on that rim.
         float planeY = surface.Y - .5f;
