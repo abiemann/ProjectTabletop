@@ -141,6 +141,32 @@ public sealed partial class MainWindow
         var water = Simulation(scene);
         water.SetAmbientEnabledForVerification(false);
         water.SetFountainEnabledForVerification(false);
+        // Repeat through the production caption-context path: each added duck
+        // must leave this unchanged button reference armed for the next second.
+        var duckHoldContext = scene.GetHoldButtonContext(now)
+            ?? throw new InvalidOperationException("DUCK+ has no settled caption reference.");
+        now += TimeSpan.FromMilliseconds(10);
+        scene.ObserveHoldButtons(duckHoldContext, [], now, ["water-garden-duck-add"]);
+        int repeatedDuckAdds = 0;
+        for (int sample = 0; sample <= 30; sample++)
+        {
+            now += TimeSpan.FromMilliseconds(100);
+            var currentHoldContext = scene.GetHoldButtonContext(now);
+            Require(currentHoldContext?.Revision == duckHoldContext.Revision,
+                "Adding a duck invalidated the unchanged DUCK+ caption reference.");
+            var actions = scene.ObserveHoldButtons(currentHoldContext, ["water-garden-duck-add"], now, []);
+            bool due = sample > 0 && sample % 10 == 0;
+            Require(due ? actions.SequenceEqual(["water-garden-duck-add"]) : actions.Count == 0,
+                "Continuous DUCK+ caption obstruction did not act exactly once per second.");
+            repeatedDuckAdds += actions.Count;
+        }
+        Require(repeatedDuckAdds == 3 && scene.GetWaterGardenDiagnostics().Simulation is not null &&
+                water.GetDiagnostics().DuckCount == 13,
+            "Continuous DUCK+ holds did not reach the native duck simulation.");
+        now += TimeSpan.FromMilliseconds(10);
+        scene.ObserveHoldButtons(duckHoldContext, [], now, ["water-garden-duck-add"]);
+        Require(scene.CurrentHoldProgress.Count == 0 && scene.ActivateWaterGardenButton("water-garden-reset"),
+            "Uncovering DUCK+ did not cancel its repeating hold or restore the test pond.");
         now += TimeSpan.FromSeconds(1.0 / 60);
         Draw(scene, target);
         var blank = Pixels(target);
@@ -155,7 +181,8 @@ public sealed partial class MainWindow
             WaterGardenView.SurfaceToScreen(new(duck.SurfaceX, duck.SurfaceY)))).ToArray();
         Require(visibleDuckPixels.All(count => count > 4),
             $"The native calm render did not show every yellow duck: {string.Join(", ", visibleDuckPixels)} pixels.");
-        Require(scene.CurrentBoardButtons.Count == 4 && scene.CurrentBoardButtons.All(button => button.Hold == BoardButtonHold.Once),
+        Require(scene.CurrentBoardButtons.Count == 4 && scene.CurrentBoardButtons.All(button =>
+                button.Hold == (button.Id == "water-garden-duck-add" ? BoardButtonHold.Repeat : BoardButtonHold.Once)),
             "Water Garden's revealed arrow and three actions must all be long-press controls.");
         await Save(target, "water-square-calm");
         var dropSurface = WaterGardenView.ScreenToSurface(new(.5f, .5f));
@@ -276,9 +303,20 @@ public sealed partial class MainWindow
             "DUCK+ did not work again after RESET restored capacity.");
         Draw(scene, target);
 
+        var beforeStickHoldContext = scene.GetHoldButtonContext(now);
+        Require(beforeStickHoldContext is not null, "The settled water controls had no hold reference.");
         now += TimeSpan.FromSeconds(1.0 / 60);
         Require(scene.SetWaterStickTip(CameraPoint(.5, .5, inset), now),
             "The calibrated eye-tip fixture was not accepted.");
+        Require(scene.CurrentBoardButtons.All(button => !button.Enabled) &&
+                scene.GetHoldButtonContext(now) is null &&
+                !scene.ActivateWaterGardenButton("water-garden-reset") &&
+                !scene.ActivateWaterGardenButton("water-garden-exit") &&
+                !scene.ActivateWaterGardenButton("water-garden-duck-add") &&
+                !scene.ActivateWaterGardenAt(.1, .93) &&
+                scene.ObserveHoldButtons(beforeStickHoldContext, ["water-garden-reset"], now, []).Count == 0 &&
+                scene.WaterGardenDrawerOpen,
+            "A detected water stick failed to disarm every action and the drawer handle.");
         Draw(scene, target);
         var injected = Statistics(water);
         Require(IsFinite(injected) && injected.MaximumHeight > .0001 && injected.TotalEnergy > 0,
@@ -299,6 +337,11 @@ public sealed partial class MainWindow
             "A same-clock preview/output draw advanced or changed the water field or its floating ducks twice.");
         await Save(target, "water-square-touch");
         scene.SetWaterStickTip(null, now);
+        Require(scene.CurrentBoardButtons.All(button => button.Enabled) &&
+                scene.GetHoldButtonContext(now) is { } afterStickHoldContext &&
+                afterStickHoldContext.Revision != beforeStickHoldContext!.Revision &&
+                scene.ObserveHoldButtons(beforeStickHoldContext, ["water-garden-reset"], now, []).Count == 0,
+            "Stick loss failed to re-enable controls or accepted a caption result from before the interlock.");
 
         var propagationProbe = WaterGardenView.ScreenToSurface(new(.5f, .5f)) + new Vector2(.065f, 0);
         double propagatedHeight = 0;
@@ -369,6 +412,7 @@ public sealed partial class MainWindow
                 changedPixels = visibleChange.Count,
                 visibleCentre = new { x = visibleChange.Centre.X, y = visibleChange.Centre.Y } });
             await Save(target, "water-perspective-touch-" + label);
+            scene.SetWaterStickTip(null, now);
         }
 
         now += TimeSpan.FromMilliseconds(20);
@@ -800,6 +844,9 @@ public sealed partial class MainWindow
             "A duplicate camera frame deposited a second ripple.");
         var oldFrame = now;
         now += TimeSpan.FromMilliseconds(300);
+        Require(scene.GetHoldButtonContext(now) is not null &&
+                scene.CurrentBoardButtons.All(button => button.Enabled),
+            "Expired stick detection left controls disarmed until another render or camera result.");
         Require(!scene.SetWaterStickTip(CameraPoint(.4, .4, inset), oldFrame) &&
                 scene.GetWaterGardenDiagnostics() is { TipVisible: false, PendingDisturbances: 0 },
             "A stale tip survived the 250 millisecond freshness limit.");
@@ -837,6 +884,7 @@ public sealed partial class MainWindow
         await Save(target, "water-square-facing-90");
         // Orientation changes discard the current drawer and its camera
         // references. Reopen it with fresh input before exercising EXIT.
+        scene.SetWaterStickTip(null, now);
         if (!scene.WaterGardenDrawerOpen)
             Require(scene.ActivateWaterGardenButton("water-drawer-open"),
                 "The rotated board could not reopen its controls drawer.");
@@ -868,6 +916,8 @@ public sealed partial class MainWindow
             now += TimeSpan.FromMilliseconds(20);
             Require(aspectScene.SetWaterStickTip(CameraPoint(.45, .48, aspectInset), now),
                 $"The {label} camera mapping rejected its input.");
+            Draw(aspectScene, output);
+            var disarmedAspectPixels = Pixels(output);
             for (int frame = 0; frame < 10; frame++)
             {
                 now += TimeSpan.FromSeconds(1.0 / 60);
@@ -898,7 +948,7 @@ public sealed partial class MainWindow
             foreach (var button in aspectScene.CurrentBoardButtons)
             {
                 var b = button.Bounds;
-                Require(ChangedPixels(initialAspectPixels, flowingAspectPixels,
+                Require(ChangedPixels(disarmedAspectPixels, flowingAspectPixels,
                         new(b.X + .025, b.Y + .018, b.Width - .05, b.Height - .036),
                         width, height, aspectInset) == 0,
                     $"The {label} fountain changed the stationary {button.Label} caption or its opaque interior.");

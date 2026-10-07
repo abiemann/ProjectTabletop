@@ -1,11 +1,11 @@
 {
-  "recipeVersion": 4,
-  "generation": "Offline native Win2D using the project\u0027s existing artwork, geometry and shaders; never run during app startup.",
+  "recipeVersion": 5,
+  "generation": "Offline native Win2D previews using the project\u0027s existing artwork, geometry and shaders, with a retained original generated Water Garden illustration; never run during app startup.",
   "width": 2304,
   "height": 512,
   "logicalWidth": 720,
   "logicalHeight": 160,
-  "framing": "Scale uniformly by destination height; align the right edge and crop the left; never stretch.",
+  "framing": "Scale uniformly by destination height; align the right edge, crop the left or extend quiet left background; never stretch.",
   "crownDeed": {
     "composition": "Close-up of the native lamplit city, property boulevard and silver pieces.",
     "boardRaster": 2400,
@@ -38,9 +38,11 @@
     "seed": "101 \u002B dropIndex * 37"
   },
   "waterGarden": {
-    "composition": "Native clear-water surface with a large moss-rock close-up anchored on the right.",
+    "composition": "Original generated banner of the rounded limestone pond, wet-rock waterfall, yellow rubber ducks and surrounding sand.",
     "retainedIllustration": true,
-    "attribution": "Evan Wallace WebGL Water, MIT; see THIRD_PARTY_NOTICES.md"
+    "width": 2172,
+    "height": 724,
+    "provenance": "Project Tabletop original image; see Assets/WaterGarden/ARTWORK.md"
   },
   "assets": [
     {
@@ -106,15 +108,15 @@
     {
       "board": "WaterGarden",
       "file": "water-garden.png",
-      "width": 2304,
-      "height": 512,
-      "sha256": "f7a22e9fcb2991338f60df9f3dfa5e2616c1ec4812502bdb85ce4a6d2b83d245",
-      "bytes": 1903318,
-      "pngColorType": 6,
+      "width": 2172,
+      "height": 724,
+      "sha256": "7696cfad650c53d15e7d8761e7c25e2e970f070ce2edb5f7755f7305edd82884",
+      "bytes": 3077523,
+      "pngColorType": 2,
       "alpha": {
         "transparent": 0,
         "translucent": 0,
-        "opaque": 1179648,
+        "opaque": 1572528,
         "exteriorVerified": false
       }
     },
@@ -390,7 +392,7 @@
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.Native.cs",
-      "sha256": "211f0cbfe54724fec54709b81985a1180fa11f2a7b4a24cb213e16d1ebc6f99e"
+      "sha256": "1efbc86444e6a695d663b1dfd031ffc8957999168b6cb124e438e5508f6342a7"
     },
     {
       "file": "tools/MenuPreviewGenerator/PreviewRecipes.cs",

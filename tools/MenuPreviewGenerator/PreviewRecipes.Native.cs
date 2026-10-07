@@ -12,6 +12,7 @@ namespace MenuPreviewGenerator;
 internal sealed partial class PreviewRecipes
 {
     private const int ImageWidth = 2304, ImageHeight = 512;
+    private const int WaterImageWidth = 2172, WaterImageHeight = 724;
     private const float CanonicalSpan = 720, RouletteCompositionSpan = 512;
     private static readonly (BoardScreen Screen, string Stem)[] Boards =
     [
@@ -68,12 +69,18 @@ internal sealed partial class PreviewRecipes
         var comparisonRecords = new List<object>();
         foreach (var (screen, stem) in Boards)
         {
-            // This approved illustration intentionally predates the rear fountain.
-            // Keep its exact pixels when other board artwork is regenerated.
+            // This original generated illustration shows the current Water Garden
+            // scene. Preserve its encoded pixels when other previews regenerate.
             string retainedWater = Path.Combine(root, "src/ProjectTabletop.App/Assets/MenuPreviews/water-garden.png");
             using CanvasBitmap image = screen == BoardScreen.WaterGarden
                 ? await CanvasBitmap.LoadAsync(device, retainedWater, 96).AsTask()
                 : recipes.Render(device, screen, ImageWidth, ImageHeight, legacy: false);
+            int assetWidth = (int)image.SizeInPixels.Width, assetHeight = (int)image.SizeInPixels.Height;
+            if (screen == BoardScreen.WaterGarden &&
+                (assetWidth != WaterImageWidth || assetHeight != WaterImageHeight))
+                throw new InvalidOperationException(
+                    $"The retained Water Garden banner must be {WaterImageWidth}×{WaterImageHeight}, " +
+                    $"but the loaded image is {assetWidth}×{assetHeight}.");
             string path = Path.Combine(output, stem + ".png");
             if (screen != BoardScreen.WaterGarden)
                 await image.SaveAsync(path, CanvasBitmapFileFormat.Png).AsTask();
@@ -85,7 +92,7 @@ internal sealed partial class PreviewRecipes
             if (encoded.Length < 33 || !encoded.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }))
                 throw new InvalidOperationException("Output is not a PNG: " + path);
             using var decoded = await CanvasBitmap.LoadAsync(device, path, 96).AsTask();
-            if (decoded.SizeInPixels.Width != ImageWidth || decoded.SizeInPixels.Height != ImageHeight)
+            if (decoded.SizeInPixels.Width != assetWidth || decoded.SizeInPixels.Height != assetHeight)
                 throw new InvalidOperationException("Saved thumbnail has incorrect dimensions: " + path);
             byte[] pixels = decoded.GetPixelBytes();
             int transparent = 0, translucent = 0, opaque = 0;
@@ -103,10 +110,12 @@ internal sealed partial class PreviewRecipes
                     if (pixels[(y * ImageWidth + x) * 4 + 3] != 0)
                         throw new InvalidOperationException($"Dragon exterior alpha is nonzero at {x},{y}.");
             }
-            assets.Add(new { board = screen.ToString(), file = stem + ".png", width = ImageWidth, height = ImageHeight,
+            if (screen == BoardScreen.WaterGarden && (transparent != 0 || translucent != 0))
+                throw new InvalidOperationException("The retained Water Garden banner must be fully opaque.");
+            assets.Add(new { board = screen.ToString(), file = stem + ".png", width = assetWidth, height = assetHeight,
                 sha256 = Hash(path), bytes = new FileInfo(path).Length,
                 pngColorType = encoded[25], alpha = new { transparent, translucent, opaque, exteriorVerified = screen == BoardScreen.Slots } });
-            foreach (double aspect in new[] { 16.0 / 9, 1.4 })
+            foreach (double aspect in new[] { 16.0 / 9, 1.4, 1.0 })
             {
                 // Main menu cards are .40×.16 of the board; artwork covers the
                 // right .72, giving physical preview aspect = 1.8*boardAspect.
@@ -116,10 +125,9 @@ internal sealed partial class PreviewRecipes
                 using (var drawing = after.CreateDrawingSession())
                 {
                     drawing.Clear(Color.FromArgb(0, 0, 0, 0));
-                    drawing.DrawImage(image, new Rect(0, 0, width, ImageHeight),
-                        new Rect(ImageWidth - width, 0, width, ImageHeight), 1, CanvasImageInterpolation.HighQualityCubic);
+                    DrawHeightFramedPreview(drawing, image, width, ImageHeight);
                 }
-                string suffix = aspect > 1.7 ? "16x9" : "1.4x1";
+                string suffix = aspect > 1.7 ? "16x9" : aspect > 1.1 ? "1.4x1" : "square";
                 string beforeName = $"{stem}-{suffix}-before.png", afterName = $"{stem}-{suffix}-after.png";
                 await before.SaveAsync(Path.Combine(comparisons, beforeName), CanvasBitmapFileFormat.Png).AsTask();
                 await after.SaveAsync(Path.Combine(comparisons, afterName), CanvasBitmapFileFormat.Png).AsTask();
@@ -129,7 +137,7 @@ internal sealed partial class PreviewRecipes
                 comparisonRecords.Add(new { board = screen.ToString(), boardAspect = aspect, width, height = ImageHeight,
                     before = beforeName, after = afterName, meanAbsoluteChannelDifference = absolute / (double)previous.Length });
             }
-            Console.WriteLine($"Generated {stem}: {ImageWidth}×{ImageHeight}, {new FileInfo(path).Length:N0} bytes");
+            Console.WriteLine($"Generated {stem}: {assetWidth}×{assetHeight}, {new FileInfo(path).Length:N0} bytes");
         }
         string[] sourceFiles =
         [
@@ -170,10 +178,10 @@ internal sealed partial class PreviewRecipes
         var options = new JsonSerializerOptions { WriteIndented = true };
         await File.WriteAllTextAsync(Path.Combine(output, "manifest.json"), JsonSerializer.Serialize(new
         {
-            recipeVersion = 4,
-            generation = "Offline native Win2D using the project's existing artwork, geometry and shaders; never run during app startup.",
+            recipeVersion = 5,
+            generation = "Offline native Win2D previews using the project's existing artwork, geometry and shaders, with a retained original generated Water Garden illustration; never run during app startup.",
             width = ImageWidth, height = ImageHeight, logicalWidth = CanonicalSpan, logicalHeight = MenuPreviewUnits,
-            framing = "Scale uniformly by destination height; align the right edge and crop the left; never stretch.",
+            framing = "Scale uniformly by destination height; align the right edge, crop the left or extend quiet left background; never stretch.",
             crownDeed = new { composition = "Close-up of the native lamplit city, property boulevard and silver pieces.",
                 boardRaster = 2400, crop = new { x = 0, y = 0, width = 1000, height = 350 },
                 snapshot = "Fixed representative game; hat on Amber Exchange, car on Festival Dues, three shops on each Crown Quarter property.",
@@ -184,16 +192,39 @@ internal sealed partial class PreviewRecipes
                 imagery = "NASA Blue Marble; credits and source URLs in THIRD_PARTY_NOTICES.md" },
             paint = new { fieldWidth = 432, fieldHeight = 96, updates = 60, fixedStepsPerUpdate = 4, shaderPassesPerStep = 14,
                 seed = "101 + dropIndex * 37" },
-            waterGarden = new { composition = "Native clear-water surface with a large moss-rock close-up anchored on the right.",
+            waterGarden = new { composition = "Original generated banner of the rounded limestone pond, wet-rock waterfall, yellow rubber ducks and surrounding sand.",
                 retainedIllustration = true,
-                attribution = "Evan Wallace WebGL Water, MIT; see THIRD_PARTY_NOTICES.md" },
+                width = WaterImageWidth, height = WaterImageHeight,
+                provenance = "Project Tabletop original image; see Assets/WaterGarden/ARTWORK.md" },
             assets, sources
         }, options) + Environment.NewLine);
         await File.WriteAllTextAsync(Path.Combine(comparisons, "comparisons.json"), JsonSerializer.Serialize(new
         {
             productionAssemblySha256 = Hash(app.Location), noMainWindowCameraOutputOrPipeConstructed = true,
-            exactProductionBoardHelpers = true, recipeVersion = 4, comparisons = comparisonRecords
+            exactProductionBoardHelpers = true, recipeVersion = 5, comparisons = comparisonRecords
         }, options) + Environment.NewLine);
+    }
+
+    // Match SceneCompositor.DrawMenuThumbnail: the menu scales by height and
+    // keeps the right edge fixed. An unusually wide card repeats only the
+    // image's quiet leftmost column, leaving the focal artwork at full scale.
+    private static void DrawHeightFramedPreview(CanvasDrawingSession drawing,
+        CanvasBitmap image, int width, int height)
+    {
+        double sourceWidth = width / (double)height * image.Size.Height;
+        if (sourceWidth <= image.Size.Width)
+        {
+            drawing.DrawImage(image, new Rect(0, 0, width, height),
+                new Rect(image.Size.Width - sourceWidth, 0, sourceWidth, image.Size.Height),
+                1, CanvasImageInterpolation.HighQualityCubic);
+            return;
+        }
+        double artWidth = width * image.Size.Width / sourceWidth;
+        drawing.DrawImage(image, new Rect(0, 0, width - artWidth, height),
+            new Rect(0, 0, 1, image.Size.Height));
+        drawing.DrawImage(image, new Rect(width - artWidth, 0, artWidth, height),
+            new Rect(0, 0, image.Size.Width, image.Size.Height),
+            1, CanvasImageInterpolation.HighQualityCubic);
     }
 
     private CanvasRenderTarget Render(CanvasDevice device, BoardScreen screen, int width, int height, bool legacy)

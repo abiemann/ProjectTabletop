@@ -49,6 +49,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
+            RefreshWaterStickPresence();
             var now = HoldClock();
             var buttons = _boardSession.Buttons;
             if (!AcquisitionBoardReady || !buttons.Any(button => button.IsHold && button.Enabled) ||
@@ -96,6 +97,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
+            RefreshWaterStickPresence();
             if (context is null || context.Revision != _holdRevision || !AcquisitionBoardReady) return [];
             var activated = _boardSession.ObserveHeldButtons(heldIds, frameTime, HoldClock(), clearedIds);
             if (activated.Count > 0)

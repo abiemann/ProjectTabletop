@@ -18,27 +18,25 @@ it in a separate process. It does not start a WinUI window, camera, projector, o
 control pipe. `-SkipAppBuild` reuses an already built app. The generator is separate
 from the solution and is never needed to run the app or build a release.
 
-Each image is 2304×512, representing a 720×160 logical frame. Artwork stays anchored
-to the right; menus uniformly scale by height and crop from the left. This retains
-round Earth/chips and the original focal positions across common board shapes.
+Native-rendered images are 2304×512, representing a 720×160 logical frame. The
+retained, original Water Garden banner is 2172×724. Artwork stays anchored to the
+right; menus uniformly scale by height and crop from the left, or extend a quiet
+strip from the left edge on an unusually wide board. This retains round
+Earth/chips and the focal positions across common board shapes.
 Captions, diagonal glass falloff and physical rounded clips remain live menu
 rendering; they are not baked into the artwork.
 
 Recipes preserve the established board previews. The offline CLI calls the actual
-production Blackjack, Crown & Deed, Roulette, Globe, Paint and Water Garden rendering helpers
+production Blackjack, Crown & Deed, Roulette, Globe and Paint rendering helpers
 through reflection. It loads only the menu dragon asset for Dragon Slots. Paint
 uses the existing 96-pixel-high simulation, seeded drops and settling sequence.
-Water Garden uses its native perspective basin, wave solver, moss-rock artwork,
-procedural pebble bed and five tiny yellow rubber ducks. The ducks use original
-analytic geometry and GPU buoyancy, with reflections in the water; no extra image
-asset or dependency is needed. Its fixed oblique camera reveals the raised slate
-rim, water depth and larger foreground rocks, with one off-centre disturbance
-allowed to spread and move the ducks before capturing the surface. The thumbnail
-retains one large moss-rock close-up anchored on the right for legibility at menu
-size. The playable board's inset rock layout is independent of this composition.
-This approved Water Garden illustration is retained byte-for-byte during normal
-generation, including when the playable pond's stone and fountain change. Its
-native recipe remains available for comparison, but does not overwrite the PNG.
+The Water Garden thumbnail is an original generated illustration of the rounded
+limestone basin, wet-rock waterfall, yellow rubber ducks and surrounding sand.
+It is retained byte-for-byte during normal generation, so updating other boards
+cannot replace its authored composition. The native Water Garden simulation
+recipe remains available for the before comparison; the shipped PNG is the
+generated illustration. The menu's live caption and diagonal glass falloff are
+not baked into it.
 Crown & Deed renders its real city painting, all forty property parcels, settled
 shops, silver pieces and the original painted water into a 2400-square board.
 The saved thumbnail crops the palace and domed waterfront district, keeping the
@@ -53,10 +51,11 @@ The Globe uses the fixed captured opening pose and NASA imagery already credited
 in `THIRD_PARTY_NOTICES.md`.
 
 The generated `manifest.json` records recipe version, source hashes, asset hashes,
-dimensions and decoded PNG alpha counts. Dragon Slots must be an RGBA PNG with
+each asset's dimensions and decoded PNG alpha counts. Dragon Slots must be an RGBA PNG with
 transparent exterior pixels and antialiased edges; a matte or checkerboard fails
-generation. A second manifest and equal-size before/after images are written under
-`artifacts/menu-preview-generator/comparisons` for 16:9 and 1.4:1 board aspects.
+generation. The Water Garden banner must be fully opaque and retain its authored
+2172×724 pixels. A second manifest and equal-size before/after images are written under
+`artifacts/menu-preview-generator/comparisons` for square, 16:9 and 1.4:1 board aspects.
 Small GPU and resampling differences are expected, especially when Paint's fixed
 wide field is cropped instead of being simulated separately for every board aspect.
 

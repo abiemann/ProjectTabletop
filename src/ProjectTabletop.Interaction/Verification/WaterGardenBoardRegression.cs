@@ -17,8 +17,9 @@ internal static class WaterGardenBoardRegression
         CheckCaptionHolds();
         CheckDuckAddHold();
         CheckGestureIsolation();
+        CheckStickControlInterlock();
         Console.WriteLine("Water Garden interaction verification passed: hidden action row, drawer timing, " +
-            "RESET and DUCK+ revisions, long-press safety, gesture isolation and menu navigation.");
+            "RESET and repeating DUCK+ revisions, stick control interlock, long-press safety, gesture isolation and menu navigation.");
     }
 
     private static void CheckNavigationAndDrawer()
@@ -44,7 +45,8 @@ internal static class WaterGardenBoardRegression
             !board.ActivateButton("water-garden-exit", At(100)) &&
             !board.TickWaterGarden(At(319)) && board.TickWaterGarden(At(320)),
             "The moving drawer accepted an action or missed its settling deadline.");
-        Require(board.Buttons.All(button => button.Enabled && button.Hold == BoardButtonHold.Once) &&
+        Require(board.Buttons.All(button => button.Enabled && button.Hold ==
+                (button.Id == "water-garden-duck-add" ? BoardButtonHold.Repeat : BoardButtonHold.Once)) &&
             board.Buttons[0].Bounds == new BoardRect(.01, .87, .18, .12) &&
             board.Buttons.Skip(1).All(button => button.Bounds.Y == .87 && button.Bounds.Height == .12),
             "The settled row did not expose four separate hold controls at the viewer's edge.");
@@ -166,28 +168,150 @@ internal static class WaterGardenBoardRegression
 
     private static void CheckDuckAddHold()
     {
+        const string add = "water-garden-duck-add";
         var board = new BoardSession();
         board.ShowWaterGarden(At(0));
         Require(board.ActivateButton("water-drawer-open", At(100)) && board.TickWaterGarden(At(400)),
             "The DUCK+ hold fixture could not settle its drawer.");
-        Clear(board, "water-garden-duck-add", 420);
-        for (int ms = 500; ms < 1500; ms += 100)
-            Require(Hold(board, "water-garden-duck-add", ms).Count == 0,
-                "DUCK+ acted before one full second.");
-        Require(Hold(board, "water-garden-duck-add", 1500).SequenceEqual(["water-garden-duck-add"]) &&
-            board.WaterGardenDuckAddRevision == 1 && board.WaterGardenResetRevision == 1,
-            "One complete DUCK+ hold did not add exactly one duck.");
-        for (int ms = 1600; ms <= 2700; ms += 100)
-            Require(Hold(board, "water-garden-duck-add", ms).Count == 0 &&
-                board.WaterGardenDuckAddRevision == 1,
-                "A covered DUCK+ acted again without release.");
-        Clear(board, "water-garden-duck-add", 2800);
-        Clear(board, "water-garden-duck-add", 3200);
-        for (int ms = 3300; ms < 4300; ms += 100)
-            Require(Hold(board, "water-garden-duck-add", ms).Count == 0,
-                "Re-armed DUCK+ borrowed time from its first hold.");
-        Require(Hold(board, "water-garden-duck-add", 4300).SequenceEqual(["water-garden-duck-add"]) &&
-            board.WaterGardenDuckAddRevision == 2,
-            "A second clear-and-hold could not add another duck.");
+        long navigation = board.NavigationRevision;
+        Clear(board, add, 420);
+        for (int ms = 500; ms <= 3500; ms += 100)
+        {
+            bool expected = ms > 500 && (ms - 500) % 1000 == 0;
+            var activated = Hold(board, add, ms);
+            Require((expected ? activated.SequenceEqual([add]) : activated.Count == 0) &&
+                board.WaterGardenDuckAddRevision == (ms - 500) / 1000,
+                "Continuously covered DUCK+ did not add exactly once at each full second.");
+            Require(board.ObserveHeldButtons([add], At(ms), At(ms + 1), []).Count == 0 &&
+                board.ObserveHeldButtons([add], At(ms - 400), At(ms + 1), []).Count == 0 &&
+                board.ObserveHeldButtons([add], At(ms + 20), At(ms + 1), []).Count == 0,
+                "Repeated, stale or future camera evidence added a duck.");
+        }
+        Clear(board, add, 3550);
+        Require(board.HoldProgress(At(3550)).Count == 0,
+            "Intact DUCK+ lettering did not immediately cancel repeating hold progress.");
+        for (int ms = 3600; ms < 4600; ms += 100)
+            Require(Hold(board, add, ms).Count == 0 && board.WaterGardenDuckAddRevision == 3,
+                "DUCK+ reused elapsed time after the caption became clear.");
+        Require(Hold(board, add, 4600).SequenceEqual([add]) && board.WaterGardenDuckAddRevision == 4,
+            "A fresh full-second DUCK+ hold did not restart after release.");
+        Require(Hold(board, add, 4700).Count == 0, "DUCK+ repeated before its next second.");
+        // Losing evidence longer than the shared gap starts a new hold, even if
+        // the first returning frame still shows broken lettering.
+        for (int ms = 5100; ms < 6100; ms += 100)
+            Require(Hold(board, add, ms).Count == 0 && board.WaterGardenDuckAddRevision == 4,
+                "DUCK+ continued its previous timer across a camera-evidence gap.");
+        Require(Hold(board, add, 6100).SequenceEqual([add]) && board.WaterGardenDuckAddRevision == 5,
+            "DUCK+ failed to restart after a full second of reacquired evidence.");
+
+        for (int ms = 6200; ms <= 6800; ms += 100)
+            Require(Hold(board, add, ms).Count == 0, "DUCK+ repeated before its stick-interruption fixture.");
+        Require(board.HoldProgress(At(6800)).Single().Progress > 0 &&
+            board.SetWaterGardenStickPresent(true, At(6850)) && board.HoldProgress(At(6850)).Count == 0,
+            "The stick did not cancel an active repeating DUCK+ hold.");
+        for (int ms = 6900; ms <= 8000; ms += 100)
+            Require(Hold(board, add, ms).Count == 0 && board.WaterGardenDuckAddRevision == 5,
+                "DUCK+ continued repeating while the stick was in the water.");
+        Require(board.SetWaterGardenStickPresent(false, At(8050)), "The repeat fixture did not release its stick.");
+        board.ObserveHeldButtons([], At(8040), At(8060), [add]);
+        for (int ms = 8100; ms <= 9200; ms += 100)
+            Require(Hold(board, add, ms).Count == 0 && board.WaterGardenDuckAddRevision == 5 &&
+                board.HoldProgress(At(ms)).Count == 0,
+                "DUCK+ resumed after stick loss without a fresh clear caption.");
+        Clear(board, add, 9250);
+        for (int ms = 9300; ms <= 15500; ms += 100)
+        {
+            bool expected = ms > 9300 && ms <= 14300 && (ms - 9300) % 1000 == 0;
+            var activated = Hold(board, add, ms);
+            Require((expected ? activated.SequenceEqual([add]) : activated.Count == 0) &&
+                board.WaterGardenDuckAddRevision == Math.Min(10, 5 + (ms - 9300) / 1000),
+                "Re-armed DUCK+ missed its one-second cadence or exceeded the ten-added-duck limit.");
+        }
+        Require(board.WaterGardenAddedDuckCount == 10 && !board.Buttons.Single(button => button.Id == add).Enabled &&
+            board.HoldProgress(At(15500)).Count == 0 && board.WaterGardenResetRevision == 1 &&
+            board.NavigationRevision == navigation && board.WaterGardenDrawerOpen,
+            "Repeating DUCK+ failed to stop at capacity, reset the pond or changed navigation.");
+    }
+
+    private static void CheckStickControlInterlock()
+    {
+        var board = new BoardSession();
+        board.ShowWaterGarden(At(0));
+        Require(board.SetWaterGardenStickPresent(true, At(10)) && board.WaterGardenStickPresent &&
+            !board.Buttons.Single().Enabled && !board.ActivateButton("water-drawer-open", At(20)),
+            "A stick in the water left the bottom-left arrow armed.");
+        Clear(board, "water-drawer-open", 30);
+        for (int ms = 100; ms <= 1200; ms += 100)
+            Require(Hold(board, "water-drawer-open", ms).Count == 0 && !board.WaterGardenDrawerOpen,
+                "Covered arrow lettering opened the drawer while the stick was present.");
+        Require(board.SetWaterGardenStickPresent(false, At(1250)) && !board.WaterGardenStickPresent &&
+            board.Buttons.Single().Enabled && board.ActivateButton("water-drawer-open", At(1300)) &&
+            board.TickWaterGarden(At(1600)),
+            "Removing the stick did not restore usable drawer controls.");
+
+        long navigation = board.NavigationRevision;
+        long reset = board.WaterGardenResetRevision;
+        long duckAdds = board.WaterGardenDuckAddRevision;
+        Clear(board, "water-garden-reset", 1610);
+        for (int ms = 1700; ms <= 2300; ms += 100)
+            Require(Hold(board, "water-garden-reset", ms).Count == 0,
+                "The interlock fixture completed its RESET hold prematurely.");
+        Require(board.HoldProgress(At(2300)).Single().Progress > 0 &&
+            board.SetWaterGardenStickPresent(true, At(2350)) && board.HoldProgress(At(2350)).Count == 0 &&
+            board.WaterGardenDrawerOpen && board.Buttons.All(button => !button.Enabled),
+            "Detecting the stick failed to cancel an in-progress hold or changed the drawer position.");
+        foreach (string id in board.Buttons.Select(button => button.Id).ToArray())
+            Require(!board.ActivateButton(id, At(2400)), "A disarmed pointer control still acted: " + id);
+        for (int ms = 2400; ms <= 3500; ms += 100)
+            Require(board.ObserveHeldButtons(["water-garden-reset"], At(ms), At(ms),
+                ["water-garden-duck-add", "water-garden-exit", "water-drawer-close"]).Count == 0,
+                "Covered RESET lettering completed a hold during stick interaction.");
+        Require(board.WaterGardenResetRevision == reset && board.WaterGardenDuckAddRevision == duckAdds &&
+            board.NavigationRevision == navigation && board.WaterGardenDrawerOpen,
+            "Disarming controls reset the simulation, added a duck or navigated.");
+
+        Require(board.SetWaterGardenStickPresent(false, At(3550)) && board.Buttons.All(button => button.Enabled),
+            "Stick loss did not re-enable the settled action row.");
+        // A frame captured while disarmed can finish processing after release.
+        Require(board.ObserveHeldButtons([], At(3540), At(3560), ["water-garden-reset"]).Count == 0,
+            "A delayed disarmed-frame observation activated a control.");
+        for (int ms = 3600; ms <= 4700; ms += 100)
+            Require(Hold(board, "water-garden-reset", ms).Count == 0 &&
+                board.WaterGardenResetRevision == reset && board.HoldProgress(At(ms)).Count == 0,
+                "Stick loss reused old clear lettering or pre-stick hold time.");
+        Clear(board, "water-garden-reset", 4750);
+        for (int ms = 4800; ms < 5800; ms += 100)
+        {
+            Require(!board.SetWaterGardenStickPresent(false, At(ms)),
+                "Repeated absent-stick observations reported a state change.");
+            Require(Hold(board, "water-garden-reset", ms).Count == 0,
+                "The re-armed RESET acted before a new full second.");
+        }
+        Require(Hold(board, "water-garden-reset", 5800).SequenceEqual(["water-garden-reset"]) &&
+            board.WaterGardenResetRevision == reset + 1 && board.WaterGardenDrawerOpen,
+            "Fresh clear lettering and a full hold could not RESET after stick removal.");
+
+        for (int i = 0; i < 10; i++)
+            Require(board.ActivateButton("water-garden-duck-add", At(5900 + i * 10)),
+                "The capacity fixture could not add its remaining ducks.");
+        Require(!board.Buttons.Single(button => button.Id == "water-garden-duck-add").Enabled &&
+            board.SetWaterGardenStickPresent(true, At(6050)) &&
+            board.SetWaterGardenStickPresent(false, At(6100)) &&
+            !board.Buttons.Single(button => button.Id == "water-garden-duck-add").Enabled &&
+            !board.ActivateButton("water-garden-duck-add", At(6150)) && board.WaterGardenAddedDuckCount == 10 &&
+            board.Buttons.Where(button => button.Id != "water-garden-duck-add").All(button => button.Enabled),
+            "Stick removal bypassed the duck limit or left unrelated controls disarmed.");
+
+        board.SetWaterGardenStickPresent(true, At(6200));
+        board.ShowMenu(At(6300));
+        long menuRevision = board.Revision;
+        var menuButtons = board.Buttons.ToArray();
+        board.SetWaterGardenStickPresent(false, At(6310));
+        Require(!board.WaterGardenStickPresent && !board.SetWaterGardenStickPresent(true, At(6350)) &&
+            board.Revision == menuRevision && board.Buttons.SequenceEqual(menuButtons),
+            "Water Garden's stick interlock escaped into the main menu.");
+        board.ShowWaterGarden(At(6400));
+        Require(!board.WaterGardenStickPresent && board.Buttons.Single().Enabled,
+            "Reopening Water Garden retained a stale stick interlock.");
     }
 }

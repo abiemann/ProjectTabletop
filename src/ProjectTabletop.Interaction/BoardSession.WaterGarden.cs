@@ -13,11 +13,25 @@ public sealed partial class BoardSession
         new BoardButton("water-garden-reset", "RESET", new(.365, .87, .155, .12), BoardScreen.WaterGarden,
             Hold: BoardButtonHold.Once),
         new BoardButton("water-garden-duck-add", "DUCK+", new(.53, .87, .155, .12), BoardScreen.WaterGarden,
-            Hold: BoardButtonHold.Once)
+            Hold: BoardButtonHold.Repeat)
     });
 
     public bool WaterGardenDrawerOpen => Screen == BoardScreen.WaterGarden && _waterGardenDrawer.Open;
     public DateTimeOffset? WaterGardenDrawerOpenedAt => WaterGardenDrawerOpen ? _waterGardenDrawer.OpenedAt : null;
+    public bool WaterGardenStickPresent { get; private set; }
+
+    /// <summary>Disarms the bottom controls while a fresh, confirmed stick tip is
+    /// over visible water. A transition cancels holds and requires new caption
+    /// evidence without moving the drawer or resetting the pond.</summary>
+    public bool SetWaterGardenStickPresent(bool present, DateTimeOffset now)
+    {
+        present &= Screen == BoardScreen.WaterGarden;
+        if (WaterGardenStickPresent == present) return false;
+        WaterGardenStickPresent = present;
+        if (Screen == BoardScreen.WaterGarden)
+            BottomDrawerInputBarrier(_waterGardenDrawer, now);
+        return true;
+    }
 
     /// <summary>Increments on opening Water Garden and each accepted Reset action.
     /// The renderer consumes this revision to clear its simulation without navigating.</summary>
@@ -40,16 +54,16 @@ public sealed partial class BoardSession
         if (!WaterGardenDrawerOpen) return Array.AsReadOnly(new[]
         {
             new BoardButton("water-drawer-open", "^", BottomDrawerHandleBounds, BoardScreen.WaterGarden,
-                Hold: BoardButtonHold.Once)
+                Enabled: !WaterGardenStickPresent, Hold: BoardButtonHold.Once)
         });
         var buttons = new List<BoardButton>
         {
             new("water-drawer-close", "v", BottomDrawerHandleBounds, BoardScreen.WaterGarden,
-                Hold: BoardButtonHold.Once)
+                Enabled: !WaterGardenStickPresent, Hold: BoardButtonHold.Once)
         };
         buttons.AddRange(WaterGardenDrawerButtons.Select(button => button with
         {
-            Enabled = _waterGardenDrawer.OpeningReady &&
+            Enabled = !WaterGardenStickPresent && _waterGardenDrawer.OpeningReady &&
                 (button.Id != "water-garden-duck-add" || _waterGardenAddedDucks < WaterGardenAdditionalDuckCapacity)
         }));
         return buttons.AsReadOnly();
@@ -57,7 +71,7 @@ public sealed partial class BoardSession
 
     private bool SelectWaterGardenButton(BoardButton button, DateTimeOffset now)
     {
-        if (now < _waterGardenDrawer.ObservedAt) return false;
+        if (WaterGardenStickPresent || now < _waterGardenDrawer.ObservedAt) return false;
         if (button.Id == "water-drawer-open")
             return SelectBottomDrawer(_waterGardenDrawer, BoardScreen.WaterGarden, open: true, now);
         if (button.Id == "water-drawer-close")
@@ -87,6 +101,7 @@ public sealed partial class BoardSession
     {
         WaterGardenResetRevision++;
         _waterGardenAddedDucks = 0;
+        WaterGardenStickPresent = false;
     }
 
     public void ShowWaterGarden(DateTimeOffset? now = null) =>

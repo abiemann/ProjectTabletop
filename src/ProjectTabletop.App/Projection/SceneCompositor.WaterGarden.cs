@@ -39,7 +39,11 @@ public sealed partial class SceneCompositor
 
     public bool TickWaterGarden(DateTimeOffset now)
     {
-        lock (_gate) return _boardSession.TickWaterGarden(now);
+        lock (_gate)
+        {
+            RefreshWaterStickPresence();
+            return _boardSession.TickWaterGarden(now);
+        }
     }
 
     private bool HasWaterGardenDrawerAnimation(DateTimeOffset now)
@@ -82,6 +86,7 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             if (_boardSession.Screen != BoardScreen.WaterGarden) return false;
+            RefreshWaterStickPresence();
             bool accepted = _boardSession.ActivateButton(id, _waterClock());
             SyncWaterGardenSession();
             if (accepted)
@@ -99,6 +104,7 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             if (!double.IsFinite(u) || !double.IsFinite(v)) return false;
+            RefreshWaterStickPresence();
             var button = _boardSession.Buttons.FirstOrDefault(item => item.Enabled && item.Bounds.Contains(u, v));
             return button is not null && ActivateWaterGardenButton(button.Id);
         }
@@ -151,8 +157,9 @@ public sealed partial class SceneCompositor
             new Rect(0, 0, rendered.SizeInPixels.Width, rendered.SizeInPixels.Height));
     }
 
-    // Stick observations never enter the hand or button-selection pipeline. The
-    // calibrated plane supplies position, not physical contact or stick depth.
+    // Stick observations cannot select buttons, but disarm controls while the
+    // tip is in the water. The calibrated plane supplies position, not contact
+    // or stick depth.
     public bool SetWaterStickTip(PixelPoint? cameraPoint, DateTimeOffset frameTime)
     {
         lock (_gate)
@@ -236,6 +243,7 @@ public sealed partial class SceneCompositor
             if (previous is null || distance >= .0035f) _waterSurfaceTip = point;
             _waterTip = boardPoint;
             _waterFrameTime = frameTime;
+            SetWaterStickPresence(true);
             return true;
         }
     }
@@ -254,6 +262,7 @@ public sealed partial class SceneCompositor
         _waterSurfaceTip = null;
         _waterDisturbances.Clear();
         _waterStickStrokes.Clear();
+        SetWaterStickPresence(false);
         // Preserve source ordering across loss; only genuinely newer frames
         // may reacquire. The separate reset watermark blocks pre-calibration work.
     }
@@ -261,6 +270,25 @@ public sealed partial class SceneCompositor
     private void ExpireWaterStick(DateTimeOffset now)
     {
         if (now - _waterFrameTime > TimeSpan.FromMilliseconds(250)) ClearWaterStick();
+    }
+
+    private void RefreshWaterStickPresence()
+    {
+        if (_boardSession.Screen != BoardScreen.WaterGarden) return;
+        SyncWaterGardenSession();
+        ExpireWaterStick(_waterClock());
+    }
+
+    private void SetWaterStickPresence(bool present)
+    {
+        if (!_boardSession.SetWaterGardenStickPresent(present, _waterClock())) return;
+        // Reject in-flight caption results even if the marker enters and leaves
+        // between two hold-context captures. Re-arming requires a fresh clear.
+        _holdSceneKey = null;
+        _holdExpectedScene = null;
+        _holdRevision++;
+        _waterVisualRevision++;
+        _waterRenderedFrame = null;
     }
 
     private void SyncWaterGardenSession()
@@ -427,7 +455,7 @@ public sealed partial class SceneCompositor
         if (IsBoardDrawerHandle(button))
         {
             using var arrow = CanvasGeometry.CreatePolygon(ds.Device, DrawerArrowVertices(button, PaintBoardAspect()));
-            ds.FillGeometry(arrow, WaterInk);
+            ds.FillGeometry(arrow, button.Enabled ? WaterInk : Color.FromArgb(255, 104, 115, 107));
             DrawButtonFingerSelectionFeedback(ds, button, feedback, WaterInk, showCaption: false);
         }
         else

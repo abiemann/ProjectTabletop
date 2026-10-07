@@ -14,7 +14,17 @@ public sealed partial class SceneCompositor
     private long _blackjackPreviewFlightRevision = -1;
 
     public BlackjackSnapshot BlackjackState { get { lock (_gate) return _boardSession.BlackjackState; } }
-    public IReadOnlyList<BoardButton> CurrentBoardButtons { get { lock (_gate) return _boardSession.Buttons.ToArray(); } }
+    public IReadOnlyList<BoardButton> CurrentBoardButtons
+    {
+        get
+        {
+            lock (_gate)
+            {
+                RefreshWaterStickPresence();
+                return _boardSession.Buttons.ToArray();
+            }
+        }
+    }
 
     public void ShowBlackjack()
     {

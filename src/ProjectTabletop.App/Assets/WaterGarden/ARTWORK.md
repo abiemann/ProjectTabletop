@@ -14,7 +14,7 @@ programmatic image editing has been applied.
 
 ## Scene composition
 
-The garden uses a fixed close oblique camera, with larger procedural pebbles and
+The garden opens with a three-second move into a close oblique camera, with larger procedural pebbles and
 perspective-rendered warm limestone walls with rounded corners and softened edges.
 The same camera projects original fine-grained sand artwork onto the ground
 beneath the basin, with rounded contact shading along its footprint.
@@ -43,6 +43,33 @@ The ducks introduce no image asset or additional dependency.
 
 ## Selected output and alpha inspection
 
+### Updated menu thumbnail
+
+`../MenuPreviews/water-garden.png` is an original illustration generated on
+2026-10-06 using the built-in OpenAI `image_gen` tool. It depicts the current
+rounded limestone pool on pale sand, with a wet slate waterfall, clear water,
+mossy rocks and yellow rubber ducks. The old project thumbnail and a native
+render of the current board were supplied as composition and design references.
+No external photograph or reference branding is included.
+
+The selected output is preserved byte-for-byte at its native 2172 × 724 size.
+The request specified 2304 × 512, but the returned image has a 3:1 aspect ratio;
+the menu's existing height-based scaling and right-anchored crop accommodate it.
+Its quiet sand on the left can extend across wider cards, while the pool,
+fountain and ducks remain on the right. The offline generator retains this
+illustration instead of replacing it with a native board capture.
+
+- Source: `exec-715f533b-375d-4d65-8698-8ceedb8bc09a.png`.
+- PNG: opaque RGB, 2172 × 724, 3,077,523 bytes.
+- All 1,572,528 pixels are opaque; there are no transparent or translucent pixels.
+- SHA-256: `7696cfad650c53d15e7d8761e7c25e2e970f070ce2edb5f7755f7305edd82884`.
+
+Generation prompt:
+
+```text
+Use case: stylized-concept. Asset type: production game-menu thumbnail banner for Project Tabletop Water Garden. Edit target: first reference is the old 2304 x 512 panoramic menu thumbnail. Supporting visual reference: second image shows the CURRENT board; use its warm rounded limestone basin, dark wet stacked-slate waterfall, pebble bed, tiny glossy yellow rubber duckies and sand as the design reference. Completely modernize the old thumbnail to this current scene with premium photorealistic 3D game-art quality. Output an opaque ultra-wide 2304 x 512 PNG banner (4.5:1). Composition is crucial: put a compact beautiful shallow rounded-rectangle pool in the RIGHTMOST 40 percent of the banner; the focal wet-rock fountain and several clearly recognizable yellow rubber ducks must remain inside the RIGHTMOST 27 percent. Keep the entire top of the fountain and front pool lip in frame. Left 55 percent is quiet natural pale beige sand with subtle fine grains and no focal objects, continuous with the scene. This is deliberately right-anchored artwork: the app crops away the left for narrow menu cards and draws its own text there. Show a low oblique view from the front at about 45 degrees, natural perspective, thin gently rounded warm ivory limestone walls, sparkling clear water over smooth varied pebbles, a short dark layered slate rock cascade at the far edge pouring convincing water into the pool with delicate splash and ripples, 5 to 7 tiny shiny yellow rubber ducks with orange beaks floating naturally, restrained moss-covered rocks INSIDE the pool margins. Inviting calm feng-shui/spa mood, warm soft daylight, elegant natural materials, rich crisp detail and readable silhouettes at small thumbnail size. A prominent duck in the right foreground and readable flowing fountain behind it. No text at all, no Water Garden lettering, no UI buttons, arrows, logo, watermark, border, people, bowl fountain, grey cement box, cartoon scenery or excessive spray. Do not reproduce the screenshot UI. Preserve opaque sand background, no transparency, no artificial gradient or rectangular fade. Compose the image itself naturally for the right-anchored crop.
+```
+
 ### Warm limestone basin material
 
 `warm-limestone.png` is an original opaque material texture generated on
@@ -50,7 +77,7 @@ The ducks introduce no image asset or additional dependency.
 honey-beige limestone mineral detail is mapped across the pond's thin rounded
 walls and softened lips. The geometry and lighting
 are native shaders; the supplied reference photograph's pixels are not used.
-The approved menu thumbnail remains the earlier saved illustration.
+The menu thumbnail uses the updated generated illustration documented below.
 
 Source: `exec-f609169a-518b-4646-b25d-6169384311bb.png`.
 SHA-256: `bcd339092f0100a53e21fad7e11bf7bf183f9d453efdff3a537f3b4bbaf1406a`.
@@ -84,7 +111,7 @@ on 2026-10-06 with OpenAI's built-in `image_gen` tool. The supplied sand
 photograph guided its fine grain and muted beige colour; no reference pixels,
 watermark or branding are included. The renderer maps the texture onto the
 ground plane using the Water Garden camera so its apparent grain and direction
-recede with the basin. The earlier Water Garden menu thumbnail remains unchanged.
+recede with the basin. The menu uses a separate illustration of the same sand and basin.
 
 Source: `exec-93464ed3-235c-4b51-ae5d-1ed2132ca452.png`.
 SHA-256: `525f5eb810a409c343ef9f8e95403f60e6d517980c8e7efd11d2424f5f1ffe86`.
