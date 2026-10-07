@@ -33,8 +33,10 @@ the same camera projection and rock silhouettes to keep ripples on visible water
 
 Ten tiny yellow rubber ducks use original analytic three-dimensional geometry,
 including rounded bodies, wings, bills and eyes. GPU buoyancy samples the actual
-water surface so the ducks bob, tilt and drift; the water reflects the same moving
-geometry. **Calm Water** restores their starting positions and clears their motion.
+water surface so the ducks bob and tilt. Local currents from measured cascade
+landings carry them outward, and confirmed moving stick strokes push nearby ducks
+aside; the water reflects the same moving geometry. **Calm Water** restores their
+starting positions and clears their motion.
 The ducks introduce no image asset or additional dependency.
 
 ## Selected output and alpha inspection

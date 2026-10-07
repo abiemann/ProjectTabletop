@@ -62,6 +62,11 @@ internal sealed class WaterGardenSimulation : IDisposable
     private readonly CanvasBitmap? _fountainAtlas;
     private readonly Vector2[] _fountainLandingPosition = new Vector2[4];
     private readonly float[] _fountainLandingMomentum = new float[4];
+    private readonly Vector2[] _duckLandingPosition = new Vector2[4];
+    private readonly float[] _duckLandingMomentum = new float[4];
+    private readonly Vector2[] _stickWakePosition = new Vector2[WaterGardenDucks.StickWakeCount];
+    private readonly Vector2[] _stickWakeDirection = new Vector2[WaterGardenDucks.StickWakeCount];
+    private readonly float[] _stickWakeStrength = new float[WaterGardenDucks.StickWakeCount];
     private double _accumulator;
     private double _simulatedSeconds;
     private double _droppedSeconds;
@@ -230,6 +235,60 @@ internal sealed class WaterGardenSimulation : IDisposable
         BindSurface();
     }
 
+    /// <summary>
+    /// Transfers a confirmed moving stick-tip stroke to nearby floating hulls.
+    /// Strength is a bounded 0..1 measure of stroke travel supplied by the
+    /// calibrated input path. A stationary observation or a reacquisition does
+    /// not call this method, and the wake dissipates when movement stops.
+    /// </summary>
+    public void AddStickStroke(Vector2 previous, Vector2 current, float strength)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!float.IsFinite(previous.X) || !float.IsFinite(previous.Y) ||
+            !float.IsFinite(current.X) || !float.IsFinite(current.Y) ||
+            !float.IsFinite(strength))
+            throw new ArgumentException("Stick stroke parameters must be finite.");
+        Vector2 delta = (current - previous) * new Vector2(_aspect, 1);
+        float distance = delta.Length();
+        if (distance < .0035f || distance > .18f || strength <= 0) return;
+        Vector2 midpoint = (previous + current) * .5f;
+        Vector2 direction = delta / distance;
+        int slot = -1, weakest = 0;
+        float weakestStrength = float.MaxValue;
+        for (int index = 0; index < _stickWakeStrength.Length; index++)
+        {
+            float existing = _stickWakeStrength[index];
+            if (existing < weakestStrength) { weakest = index; weakestStrength = existing; }
+            // Nearby, similarly directed strokes share a wake instead of
+            // allowing repeated samples of one physical sweep to pile up.
+            Vector2 separation = (midpoint - _stickWakePosition[index]) * new Vector2(_aspect, 1);
+            if (existing > .001f && separation.LengthSquared() < .022f * .022f &&
+                Vector2.Dot(direction, _stickWakeDirection[index]) > .5f)
+            {
+                slot = index;
+                break;
+            }
+        }
+        bool merged = slot >= 0;
+        if (!merged) slot = weakest;
+        float added = .055f + .060f * Math.Clamp(strength, 0, 1);
+        if (merged)
+        {
+            float previousStrength = _stickWakeStrength[slot];
+            float combined = previousStrength + added;
+            _stickWakePosition[slot] = (_stickWakePosition[slot] * previousStrength + midpoint * added) / combined;
+            Vector2 blended = _stickWakeDirection[slot] * previousStrength + direction * added;
+            _stickWakeDirection[slot] = Vector2.Normalize(blended);
+            _stickWakeStrength[slot] = Math.Min(.14f, previousStrength * .65f + added);
+        }
+        else
+        {
+            _stickWakePosition[slot] = midpoint;
+            _stickWakeDirection[slot] = direction;
+            _stickWakeStrength[slot] = added;
+        }
+    }
+
     public void Advance(double seconds)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -240,6 +299,12 @@ internal sealed class WaterGardenSimulation : IDisposable
         int steps = Math.Min(MaximumStepsPerAdvance, (int)Math.Floor((_accumulator + 1e-9) / FixedStep));
         for (int i = 0; i < steps; i++)
         {
+            float currentRetention = MathF.Exp(-1.25f * (float)FixedStep);
+            for (int bin = 0; bin < _duckLandingMomentum.Length; bin++)
+                _duckLandingMomentum[bin] *= currentRetention;
+            float wakeRetention = MathF.Exp(-5f * (float)FixedStep);
+            for (int wake = 0; wake < _stickWakeStrength.Length; wake++)
+                _stickWakeStrength[wake] *= wakeRetention;
             _fountainFluid.Advance(FixedStep, _fountainEnabled);
             foreach (WaterFountainImpact impact in _fountainFluid.DrainImpacts())
             {
@@ -250,6 +315,16 @@ internal sealed class WaterGardenSimulation : IDisposable
                     (.42f * MathF.Min(_aspect, 1)) * 4 + 2), 0, 3);
                 _fountainLandingPosition[bin] += impact.Position * impact.NormalMomentum;
                 _fountainLandingMomentum[bin] += impact.NormalMomentum;
+                float retained = _duckLandingMomentum[bin];
+                float incoming = impact.NormalMomentum;
+                float total = retained + incoming;
+                if (total > 0)
+                {
+                    _duckLandingPosition[bin] = retained > 0
+                        ? (_duckLandingPosition[bin] * retained + impact.Position * incoming) / total
+                        : impact.Position;
+                    _duckLandingMomentum[bin] = total;
+                }
                 _fountainImpacts += impact.Particles;
             }
             if (_steps % 12 == 11)
@@ -273,8 +348,16 @@ internal sealed class WaterGardenSimulation : IDisposable
             _stepEffect.ConstantBuffer = new WaterStepShader(_fieldSize, _aspect, (float)FixedStep, _waveSpeed);
             Run(_stepEffect, _next, _field);
             (_field, _next) = (_next, _field);
+            Float4 Landing(int bin) => new(_duckLandingPosition[bin].X,
+                _duckLandingPosition[bin].Y, Math.Clamp(_duckLandingMomentum[bin] * 2400f, 0, .065f), 0);
+            Float4 Stick(int wake) => new(_stickWakePosition[wake].X, _stickWakePosition[wake].Y,
+                _stickWakeStrength[wake], MathF.Atan2(_stickWakeDirection[wake].Y,
+                    _stickWakeDirection[wake].X));
             _duckDynamicsEffect.ConstantBuffer = new WaterDuckDynamicsShader(_fieldSize, _aspect,
-                (float)FixedStep, (float)(_simulatedSeconds + FixedStep), _ambientEnabled ? 1 : 0);
+                (float)FixedStep, (float)(_simulatedSeconds + FixedStep), _ambientEnabled ? 1 : 0,
+                Landing(0), Landing(1), Landing(2), Landing(3),
+                Stick(0), Stick(1), Stick(2), Stick(3),
+                Stick(4), Stick(5), Stick(6), Stick(7));
             _duckDynamicsEffect.Sources[1] = _field;
             Run(_duckDynamicsEffect, _nextDucks, _ducks);
             (_ducks, _nextDucks) = (_nextDucks, _ducks);
@@ -299,6 +382,11 @@ internal sealed class WaterGardenSimulation : IDisposable
         _fountainFluid.Reset();
         Array.Clear(_fountainLandingPosition);
         Array.Clear(_fountainLandingMomentum);
+        Array.Clear(_duckLandingPosition);
+        Array.Clear(_duckLandingMomentum);
+        Array.Clear(_stickWakePosition);
+        Array.Clear(_stickWakeDirection);
+        Array.Clear(_stickWakeStrength);
         Revision++;
         BindSurface();
     }

@@ -7,6 +7,7 @@ internal static class WaterGardenDucks
 {
     public const int Count = 10;
     public const int Rows = 4;
+    public const int StickWakeCount = 8;
 }
 
 // Each column describes one floating hull. Rows contain position/heading,
@@ -51,7 +52,10 @@ internal readonly partial struct WaterDuckInitializeShader(float aspect) : ID2D1
 [D2DOutputBuffer(D2D1BufferPrecision.Float32)]
 [D2DGeneratedPixelShaderDescriptor]
 internal readonly partial struct WaterDuckDynamicsShader(Float2 fieldSize, float aspect,
-    float dt, float time, int ambientEnabled) : ID2D1PixelShader
+    float dt, float time, int ambientEnabled,
+    Float4 landing0, Float4 landing1, Float4 landing2, Float4 landing3,
+    Float4 stick0, Float4 stick1, Float4 stick2, Float4 stick3,
+    Float4 stick4, Float4 stick5, Float4 stick6, Float4 stick7) : ID2D1PixelShader
 {
     private Float4 State(int index, int row) => D2D.SampleInputAtPosition(0,
         new Float2(index + .5f, row + .5f));
@@ -67,6 +71,34 @@ internal readonly partial struct WaterDuckDynamicsShader(Float2 fieldSize, float
         return height + amount * (.00040f * Hlsl.Sin(world.X * 23 + world.Y * 13 - time * .9f) +
             .00030f * Hlsl.Sin(world.X * -17 + world.Y * 29 + time * .72f) +
             .00016f * Hlsl.Sin(world.X * 43 - world.Y * 21 - time * 1.12f));
+    }
+
+    private Float2 LandingCurrent(Float2 position, Float2 metric, Float4 landing)
+    {
+        // A parcel transfers momentum to the pond at its measured landing point.
+        // That flux spreads as a surface current; the rear cascade also gives the
+        // outward flow a downstream bias toward the front of the garden.
+        Float2 delta = (position - landing.XY) * metric;
+        float distance = Hlsl.Length(delta);
+        float radius = .12f * Hlsl.Min(aspect, 1);
+        float falloff = Hlsl.Exp(-.5f * distance * distance / (radius * radius));
+        Float2 radial = delta / Hlsl.Max(distance, .0001f);
+        Float2 flow = new Float2(radial.X * .35f, Hlsl.Max(.55f, radial.Y + .8f));
+        flow /= Hlsl.Max(Hlsl.Length(flow), .0001f);
+        return flow * landing.Z * falloff;
+    }
+
+    private Float2 StickCurrent(Float2 position, Float2 metric, Float4 wake)
+    {
+        Float2 delta = (position - wake.XY) * metric;
+        float distance = Hlsl.Length(delta);
+        float radius = .060f * Hlsl.Min(aspect, 1);
+        float falloff = Hlsl.Exp(-.5f * distance * distance / (radius * radius));
+        Float2 radial = delta / Hlsl.Max(distance, .0001f);
+        Float2 stroke = new Float2(Hlsl.Cos(wake.W), Hlsl.Sin(wake.W));
+        Float2 flow = radial * .55f + stroke * .75f;
+        flow /= Hlsl.Max(Hlsl.Length(flow), .0001f);
+        return flow * wake.Z * falloff;
     }
 
     public Float4 Execute()
@@ -99,6 +131,18 @@ internal readonly partial struct WaterDuckDynamicsShader(Float2 fieldSize, float
         float ambient = ambientEnabled * Hlsl.SmoothStep(2, 5, time);
         acceleration += new Float2(Hlsl.Sin(world.Y * 8 + time * .17f),
             Hlsl.Cos(world.X * 5 - time * .13f)) * (.0016f * ambient);
+        acceleration += LandingCurrent(position, metric, landing0) +
+            LandingCurrent(position, metric, landing1) +
+            LandingCurrent(position, metric, landing2) +
+            LandingCurrent(position, metric, landing3) +
+            StickCurrent(position, metric, stick0) +
+            StickCurrent(position, metric, stick1) +
+            StickCurrent(position, metric, stick2) +
+            StickCurrent(position, metric, stick3) +
+            StickCurrent(position, metric, stick4) +
+            StickCurrent(position, metric, stick5) +
+            StickCurrent(position, metric, stick6) +
+            StickCurrent(position, metric, stick7);
 
         // Soft hull separation keeps a moving group from collecting into one
         // yellow blob. Forces and travel are bounded, including narrow boards.

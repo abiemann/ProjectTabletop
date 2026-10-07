@@ -306,7 +306,7 @@
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterDuckDynamicsShader.cs",
-      "sha256": "2349f2ca49528a3b452c8afc9aa5610f06309cd1511f8c8d0d525c856b80962e"
+      "sha256": "c19fc724cd7c531c8627fb0abd49b1a79ceec7da9b48998fcc19b24e9a0df67f"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterDuckRendering.cs",
@@ -334,7 +334,7 @@
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterGardenSimulation.cs",
-      "sha256": "fd7f352edf08a00715575afcb75d7df9ef636bd49e517e1f049f609da87e209e"
+      "sha256": "e1f5c23539de32c68694508b625c10ffdee1ba3f1dfa24e5ee59a7e0aea4e216"
     },
     {
       "file": "src/ProjectTabletop.App/Projection/WaterGarden/WaterGardenView.cs",

@@ -16,6 +16,7 @@ public sealed partial class SceneCompositor
     private WaterGardenSimulation? _waterSimulation;
     private CanvasDevice? _waterDevice;
     private readonly Queue<(Vector2 Position, float Strength)> _waterDisturbances = new();
+    private readonly Queue<(Vector2 Previous, Vector2 Current, float Strength)> _waterStickStrokes = new();
     private DateTimeOffset _waterAdvancedAt, _waterResetThrough, _waterFrameTime;
     private Vector2? _waterTip, _waterSurfaceTip;
     private Homography? _waterCameraMap, _waterSurfaceMap;
@@ -185,6 +186,11 @@ public sealed partial class SceneCompositor
                 float strength = Math.Clamp(distance * .10f, .0015f, .004f) / MathF.Sqrt(count);
                 for (int i = 1; i <= count; i++)
                     QueueWaterDisturbance(Vector2.Lerp(previous.Value, point, (float)i / count), strength);
+                // One accepted marker movement transfers momentum to nearby
+                // ducks. Interpolated ripple samples must not multiply the shove.
+                if (_waterStickStrokes.Count >= 24) _waterStickStrokes.Dequeue();
+                _waterStickStrokes.Enqueue((previous.Value, point,
+                    Math.Clamp(distance / .06f, .15f, 1f)));
             }
             // Keep the disturbance anchor during sub-threshold movement so a
             // very slow deliberate stroke can still accumulate enough distance.
@@ -208,6 +214,7 @@ public sealed partial class SceneCompositor
         _waterTip = null;
         _waterSurfaceTip = null;
         _waterDisturbances.Clear();
+        _waterStickStrokes.Clear();
         // Preserve source ordering across loss; only genuinely newer frames
         // may reacquire. The separate reset watermark blocks pre-calibration work.
     }
@@ -277,6 +284,8 @@ public sealed partial class SceneCompositor
         AdvanceWaterGarden(now);
         while (_waterDisturbances.TryDequeue(out var ripple))
             _waterSimulation.AddDisturbance(ripple.Position, .034f, ripple.Strength);
+        while (_waterStickStrokes.TryDequeue(out var stroke))
+            _waterSimulation.AddStickStroke(stroke.Previous, stroke.Current, stroke.Strength);
         _waterSimulation.Draw(ds, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
     }
 

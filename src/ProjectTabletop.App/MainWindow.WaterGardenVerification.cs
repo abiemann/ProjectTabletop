@@ -222,7 +222,8 @@ public sealed partial class MainWindow
             Require(DuckStatesWithinTolerance(start, DuckStates(duckWater)),
                 "Resetting a calm duck fixture changed its initial placement.");
             var subject = start[0];
-            duckWater.AddDisturbance(new(subject.SurfaceX + .016f, subject.SurfaceY), .03f, .006f);
+            var stickTip = new Vector2(subject.SurfaceX - .016f, subject.SurfaceY);
+            duckWater.AddDisturbance(stickTip, .034f, .004f);
             double maximumHeave = 0, maximumSlope = 0, maximumDrift = 0;
             for (int frame = 0; frame < 60; frame++)
             {
@@ -241,10 +242,59 @@ public sealed partial class MainWindow
             Require(maximumHeave > 1e-5 && maximumSlope > 1e-4 && maximumDrift > 1e-5,
                 $"A nearby water wave failed to bob, tilt and carry its duck: " +
                 $"heave={maximumHeave:G6}, slope={maximumSlope:G6}, drift={maximumDrift:G6}.");
+            var waveOnlyDuck = DuckStates(duckWater)[0];
+            duckWater.Reset();
+            Require(DuckStatesWithinTolerance(start, DuckStates(duckWater)),
+                "Preparing the moving-stick comparison failed to reset duck positions.");
+            duckWater.AddDisturbance(stickTip, .034f, .004f);
+            // The matching ripple-only run above is the acquisition control;
+            // the moving stroke below must add a separate directed shove.
+            duckWater.AddStickStroke(
+                new(subject.SurfaceX - .035f, subject.SurfaceY),
+                new(subject.SurfaceX - .005f, subject.SurfaceY), .5f);
+            for (int frame = 0; frame < 60; frame++) duckWater.Advance(1.0 / 30);
+            var movedByStick = DuckStates(duckWater)[0];
+            double additionalStrokeTravel = movedByStick.SurfaceX - waveOnlyDuck.SurfaceX;
+            double outwardStrokeTravel = movedByStick.SurfaceX - subject.SurfaceX;
+            Require(DuckIsFiniteAndInside(movedByStick) && additionalStrokeTravel > .004 &&
+                    outwardStrokeTravel > .004,
+                $"A confirmed moving stick failed to push the nearby duck beyond the matching " +
+                $"acquisition ripple: additional travel={additionalStrokeTravel:G6}, " +
+                $"outward travel={outwardStrokeTravel:G6}.");
             for (int frame = 0; frame < 120; frame++) duckWater.Advance(1.0 / 30);
             var settled = DuckStates(duckWater);
             Require(settled.All(DuckIsFiniteAndInside),
                 "Floating ducks became non-finite or left the basin after six simulated seconds.");
+
+            // A fast confirmed stroke can queue several segments before the
+            // next simulation step. The duck is beside a middle segment; the
+            // final segment ends well beyond it. Its motion must not depend on
+            // the last segment alone surviving in the wake state.
+            var fastStroke = new[]
+            {
+                new Vector2(subject.SurfaceX - .12f, subject.SurfaceY),
+                new Vector2(subject.SurfaceX - .06f, subject.SurfaceY),
+                new Vector2(subject.SurfaceX, subject.SurfaceY),
+                new Vector2(subject.SurfaceX + .10f, subject.SurfaceY),
+                new Vector2(subject.SurfaceX + .22f, subject.SurfaceY)
+            };
+            duckWater.Reset();
+            for (int segment = 1; segment < fastStroke.Length; segment++)
+                duckWater.AddStickStroke(fastStroke[segment - 1], fastStroke[segment], .7f);
+            for (int frame = 0; frame < 60; frame++) duckWater.Advance(1.0 / 30);
+            var fastStrokeDucks = DuckStates(duckWater);
+            double fastStrokeTravel = fastStrokeDucks[0].SurfaceX - subject.SurfaceX;
+            Require(fastStrokeDucks.All(DuckIsFiniteAndInside),
+                "A fast multi-segment stick stroke drove a duck outside the basin.");
+            duckWater.Reset();
+            duckWater.AddStickStroke(fastStroke[^2], fastStroke[^1], .7f);
+            for (int frame = 0; frame < 60; frame++) duckWater.Advance(1.0 / 30);
+            var lastSegmentOnlyDuck = DuckStates(duckWater)[0];
+            double intermediateSegmentTravel = fastStrokeDucks[0].SurfaceX - lastSegmentOnlyDuck.SurfaceX;
+            Require(fastStrokeTravel > .004 && intermediateSegmentTravel > .004,
+                $"A duck beside an intermediate stick segment did not receive its push: " +
+                $"fast stroke={fastStrokeTravel:G6}, beyond-last-segment control " +
+                $"difference={intermediateSegmentTravel:G6}.");
             duckWater.Reset();
             var firstReset = DuckStates(duckWater);
             duckWater.Advance(1.0 / 30);
@@ -252,7 +302,9 @@ public sealed partial class MainWindow
             Require(DuckStatesWithinTolerance(start, firstReset) && firstReset.SequenceEqual(DuckStates(duckWater)),
                 "Repeated Calm Water resets did not restore identical duck placement and motion.");
             duckPhysics = new { count = start.Count, ambientDisabledCalmStable = true,
-                maximumHeave, maximumSlope, maximumDrift, simulatedSecondsAfterImpulse = 6,
+                maximumHeave, maximumSlope, maximumDrift, additionalStrokeTravel, outwardStrokeTravel,
+                fastStrokeTravel, intermediateSegmentTravel,
+                simulatedSecondsAfterImpulse = 6,
                 boundedAfterSettling = true, repeatedResetDeterministic = true };
         }
 
@@ -266,6 +318,14 @@ public sealed partial class MainWindow
             Require(fountainWater.GetDiagnostics().FountainEnabled,
                 "The Water Garden fountain was not enabled by default.");
             var fluid = Fountain(fountainWater);
+            var fountainStartDucks = DuckStates(fountainWater);
+            var waterfallOutlet = new Vector2(.5f, .5f + fluid.WorldMaximum.Y);
+            int nearestDuckIndex = fountainStartDucks.OrderBy(duck =>
+                Vector2.Distance(new(duck.SurfaceX, duck.SurfaceY), waterfallOutlet)).First().Index;
+            var nearestDuckStart = fountainStartDucks[nearestDuckIndex];
+            var nearestDuckPrevious = new Vector2(nearestDuckStart.SurfaceX, nearestDuckStart.SurfaceY);
+            double nearestDuckPath = 0, maximumDownstreamTravel = 0, maximumAwayFromWaterfall = 0;
+            var maximumDuckTravel = new double[fountainStartDucks.Count];
             byte[] calmRockPixels;
             using (var calmRocks = new CanvasRenderTarget(device, 1536, 1536, 96))
             {
@@ -300,10 +360,36 @@ public sealed partial class MainWindow
                 if (currentFluid.EmittedParticles > 0) firstEmissionSeconds ??= frame / 30.0;
                 if (currentFluid.PoolImpactParticles > 0) firstImpactSeconds ??= frame / 30.0;
                 airborneBeforeImpact |= currentFluid.ParticleCount > 0 && currentFluid.PoolImpactParticles == 0;
+                if (frame % 15 == 0 && currentFluid.PoolImpactParticles > 0)
+                {
+                    var ducks = DuckStates(fountainWater);
+                    Require(ducks.All(DuckIsFiniteAndInside) && ducks.All(duck =>
+                            duck.SurfaceX >= .159f && duck.SurfaceX <= .841f &&
+                            duck.SurfaceY >= .219f && duck.SurfaceY <= .821f),
+                        "Fountain-driven ducks became non-finite or crossed a pond margin.");
+                    for (int index = 0; index < ducks.Count; index++)
+                    {
+                        var start = fountainStartDucks[index];
+                        var current = ducks[index];
+                        maximumDuckTravel[index] = Math.Max(maximumDuckTravel[index],
+                            Vector2.Distance(new(start.SurfaceX, start.SurfaceY),
+                                new(current.SurfaceX, current.SurfaceY)));
+                    }
+                    var near = ducks[nearestDuckIndex];
+                    var nearPosition = new Vector2(near.SurfaceX, near.SurfaceY);
+                    nearestDuckPath += Vector2.Distance(nearestDuckPrevious, nearPosition);
+                    nearestDuckPrevious = nearPosition;
+                    maximumDownstreamTravel = Math.Max(maximumDownstreamTravel,
+                        near.SurfaceY - nearestDuckStart.SurfaceY);
+                    maximumAwayFromWaterfall = Math.Max(maximumAwayFromWaterfall,
+                        Vector2.Distance(nearPosition, waterfallOutlet) -
+                        Vector2.Distance(new(nearestDuckStart.SurfaceX, nearestDuckStart.SurfaceY), waterfallOutlet));
+                }
                 if (frame == 30)
                     Require(currentFluid is { ParticleCount: 0, EmittedParticles: 0, PoolImpactParticles: 0 } &&
-                            Statistics(fountainWater).TotalEnergy == 0,
-                        "The fountain emitted parcels or disturbed the first quiet second after Calm Water.");
+                            Statistics(fountainWater).TotalEnergy == 0 &&
+                            DuckStatesWithinTolerance(fountainStartDucks, DuckStates(fountainWater)),
+                        "The fountain emitted parcels, moved ducks or disturbed the first quiet second after Calm Water.");
                 if (frame >= 60 && frame % 15 == 0)
                 {
                     var probe = fountainWater.GetFieldProbe(neighbour);
@@ -328,6 +414,13 @@ public sealed partial class MainWindow
                         firstFlowAtlas = (byte[])fluid.BuildDensityAtlas().Clone();
                     }
                 }
+                if (frame == 90)
+                {
+                    using var earlyFlow = new CanvasRenderTarget(device, 1536, 1536, 96);
+                    using (var drawing = earlyFlow.CreateDrawingSession())
+                        fountainWater.Draw(drawing, new Windows.Foundation.Rect(0, 0, 1536, 1536));
+                    await Save(earlyFlow, "water-fountain-early");
+                }
                 if (frame % 150 != 0) continue;
                 var densityVolume = FountainVolume(fluid);
                 currentFluid = fluid.GetDiagnostics();
@@ -351,6 +444,13 @@ public sealed partial class MainWindow
                     impactSeconds > emissionSeconds &&
                     maximumParticles > 0 && maximumOccupiedVoxels > 0 && finalFluid.RockContacts > 0,
                 "The fountain did not carry persistent parcels over the rock into a propagating pond wave.");
+            int travellingDucks = maximumDuckTravel.Count(travel => travel > .015);
+            Require(maximumDownstreamTravel > .025 && maximumAwayFromWaterfall > .025 &&
+                    nearestDuckPath > .05 && travellingDucks >= 3,
+                $"Real waterfall arrivals failed to carry ducks away through the pond: " +
+                $"nearest index={nearestDuckIndex}, downstream={maximumDownstreamTravel:G6}, " +
+                $"away={maximumAwayFromWaterfall:G6}, path={nearestDuckPath:G6}, " +
+                $"travelling ducks={travellingDucks}.");
             using (var steady = new CanvasRenderTarget(device, 1536, 1536, 96))
             {
                 using (var drawing = steady.CreateDrawingSession())
@@ -376,8 +476,9 @@ public sealed partial class MainWindow
             Require(fountainWater.GetDiagnostics() is { FountainEnabled: true, FountainImpactCount: 0 } &&
                     fluid.GetDiagnostics() is { ParticleCount: 0, EmittedParticles: 0, PoolImpactParticles: 0,
                         EscapedParticles: 0, RockContacts: 0, Steps: 0 } && resetVolume.Occupied == 0 &&
-                    Statistics(fountainWater).TotalEnergy == 0,
-                "Calm Water failed to clear fountain particles, density, waves or impact history.");
+                    Statistics(fountainWater).TotalEnergy == 0 &&
+                    DuckStatesWithinTolerance(fountainStartDucks, DuckStates(fountainWater)),
+                "Calm Water failed to restore ducks or clear fountain particles, density, waves and impacts.");
             for (int frame = 0; frame < firstFlowFrame; frame++) fountainWater.Advance(1.0 / 30);
             var resumedFlow = Statistics(fountainWater);
             var resumedFlowDucks = DuckStates(fountainWater);
@@ -411,9 +512,12 @@ public sealed partial class MainWindow
                 maximumNeighbourHeight, maximumMass, maximumHeight, maximumSpeed,
                 maximumParticles, maximumOccupiedVoxels, firstEmissionSeconds, firstImpactSeconds,
                 firstFlowSeconds = firstFlowFrame / 30.0, finalFluid,
+                nearestDuckIndex, maximumDownstreamTravel, maximumAwayFromWaterfall,
+                nearestDuckPath, travellingDucks, maximumDuckTravel,
                 realParcelArrivalsMatchImpacts = true, particleConservation = true,
                 occupiedThreeDimensionalDensity = true, stoneCollisions = true,
-                drivesWavesWithoutStick = true, initialCalmSecond = true, resetReproducible = true };
+                drivesWavesWithoutStick = true, initialCalmSecond = true,
+                duckTravelBounded = true, resetReproducible = true };
         }
 
         now += TimeSpan.FromMilliseconds(20);
