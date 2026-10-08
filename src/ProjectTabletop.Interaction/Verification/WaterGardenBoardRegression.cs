@@ -74,7 +74,7 @@ internal static class WaterGardenBoardRegression
             !board.MenuScrolled && board.Buttons.Any(button => button.Id == "water-garden"),
             "Revealed EXIT did not restore the first menu page.");
         Require(board.ActivateButton("menu-scroll-down", At(830)) && board.TickMenu(At(1480)) &&
-            board.Buttons.Select(button => button.Id).SequenceEqual(["roulette", "paint", "settings", "menu-scroll-up"]) &&
+            board.Buttons.Select(button => button.Id).SequenceEqual(["roulette", "paint", "football", "settings", "menu-scroll-up"]) &&
             !board.ActivateButton("water-garden", At(1490)), "Water Garden remained on menu page two.");
         Require(board.ActivateButton("menu-scroll-up", At(1500)) && board.TickMenu(At(2150)) &&
             board.ActivateButton("water-garden", At(2160)) && board.WaterGardenResetRevision == 4,

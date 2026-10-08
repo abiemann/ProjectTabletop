@@ -150,6 +150,7 @@ public sealed partial class MainWindow
     private void ClearHandTracking([CallerMemberName] string reason = "")
     {
         ResetPieceDetections();
+        ResetFootballInput();
         lock (_handGate)
         {
             _handGeneration++;
@@ -264,6 +265,7 @@ public sealed partial class MainWindow
                                 visibleHands.Select(DescribeHandObservation).ToArray());
                             if (age > HandMarkerLifetime)
                             {
+                                ClearFootballFingerInput(frame.Timestamp);
                                 _handPreview = null;
                                 _handVisuals.Reset();
                                 _scene.ClearHandTips(resetInput: false);
@@ -282,6 +284,7 @@ public sealed partial class MainWindow
                                 _handPreview = new HandPreview(cursors, visualCursors, frame.Width, frame.Height, frame.Timestamp);
                                 _scene.SetHandCursors(cursors, frame.Timestamp, _photoCopyTask is { IsCompleted: false }, visualCursors);
                                 _scene.SetHandSpotlights(visibleHands, frame.Timestamp);
+                                PublishFootballFingers(visibleHands, frame);
                                 _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.LightingHints, visibleHands, frame.Timestamp,
                                     acquisitionHints.Presence?.IlluminatedPresence, acquisitionHints.Presence?.IlluminatedWhiteLuminance,
                                     acquisitionHints.Presence?.ProjectedWhiteClipped);

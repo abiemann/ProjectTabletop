@@ -78,6 +78,20 @@ static async Task RunMcpAsync()
                 Name = "water_garden_action",
                 Description = "Activate a visible Water Garden control by id: water-drawer-open, water-drawer-close, water-garden-exit, water-garden-reset, or water-garden-duck-add."
             });
+    static McpServerTool FootballActionTool() =>
+        McpServerTool.Create((Func<string, Task<string>>)FootballActionAsync,
+            new McpServerToolCreateOptions
+            {
+                Name = "football_action",
+                Description = "Activate Football controls: football-exit, football-reset, or football-mode to switch between AI and two human players."
+            });
+    static McpServerTool LearnFootballBarTool() =>
+        McpServerTool.Create((Func<int, double, double, Task<string>>)LearnFootballBarAsync,
+            new McpServerToolCreateOptions
+            {
+                Name = "learn_football_bar",
+                Description = "Learn the black crossbar on a cardboard T for football player 1 or 2. Supply player as 1 or 2 and x/y at its centre in raw camera pixels. Uses the currently running selected webcam."
+            });
     static McpServerTool CrownDeedActionTool() =>
         McpServerTool.Create((Func<string, Task<string>>)CrownDeedActionAsync,
             new McpServerToolCreateOptions
@@ -139,6 +153,10 @@ static async Task RunMcpAsync()
             Tool("show_water_garden", "Open Water Garden: shallow clear water and a pebble bed with ripples driven by a learned coloured tip or eye sticker. Camera and projector are not started by this command."),
             Tool("get_water_garden", "Read Water Garden simulation and fresh calibrated stick input diagnostics."),
             WaterGardenActionTool(),
+            Tool("show_football", "Open Football with learned black cardboard bars or fingertip kickers, a bouncy speed-capped ball, and human-versus-AI or two-player matches. Does not start camera or projector."),
+            Tool("get_football", "Read the current football match and separate player input diagnostics."),
+            FootballActionTool(),
+            LearnFootballBarTool(),
             Tool("show_blackjack", "Open the virtual-chip Blackjack table and laptop preview without opening projector output or starting the camera."),
             BlackjackActionTool(),
             Tool("show_crown_deed", "Open Crown & Deed, the oval property board with human/AI player setup and a clickable laptop preview, without starting camera or projector."),
@@ -181,6 +199,12 @@ static Task<string> BlackjackActionAsync(string id) =>
 
 static Task<string> WaterGardenActionAsync(string id) =>
     CallToolAsync("water_garden_action", JsonSerializer.SerializeToElement(new { id }));
+
+static Task<string> FootballActionAsync(string id) =>
+    CallToolAsync("football_action", JsonSerializer.SerializeToElement(new { id }));
+
+static Task<string> LearnFootballBarAsync(int player, double x, double y) =>
+    CallToolAsync("learn_football_bar", JsonSerializer.SerializeToElement(new { player, x, y }));
 
 static Task<string> CrownDeedActionAsync(string id) =>
     CallToolAsync("crown_deed_action", JsonSerializer.SerializeToElement(new { id }));

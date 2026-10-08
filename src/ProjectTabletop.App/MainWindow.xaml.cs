@@ -80,6 +80,7 @@ public sealed partial class MainWindow : Window
         _initialized = true;
         StartHandTrackingStatus();
         InitializeEyeTipTracking();
+        InitializeFootballInput();
         RefreshDisplays();
         InitializeProjectionSettings();
         InitializeDisplayAudio();
@@ -243,6 +244,7 @@ public sealed partial class MainWindow : Window
         _photocopierSound.Dispose();
         _statusTimer.Stop();
         await DisposeEyeTipTrackingAsync();
+        await DisposeFootballInputAsync();
         await DisposeHandTrackingAsync();
         if (_crownDeedSaveTask is not null) await _crownDeedSaveTask;
         if (_controlHost is not null) await _controlHost.DisposeAsync();

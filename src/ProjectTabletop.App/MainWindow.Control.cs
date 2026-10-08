@@ -93,6 +93,8 @@ public sealed partial class MainWindow
                 return await VerifyPaintAsync();
             case "verify_water_garden":
                 return await VerifyWaterGardenAsync();
+            case "verify_football":
+                return await VerifyFootballAsync();
             case "capture_water_garden_motion":
                 return await CaptureWaterGardenMotionAsync();
             case "capture_paint_diagnostics":
@@ -335,6 +337,18 @@ public sealed partial class MainWindow
                     boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text };
             case "get_water_garden":
                 return _scene.GetWaterGardenDiagnostics();
+            case "show_football":
+                ShowFootball();
+                return new { board = _scene.CurrentBoardScreen.ToString(), state = FootballControlState() };
+            case "get_football":
+                return new { state = FootballControlState(), input = GetFootballInputStatus() };
+            case "learn_football_bar":
+                return await LearnFootballBarForControlAsync(parameters.GetProperty("player").GetInt32(),
+                    parameters.GetProperty("x").GetDouble(), parameters.GetProperty("y").GetDouble());
+            case "football_action":
+                bool footballAccepted = _scene.ActivateFootballButton(parameters.GetProperty("id").GetString()!);
+                UpdateBoardAppStatus();
+                return new { accepted = footballAccepted, state = FootballControlState() };
             case "water_garden_action":
                 if (!parameters.TryGetProperty("id", out var waterAction) || waterAction.ValueKind != JsonValueKind.String)
                     throw new ArgumentException("Provide a Water Garden button id.");

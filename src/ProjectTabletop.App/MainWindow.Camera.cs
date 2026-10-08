@@ -367,6 +367,7 @@ public sealed partial class MainWindow
             _camera.ActiveDeviceId != _cameraWantedDeviceId) return;
         Volatile.Write(ref _latestCameraFrame, frame);
         QueueEyeTipDetection(frame);
+        QueueFootballDetection(frame);
         QueueHandTrackingVideoFrame(frame);
         var now = Stopwatch.GetTimestamp();
         if (_lastPreviewTick == 0 || Stopwatch.GetElapsedTime(_lastPreviewTick, now) >= TimeSpan.FromMilliseconds(40))
@@ -511,7 +512,7 @@ public sealed partial class MainWindow
     {
         // Learning must inspect the pupil the user actually saw, even when a
         // newer camera frame arrived after the last preview draw.
-        var frame = IsLearningEyeTip ? _bitmapFrame : _frozenFrame ?? Volatile.Read(ref _latestCameraFrame);
+        var frame = IsLearningEyeTip || IsLearningFootballTip ? _bitmapFrame : _frozenFrame ?? Volatile.Read(ref _latestCameraFrame);
         if (frame is null) return;
         var point = e.GetCurrentPoint(CameraCanvas).Position;
         var rect = CameraImageRect(frame, (float)CameraCanvas.ActualWidth, (float)CameraCanvas.ActualHeight);
@@ -520,7 +521,7 @@ public sealed partial class MainWindow
         var cameraPoint = new PixelPoint((point.X - rect.X) / rect.Width * frame.Width,
                                          (point.Y - rect.Y) / rect.Height * frame.Height);
 
-        if (TryLearnEyeTipFromPreview(frame, cameraPoint))
+        if (TryLearnFootballTipFromPreview(frame, cameraPoint) || TryLearnEyeTipFromPreview(frame, cameraPoint))
         {
             e.Handled = true;
             return;
@@ -594,6 +595,7 @@ public sealed partial class MainWindow
             DrawBoardPreview(ds, frame, rect);
             DrawHandPreview(ds, frame, rect);
             DrawEyeTipPreview(ds, frame, rect);
+            DrawFootballInputPreview(ds, frame, rect);
             if (!Volatile.Read(ref _boardSetupActive)) foreach (var detection in Volatile.Read(ref _latestDetections))
             {
                 var corners = detection.Outline.Select(View).ToArray();

@@ -109,6 +109,7 @@ public sealed partial class BoardSession
         {
             return SelectWaterGardenButton(button, now);
         }
+        if (Screen == BoardScreen.Football) return SelectFootballButton(button, now);
         if (Screen == BoardScreen.Slots)
         {
             return SelectSlotsButton(button, now);
@@ -170,6 +171,7 @@ public sealed partial class BoardSession
             Revision++;
             NavigationRevision++;
             if (Screen == BoardScreen.WaterGarden) RequestWaterGardenReset();
+            if (Screen == BoardScreen.Football) ResetFootball(now);
             openedBoard = true;
         }
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

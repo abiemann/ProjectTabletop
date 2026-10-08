@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, CrownDeed, Globe, Media, Slots, Settings, Roulette, WaterGarden }
+public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, CrownDeed, Globe, Media, Slots, Settings, Roulette, WaterGarden, Football }
 
 /// <summary>A rectangle in the board's normalized, perspective-corrected coordinate system.</summary>
 public readonly record struct BoardRect(double X, double Y, double Width, double Height)
@@ -119,6 +119,7 @@ public sealed partial class BoardSession
         BoardScreen.Blackjack => "Blackjack",
         BoardScreen.Paint => "Paint",
         BoardScreen.WaterGarden => "Water Garden",
+        BoardScreen.Football => "Football",
         BoardScreen.CrownDeed => "Crown & Deed",
         BoardScreen.Globe => "Globe",
         BoardScreen.Media => "Media",
@@ -133,6 +134,7 @@ public sealed partial class BoardSession
         BoardScreen.PhotoCopy => CurrentPhotoCopyButtons(),
         BoardScreen.Paint => CurrentPaintButtons(),
         BoardScreen.WaterGarden => CurrentWaterGardenButtons(),
+        BoardScreen.Football => CurrentFootballButtons(),
         BoardScreen.Blackjack => BlackjackButtons(),
         BoardScreen.CrownDeed => CrownDeedButtons(),
         BoardScreen.Globe => CurrentGlobeButtons(),
@@ -228,6 +230,8 @@ public sealed partial class BoardSession
     /// <summary>Clear hover and reject observations/pulses that predate a camera or calibration reset.</summary>
     public void ResetInput(DateTimeOffset now)
     {
+        ClearFootballInput(now);
+        TickFootball(now);
         ClearMenuScroll(now);
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
@@ -261,6 +265,7 @@ public sealed partial class BoardSession
         Revision++;
         NavigationRevision++;
         if (screen == BoardScreen.WaterGarden) RequestWaterGardenReset();
+        if (screen == BoardScreen.Football) ResetFootball(now);
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

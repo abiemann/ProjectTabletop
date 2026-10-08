@@ -33,7 +33,7 @@ public sealed partial class MainWindow
         var game = new BlackjackGame(41, new[] { 2, 6, 2, 10, 2, 2, 3, 4 }
             .Select(rank => new BlackjackCard(rank, BlackjackSuit.Clubs)));
         using var scene = new SceneCompositor(game, blackjackClock: () => now, globeClock: () => globeNow,
-            waterClock: () => now);
+            waterClock: () => now, footballClock: () => now);
         await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
         await scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
         foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.CrownDeed, BoardScreen.WaterGarden })
@@ -91,6 +91,7 @@ public sealed partial class MainWindow
         now += BoardSession.WaterGardenDrawerOpeningDuration;
         scene.TickWaterGarden(now);
         VerifyButtons("Water Garden/open");
+        scene.ShowFootball(); VerifyButtons("Football");
         scene.ShowBlackjack(); VerifyButtons("Blackjack betting");
         Require(scene.CurrentBoardButtons.Any(button => button.Id == "bj-reset" && button.Label == "Your Chips" &&
                     button.Bounds == new BoardRect(.742, .055, .198, .09)) &&
@@ -157,7 +158,7 @@ public sealed partial class MainWindow
             var screen = scene.CurrentBoardScreen;
             Require(context.RestrictAcquisitionToSearchRegions == (screen != BoardScreen.HandTracking) &&
                     context.AllowsSearchIllumination &&
-                    (context.ContinuousSearchPolygon is not null) == (screen == BoardScreen.PhotoCopy),
+                    (context.ContinuousSearchPolygon is not null) == (screen is BoardScreen.PhotoCopy or BoardScreen.Football),
                 label + " did not preserve its intended acquisition policy.");
             Require(context.ExpectedScene!.BoardTriggerRegions?.Count == scene.CurrentBoardButtons.Count,
                 label + " omitted its generated control-label trigger masks.");

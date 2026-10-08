@@ -66,7 +66,7 @@ public sealed partial class SceneCompositor
     private void DrawMenuPreview(CanvasDrawingSession ds, Rect rect, Rect inside, float radius, BoardScreen screen)
     {
         if (!_menuPreviewReady) return;
-        var image = _menuPreviewImages?.Image(screen);
+        var image = screen == BoardScreen.Football ? FootballMenuThumbnail(ds.Device) : _menuPreviewImages?.Image(screen);
         if (image is null) return;
         // Keep the original diagonal sheen and rounded panel clip. Only the
         // destination artwork is baked; captions and hold rims remain live.

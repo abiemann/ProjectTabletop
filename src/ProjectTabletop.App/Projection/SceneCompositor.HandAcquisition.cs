@@ -122,8 +122,12 @@ public sealed partial class SceneCompositor
                 // Photo Copy must see hands beside the subject for its field
                 // shutter and to keep a hand from being acquired as an object.
                 // This known capture area is separate from button lighting.
-                var field = BoardSession.PhotoCopyShutterBounds;
-                var capturePolygon = _boardSession.Screen == BoardScreen.PhotoCopy && !_boardSession.PhotoCopyHasSwirl
+                var footballField = FootballFieldBounds();
+                var field = _boardSession.Screen == BoardScreen.Football
+                    ? new BoardRect(footballField.X, footballField.Y, footballField.Width, footballField.Height)
+                    : BoardSession.PhotoCopyShutterBounds;
+                var capturePolygon = _boardSession.Screen == BoardScreen.Football ||
+                    _boardSession.Screen == BoardScreen.PhotoCopy && !_boardSession.PhotoCopyHasSwirl
                     ? new[] { new Point2(field.X, field.Y), new Point2(field.X + field.Width, field.Y),
                         new Point2(field.X + field.Width, field.Y + field.Height), new Point2(field.X, field.Y + field.Height) }
                         .Select(point => _boardCameraMap!.InverseTransform(_boardSurfaceMap!.Transform(point)))
@@ -339,11 +343,12 @@ public sealed partial class SceneCompositor
         var paint = _boardSession.Screen == BoardScreen.Paint;
         var globe = _boardSession.Screen == BoardScreen.Globe;
         var water = _boardSession.Screen == BoardScreen.WaterGarden;
+        var football = _boardSession.Screen == BoardScreen.Football;
         var slots = _boardSession.Screen == BoardScreen.Slots;
         bool roulette = _boardSession.Screen == BoardScreen.Roulette;
         if (_boardApplicationTarget is null || _renderedBoardState is not { } rendered ||
             rendered.Screen != _boardSession.Screen) return null;
-        if (!photoCopy && !globe && !roulette && !water && (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
+        if (!photoCopy && !globe && !roulette && !water && !football && (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
         if (_boardSession.Screen == BoardScreen.Blackjack &&
             (rendered.BlackjackRevision != _boardSession.BlackjackState.Revision ||
             rendered.BlackjackFlightRevision != _blackjackFlightRevision ||
@@ -405,6 +410,11 @@ public sealed partial class SceneCompositor
                     drawing.Clear(Colors.Black);
                     DrawWaterGardenControls(drawing, _boardSession.Buttons, [], [], _waterClock());
                 }
+                else if (football)
+                {
+                    drawing.Clear(Colors.Black);
+                    DrawFootballControls(drawing);
+                }
                 else if (globe)
                 {
                     // The sphere rotates independently. Only fixed, opaque controls
@@ -452,6 +462,7 @@ public sealed partial class SceneCompositor
                 // panel. Use the generated button interiors as lighting anchors.
                 BoardScreen.Paint => controlReferences,
                 BoardScreen.WaterGarden => controlReferences,
+                BoardScreen.Football => controlReferences,
                 BoardScreen.Globe => controlReferences,
                 BoardScreen.PhotoCopy => controlReferences,
                 BoardScreen.Slots => controlReferences,

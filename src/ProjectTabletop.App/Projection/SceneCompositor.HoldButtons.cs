@@ -181,6 +181,7 @@ public sealed partial class SceneCompositor
 
     private DateTimeOffset HoldClock() => _boardSession.Screen switch
     {
+        BoardScreen.Football => _footballClock(),
         BoardScreen.Globe => _globeClock(),
         BoardScreen.WaterGarden => _waterClock(),
         _ => _blackjackClock()

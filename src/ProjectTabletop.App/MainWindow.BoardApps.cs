@@ -46,10 +46,13 @@ public sealed partial class MainWindow
         bool slots = _scene.CurrentBoardScreen == BoardScreen.Slots;
         bool roulette = _scene.CurrentBoardScreen == BoardScreen.Roulette;
         bool water = _scene.CurrentBoardScreen == BoardScreen.WaterGarden;
+        bool football = _scene.CurrentBoardScreen == BoardScreen.Football;
+        SyncFootballControls();
         SettingsToolsPanel.Visibility = _scene.CurrentBoardScreen == BoardScreen.Settings
             ? Visibility.Visible : Visibility.Collapsed;
-        bool boardGame = blackjack || crownDeed || globe || slots || roulette || water;
-        BoardGamePreviewTitle.Text = water ? "WATER GARDEN  ·  eye-tip stick makes ripples  ·  click controls" :
+        bool boardGame = blackjack || crownDeed || globe || slots || roulette || water || football;
+        BoardGamePreviewTitle.Text = football ? "FOOTBALL  ·  black cardboard bars or index fingers  ·  first to five" :
+            water ? "WATER GARDEN  ·  stick tip makes ripples  ·  click controls" :
             roulette ? "VICE ROYALE  ·  ROULETTE  ·  click to place chips" :
             slots ? "DRAGON SLOTS  ·  click a button to play  ·  virtual credits" :
             globe ? "GLOBE  ·  zoom Earth in and out" : crownDeed ? "CROWN & DEED  ·  click the table to play" :
@@ -57,9 +60,9 @@ public sealed partial class MainWindow
         BlackjackPreviewPanel.Visibility = boardGame ? Visibility.Visible : Visibility.Collapsed;
         // Water keeps the camera beside its interactive preview so Learn eye tip
         // remains usable and the user can see whether the sticker is acquired.
-        Microsoft.UI.Xaml.Controls.Grid.SetRow(BlackjackPreviewPanel, water ? 1 : 0);
-        Microsoft.UI.Xaml.Controls.Grid.SetRowSpan(BlackjackPreviewPanel, water ? 1 : 2);
-        CameraPreviewPanel.Visibility = water || !boardGame ? Visibility.Visible : Visibility.Collapsed;
+        Microsoft.UI.Xaml.Controls.Grid.SetRow(BlackjackPreviewPanel, water || football ? 1 : 0);
+        Microsoft.UI.Xaml.Controls.Grid.SetRowSpan(BlackjackPreviewPanel, water || football ? 1 : 2);
+        CameraPreviewPanel.Visibility = water || football || !boardGame ? Visibility.Visible : Visibility.Collapsed;
         ProjectionPreviewPanel.Visibility = boardGame ? Visibility.Collapsed : Visibility.Visible;
         BoardAppStatusText.Text = _scene.CurrentBoardTitle + ". " +
             (IsBoardScanMeasuring ? "Board alignment is in progress." :
@@ -69,6 +72,7 @@ public sealed partial class MainWindow
              crownDeed ? _scene.CrownDeedState.Status :
              globe ? "Earth spins slowly. Open the ^ drawer for Zoom + and Zoom -; its Exit returns to the menu." :
              water ? "Move the calibrated stick tip across the water. Open the bottom-left arrow for Exit, Reset, and Duck+; you can also click those controls here." :
+             football ? "Choose Football input for each player. Play the computer or switch to two players. First to five wins; tracking loss pauses the match." :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :
              _scene.CurrentBoardScreen == BoardScreen.PhotoCopy ? _scene.PhotoCopyStatus :

@@ -122,6 +122,30 @@
                         <TextBlock Text="Play the dealer with virtual chips. Aim with four fingers together, then move your index finger sideways to select, or click the laptop table. The laptop table works with the projector off." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Water Garden" Click="WaterGarden_Click" />
                         <TextBlock Text="Move a calibrated stick tip across the water to make ripples. Learn its marker and enable Stick tip tracking in Hand interaction. Open the bottom-left arrow to find EXIT, RESET, and DUCK+. Hold a projected control for one second, then uncover it before pressing again. Laptop clicks also work." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <Button Content="Football" Click="OnOpenFootballBoard" />
+                        <TextBlock Text="Kick a lively football with a black cardboard T crossbar or your index finger. Play against the computer or another person, defending opposite goals. Player 1 uses the left half; player 2 uses the right." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <Expander Header="Football game" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <StackPanel Spacing="10">
+                                <ComboBox x:Name="FootballModeBox" Header="Players" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="OnFootballModeChanged">
+                                    <ComboBoxItem Content="One player against AI" />
+                                    <ComboBoxItem Content="Two human players" />
+                                </ComboBox>
+                                <ComboBox x:Name="FootballPlayer1StyleBox" Header="Player 1 kicker" SelectedIndex="0" Tag="0" HorizontalAlignment="Stretch" SelectionChanged="OnFootballStyleChanged">
+                                    <ComboBoxItem Content="Car front" />
+                                    <ComboBoxItem Content="Boxing glove" />
+                                    <ComboBoxItem Content="Frying pan" />
+                                    <ComboBoxItem Content="Football boot" />
+                                </ComboBox>
+                                <ComboBox x:Name="FootballPlayer2StyleBox" Header="Player 2 / AI kicker" SelectedIndex="1" Tag="1" HorizontalAlignment="Stretch" SelectionChanged="OnFootballStyleChanged">
+                                    <ComboBoxItem Content="Car front" />
+                                    <ComboBoxItem Content="Boxing glove" />
+                                    <ComboBoxItem Content="Frying pan" />
+                                    <ComboBoxItem Content="Football boot" />
+                                </ComboBox>
+                                <Button Content="Reset football match" Click="OnResetFootball" />
+                                <TextBlock Text="Choose each player's input and learn the black bars under Football input below. Every kicker uses the same contact size." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                            </StackPanel>
+                        </Expander>
                         <Button Content="Crown &amp; Deed" Click="CrownDeed_Click" />
                         <TextBlock Text="Choose 2–6 human and AI players, then play on the gold-and-emerald board. Click the laptop table or use the same four-finger selection gesture. Open the up-arrow drawer for Save and Exit during a game; saved games can be resumed." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Globe" Click="Globe_Click" />
@@ -160,6 +184,24 @@
                         </StackPanel>
                         <TextBlock x:Name="EyeTipStatusText" Text="Off. Learn a coloured tip or eye sticker before tracking." TextWrapping="Wrap" />
                         <TextBlock Text="For a coloured pin, choose Learn colour tip and click inside its coloured surface. For an eye sticker, choose Learn eye tip and click its black pupil. A green circle confirms tracking. After board setup, open Water Garden and move the tip close to the board to make ripples." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <Expander Header="Football input" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="Use a cardboard T with a solid black top crossbar and an uncoloured stem. Choose Learn black bar, then click the centre of the black crossbar in the live webcam preview. Face the bar up toward the camera and keep it close to the board. Profiles are saved separately for each camera." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <ComboBox x:Name="FootballPlayer1Input" Header="Player 1 input" Tag="0" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="FootballInputMode_SelectionChanged">
+                                    <ComboBoxItem Content="Black T crossbar" />
+                                    <ComboBoxItem Content="Index fingertip" />
+                                </ComboBox>
+                                <Button Content="Learn player 1 black bar" Tag="0" Click="LearnFootballTip_Click" />
+                                <ComboBox x:Name="FootballPlayer2Input" Header="Player 2 input" Tag="1" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="FootballInputMode_SelectionChanged">
+                                    <ComboBoxItem Content="Black T crossbar" />
+                                    <ComboBoxItem Content="Index fingertip" />
+                                </ComboBox>
+                                <Button Content="Learn player 2 black bar" Tag="1" Click="LearnFootballTip_Click" />
+                                <Button Content="Cancel learning" Click="CancelFootballLearning_Click" />
+                                <TextBlock x:Name="FootballInputStatusText" Text="Learn a black bar for each human player, or choose Index fingertip." TextWrapping="Wrap" />
+                                <TextBlock Text="Both black bars may look identical: keep one in each half, player 1 on the left and player 2 on the right. For fingertip play, show the back of one hand in your half and point with the index finger. Player 2 input is used in two-human mode. Lost or hidden markers stop controlling the kicker." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                            </StackPanel>
+                        </Expander>
                     </StackPanel>
                 </Border>
 

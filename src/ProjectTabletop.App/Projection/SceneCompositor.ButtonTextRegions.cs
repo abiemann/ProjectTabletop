@@ -45,6 +45,7 @@ public sealed partial class SceneCompositor
         if (_boardSession.Screen == BoardScreen.Roulette) return RouletteButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Paint) return PaintButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.WaterGarden) return WaterGardenButtonTextRegion(device, button);
+        if (_boardSession.Screen == BoardScreen.Football) return FootballButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Slots) return SlotButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Menu && button.Id == "settings") return SettingsCogTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Globe)

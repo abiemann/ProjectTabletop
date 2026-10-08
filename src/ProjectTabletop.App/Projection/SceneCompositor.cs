@@ -120,6 +120,7 @@ public sealed partial class SceneCompositor : IDisposable
             _boardCameraMap = null;
             _boardSurfaceMap = null;
             SyncWaterGardenSession();
+            SyncFootballSession();
             ResetBoardRaster();
             _handTips = [];
             _handVisualResetThrough = MonotonicClock.UtcNow;
@@ -344,6 +345,7 @@ public sealed partial class SceneCompositor : IDisposable
             }
             _blackOutput = enabled;
             SyncWaterGardenSession();
+            SyncFootballSession();
             if (enabled) ClearHandSpotlights();
         }
     }
@@ -405,6 +407,7 @@ public sealed partial class SceneCompositor : IDisposable
         _boardCameraMap = cameraMap;
         _boardSurfaceMap = surfaceMap;
         SyncWaterGardenSession();
+        SyncFootballSession();
         _handTips = [];
         _handVisualResetThrough = MonotonicClock.UtcNow;
         ClearHandSpotlights();
@@ -421,6 +424,7 @@ public sealed partial class SceneCompositor : IDisposable
             CancelBoardReveal();
             _calibrationTarget = index is >= 0 and < 4 ? index : -1;
             SyncWaterGardenSession();
+            SyncFootballSession();
             _calibrationTargetTop = pieceTop;
             if (_calibrationTarget >= 0)
             {
@@ -915,6 +919,7 @@ public sealed partial class SceneCompositor : IDisposable
             _photoCopyPremultipliedPixels = null;
             DisposePaintResources();
             DisposeWaterGardenResources();
+            DisposeFootballResources();
             DisposeWaterGardenArtwork();
             DisposeEyeProjectionReference();
             DisposePaintReference();

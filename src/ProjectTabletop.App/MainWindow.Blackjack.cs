@@ -21,7 +21,9 @@ public sealed partial class MainWindow
 
     private void BlackjackPreview_Draw(ICanvasAnimatedControl sender, CanvasAnimatedDrawEventArgs args)
     {
-        if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.WaterGarden)
+        if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Football)
+            _scene.DrawFootballPreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
+        else if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.WaterGarden)
             _scene.DrawWaterGardenPreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
         else if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Roulette)
             _scene.DrawRoulettePreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
@@ -44,13 +46,14 @@ public sealed partial class MainWindow
         bool slots = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Slots;
         bool roulette = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Roulette;
         bool water = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.WaterGarden;
-        double aspect = water ? _scene.WaterGardenPreviewAspect : roulette ? _scene.RoulettePreviewAspect : slots ? _scene.SlotsPreviewAspect : globe ? _scene.GlobePreviewAspect :
+        bool football = _scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Football;
+        double aspect = football ? _scene.FootballPreviewAspect : water ? _scene.WaterGardenPreviewAspect : roulette ? _scene.RoulettePreviewAspect : slots ? _scene.SlotsPreviewAspect : globe ? _scene.GlobePreviewAspect :
             crownDeed ? _scene.CrownDeedPreviewAspect : 1;
         double drawWidth = Math.Min(width, height * aspect), drawHeight = drawWidth / aspect;
         if (drawWidth <= 0 || drawHeight <= 0) return;
         double u = (point.Position.X - (width - drawWidth) / 2) / drawWidth;
         double v = (point.Position.Y - (height - drawHeight) / 2) / drawHeight;
-        if (water ? _scene.ActivateWaterGardenAt(u, v) : roulette ? _scene.ActivateRouletteAt(u, v) : slots ? _scene.ActivateSlotsAt(u, v) : globe ? _scene.ActivateGlobeAt(u, v) :
+        if (football ? _scene.ActivateFootballAt(u, v) : water ? _scene.ActivateWaterGardenAt(u, v) : roulette ? _scene.ActivateRouletteAt(u, v) : slots ? _scene.ActivateSlotsAt(u, v) : globe ? _scene.ActivateGlobeAt(u, v) :
             crownDeed ? _scene.ActivateCrownDeedAt(u, v) : _scene.ActivateBlackjackAt(u, v))
         {
             if (crownDeed) QueueCrownDeedSave();

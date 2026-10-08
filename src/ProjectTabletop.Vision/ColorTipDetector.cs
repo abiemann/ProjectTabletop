@@ -59,10 +59,18 @@ public static class ColorTipDetector
             patch.Select(item => item.Saturation).Order().ElementAt(patch.Count / 2),
             patch.Select(item => item.Value).Order().ElementAt(patch.Count / 2), .0001);
         using Mat mask = image.Mask(seed);
-        Cv2.FindContours(mask, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
-        var containing = contours.Where(contour => Cv2.PointPolygonTest(contour, new Point2f(cx, cy), false) >= 0)
-            .Select(contour => Component(contour, image, null)).Where(item => item is not null).ToArray();
-        if (containing.Length != 1)
+        Cv2.FindContours(mask, out Point[][] contours, out HierarchyIndex[] hierarchy,
+            RetrievalModes.CComp, ContourApproximationModes.ApproxSimple);
+        // CComp promotes every foreground island, even one inside a coloured
+        // ring's hole, to the top level. Hole outlines themselves are children
+        // and must never become candidate tips. The innermost containing
+        // foreground contour belongs to the clicked colour, not its enclosing
+        // projected artwork.
+        var containing = contours.Where((contour, index) => hierarchy[index].Parent < 0 &&
+                Cv2.PointPolygonTest(contour, new Point2f(cx, cy), false) >= 0)
+            .Select(contour => Component(contour, image, null)).Where(item => item is not null)
+            .OrderBy(item => item!.AreaPixels).ToArray();
+        if (containing.Length == 0)
             throw new InvalidOperationException("The selected colour is not a small separate tip. Keep the coloured end visible and click its centre.");
         var selected = containing[0]!;
         var profile = seed with { NormalizedArea = selected.AreaPixels / (width * (double)height) };
@@ -84,9 +92,11 @@ public static class ColorTipDetector
         if (projection is { Ready: false }) return new([], "waiting-for-projected-tip-reference");
         var image = new ColorImage(width, height, stride, bgra);
         using Mat mask = image.Mask(profile);
-        Cv2.FindContours(mask, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+        Cv2.FindContours(mask, out Point[][] contours, out HierarchyIndex[] hierarchy,
+            RetrievalModes.CComp, ContourApproximationModes.ApproxSimple);
         double expectedArea = profile.NormalizedArea * width * height;
-        var components = contours.Select(contour => Component(contour, image, expectedArea, profile))
+        var components = contours.Where((_, index) => hierarchy[index].Parent < 0)
+            .Select(contour => Component(contour, image, expectedArea, profile))
             .Where(item => item is not null).Cast<ColorTipObservation>();
         var ranked = options?.PreferredCenter is { } location ?
             components.OrderBy(item => Distance(item.Center, location)).ThenByDescending(item => item.Score) :

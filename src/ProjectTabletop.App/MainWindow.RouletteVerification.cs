@@ -252,7 +252,7 @@ public sealed partial class MainWindow
         fixture.Now = started + BoardSession.MenuScrollDuration;
         await Capture("menu-scrolled");
         Check(board.MenuScrolled && !board.MenuScrolling && scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
-            ["roulette", "paint", "settings", "menu-scroll-up"]),
+            ["roulette", "paint", "football", "settings", "menu-scroll-up"]),
             "The settled second page did not show Roulette, Paint and the fixed navigation controls.");
         var roulette = scene.CurrentBoardButtons.Single(button => button.Id == "roulette");
         var paint = scene.CurrentBoardButtons.Single(button => button.Id == "paint");
@@ -260,7 +260,7 @@ public sealed partial class MainWindow
             Math.Abs(roulette.Bounds.Y - .25) < 1e-9 && roulette.Bounds.Height == .16 &&
             Math.Abs(paint.Bounds.Y - .25) < 1e-9 && paint.Bounds.Height == .16 &&
             roulette.Bounds.X == .08 && paint.Bounds.X == .52 &&
-            board.GetMenuCards(fixture.Now).Where(button => button.Id is not ("roulette" or "paint"))
+            board.GetMenuCards(fixture.Now).Where(button => button.Id is not ("roulette" or "paint" or "football"))
                 .All(button => button.Bounds.Y + button.Bounds.Height <= BoardSession.MenuCardViewport.Y),
             "A full-page scroll left an original card in the viewport or misplaced Roulette or Paint's visible/input bounds.");
         fixture.Now += TimeSpan.FromMilliseconds(1);
