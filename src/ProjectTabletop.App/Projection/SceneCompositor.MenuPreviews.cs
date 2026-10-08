@@ -26,7 +26,9 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return GetMenuPreviewImages(device).EnsureReadyAsync();
+            // The Football card's thumbnail is drawn from that board's cached pitch.
+            return Task.WhenAll(GetMenuPreviewImages(device).EnsureReadyAsync(),
+                GetFootballRenderer(device).EnsurePitchAsync());
         }
     }
 
@@ -45,11 +47,15 @@ public sealed partial class SceneCompositor
     private void PrepareMenuPreviews(CanvasDevice device)
     {
         var images = GetMenuPreviewImages(device);
-        bool ready = images.IsReady;
+        var football = GetFootballRenderer(device);
+        _ = football.EnsurePitchAsync();
+        bool ready = images.IsReady && football.PitchCompleted;
         if (ready == _menuPreviewReady) return;
         _menuPreviewReady = ready;
         if (ready && images.Error is { } error)
             AppLog.Write("Menu thumbnails", new InvalidDataException(error));
+        if (ready && football.PitchError is { } pitchError)
+            AppLog.Write("Football menu thumbnail", new InvalidDataException(pitchError));
         InvalidateMenuPreviewSurface();
     }
 

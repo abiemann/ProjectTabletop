@@ -1,8 +1,10 @@
+using System.Numerics;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Text;
 using ProjectTabletop.Interaction;
 using ProjectTabletop.Vision;
 using Windows.Foundation;
+using Windows.UI;
 
 namespace ProjectTabletop.App.Projection;
 
@@ -14,6 +16,44 @@ public sealed partial class SceneCompositor
     private Rect BoardVectorArrowInk(BoardButton button) => IsCrownDeedDrawerHandle(button)
         ? CrownDeedDrawerArrowInk(button, PaintBoardAspect())
         : DrawerArrowInk(IsMenuScrollHandle(button) ? MenuArrowAppearance(button) : button, PaintBoardAspect());
+
+    // The board surface is square in logical units but not on the physical
+    // board. Draw text in physical proportions; narrow boards shrink the font.
+    private void DrawBoardAspectText(CanvasDrawingSession ds, string text, Rect bounds, Color color, CanvasTextFormat format)
+    {
+        float aspect = (float)PaintBoardAspect();
+        float size = format.FontSize;
+        var transform = ds.Transform;
+        try
+        {
+            format.FontSize = size * Math.Min(1, aspect);
+            ds.Transform = Matrix3x2.CreateScale(1 / aspect, 1) * transform;
+            ds.DrawText(text, new Rect(bounds.X * aspect, bounds.Y, bounds.Width * aspect, bounds.Height), color, format);
+        }
+        finally
+        {
+            ds.Transform = transform;
+            format.FontSize = size;
+        }
+    }
+
+    // The caption-hold ink region of a button label drawn by DrawBoardAspectText.
+    private HandTrackingBounds BoardAspectButtonTextRegion(CanvasDevice device, BoardButton button,
+        CanvasTextFormat format, Rect rectangle)
+    {
+        float aspect = (float)PaintBoardAspect();
+        float size = format.FontSize;
+        try
+        {
+            format.FontSize = size * Math.Min(1, aspect);
+            using var layout = new CanvasTextLayout(device, button.Label, format,
+                (float)rectangle.Width * aspect, (float)rectangle.Height);
+            var ink = layout.DrawBounds;
+            return ButtonInkRegion(button, new Rect(ink.X / aspect, ink.Y, ink.Width / aspect, ink.Height),
+                rectangle.X, rectangle.Y);
+        }
+        finally { format.FontSize = size; }
+    }
 
     private static HandTrackingBounds BoardButtonPlateRegion(BoardButton button) =>
         new(button.Bounds.X + .012, button.Bounds.Y + .012,

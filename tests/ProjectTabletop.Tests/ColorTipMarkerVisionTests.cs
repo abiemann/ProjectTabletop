@@ -2,7 +2,9 @@ using ProjectTabletop.Vision;
 
 namespace ProjectTabletop.Tests;
 
-public class FootballInputVisionTests
+// Multi-marker colour-tip detection and tracking. Football reads black bars;
+// see BlackTipVisionTests for its half assignment.
+public class ColorTipMarkerVisionTests
 {
     private const int Width = 320, Height = 240;
     private static readonly DateTimeOffset Epoch = new(2026, 10, 7, 12, 0, 0, TimeSpan.Zero);

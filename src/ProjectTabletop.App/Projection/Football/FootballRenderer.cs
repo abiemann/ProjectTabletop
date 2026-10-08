@@ -14,15 +14,40 @@ internal sealed partial class FootballRenderer : IDisposable
 {
     private readonly CanvasDevice _device;
     private readonly SoccerBallRenderer _ball = new();
+    private readonly object _pitchGate = new();
+    private Task? _pitchTask;
     private CanvasRenderTarget? _pitch;
-    private readonly float[] _heading = [0, MathF.PI];
+    private bool _disposed;
 
     internal FootballRenderer(CanvasDevice device) => _device = device;
+
+    internal bool PitchReady => Pitch is not null;
+    internal bool PitchCompleted { get { lock (_pitchGate) return _pitchTask is { IsCompleted: true }; } }
+    internal string? PitchError { get { lock (_pitchGate) return _pitchTask?.Exception?.GetBaseException().Message; } }
+    private CanvasRenderTarget? Pitch { get { lock (_pitchGate) return _pitch; } }
+
+    // About 300k antialiased grass strokes are far too slow for a render pass
+    // under the compositor lock. Build the cached pitch once on a worker; draw
+    // callers show their loading state until it is published.
+    internal Task EnsurePitchAsync()
+    {
+        lock (_pitchGate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_pitchTask is null)
+            {
+                _pitchTask = Task.Run(BuildPitch);
+                _ = _pitchTask.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            }
+            return _pitchTask;
+        }
+    }
 
     internal void DrawThumbnail(CanvasDrawingSession ds, Rect bounds)
     {
         if (bounds.Width <= 0 || bounds.Height <= 0) return;
-        EnsurePitch();
+        var pitch = Pitch ?? throw new InvalidOperationException("Football pitch artwork is not ready.");
         var before = ds.Transform;
         float scale = (float)bounds.Height / 400;
         float width = (float)bounds.Width / scale;
@@ -34,7 +59,7 @@ internal sealed partial class FootballRenderer : IDisposable
             double cropWidth = 1824, cropHeight = cropWidth * 400 / width;
             if (cropHeight > 1132) { cropHeight = 1132; cropWidth = cropHeight * width / 400; }
             var crop = new Rect((1824 - cropWidth) / 2, (1132 - cropHeight) / 2, cropWidth, cropHeight);
-            ds.DrawImage(_pitch!, new Rect(0, 0, width, 400), crop);
+            ds.DrawImage(pitch, new Rect(0, 0, width, 400), crop);
             var center = new Vector2(width * .80f, 178);
             DrawSoftShadow(ds, center + new Vector2(47, 89), 127, 93, 165);
             DrawSoftShadow(ds, new(width * .66f + 12, 320), 68, 42, 115);
@@ -48,13 +73,14 @@ internal sealed partial class FootballRenderer : IDisposable
     internal void Draw(CanvasDrawingSession ds, Rect fieldBounds, FootballSnapshot snapshot)
     {
         if (fieldBounds.Width <= 0 || fieldBounds.Height <= 0) return;
-        EnsurePitch();
+        var pitch = Pitch;
         var previous = ds.Transform;
         ds.Transform = Matrix3x2.CreateScale((float)fieldBounds.Width / 1600, (float)fieldBounds.Height / 1000) *
             Matrix3x2.CreateTranslation((float)fieldBounds.X, (float)fieldBounds.Y) * previous;
         try
         {
-            ds.DrawImage(_pitch!, -112, -66);
+            if (pitch is not null) ds.DrawImage(pitch, -112, -66);
+            else ds.FillRectangle(new Rect(0, 0, 1600, 1000), Ink(66, 105, 39));
             // Goal shadows belong to the turf and remain under the moving ball.
             DrawGoal(ds, false, false);
             DrawGoal(ds, true, false);
@@ -74,20 +100,10 @@ internal sealed partial class FootballRenderer : IDisposable
             if (lift < 8)
                 DrawSoftShadow(ds, ground + new Vector2(2, 4), radius * .64f, radius * .38f, (byte)(100 * (1 - lift / 8)));
 
+            // The simulation turns each body toward play at a fixed rate.
             foreach (var kicker in snapshot.Kickers)
-            {
-                int index = Math.Clamp(kicker.Index, 0, 1);
-                float speed = kicker.Velocity.Length();
-                // Point toward play; small motion turns the body without jittering at rest.
-                if (speed > .10f)
-                {
-                    float target = MathF.Atan2(kicker.Velocity.Y, kicker.Velocity.X);
-                    float delta = MathF.IEEERemainder(target - _heading[index], MathF.Tau);
-                    _heading[index] += Math.Clamp(delta, -.14f, .14f);
-                }
-                DrawKicker(ds, kicker.Style, FieldPoint(kicker.Position), _heading[index],
-                    index == 0 ? Ink(239, 91, 53) : Ink(52, 161, 224), kicker.Present, !kicker.IsAi);
-            }
+                DrawKicker(ds, kicker.Style, FieldPoint(kicker.Position), kicker.Heading,
+                    kicker.Index == 0 ? Ink(239, 91, 53) : Ink(52, 161, 224), kicker.Present, !kicker.IsAi);
             _ball.Draw(ds, ballCenter, radius, snapshot.BallRotation);
             // Elevated crossbars occlude a low ball at the goal mouth.
             DrawGoal(ds, false, true);
@@ -98,10 +114,10 @@ internal sealed partial class FootballRenderer : IDisposable
 
     private static Vector2 FieldPoint(Vector2 point) => new((point.X + .8f) * 1000, (point.Y + .5f) * 1000);
 
-    private void EnsurePitch()
+    private void BuildPitch()
     {
-        if (_pitch is not null) return;
         var target = new CanvasRenderTarget(_device, 1824, 1132, 96);
+        bool published = false;
         try
         {
             using (var ds = target.CreateDrawingSession())
@@ -124,9 +140,14 @@ internal sealed partial class FootballRenderer : IDisposable
                 }
                 ds.DrawRoundedRectangle(new Rect(-110, -64, 1820, 1128), 16, 16, Ink(17, 37, 22, 180), 3);
             }
-            _pitch = target;
+            lock (_pitchGate)
+            {
+                if (_disposed) return;
+                _pitch = target;
+                published = true;
+            }
         }
-        catch { target.Dispose(); throw; }
+        finally { if (!published) target.Dispose(); }
     }
 
     private static void DrawGrass(CanvasDrawingSession ds)
@@ -298,5 +319,13 @@ internal sealed partial class FootballRenderer : IDisposable
     }
 
     private static Color Ink(byte r, byte g, byte b, byte alpha = 255) => Color.FromArgb(alpha, r, g, b);
-    public void Dispose() { _pitch?.Dispose(); _pitch = null; }
+    public void Dispose()
+    {
+        lock (_pitchGate)
+        {
+            _disposed = true;
+            _pitch?.Dispose();
+            _pitch = null;
+        }
+    }
 }

@@ -64,8 +64,8 @@ try {
     foreach ($route in @{
             show_blackjack = 'Blackjack'; show_crown_deed = 'CrownDeed'; show_globe = 'Globe';
             show_slots = 'Slots'; show_roulette = 'Roulette'; show_photo_copy = 'PhotoCopy';
-            show_paint = 'Paint'; show_water_garden = 'WaterGarden'; show_settings = 'Settings';
-            show_board_menu = 'Menu'
+            show_paint = 'Paint'; show_water_garden = 'WaterGarden'; show_football = 'Football';
+            show_settings = 'Settings'; show_board_menu = 'Menu'
         }.GetEnumerator()) {
         $result = Invoke-Control $route.Key
         if ($result.boardApp -ne $route.Value) { throw "Navigation failed: $($route.Key)" }

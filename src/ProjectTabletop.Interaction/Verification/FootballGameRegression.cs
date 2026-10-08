@@ -14,9 +14,11 @@ internal static class FootballGameRegression
         CheckGoalsPostsAndHighBalls();
         CheckInputSafetyAndAppearances();
         CheckAiAndDeterminism();
+        CheckWaitingKickersIdleFramesAndHeading();
         Console.WriteLine("Football verification passed: fresh-input countdown/pause/reset, swept bumper impacts, " +
             "speed caps, lively boundary/floor rebounds, height and quaternion rotation, exact-once goals, " +
-            "posts/high balls, first-to-five, invalid/stale/jumping input, equal kicker styles and bounded physical AI.");
+            "posts/high balls, first-to-five, invalid/stale/jumping input, equal kicker styles, bounded physical AI, " +
+            "kickers following input while paused, stable idle revisions and simulation-timed headings.");
     }
 
     private static void CheckCountdownPauseAndReset()
@@ -260,6 +262,36 @@ internal static class FootballGameRegression
         first.Game.SetPlayerInput(1, new(-.7f, -.4f), first.Now.AddMilliseconds(1));
         Require(first.Game.Snapshot.Kickers[1].Position == aiBefore.Position,
             "Human observations must not teleport the computer player.");
+    }
+
+    private static void CheckWaitingKickersIdleFramesAndHeading()
+    {
+        var game = new FootballGame();
+        game.SetMode(FootballMode.TwoHumans, Epoch);
+        game.Advance(Epoch);
+        var now = Epoch;
+        foreach (var target in new Vector2[] { new(-.5f, .1f), new(-.45f, .08f), new(-.41f, .05f) })
+        {
+            now = now.AddMilliseconds(30);
+            game.SetPlayerInput(0, target, now);
+            game.Advance(now);
+            var kicker = game.Snapshot.Kickers[0];
+            Require(game.Snapshot.Phase == FootballPhase.WaitingForPlayers && kicker.Present &&
+                kicker.Position == target && kicker.Velocity == Vector2.Zero,
+                "A present player's kicker must follow its input while waiting for the other player.");
+        }
+        var idle = game.Snapshot;
+        game.Advance(now.AddMilliseconds(10));
+        Require(ReferenceEquals(idle, game.Snapshot) && game.Revision == idle.Revision,
+            "An unchanged pause must keep its revision so renderers can reuse the frame.");
+
+        var rig = Playing();
+        float before = rig.Game.Snapshot.Kickers[0].Heading;
+        rig.P1 = new(-.52f, .30f);
+        rig.Step(30);
+        float after = rig.Game.Snapshot.Kickers[0].Heading;
+        Require(before == 0 && after < -.05f && after > -MathF.PI / 2 - .0001f,
+            "A moving kicker must turn toward its motion at the fixed simulated rate.");
     }
 
     private static Rig Playing(FootballMode mode = FootballMode.TwoHumans)

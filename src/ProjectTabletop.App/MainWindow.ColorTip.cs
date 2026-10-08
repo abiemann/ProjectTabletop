@@ -110,6 +110,7 @@ public sealed partial class MainWindow
     {
         if (!_camera.IsRunning || !_cameraWanted || _camera.ActiveDeviceId != _selectedCameraId)
         { SetStatus("Start the selected webcam before learning the coloured tip."); return; }
+        CancelFootballLearning();
         SetStickTrackingEnabled(true);
         _frozenFrame = null;
         lock (_eyeTipGate)
@@ -145,6 +146,7 @@ public sealed partial class MainWindow
             throw new InvalidOperationException("Start the selected webcam and wait for a fresh camera frame.");
         if (!double.IsFinite(x) || !double.IsFinite(y) || x < 0 || y < 0 || x >= frame.Width || y >= frame.Height)
             throw new ArgumentException("Provide x and y inside the raw camera frame.");
+        CancelFootballLearning();
         SetStickTrackingEnabled(true);
         _frozenFrame = null;
         long generation;

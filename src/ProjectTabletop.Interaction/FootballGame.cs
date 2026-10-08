@@ -6,8 +6,9 @@ public enum FootballMode { HumanVsAi, TwoHumans }
 public enum FootballKickerStyle { Car, Glove, Pan, Boot }
 public enum FootballPhase { WaitingForPlayers, Countdown, Playing, Goal, Finished }
 
+/// <summary>Heading is the cosmetic facing in radians, turned at a fixed simulated rate.</summary>
 public sealed record FootballKickerSnapshot(int Index, Vector2 Position, Vector2 Velocity,
-    bool Present, FootballKickerStyle Style, bool IsAi);
+    bool Present, FootballKickerStyle Style, bool IsAi, float Heading = 0);
 
 /// <summary>Field coordinates are centered: X goes left to right, Y goes top to bottom.
 /// BallHeight is its center above the turf, in the same units as the field.</summary>
@@ -42,6 +43,8 @@ public sealed class FootballGame
     private const float Gravity = 2.8f;
     private const float CountdownDuration = 1.5f;
     private const float Restitution = .96f;
+    private const float HeadingSpeed = .10f;
+    private const float HeadingTurnRate = 8.4f;
     private static readonly Vector2[] GoalPosts =
     [
         new(-Width / 2, -GoalHalfWidth), new(-Width / 2, GoalHalfWidth),
@@ -71,9 +74,11 @@ public sealed class FootballGame
     public FootballSnapshot Snapshot => _snapshot ??= CreateSnapshot();
 
     /// <summary>
-    /// Supply a fresh world-space marker/fingertip, or null immediately on a missed observation.
-    /// Invalid/outside samples disarm the player. Large discontinuities reacquire without sweeping
-    /// a bumper through the pitch, so a changed hand identity cannot produce a phantom kick.
+    /// Supply a fresh world-space marker/fingertip, or null when the player is lost or ambiguous.
+    /// A caller may omit samples during a brief miss: the kicker holds its last target and becomes
+    /// absent after InputFreshness. Invalid/outside samples disarm the player. Large discontinuities
+    /// reacquire without sweeping a bumper through the pitch, so a changed hand identity cannot
+    /// produce a phantom kick.
     /// </summary>
     public void SetPlayerInput(int index, Vector2? position, DateTimeOffset observedAt)
     {
@@ -153,6 +158,7 @@ public sealed class FootballGame
             kicker.ObservedAt = null;
             kicker.Position = kicker.Target = new(kicker.Index == 0 ? -.52f : .52f, 0);
             kicker.Velocity = Vector2.Zero;
+            kicker.Heading = kicker.Index == 0 ? 0 : MathF.PI;
             kicker.CollisionQuiet = .10f;
         }
         Change();
@@ -163,7 +169,8 @@ public sealed class FootballGame
         if (_lastAdvance is { } previous && now <= previous) return;
         double elapsed = _lastAdvance is { } last ? (now - last).TotalSeconds : 0;
         _lastAdvance = now;
-        bool ready = UpdatePresence(now);
+        var phase = _phase;
+        bool changed = UpdatePresence(now, out bool ready);
         // A suspended window must not catch up several seconds of football against an absent hand.
         if (elapsed > .20)
         {
@@ -171,6 +178,7 @@ public sealed class FootballGame
             _accumulator = 0;
             foreach (var kicker in _kickers)
             {
+                changed |= kicker.Velocity != Vector2.Zero;
                 kicker.Velocity = Vector2.Zero;
                 kicker.CollisionQuiet = .10f;
             }
@@ -189,10 +197,23 @@ public sealed class FootballGame
             _phaseRemaining = CountdownDuration;
             _accumulator = 0;
         }
+        changed |= _phase != phase;
         if (_phase is FootballPhase.WaitingForPlayers or FootballPhase.Finished)
         {
-            foreach (var kicker in _kickers) kicker.Velocity = Vector2.Zero;
-            Change();
+            // Play is paused: a present player's kicker follows its input directly,
+            // without moving the ball or banking velocity for a later kick.
+            foreach (var kicker in _kickers)
+            {
+                if (kicker.Present && !IsAi(kicker) && kicker.Position != kicker.Target)
+                {
+                    kicker.Position = kicker.Target;
+                    changed = true;
+                }
+                changed |= kicker.Velocity != Vector2.Zero;
+                kicker.Velocity = Vector2.Zero;
+            }
+            // An idle pause keeps its revision, so renderers reuse the last image.
+            if (changed) Change();
             return;
         }
 
@@ -201,30 +222,31 @@ public sealed class FootballGame
         {
             _accumulator -= StepDuration;
             Step(ready);
+            changed = true;
         }
-        Change();
+        if (changed) Change();
     }
 
-    private bool UpdatePresence(DateTimeOffset now)
+    /// <summary>Marks stale humans absent and reports whether anything visible changed.</summary>
+    private bool UpdatePresence(DateTimeOffset now, out bool ready)
     {
-        bool ready = true;
+        ready = true;
+        bool changed = false;
         foreach (var kicker in _kickers)
         {
-            if (IsAi(kicker))
+            bool present = IsAi(kicker) ||
+                kicker.HasInput && kicker.ObservedAt is { } at && now >= at && now - at <= InputFreshness;
+            if (!present)
             {
-                kicker.Present = true;
-                continue;
-            }
-            bool fresh = kicker.HasInput && kicker.ObservedAt is { } at && now >= at && now - at <= InputFreshness;
-            if (!fresh)
-            {
+                changed |= kicker.Velocity != Vector2.Zero;
                 kicker.Velocity = Vector2.Zero;
                 kicker.CollisionQuiet = .10f;
             }
-            kicker.Present = fresh;
-            ready &= fresh;
+            changed |= kicker.Present != present;
+            kicker.Present = present;
+            ready &= present;
         }
-        return ready;
+        return changed;
     }
 
     private void Step(bool ready)
@@ -329,7 +351,19 @@ public sealed class FootballGame
             else kicker.Velocity = Limit((kicker.Target - kicker.Position) * 36, MaxKickerSpeed);
             kicker.Position = ClampKicker(kicker.Position + kicker.Velocity * StepSeconds);
             kicker.Velocity = (kicker.Position - kicker.StepStart) / StepSeconds;
+            TurnToward(kicker);
         }
+    }
+
+    // Cosmetic facing follows play at a fixed rate of simulated time, so every
+    // canvas draws the same heading however many frames it renders.
+    private static void TurnToward(Kicker kicker)
+    {
+        if (kicker.Velocity.LengthSquared() <= HeadingSpeed * HeadingSpeed) return;
+        float target = MathF.Atan2(kicker.Velocity.Y, kicker.Velocity.X);
+        float limit = HeadingTurnRate * StepSeconds;
+        float delta = MathF.IEEERemainder(target - kicker.Heading, MathF.Tau);
+        kicker.Heading = MathF.IEEERemainder(kicker.Heading + Math.Clamp(delta, -limit, limit), MathF.Tau);
     }
 
     private void StepVertical()
@@ -491,7 +525,7 @@ public sealed class FootballGame
             _ => "First to 5"
         };
         var kickers = Array.AsReadOnly(_kickers.Select(kicker => new FootballKickerSnapshot(kicker.Index,
-            kicker.Position, kicker.Velocity, kicker.Present, kicker.Style, IsAi(kicker))).ToArray());
+            kicker.Position, kicker.Velocity, kicker.Present, kicker.Style, IsAi(kicker), kicker.Heading)).ToArray());
         return new(_ballPosition, _ballVelocity, _ballHeight, _ballVerticalVelocity, _ballRotation, kickers,
             _score1, _score2, _mode, _phase, banner, _phaseRemaining, Revision);
     }
@@ -540,6 +574,7 @@ public sealed class FootballGame
         public DateTimeOffset? ObservedAt;
         public float CollisionQuiet;
         public float HopCooldown;
+        public float Heading = index == 0 ? 0 : MathF.PI;
         public FootballKickerStyle Style = index == 0 ? FootballKickerStyle.Car : FootballKickerStyle.Glove;
     }
 }

@@ -18,6 +18,8 @@ public sealed partial class BoardSession
         new BoardButton("paint", "Paint", new(.52, .85, .40, .16), BoardScreen.Paint),
         new BoardButton("football", "Football", new(.08, 1.05, .40, .16), BoardScreen.Football)
     });
+    /// <summary>Number of launcher cards across both menu pages.</summary>
+    public static int MenuCardCount => MenuCards.Count;
     private bool _menuScrolled;
     private DateTimeOffset? _menuScrollStartedAt;
     private DateTimeOffset _menuScrollObservedAt = DateTimeOffset.MinValue;

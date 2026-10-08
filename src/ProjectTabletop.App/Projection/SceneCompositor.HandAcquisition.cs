@@ -122,11 +122,13 @@ public sealed partial class SceneCompositor
                 // Photo Copy must see hands beside the subject for its field
                 // shutter and to keep a hand from being acquired as an object.
                 // This known capture area is separate from button lighting.
+                // Football searches its pitch only while a human plays by fingertip.
+                bool footballSearch = FootballFingerSearch;
                 var footballField = FootballFieldBounds();
-                var field = _boardSession.Screen == BoardScreen.Football
+                var field = footballSearch
                     ? new BoardRect(footballField.X, footballField.Y, footballField.Width, footballField.Height)
                     : BoardSession.PhotoCopyShutterBounds;
-                var capturePolygon = _boardSession.Screen == BoardScreen.Football ||
+                var capturePolygon = footballSearch ||
                     _boardSession.Screen == BoardScreen.PhotoCopy && !_boardSession.PhotoCopyHasSwirl
                     ? new[] { new Point2(field.X, field.Y), new Point2(field.X + field.Width, field.Y),
                         new Point2(field.X + field.Width, field.Y + field.Height), new Point2(field.X, field.Y + field.Height) }

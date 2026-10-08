@@ -36,7 +36,8 @@ public sealed partial class MainWindow
             waterClock: () => now, footballClock: () => now);
         await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
         await scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
-        foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.CrownDeed, BoardScreen.WaterGarden })
+        foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.CrownDeed,
+            BoardScreen.WaterGarden, BoardScreen.Football })
             await scene.EnsureBoardArtworkResourcesAsync(CanvasDevice.GetSharedDevice(), screen);
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96);
         scene.SetDisplayAspect(1);
@@ -91,6 +92,8 @@ public sealed partial class MainWindow
         now += BoardSession.WaterGardenDrawerOpeningDuration;
         scene.TickWaterGarden(now);
         VerifyButtons("Water Garden/open");
+        // The pitch search is part of Football's policy only for fingertip players.
+        scene.SetFootballFingerInput(0, true);
         scene.ShowFootball(); VerifyButtons("Football");
         scene.ShowBlackjack(); VerifyButtons("Blackjack betting");
         Require(scene.CurrentBoardButtons.Any(button => button.Id == "bj-reset" && button.Label == "Your Chips" &&

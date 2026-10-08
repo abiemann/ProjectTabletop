@@ -117,8 +117,6 @@ public class BlackTipVisionTests
         var profile = Learn(training, 75, 120);
         var left = new ColorTipTracker();
         var right = new ColorTipTracker();
-        ColorTipDetectionResult Half(ColorTipDetectionResult all, bool first) =>
-            new(all.Candidates.Where(item => first ? item.Center.X < Width / 2 : item.Center.X >= Width / 2).ToArray(), all.Reason);
         for (int frame = 0; frame < 12; frame++)
         {
             var image = Frame();
@@ -128,26 +126,33 @@ public class BlackTipVisionTests
             var all = Detect(image, profile);
             Assert.Equal(2, all.Candidates.Count);
             var now = Epoch.AddMilliseconds(frame * 40);
-            var first = left.Update(Half(all, true), now, now);
-            var second = right.Update(Half(all, false), now, now);
-            Assert.Equal(frame > 0, first.Confirmed);
-            Assert.Equal(frame > 0, second.Confirmed);
-            Assert.InRange(first.Observation!.Center.X, lx - 1, lx + 1);
-            Assert.InRange(second.Observation!.Center.X, rx - 1, rx + 1);
+            var first = FootballTipAssignment.Update(left, 0, all, Field, now, now);
+            var second = FootballTipAssignment.Update(right, 1, all, Field, now, now);
+            var expected = frame > 0 ? FootballTipAction.Publish : FootballTipAction.Hold;
+            Assert.Equal(expected, first.Action);
+            Assert.Equal(expected, second.Action);
+            if (frame == 0) continue;
+            Assert.InRange(first.Tip!.Center.X, lx - 1, lx + 1);
+            Assert.InRange(second.Tip!.Center.X, rx - 1, rx + 1);
+            Assert.InRange(first.FieldPoint!.Value.X, (lx - 1.0) / Width, (lx + 1.0) / Width);
         }
         var occluded = Frame();
         Bar(occluded, 200, 145, 30, 8, 35);
         var lostAt = Epoch.AddMilliseconds(480);
         var onlyRight = Detect(occluded, profile);
-        Assert.False(left.Update(Half(onlyRight, true), lostAt, lostAt).Confirmed);
-        Assert.True(right.Update(Half(onlyRight, false), lostAt, lostAt).Confirmed);
+        // A missing bar holds the last input instead of immediately pausing play.
+        Assert.Equal(FootballTipAction.Hold, FootballTipAssignment.Update(left, 0, onlyRight, Field, lostAt, lostAt).Action);
+        Assert.Equal(FootballTipAction.Publish, FootballTipAssignment.Update(right, 1, onlyRight, Field, lostAt, lostAt).Action);
         Bar(occluded, 117, 100, 30, 8, 70);
         var back = Detect(occluded, profile);
         var backAt = lostAt.AddMilliseconds(40);
-        Assert.False(left.Update(Half(back, true), backAt, backAt).Confirmed);
+        Assert.Equal(FootballTipAction.Hold, FootballTipAssignment.Update(left, 0, back, Field, backAt, backAt).Action);
         backAt = backAt.AddMilliseconds(40);
-        Assert.True(left.Update(Half(back, true), backAt, backAt).Confirmed);
-        Assert.False(left.Update(Half(back, true), backAt, backAt.AddMilliseconds(400)).Confirmed);
+        var returned = FootballTipAssignment.Update(left, 0, back, Field, backAt, backAt);
+        Assert.Equal(FootballTipAction.Publish, returned.Action);
+        Assert.InRange(returned.Tip!.Center.X, 116, 118);
+        Assert.NotEqual(FootballTipAction.Publish,
+            FootballTipAssignment.Update(left, 0, back, Field, backAt, backAt.AddMilliseconds(400)).Action);
     }
 
     [Fact]
@@ -158,27 +163,54 @@ public class BlackTipVisionTests
         var profile = Learn(image, 90, 120);
         Bar(image, 125, 120, 30, 8);
         Bar(image, 245, 120, 30, 8);
-        var candidates = Detect(image, profile).Candidates;
-        Assert.Equal(3, candidates.Count);
-        var left = new ColorTipDetectionResult(candidates.Where(item => item.Center.X < Width / 2).ToArray(), "left-half");
-        var right = new ColorTipDetectionResult(candidates.Where(item => item.Center.X >= Width / 2).ToArray(), "right-half");
-        Assert.False(new ColorTipTracker().Update(left, Epoch, Epoch).Confirmed);
+        var all = Detect(image, profile);
+        Assert.Equal(3, all.Candidates.Count);
+        var ambiguous = FootballTipAssignment.Update(new ColorTipTracker(), 0, all, Field, Epoch, Epoch);
+        Assert.Equal(FootballTipAction.Clear, ambiguous.Action);
+        Assert.Null(ambiguous.Tip);
         var rightTracker = new ColorTipTracker();
-        rightTracker.Update(right, Epoch, Epoch);
-        Assert.True(rightTracker.Update(right, Epoch.AddMilliseconds(40), Epoch.AddMilliseconds(40)).Confirmed);
+        Assert.Equal(FootballTipAction.Hold, FootballTipAssignment.Update(rightTracker, 1, all, Field, Epoch, Epoch).Action);
+        var later = Epoch.AddMilliseconds(40);
+        Assert.Equal(FootballTipAction.Publish, FootballTipAssignment.Update(rightTracker, 1, all, Field, later, later).Action);
     }
 
     [Fact]
-    public void OptionalEmptyBoardBaselineRejectsAnAlreadyPresentBlackBar()
+    public void ProjectionWaitClearsAndOffPitchBarsDoNotCount()
     {
-        var empty = Frame();
-        Bar(empty, 160, 120, 30, 8);
-        Assert.Throws<InvalidOperationException>(() => BlackTipDetector.Learn(Width, Height, Width * 4,
-            empty, new(160, 120), new(EmptyBgra: empty)));
-        var withBat = empty.ToArray();
-        Bar(withBat, 230, 160, 30, 8, 45);
-        Assert.True(BlackTipDetector.Learn(Width, Height, Width * 4, withBat, new(230, 160), new(EmptyBgra: empty)).IsValid);
+        var image = Frame();
+        Bar(image, 110, 120, 30, 8);
+        var profile = Learn(image, 110, 120);
+        var tracker = new ColorTipTracker();
+        var waiting = FootballTipAssignment.Update(tracker, 0,
+            new ColorTipDetectionResult([], "waiting-for-projected-bat-reference"), Field, Epoch, Epoch);
+        Assert.Equal(FootballTipAction.Clear, waiting.Action);
+        // A second bar in the left half, but beside the pitch, is not this player's input.
+        Bar(image, 40, 120, 30, 8);
+        var all = Detect(image, profile);
+        Assert.Equal(2, all.Candidates.Count);
+        static PixelPoint? Pitch(PixelPoint camera) => camera.X < 70 ? null : Field(camera);
+        Assert.Equal(FootballTipAction.Hold, FootballTipAssignment.Update(tracker, 0, all, Pitch, Epoch, Epoch).Action);
+        var later = Epoch.AddMilliseconds(40);
+        var tracked = FootballTipAssignment.Update(tracker, 0, all, Pitch, later, later);
+        Assert.Equal(FootballTipAction.Publish, tracked.Action);
+        Assert.InRange(tracked.Tip!.Center.X, 109, 111);
     }
+
+    [Fact]
+    public void DetectEachSharesOneFrameAcrossProfiles()
+    {
+        var image = Frame();
+        Bar(image, 90, 120, 30, 8);
+        Bar(image, 230, 120, 44, 8);
+        var shortBar = Learn(image, 90, 120);
+        var longBar = Learn(image, 230, 120);
+        var results = BlackTipDetector.DetectEach(Width, Height, Width * 4, image, [shortBar, longBar]);
+        Assert.Equal(2, results.Count);
+        Assert.Equal(Detect(image, shortBar).Candidates.Select(tip => tip.Center), results[0].Candidates.Select(tip => tip.Center));
+        Assert.Equal(Detect(image, longBar).Candidates.Select(tip => tip.Center), results[1].Candidates.Select(tip => tip.Center));
+    }
+
+    private static PixelPoint? Field(PixelPoint camera) => new PixelPoint(camera.X / Width, camera.Y / Height);
 
     private static BlackTipProfile Learn(byte[] image, int x, int y) =>
         BlackTipDetector.Learn(Width, Height, Width * 4, image, new(x, y));

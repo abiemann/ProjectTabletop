@@ -171,7 +171,6 @@ public sealed partial class SceneCompositor
         _blackjackPreviewRevision = -1;
         ResetPaint();
         DisposeWaterGardenResources();
-        DisposeFootballResources();
         // A first launch can wait for calibration. Keep its unseen hint pending;
         // resetting an already visible painting still leaves the board blank.
         if (unseenPaintIntroduction && _boardSession.Screen == BoardScreen.Paint) SchedulePaintIntroduction();

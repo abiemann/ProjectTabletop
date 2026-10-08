@@ -51,6 +51,9 @@ internal sealed class EyeTipProjectionMatcher
             .Select(frame => References.GetValue(frame, static value => new(value))).ToArray();
     }
 
+    /// <summary>Whether any current reference places this raw camera point on the board.</summary>
+    public bool ContainsBoardPoint(PixelPoint center) => _frames.Any(frame => frame.InBoard(center.X, center.Y));
+
     public bool IsPhysicalCandidate(EyeTipObservation eye, byte[] gray, int width, int height,
         double scaleX, double scaleY) => IsPhysicalCandidate(eye.Center, eye.RadiusPixels,
             gray, width, height, scaleX, scaleY);

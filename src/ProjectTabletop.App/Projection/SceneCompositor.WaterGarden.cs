@@ -461,7 +461,7 @@ public sealed partial class SceneCompositor
         else
         {
             using var text = WaterGardenButtonTextFormat();
-            DrawWaterText(ds, button.Label, WaterGardenButtonTextRectangle(button),
+            DrawBoardAspectText(ds, button.Label, WaterGardenButtonTextRectangle(button),
                 button.Enabled ? WaterInk : Color.FromArgb(255, 104, 115, 107), text);
             DrawButtonFingerSelectionFeedback(ds, button, feedback, WaterInk);
         }
@@ -481,30 +481,10 @@ public sealed partial class SceneCompositor
         return format;
     }
 
-    private void DrawWaterText(CanvasDrawingSession ds, string text, Rect bounds, Color color, CanvasTextFormat format)
-    {
-        float aspect = (float)PaintBoardAspect();
-        format.FontSize *= Math.Min(1, aspect);
-        var transform = ds.Transform;
-        try
-        {
-            ds.Transform = Matrix3x2.CreateScale(1 / aspect, 1) * transform;
-            ds.DrawText(text, new Rect(bounds.X * aspect, bounds.Y, bounds.Width * aspect, bounds.Height), color, format);
-        }
-        finally { ds.Transform = transform; }
-    }
-
     private HandTrackingBounds WaterGardenButtonTextRegion(CanvasDevice device, BoardButton button)
     {
-        float aspect = (float)PaintBoardAspect();
         using var format = WaterGardenButtonTextFormat();
-        format.FontSize *= Math.Min(1, aspect);
-        var rectangle = WaterGardenButtonTextRectangle(button);
-        using var layout = new CanvasTextLayout(device, button.Label, format,
-            (float)rectangle.Width * aspect, (float)rectangle.Height);
-        var ink = layout.DrawBounds;
-        return ButtonInkRegion(button, new Rect(ink.X / aspect, ink.Y, ink.Width / aspect, ink.Height),
-            rectangle.X, rectangle.Y);
+        return BoardAspectButtonTextRegion(device, button, format, WaterGardenButtonTextRectangle(button));
     }
 
     private void DisposeWaterGardenResources()

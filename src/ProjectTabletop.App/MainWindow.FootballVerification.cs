@@ -23,6 +23,8 @@ public sealed partial class MainWindow
         var now = MonotonicClock.UtcNow;
         int renderedFrames = 0;
         using var scene = MakeScene(16.0 / 9, out double inset);
+        // The pitch is built off the render path; the board shows Loading until then.
+        await scene.EnsureBoardArtworkResourcesAsync(device, BoardScreen.Football);
         using var target = new CanvasRenderTarget(device, 1600, 900, 96);
         Draw(scene, target);
         Check(scene.FootballState.Phase == FootballPhase.WaitingForPlayers, "Football started without a player.");
@@ -40,6 +42,9 @@ public sealed partial class MainWindow
         Check(scene.FootballState.Phase == FootballPhase.Playing && scene.FootballState.Kickers.All(k => k.Present),
             "Fresh calibrated input did not start a human-versus-AI match.");
         await Save(target, "football-playing");
+        Check(scene.GetHandAcquisitionContext(now) is { ContinuousSearchPolygon: null },
+            "Black-bar play searched the pitch for hands.");
+        scene.SetFootballFingerInput(0, true);
         var context = scene.GetHandAcquisitionContext(now);
         Check(context?.ContinuousSearchPolygon?.Length == 4, "The pitch did not allow finger acquisition away from buttons.");
         var hold = scene.GetHoldButtonContext(now);
@@ -88,6 +93,7 @@ public sealed partial class MainWindow
         Check(!scene.TryMapFootballCameraPoint(rotated, out _), "Black output still accepted football camera input.");
 
         using var renderer = new FootballRenderer(device);
+        await renderer.EnsurePitchAsync();
         using var raw = new CanvasRenderTarget(device, 1824, 1132, 96);
         var snapshot = new FootballGame().Snapshot with
         {
@@ -121,6 +127,7 @@ public sealed partial class MainWindow
         foreach (double aspect in new[] { 1.0, 9.0 / 16 })
         {
             using var fitted = MakeScene(aspect, out _);
+            await fitted.EnsureBoardArtworkResourcesAsync(device, BoardScreen.Football);
             using var output = new CanvasRenderTarget(device, (float)(900 * aspect), 900, 96);
             Draw(fitted, output);
             var fittedField = fitted.FootballFieldBounds();

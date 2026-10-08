@@ -339,14 +339,21 @@ public sealed partial class MainWindow
                 return _scene.GetWaterGardenDiagnostics();
             case "show_football":
                 ShowFootball();
-                return new { board = _scene.CurrentBoardScreen.ToString(), state = FootballControlState() };
+                return new { boardApp = _scene.CurrentBoardScreen.ToString(),
+                    boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text, state = FootballControlState() };
             case "get_football":
                 return new { state = FootballControlState(), input = GetFootballInputStatus() };
             case "learn_football_bar":
-                return await LearnFootballBarForControlAsync(parameters.GetProperty("player").GetInt32(),
-                    parameters.GetProperty("x").GetDouble(), parameters.GetProperty("y").GetDouble());
+                if (!parameters.TryGetProperty("player", out var footballPlayer) || footballPlayer.ValueKind != JsonValueKind.Number ||
+                    !footballPlayer.TryGetInt32(out int footballPlayerNumber) ||
+                    !parameters.TryGetProperty("x", out var footballX) || footballX.ValueKind != JsonValueKind.Number ||
+                    !parameters.TryGetProperty("y", out var footballY) || footballY.ValueKind != JsonValueKind.Number)
+                    throw new ArgumentException("Provide player (1 or 2) and the bar centre as raw-camera x and y.");
+                return await LearnFootballBarForControlAsync(footballPlayerNumber, footballX.GetDouble(), footballY.GetDouble());
             case "football_action":
-                bool footballAccepted = _scene.ActivateFootballButton(parameters.GetProperty("id").GetString()!);
+                if (!parameters.TryGetProperty("id", out var footballAction) || footballAction.ValueKind != JsonValueKind.String)
+                    throw new ArgumentException("Provide a Football button id.");
+                bool footballAccepted = _scene.ActivateFootballButton(footballAction.GetString()!);
                 UpdateBoardAppStatus();
                 return new { accepted = footballAccepted, state = FootballControlState() };
             case "water_garden_action":

@@ -18,9 +18,17 @@ public sealed partial class SceneCompositor
     private CanvasRenderTarget? _footballThumbnail;
     private Homography? _footballCameraMap, _footballSurfaceMap;
     private long _footballNavigation = -1;
-    private bool _footballActive;
+    private bool _footballActive, _footballArtworkPublished;
     private DateTimeOffset _footballResetThrough;
     private readonly DateTimeOffset[] _footballSourceTimes = new DateTimeOffset[2];
+    private readonly bool[] _footballFingerPlayers = new bool[2];
+
+    private bool FootballArtworkReady => _footballRenderer is { PitchReady: true };
+
+    // The pitch is searched for arriving hands only while a human player
+    // actually uses fingertip input; black bars need no palm inference.
+    private bool FootballFingerSearch => _boardSession.Screen == BoardScreen.Football &&
+        (_footballFingerPlayers[0] || _footballFingerPlayers[1] && _boardSession.FootballState.Mode == FootballMode.TwoHumans);
 
     public FootballSnapshot FootballState { get { lock (_gate) return _boardSession.FootballState; } }
     public double FootballPreviewAspect { get { lock (_gate) return PaintBoardAspect(); } }
@@ -59,6 +67,38 @@ public sealed partial class SceneCompositor
     public void SetFootballStyle(int player, FootballKickerStyle style)
     {
         lock (_gate) _boardSession.SetFootballStyle(player, style);
+    }
+
+    public void SetFootballFingerInput(int player, bool enabled)
+    {
+        if (player is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(player));
+        lock (_gate) _footballFingerPlayers[player] = enabled;
+    }
+
+    internal async Task EnsureFootballResourcesAsync(CanvasDevice device)
+    {
+        Task pitch;
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            pitch = GetFootballRenderer(device).EnsurePitchAsync();
+        }
+        await pitch.ConfigureAwait(false);
+        lock (_gate)
+            if (!_disposed && _footballDevice == device) PrepareFootballResources(device);
+    }
+
+    private bool PrepareFootballResources(CanvasDevice device)
+    {
+        var renderer = GetFootballRenderer(device);
+        _ = renderer.EnsurePitchAsync();
+        if (!renderer.PitchReady) return false;
+        if (!_footballArtworkPublished)
+        {
+            _footballArtworkPublished = true;
+            if (_boardSession.Screen == BoardScreen.Football) InvalidateBoardArtworkSurface();
+        }
+        return true;
     }
 
     public bool ActivateFootballButton(string id)
@@ -142,12 +182,25 @@ public sealed partial class SceneCompositor
         if (player is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(player));
         lock (_gate)
         {
+            PixelPoint? field = cameraPoint is { } camera && TryMapFootballCameraPoint(camera, out var uv) ? uv : null;
+            SetFootballPlayerFieldPoint(player, field, frameTime);
+        }
+    }
+
+    /// <summary>Supplies a normalized pitch point already returned by TryMapFootballCameraPoint,
+    /// or null. A registration change since that mapping rejects the older frame.</summary>
+    public void SetFootballPlayerFieldPoint(int player, PixelPoint? fieldPoint, DateTimeOffset frameTime)
+    {
+        if (player is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(player));
+        lock (_gate)
+        {
             SyncFootballSession();
             var now = _footballClock();
             if (frameTime <= _footballResetThrough || frameTime <= _footballSourceTimes[player] ||
                 frameTime > now || now - frameTime > FootballGame.InputFreshness) return;
             _footballSourceTimes[player] = frameTime;
-            Vector2? point = cameraPoint is { } camera && TryMapFootballCameraPoint(camera, out var uv)
+            Vector2? point = _footballActive && fieldPoint is { } uv && double.IsFinite(uv.X) && double.IsFinite(uv.Y) &&
+                uv.X is >= 0 and <= 1 && uv.Y is >= 0 and <= 1
                 ? new((float)(uv.X - .5) * FootballGame.Width, (float)(uv.Y - .5)) : null;
             _boardSession.SetFootballInput(player, point, frameTime);
         }
@@ -178,6 +231,11 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             if (_disposed || _boardSession.Screen != BoardScreen.Football) return;
+            if (!PrepareBoardArtwork(ds.Device))
+            {
+                DrawArtworkLoading(ds, new Rect(0, 0, width, height));
+                return;
+            }
             FootballVisualRevision();
             double aspect = PaintBoardAspect();
             float drawWidth = (float)Math.Min(width, height * aspect), drawHeight = (float)(drawWidth / aspect);
@@ -219,11 +277,12 @@ public sealed partial class SceneCompositor
             FontFamily = "Segoe UI", FontSize = 19, HorizontalAlignment = CanvasHorizontalAlignment.Center,
             VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap
         };
-        ds.DrawText($"{state.Score1}  :  {state.Score2}", new Rect(340, 9, 320, 61), Color.FromArgb(255, 248, 247, 226), score);
-        ds.DrawText("PLAYER 1", new Rect(60, 20, 260, 40), Color.FromArgb(255, 255, 186, 121), caption);
-        ds.DrawText(state.Mode == FootballMode.HumanVsAi ? "COMPUTER" : "PLAYER 2", new Rect(680, 20, 260, 40),
+        DrawBoardAspectText(ds, $"{state.Score1}  :  {state.Score2}", new Rect(340, 9, 320, 61),
+            Color.FromArgb(255, 248, 247, 226), score);
+        DrawBoardAspectText(ds, "PLAYER 1", new Rect(60, 20, 260, 40), Color.FromArgb(255, 255, 186, 121), caption);
+        DrawBoardAspectText(ds, state.Mode == FootballMode.HumanVsAi ? "COMPUTER" : "PLAYER 2", new Rect(680, 20, 260, 40),
             Color.FromArgb(255, 116, 206, 239), caption);
-        ds.DrawText(state.Phase == FootballPhase.Playing ? "FIRST TO FIVE  ·  DEFEND YOUR GOAL" : state.Banner,
+        DrawBoardAspectText(ds, state.Phase == FootballPhase.Playing ? "FIRST TO FIVE  ·  DEFEND YOUR GOAL" : state.Banner,
             new Rect(40, 76, 920, 39), Color.FromArgb(255, 221, 230, 210), caption);
         if (state.Phase is FootballPhase.Countdown or FootballPhase.Goal or FootballPhase.Finished)
         {
@@ -233,7 +292,7 @@ public sealed partial class SceneCompositor
                 VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap
             };
             ds.FillRoundedRectangle(new Rect(180, 438, 640, 92), 18, 18, Color.FromArgb(225, 12, 28, 25));
-            ds.DrawText(state.Banner, new Rect(185, 442, 630, 84), Color.FromArgb(255, 255, 248, 215), banner);
+            DrawBoardAspectText(ds, state.Banner, new Rect(185, 442, 630, 84), Color.FromArgb(255, 255, 248, 215), banner);
         }
     }
 
@@ -255,21 +314,21 @@ public sealed partial class SceneCompositor
             var rect = new Rect(b.X * BoardSurfaceSize, b.Y * BoardSurfaceSize, b.Width * BoardSurfaceSize, b.Height * BoardSurfaceSize);
             ds.FillRoundedRectangle(rect, 14, 14, Color.FromArgb(255, 221, 229, 211));
             ds.DrawRoundedRectangle(rect, 14, 14, Color.FromArgb(255, 130, 163, 133), 2);
-            ds.DrawText(button.Label, FootballButtonTextRect(button), Color.FromArgb(255, 21, 46, 36), format);
+            DrawBoardAspectText(ds, button.Label, FootballButtonTextRect(button), Color.FromArgb(255, 21, 46, 36), format);
         }
     }
 
     private HandTrackingBounds FootballButtonTextRegion(CanvasDevice device, BoardButton button)
     {
-        var rect = FootballButtonTextRect(button);
         using var format = FootballButtonTextFormat();
-        using var layout = new CanvasTextLayout(device, button.Label, format, (float)rect.Width, (float)rect.Height);
-        return ButtonInkRegion(button, layout.DrawBounds, rect.X, rect.Y);
+        return BoardAspectButtonTextRegion(device, button, format, FootballButtonTextRect(button));
     }
 
-    private CanvasBitmap FootballMenuThumbnail(CanvasDevice device)
+    // Null until the background pitch build publishes; the menu then redraws.
+    private CanvasBitmap? FootballMenuThumbnail(CanvasDevice device)
     {
         var renderer = GetFootballRenderer(device);
+        if (!renderer.PitchReady) return null;
         if (_footballThumbnail is null)
         {
             _footballThumbnail = new(device, 1200, 600, 96);
@@ -286,5 +345,6 @@ public sealed partial class SceneCompositor
         _footballRenderer?.Dispose();
         _footballRenderer = null;
         _footballDevice = null;
+        _footballArtworkPublished = false;
     }
 }

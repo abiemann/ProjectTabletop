@@ -16,7 +16,7 @@ public sealed record BlackTipProfile(int Version, double Value, double Saturatio
 }
 
 public sealed record BlackTipLearningOptions(IReadOnlyList<EyeTipProjectionFrame>? ProjectionFrames = null,
-    DateTimeOffset FrameTime = default, byte[]? EmptyBgra = null);
+    DateTimeOffset FrameTime = default);
 
 /// <summary>
 /// Detects the solid black top crossbar of a cardboard T, not its uncoloured handle. Learned
@@ -71,47 +71,55 @@ public static class BlackTipDetector
             var projection = new EyeTipProjectionMatcher(frames, options.FrameTime);
             if (!projection.Ready)
                 throw new InvalidOperationException("Wait for a current projected-board reference, then click the physical crossbar again.");
+            if (!projection.ContainsBoardPoint(selected.Observation.Center))
+                throw new InvalidOperationException("Place the cardboard T on the projected board, then click its black crossbar again.");
             if (!projection.IsPhysicalCandidate(selected.Observation.Center, selected.Observation.RadiusPixels,
                 image.Gray, image.Width, image.Height, image.ScaleX, image.ScaleY))
                 throw new InvalidOperationException("That mark is part of the projected picture. Click the black crossbar on your cardboard T.");
-        }
-        if (options?.EmptyBgra is { } empty)
-        {
-            ValidateFrame(width, height, stride, empty);
-            var background = new BlackImage(width, height, stride, empty);
-            using Mat emptyMask = background.Mask(result);
-            Cv2.FindContours(emptyMask, out Point[][] before, out HierarchyIndex[] beforeHierarchy,
-                RetrievalModes.CComp, ContourApproximationModes.ApproxSimple);
-            if (before.Where((_, index) => beforeHierarchy[index].Parent < 0)
-                .Select(contour => Component(contour, background, result, result.NormalizedArea * width * height))
-                .Any(item => item is not null && ColorTipDetector.Distance(item.Observation.Center,
-                    selected.Observation.Center) < selected.Observation.RadiusPixels))
-                throw new InvalidOperationException("That dark mark was already on the empty board. Move the cardboard T onto a clear area and try again.");
         }
         return result;
     }
 
     public static ColorTipDetectionResult Detect(int width, int height, int stride, byte[] bgra,
-        BlackTipProfile profile, ColorTipDetectionOptions? options = null)
+        BlackTipProfile profile, ColorTipDetectionOptions? options = null) =>
+        DetectEach(width, height, stride, bgra, [profile], options)[0];
+
+    /// <summary>Detects each learned bar in one camera frame, in profile order. The colour
+    /// conversion and projected-scene reference are shared; only the dark threshold and the
+    /// learned size and shape differ per profile.</summary>
+    public static IReadOnlyList<ColorTipDetectionResult> DetectEach(int width, int height, int stride, byte[] bgra,
+        IReadOnlyList<BlackTipProfile> profiles, ColorTipDetectionOptions? options = null)
     {
         ValidateFrame(width, height, stride, bgra);
-        ArgumentNullException.ThrowIfNull(profile);
-        if (!profile.IsValid) throw new ArgumentException("Invalid black-crossbar profile.", nameof(profile));
+        ArgumentNullException.ThrowIfNull(profiles);
+        foreach (var profile in profiles)
+        {
+            ArgumentNullException.ThrowIfNull(profile, nameof(profiles));
+            if (!profile.IsValid) throw new ArgumentException("Invalid black-crossbar profile.", nameof(profiles));
+        }
         if (options?.PreferredCenter is { } preferred && (!double.IsFinite(preferred.X) ||
             !double.IsFinite(preferred.Y) || preferred.X < 0 || preferred.Y < 0))
             throw new ArgumentException("Invalid preferred black-crossbar center.", nameof(options));
         EyeTipProjectionMatcher? projection = options?.ProjectionFrames is null ? null :
             new(options.ProjectionFrames, options.FrameTime);
-        if (projection is { Ready: false }) return new([], "waiting-for-projected-bat-reference");
+        if (projection is { Ready: false })
+            return profiles.Select(_ => new ColorTipDetectionResult([], "waiting-for-projected-bat-reference")).ToArray();
         var image = new BlackImage(width, height, stride, bgra);
+        return profiles.Select(profile => Detect(image, profile, width * (double)height,
+            options?.PreferredCenter, projection)).ToArray();
+    }
+
+    private static ColorTipDetectionResult Detect(BlackImage image, BlackTipProfile profile, double framePixels,
+        PixelPoint? preferred, EyeTipProjectionMatcher? projection)
+    {
         using Mat mask = image.Mask(profile);
         Cv2.FindContours(mask, out Point[][] contours, out HierarchyIndex[] hierarchy,
             RetrievalModes.CComp, ContourApproximationModes.ApproxSimple);
-        double expectedArea = profile.NormalizedArea * width * height;
+        double expectedArea = profile.NormalizedArea * framePixels;
         var candidates = contours.Where((_, index) => hierarchy[index].Parent < 0)
             .Select(contour => Component(contour, image, profile, expectedArea))
             .Where(item => item is not null).Select(item => item!.Observation);
-        var ranked = options?.PreferredCenter is { } point
+        var ranked = preferred is { } point
             ? candidates.OrderBy(item => ColorTipDetector.Distance(item.Center, point)).ThenByDescending(item => item.Score)
             : candidates.OrderByDescending(item => item.Score);
         var accepted = ranked.Take(128).Where(item => projection is null ||

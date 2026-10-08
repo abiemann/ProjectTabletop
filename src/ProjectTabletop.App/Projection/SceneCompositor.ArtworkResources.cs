@@ -15,6 +15,7 @@ public sealed partial class SceneCompositor
         BoardScreen.Roulette => _rouletteArtworkPublished,
         BoardScreen.CrownDeed => CrownDeedResourcesReady,
         BoardScreen.WaterGarden => WaterGardenArtworkReady,
+        BoardScreen.Football => FootballArtworkReady,
         _ => true
     };
 
@@ -24,6 +25,7 @@ public sealed partial class SceneCompositor
         BoardScreen.Roulette => EnsureRouletteResourcesAsync(device),
         BoardScreen.CrownDeed => EnsureCrownDeedResourcesAsync(device),
         BoardScreen.WaterGarden => EnsureWaterGardenResourcesAsync(device),
+        BoardScreen.Football => EnsureFootballResourcesAsync(device),
         _ => Task.CompletedTask
     };
 
@@ -33,6 +35,7 @@ public sealed partial class SceneCompositor
         BoardScreen.Roulette => PrepareRouletteResources(device),
         BoardScreen.CrownDeed => PrepareCrownDeedResources(device),
         BoardScreen.WaterGarden => PrepareWaterGardenResources(device),
+        BoardScreen.Football => PrepareFootballResources(device),
         _ => true
     };
 
@@ -80,6 +83,7 @@ public sealed partial class SceneCompositor
             BoardScreen.Roulette => _rouletteImages?.Error,
             BoardScreen.CrownDeed => CrownDeedResourcesError,
             BoardScreen.WaterGarden => WaterGardenArtworkError,
+            BoardScreen.Football => _footballRenderer?.PitchError,
             _ => null
         };
         drawing.DrawText(error is null ? "Loading…" : "Could not load board",

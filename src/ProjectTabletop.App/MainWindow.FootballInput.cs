@@ -126,6 +126,7 @@ public sealed partial class MainWindow
     {
         if (!_initialized || sender is not ComboBox combo || !int.TryParse(combo.Tag?.ToString(), out int player)) return;
         lock (_footballInputGate) _footballFingerInputs[player] = combo.SelectedIndex == 1;
+        _scene.SetFootballFingerInput(player, combo.SelectedIndex == 1);
         ResetFootballInput();
         if (combo.SelectedIndex == 1) SetHandTrackingEnabled(true);
         UpdateFootballInputStatus();
@@ -150,6 +151,7 @@ public sealed partial class MainWindow
         _footballInputWasActive = _scene.CurrentBoardScreen == BoardScreen.Football;
         // Cancel another learning gesture without replacing its saved profile.
         lock (_eyeTipGate) { _eyeTipLearning = false; _colorTipLearning = false; }
+        UpdateEyeTipStatus();
         _frozenFrame = null;
         lock (_footballInputGate)
         {
@@ -161,6 +163,23 @@ public sealed partial class MainWindow
         CameraCanvas.Invalidate();
         return true;
     }
+
+    // Starting another marker's learning replaces a pending football click, just
+    // as football learning cancels eye and colour learning.
+    private void CancelFootballLearning()
+    {
+        lock (_footballInputGate)
+        {
+            if (_footballLearningPlayer < 0) return;
+            _footballInputReasons[_footballLearningPlayer] = "Waiting for a fresh view of the tip.";
+            _footballLearningPlayer = -1;
+        }
+        UpdateFootballInputStatus();
+    }
+
+    // Player 2 is the computer in one-player mode; its camera input is never read.
+    private bool FootballHumanPlayer(int player) =>
+        player == 0 || _scene.FootballState.Mode == FootballMode.TwoHumans;
 
     private void CancelFootballLearning_Click(object sender, RoutedEventArgs e)
     {
@@ -284,16 +303,15 @@ public sealed partial class MainWindow
     {
         lock (_footballInputGate)
         {
-            bool active = _scene.CurrentBoardScreen == BoardScreen.Football;
-            if (_closing || (!active && _footballLearningPlayer < 0) || _footballDetecting ||
-                _footballLearningPlayer >= 0 || !_cameraWanted || !_camera.IsRunning || _cameraHealthWarning ||
-                IsBoardScanMeasuring || frame.Timestamp < _footballInputNotBefore ||
+            if (_closing || _footballDetecting || _footballLearningPlayer >= 0 ||
+                _scene.CurrentBoardScreen != BoardScreen.Football || !_cameraWanted || !_camera.IsRunning ||
+                _cameraHealthWarning || IsBoardScanMeasuring || frame.Timestamp < _footballInputNotBefore ||
                 !EyeTipFrameFresh(frame, MonotonicClock.UtcNow)) return;
             string? cameraId = _camera.ActiveDeviceId;
             if (cameraId is null || cameraId != _selectedCameraId ||
                 !_footballMarkerProfiles.TryGetValue(cameraId, out var profiles)) return;
-            var selected = Enumerable.Range(0, 2).Where(player => !_footballFingerInputs[player] &&
-                profiles.ForPlayer(player) is not null).ToArray();
+            var selected = Enumerable.Range(0, 2).Where(player => FootballHumanPlayer(player) &&
+                !_footballFingerInputs[player] && profiles.ForPlayer(player) is not null).ToArray();
             if (selected.Length == 0) return;
             long tick = Stopwatch.GetTimestamp();
             if (_footballDetectionTick != 0 && Stopwatch.GetElapsedTime(_footballDetectionTick, tick).TotalMilliseconds < 32) return;
@@ -307,9 +325,10 @@ public sealed partial class MainWindow
                     // GPU reference readback can be slow; never hold the input
                     // lock while reading it or scanning either camera image.
                     var references = StickTipProjectionReference();
-                    var detections = selected.Select(player => (Player: player,
-                        Detection: BlackTipDetector.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-                            profiles.ForPlayer(player)!, new(ProjectionFrames: references, FrameTime: frame.Timestamp)))).ToArray();
+                    // Both players share one colour conversion of this camera frame.
+                    var detections = BlackTipDetector.DetectEach(frame.Width, frame.Height, frame.Stride, frame.Bgra,
+                        selected.Select(player => profiles.ForPlayer(player)!).ToArray(),
+                        new(ProjectionFrames: references, FrameTime: frame.Timestamp));
                     lock (_footballInputGate)
                     {
                         if (_closing || generation != _footballInputGeneration || !_cameraWanted || !_camera.IsRunning ||
@@ -322,41 +341,37 @@ public sealed partial class MainWindow
                             _footballFrameHeight = frame.Height;
                         }
                         var now = MonotonicClock.UtcNow;
-                        foreach (var item in detections)
+                        bool fresh = EyeTipFrameFresh(frame, now);
+                        for (int index = 0; index < selected.Length; index++)
                         {
-                            int player = item.Player;
-                            if (!EyeTipFrameFresh(frame, now) || item.Detection.Reason.StartsWith("waiting-for-projected-", StringComparison.Ordinal))
+                            int player = selected[index];
+                            if (!fresh)
                             {
                                 _footballTipTrackers[player].Reset();
                                 ClearFootballPlayerLocked(player, "Waiting for fresh camera and projection images.", frame.Timestamp);
                                 continue;
                             }
-                            // Identical black bars have no colour identity. Map
-                            // to the calibrated pitch before temporal matching:
-                            // P1 owns the left half and P2 the right. Never pick
-                            // a nearest winner when a half contains two bars.
-                            var inHalf = item.Detection.Candidates.Where(tip =>
-                                _scene.TryMapFootballCameraPoint(tip.Center, out var point) &&
-                                (point.X < .5 ? 0 : 1) == player).ToArray();
-                            if (inHalf.Length > 1)
+                            // Identical bars are assigned by calibrated pitch half before temporal matching.
+                            var decision = FootballTipAssignment.Update(_footballTipTrackers[player], player,
+                                detections[index], camera => _scene.TryMapFootballCameraPoint(camera, out var field) ? field : null,
+                                frame.Timestamp, now);
+                            switch (decision.Action)
                             {
-                                _footballTipTrackers[player].Reset();
-                                ClearFootballPlayerLocked(player, "Show only one black bar in this player's half.", frame.Timestamp);
-                                continue;
+                                case FootballTipAction.Publish:
+                                    _footballCameraTips[player] = decision.Tip!.Center;
+                                    _footballTipTimes[player] = frame.Timestamp;
+                                    _footballInputReasons[player] = decision.Reason;
+                                    _scene.SetFootballPlayerFieldPoint(player, decision.FieldPoint, frame.Timestamp);
+                                    break;
+                                case FootballTipAction.Clear:
+                                    ClearFootballPlayerLocked(player, decision.Reason, frame.Timestamp);
+                                    break;
+                                case FootballTipAction.Hold:
+                                    // Keep the last fresh input. The expiry timer and the game's
+                                    // own freshness pause play only if the bar stays away.
+                                    _footballInputReasons[player] = decision.Reason;
+                                    break;
                             }
-                            var track = _footballTipTrackers[player].Update(
-                                new(inHalf, item.Detection.Reason), frame.Timestamp, now);
-                            if (!track.Confirmed || track.Observation is not { } tip)
-                            {
-                                ClearFootballPlayerLocked(player, track.Reason.Contains("ambiguous", StringComparison.Ordinal)
-                                    ? "Show only one black bar in this player's half."
-                                    : $"Looking for a black bar in the {(player == 0 ? "left" : "right")} half.", frame.Timestamp);
-                                continue;
-                            }
-                            _footballCameraTips[player] = tip.Center;
-                            _footballTipTimes[player] = frame.Timestamp;
-                            _footballInputReasons[player] = "Black bar tracked.";
-                            _scene.SetFootballPlayerCameraPoint(player, tip.Center, frame.Timestamp);
                         }
                     }
                 }
@@ -383,28 +398,32 @@ public sealed partial class MainWindow
             bool fresh = !_closing && _cameraWanted && _camera.IsRunning && !_cameraHealthWarning &&
                 !IsBoardScanMeasuring && frame.Timestamp >= _footballInputNotBefore &&
                 EyeTipFrameFresh(frame, MonotonicClock.UtcNow);
-            var candidates = new List<PixelPoint>[] { [], [] };
+            var candidates = new List<(PixelPoint Camera, PixelPoint Field)>[] { [], [] };
             if (fresh)
                 foreach (var hand in hands)
-                    if (_scene.TryMapFootballCameraPoint(hand.IndexTip, out var boardPoint))
-                        candidates[boardPoint.X < .5 ? 0 : 1].Add(hand.IndexTip);
+                    if (_scene.TryMapFootballCameraPoint(hand.IndexTip, out var fieldPoint))
+                        candidates[fieldPoint.X < .5 ? 0 : 1].Add((hand.IndexTip, fieldPoint));
             for (int player = 0; player < 2; player++)
             {
-                if (!_footballFingerInputs[player]) continue;
-                if (candidates[player].Count != 1)
+                if (!_footballFingerInputs[player] || !FootballHumanPlayer(player)) continue;
+                if (candidates[player].Count > 1)
                 {
-                    ClearFootballPlayerLocked(player, candidates[player].Count > 1
-                        ? "Show only one hand in this player's half."
-                        : "Point one index fingertip in this player's half.", frame.Timestamp);
+                    ClearFootballPlayerLocked(player, "Show only one hand in this player's half.", frame.Timestamp);
                     continue;
                 }
-                var point = candidates[player][0];
-                _footballCameraTips[player] = point;
+                if (candidates[player].Count == 0)
+                {
+                    // A brief miss holds the last fresh fingertip; expiry pauses play.
+                    _footballInputReasons[player] = "Point one index fingertip in this player's half.";
+                    continue;
+                }
+                var (camera, field) = candidates[player][0];
+                _footballCameraTips[player] = camera;
                 _footballTipTimes[player] = frame.Timestamp;
                 _footballFrameWidth = frame.Width;
                 _footballFrameHeight = frame.Height;
                 _footballInputReasons[player] = "Index fingertip tracked.";
-                _scene.SetFootballPlayerCameraPoint(player, point, frame.Timestamp);
+                _scene.SetFootballPlayerFieldPoint(player, field, frame.Timestamp);
             }
         }
     }
@@ -426,6 +445,7 @@ public sealed partial class MainWindow
             var profiles = cameraId is null ? null : _footballMarkerProfiles.GetValueOrDefault(cameraId);
             string Describe(int player) => $"P{player + 1}: " + (_footballLearningPlayer == player
                 ? "Click the black bar in the live camera preview."
+                : !FootballHumanPlayer(player) ? "The computer plays this side."
                 : _footballFingerInputs[player] ? _footballInputReasons[player]
                 : profiles?.ForPlayer(player) is null ? "Choose Learn black bar, then click its centre."
                 : _footballInputReasons[player]);
@@ -448,7 +468,8 @@ public sealed partial class MainWindow
                 learningPlayer = _footballLearningPlayer >= 0 ? (int?)(_footballLearningPlayer + 1) : null,
                 players = Enumerable.Range(0, 2).Select(player => new
                 {
-                    player = player + 1, input = _footballFingerInputs[player] ? "finger" : "black-bar",
+                    player = player + 1, human = FootballHumanPlayer(player),
+                    input = _footballFingerInputs[player] ? "finger" : "black-bar",
                     learned = profiles?.ForPlayer(player) is not null,
                     profile = profiles?.ForPlayer(player),
                     visible = _footballCameraTips[player] is not null && now - _footballTipTimes[player] <= EyeTipLifetime,
