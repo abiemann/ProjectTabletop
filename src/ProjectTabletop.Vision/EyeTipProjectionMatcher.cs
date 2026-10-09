@@ -66,21 +66,25 @@ internal sealed class EyeTipProjectionMatcher
         int width, int height, double scaleX, double scaleY) =>
         IsPhysicalCandidate(tip.Center, tip.RadiusPixels, gray, width, height, scaleX, scaleY, profile);
 
+    public bool IsPhysicalBlackBarCandidate(ColorTipObservation strip, byte[] gray, int width, int height,
+        double scaleX, double scaleY) => IsPhysicalCandidate(strip.Center, strip.RadiusPixels, gray,
+            width, height, scaleX, scaleY, null, strip.Bar);
+
     private bool IsPhysicalCandidate(PixelPoint center, double radiusPixels, byte[] gray, int width, int height,
-        double scaleX, double scaleY, ColorTipProfile? color)
+        double scaleX, double scaleY, ColorTipProfile? color, BlackBarGeometry? bar = null)
     {
         bool inBoard = false;
         foreach (Reference frame in _frames)
         {
             if (!frame.InBoard(center.X, center.Y)) continue;
             inBoard = true;
-            if (Matches(frame, center, radiusPixels, gray, width, height, scaleX, scaleY, color)) return false;
+            if (Matches(frame, center, radiusPixels, gray, width, height, scaleX, scaleY, color, bar)) return false;
         }
         return inBoard;
     }
 
     private static bool Matches(Reference frame, PixelPoint center, double radiusPixels, byte[] gray,
-        int width, int height, double scaleX, double scaleY, ColorTipProfile? color)
+        int width, int height, double scaleX, double scaleY, ColorTipProfile? color, BlackBarGeometry? bar)
     {
         double cx = center.X / scaleX, cy = center.Y / scaleY;
         int radius = (int)Math.Round(Math.Clamp(radiusPixels / Math.Max(scaleX, scaleY) * 3, 8, 28));
@@ -99,19 +103,43 @@ internal sealed class EyeTipProjectionMatcher
         Span<int> locations = stackalloc int[Grid * Grid];
         Span<double> camera = stackalloc double[Grid * Grid];
         double sum = 0, sumSquares = 0;
-        int count = 0;
+        // A neighbouring physical strip must not hide that this strip was projected.
+        // Compare its narrow oriented band and immediate flanks independently, leaving
+        // the existing circular eye/colour comparison unchanged.
+        double barX = 0, barY = 0, axisX = 0, axisY = 0, halfLength = 0, halfWidth = 0;
+        if (bar is not null)
+        {
+            barX = (bar.End1.X + bar.End2.X) * .5 / scaleX;
+            barY = (bar.End1.Y + bar.End2.Y) * .5 / scaleY;
+            axisX = (bar.End2.X - bar.End1.X) / scaleX;
+            axisY = (bar.End2.Y - bar.End1.Y) / scaleY;
+            double length = Math.Sqrt(axisX * axisX + axisY * axisY);
+            if (length < 1) return false;
+            axisX /= length; axisY /= length;
+            halfLength = length * .5 + 3;
+            halfWidth = Math.Abs((bar.Side2.X - bar.Side1.X) / scaleX * -axisY +
+                (bar.Side2.Y - bar.Side1.Y) / scaleY * axisX) * .5 + 3;
+        }
+        int count = 0, eligible = 0;
         for (int gy = 0; gy < Grid; gy++)
         for (int gx = 0; gx < Grid; gx++)
         {
             int x = (int)Math.Round(gx * radius * 2.0 / (Grid - 1));
             int y = (int)Math.Round(gy * radius * 2.0 / (Grid - 1));
+            if (bar is not null)
+            {
+                double dx = cx - radius + x - barX, dy = cy - radius + y - barY;
+                if (Math.Abs(dx * axisX + dy * axisY) > halfLength ||
+                    Math.Abs(dx * -axisY + dy * axisX) > halfWidth) continue;
+            }
+            eligible++;
             double value = Sample(gray, width, height, cx - radius + x, cy - radius + y);
             if (value < 0) continue;
             locations[count] = (y + Margin) * size + x + Margin;
             camera[count++] = value;
             sum += value; sumSquares += value * value;
         }
-        if (count < Grid * Grid * .80) return false;
+        if (count < 12 || count < eligible * .80) return false;
         double mean = sum / count, energy = sumSquares - sum * mean;
         if (energy < count * 16) return false;
         for (int i = 0; i < count; i++) camera[i] -= mean;

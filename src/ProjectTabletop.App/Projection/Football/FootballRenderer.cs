@@ -87,7 +87,8 @@ internal sealed partial class FootballRenderer : IDisposable
             foreach (var kicker in snapshot.Kickers)
             {
                 var position = FieldPoint(kicker.Position);
-                DrawSoftShadow(ds, position + new Vector2(17, 23), 68, 47, kicker.Present ? (byte)132 : (byte)28);
+                DrawSoftShadow(ds, position + new Vector2(17, 23), 68, 47,
+                    kicker.Present || snapshot.RecoveringInput ? (byte)132 : (byte)28);
             }
             float lift = Math.Max(0, snapshot.BallHeight - FootballGame.BallRadius) * 1000;
             var ground = FieldPoint(snapshot.BallPosition);
@@ -100,10 +101,11 @@ internal sealed partial class FootballRenderer : IDisposable
             if (lift < 8)
                 DrawSoftShadow(ds, ground + new Vector2(2, 4), radius * .64f, radius * .38f, (byte)(100 * (1 - lift / 8)));
 
-            // The simulation turns each body toward play at a fixed rate.
+            // Bars supply a measured heading; fingers and AI turn toward play.
             foreach (var kicker in snapshot.Kickers)
                 DrawKicker(ds, kicker.Style, FieldPoint(kicker.Position), kicker.Heading,
-                    kicker.Index == 0 ? Ink(239, 91, 53) : Ink(52, 161, 224), kicker.Present, !kicker.IsAi);
+                    kicker.Index == 0 ? Ink(239, 91, 53) : Ink(52, 161, 224), kicker.Present || snapshot.RecoveringInput,
+                    !kicker.IsAi && !kicker.MarkerAnchored);
             _ball.Draw(ds, ballCenter, radius, snapshot.BallRotation);
             // Elevated crossbars occlude a low ball at the goal mouth.
             DrawGoal(ds, false, true);
@@ -124,7 +126,10 @@ internal sealed partial class FootballRenderer : IDisposable
             {
                 ds.Clear(Ink(24, 45, 23, 0));
                 ds.Transform = Matrix3x2.CreateTranslation(112, 66);
-                using var shape = CanvasGeometry.CreateRoundedRectangle(_device, new Rect(-110, -64, 1820, 1128), 16, 16);
+                var turf = new Rect(FootballFieldGeometry.TurfLeft, FootballFieldGeometry.TurfTop,
+                    FootballFieldGeometry.TurfWidth, FootballFieldGeometry.TurfHeight);
+                float corner = (float)FootballFieldGeometry.TurfCornerRadius;
+                using var shape = CanvasGeometry.CreateRoundedRectangle(_device, turf, corner, corner);
                 using (ds.CreateLayer(1, shape))
                 {
                     ds.FillRectangle(new Rect(-112, -66, 1824, 1132), Ink(55, 87, 36));
@@ -138,7 +143,7 @@ internal sealed partial class FootballRenderer : IDisposable
                     ds.FillRectangle(new Rect(-112, -66, 1824, 1132), sun);
                     DrawMarkings(ds);
                 }
-                ds.DrawRoundedRectangle(new Rect(-110, -64, 1820, 1128), 16, 16, Ink(17, 37, 22, 180), 3);
+                ds.DrawRoundedRectangle(turf, corner, corner, Ink(17, 37, 22, 180), 3);
             }
             lock (_pitchGate)
             {
@@ -251,9 +256,13 @@ internal sealed partial class FootballRenderer : IDisposable
         if (!foreground)
         {
             var shadow = Ink(11, 24, 14, 95);
-            ds.DrawLine(frontTop + new Vector2(22, 32), frontBottom + new Vector2(22, 32), shadow, 7);
-            ds.DrawLine(frontTop + new Vector2(22, 32), backTop + new Vector2(14, 18), shadow, 5);
-            ds.DrawLine(frontBottom + new Vector2(22, 32), backBottom + new Vector2(14, 18), shadow, 5);
+            // Keep both goal shadows behind their own line, including when
+            // board orientation puts the logical left goal on the user's right.
+            var frontShadow = new Vector2(sign * 22, 32);
+            var backShadow = new Vector2(sign * 14, 18);
+            ds.DrawLine(frontTop + frontShadow, frontBottom + frontShadow, shadow, 7);
+            ds.DrawLine(frontTop + frontShadow, backTop + backShadow, shadow, 5);
+            ds.DrawLine(frontBottom + frontShadow, backBottom + backShadow, shadow, 5);
             using var netShape = Polygon(ds, frontTop, backTop, backBottom, frontBottom);
             ds.FillGeometry(netShape, Ink(203, 220, 199, 21));
             using (ds.CreateLayer(1, netShape))

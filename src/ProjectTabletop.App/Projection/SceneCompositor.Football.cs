@@ -18,10 +18,12 @@ public sealed partial class SceneCompositor
     private CanvasRenderTarget? _footballThumbnail;
     private Homography? _footballCameraMap, _footballSurfaceMap;
     private long _footballNavigation = -1;
+    private long _footballSessionInputRevision = -1, _footballInputEpoch;
     private bool _footballActive, _footballArtworkPublished;
     private DateTimeOffset _footballResetThrough;
     private readonly DateTimeOffset[] _footballSourceTimes = new DateTimeOffset[2];
     private readonly bool[] _footballFingerPlayers = new bool[2];
+    private readonly float?[] _footballBarHeadings = new float?[2];
 
     private bool FootballArtworkReady => _footballRenderer is { PitchReady: true };
 
@@ -31,6 +33,10 @@ public sealed partial class SceneCompositor
         (_footballFingerPlayers[0] || _footballFingerPlayers[1] && _boardSession.FootballState.Mode == FootballMode.TwoHumans);
 
     public FootballSnapshot FootballState { get { lock (_gate) return _boardSession.FootballState; } }
+    public long FootballInputRevision
+    {
+        get { lock (_gate) { SyncFootballSession(); return _footballInputEpoch; } }
+    }
     public double FootballPreviewAspect { get { lock (_gate) return PaintBoardAspect(); } }
 
     public void ShowFootball()
@@ -127,8 +133,11 @@ public sealed partial class SceneCompositor
 
     private void ClearFootballObservations()
     {
+        _footballSessionInputRevision = _boardSession.FootballInputRevision;
+        _footballInputEpoch++;
         _footballResetThrough = _footballClock();
         Array.Fill(_footballSourceTimes, _footballResetThrough);
+        Array.Clear(_footballBarHeadings);
         _boardSession.ClearFootballInput(_footballResetThrough);
         _renderedBoardState = null;
     }
@@ -139,6 +148,7 @@ public sealed partial class SceneCompositor
             !_blackOutput && !_boardSetup && _calibrationTarget < 0 && !IsBoardRevealActive &&
             _boardCameraMap is not null && _boardSurfaceMap is not null;
         if (active == _footballActive && _footballNavigation == _boardSession.NavigationRevision &&
+            _footballSessionInputRevision == _boardSession.FootballInputRevision &&
             ReferenceEquals(_footballCameraMap, _boardCameraMap) && ReferenceEquals(_footballSurfaceMap, _boardSurfaceMap)) return;
         _footballActive = active;
         _footballNavigation = _boardSession.NavigationRevision;
@@ -158,6 +168,15 @@ public sealed partial class SceneCompositor
     }
 
     public bool TryMapFootballCameraPoint(PixelPoint camera, out PixelPoint normalized)
+        => TryMapFootballCameraPoint(camera, out normalized, requireInside: true);
+
+    // Physical markers may sit behind a goal or sideline on the visible grass.
+    // Preserve their actual position and angle; clamp only the attached kicker.
+    public bool TryMapFootballMarkerCameraPoint(PixelPoint camera, out PixelPoint normalized)
+        => TryMapFootballCameraPoint(camera, out normalized, requireInside: false) &&
+            FootballFieldGeometry.ContainsMarker(normalized.X, normalized.Y);
+
+    private bool TryMapFootballCameraPoint(PixelPoint camera, out PixelPoint normalized, bool requireInside)
     {
         lock (_gate)
         {
@@ -169,7 +188,8 @@ public sealed partial class SceneCompositor
                 var uv = _boardSurfaceMap!.InverseTransform(_boardCameraMap!.Transform(new(camera.X, camera.Y)));
                 var field = FootballFieldBounds();
                 double x = (uv.X - field.X) / field.Width, y = (uv.Y - field.Y) / field.Height;
-                if (!double.IsFinite(x) || !double.IsFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) return false;
+                if (!double.IsFinite(x) || !double.IsFinite(y) ||
+                    requireInside && (x < 0 || x > 1 || y < 0 || y > 1)) return false;
                 normalized = new(x, y);
                 return true;
             }
@@ -199,11 +219,52 @@ public sealed partial class SceneCompositor
             if (frameTime <= _footballResetThrough || frameTime <= _footballSourceTimes[player] ||
                 frameTime > now || now - frameTime > FootballGame.InputFreshness) return;
             _footballSourceTimes[player] = frameTime;
+            _footballBarHeadings[player] = null;
             Vector2? point = _footballActive && fieldPoint is { } uv && double.IsFinite(uv.X) && double.IsFinite(uv.Y) &&
                 uv.X is >= 0 and <= 1 && uv.Y is >= 0 and <= 1
                 ? new((float)(uv.X - .5) * FootballGame.Width, (float)(uv.Y - .5)) : null;
             _boardSession.SetFootballInput(player, point, frameTime);
         }
+    }
+
+    /// <summary>Maps the whole physical bar through the calibrated plane before deriving
+    /// its angle. Camera angles alone are wrong on rotated or oblique projections.</summary>
+    public bool SetFootballPlayerBar(int player, ColorTipObservation observation, DateTimeOffset frameTime)
+    {
+        if (player is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(player));
+        lock (_gate)
+        {
+            SyncFootballSession();
+            var now = _footballClock();
+            if (!_footballActive || frameTime <= _footballResetThrough || frameTime <= _footballSourceTimes[player] ||
+                frameTime > now || now - frameTime > FootballGame.InputFreshness) return false;
+            float? previous = frameTime - _footballSourceTimes[player] <= FootballGame.TrackingRecoveryTimeout
+                ? _footballBarHeadings[player] : null;
+            _footballSourceTimes[player] = frameTime;
+            if (observation.Bar is not { } bar || !TryMapFootballMarkerCameraPoint(observation.Center, out var center) ||
+                (center.X < .5 ? 0 : 1) != player ||
+                !TryMapFootballCameraPoint(bar.End1, out var end1, false) ||
+                !TryMapFootballCameraPoint(bar.End2, out var end2, false) ||
+                !TryMapFootballCameraPoint(bar.Side1, out var side1, false) ||
+                !TryMapFootballCameraPoint(bar.Side2, out var side2, false) ||
+                !FootballBarPose.TryResolve(player, World(center), World(end1), World(end2),
+                    World(side1), World(side2), previous, out var position, out float heading))
+            {
+                _footballBarHeadings[player] = null;
+                _boardSession.SetFootballInput(player, null, frameTime);
+                return false;
+            }
+            _footballBarHeadings[player] = heading;
+            // Keep the complete game object on the pitch when a physical bar
+            // reaches a sideline; do not report a visible bar as a lost player.
+            position = Vector2.Clamp(position,
+                new(-FootballGame.Width / 2 + FootballGame.KickerRadius, -.5f + FootballGame.KickerRadius),
+                new(FootballGame.Width / 2 - FootballGame.KickerRadius, .5f - FootballGame.KickerRadius));
+            _boardSession.SetFootballInput(player, position, frameTime, heading);
+            return true;
+        }
+
+        static Vector2 World(PixelPoint point) => new((float)(point.X - .5) * FootballGame.Width, (float)(point.Y - .5));
     }
 
     private long FootballVisualRevision()
@@ -282,18 +343,12 @@ public sealed partial class SceneCompositor
         DrawBoardAspectText(ds, "PLAYER 1", new Rect(60, 20, 260, 40), Color.FromArgb(255, 255, 186, 121), caption);
         DrawBoardAspectText(ds, state.Mode == FootballMode.HumanVsAi ? "COMPUTER" : "PLAYER 2", new Rect(680, 20, 260, 40),
             Color.FromArgb(255, 116, 206, 239), caption);
+        // Keep every phase message off the playing surface. A dark countdown
+        // plaque over a real bar merges with its ink and repeatedly loses it.
+        if (state.Phase is FootballPhase.Countdown or FootballPhase.Goal or FootballPhase.Finished)
+        { caption.FontFamily = "Bahnschrift"; caption.FontSize = 28; }
         DrawBoardAspectText(ds, state.Phase == FootballPhase.Playing ? "FIRST TO FIVE  ·  DEFEND YOUR GOAL" : state.Banner,
             new Rect(40, 76, 920, 39), Color.FromArgb(255, 221, 230, 210), caption);
-        if (state.Phase is FootballPhase.Countdown or FootballPhase.Goal or FootballPhase.Finished)
-        {
-            using var banner = new CanvasTextFormat
-            {
-                FontFamily = "Bahnschrift", FontSize = 39, HorizontalAlignment = CanvasHorizontalAlignment.Center,
-                VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap
-            };
-            ds.FillRoundedRectangle(new Rect(180, 438, 640, 92), 18, 18, Color.FromArgb(225, 12, 28, 25));
-            DrawBoardAspectText(ds, state.Banner, new Rect(185, 442, 630, 84), Color.FromArgb(255, 255, 248, 215), banner);
-        }
     }
 
     private static Rect FootballButtonTextRect(BoardButton button) => new(button.Bounds.X * BoardSurfaceSize + 12,

@@ -9,14 +9,14 @@ public sealed partial class BoardSession
     private static readonly IReadOnlyList<BoardButton> MenuCards = Array.AsReadOnly(new[]
     {
         new BoardButton("slots", "Dragon Slots", new(.08, .25, .40, .16), BoardScreen.Slots),
-        new BoardButton("photo-copy", "Photo Copy", new(.52, .25, .40, .16), BoardScreen.PhotoCopy),
+        new BoardButton("football", "Football", new(.52, .25, .40, .16), BoardScreen.Football),
         new BoardButton("blackjack", "Blackjack", new(.08, .45, .40, .16), BoardScreen.Blackjack),
         new BoardButton("water-garden", "Water Garden", new(.52, .45, .40, .16), BoardScreen.WaterGarden),
         new BoardButton("crown-deed", "Crown & Deed", new(.08, .65, .40, .16), BoardScreen.CrownDeed),
         new BoardButton("globe", "Globe", new(.52, .65, .40, .16), BoardScreen.Globe),
         new BoardButton("roulette", "Roulette", new(.08, .85, .40, .16), BoardScreen.Roulette),
         new BoardButton("paint", "Paint", new(.52, .85, .40, .16), BoardScreen.Paint),
-        new BoardButton("football", "Football", new(.08, 1.05, .40, .16), BoardScreen.Football)
+        new BoardButton("photo-copy", "Photo Copy", new(.08, 1.05, .40, .16), BoardScreen.PhotoCopy)
     });
     /// <summary>Number of launcher cards across both menu pages.</summary>
     public static int MenuCardCount => MenuCards.Count;

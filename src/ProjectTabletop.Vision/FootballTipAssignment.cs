@@ -5,18 +5,22 @@ public enum FootballTipAction { Publish, Hold, Clear }
 /// <summary>Tip is in raw camera pixels. FieldPoint is the normalized pitch location
 /// supplied by the caller's mapping, present only for Publish.</summary>
 public sealed record FootballTipDecision(FootballTipAction Action, ColorTipObservation? Tip,
-    PixelPoint? FieldPoint, string Reason);
+    PixelPoint? FieldPoint, string Reason)
+{
+    public string Source { get; init; } = "none";
+}
 
 /// <summary>
-/// Assigns identical black bars to football players by calibrated pitch half before temporal
-/// association: player 1 owns the left half, player 2 the right. Two bars in one half are
+/// Assigns black markers (single bars or learned pairs) by calibrated pitch half before temporal
+/// association: player 1 owns the left half, player 2 the right. Two markers in one half are
 /// ambiguous and clear that player. A brief miss or reconfirmation holds instead, so one blurred
 /// frame does not pause play; the caller's freshness timeout clears a bar that stays away.
 /// </summary>
 public static class FootballTipAssignment
 {
     /// <param name="toField">Maps a raw camera point to normalized pitch coordinates, or null
-    /// when it lies outside the calibrated pitch.</param>
+    /// when it lies outside the calibrated grass surface. Grass behind a goal line can
+    /// produce an X outside 0–1; its sign still identifies the owning half.</param>
     public static FootballTipDecision Update(ColorTipTracker tracker, int player, ColorTipDetectionResult detection,
         Func<PixelPoint, PixelPoint?> toField, DateTimeOffset frameTime, DateTimeOffset now)
     {
@@ -35,12 +39,12 @@ public static class FootballTipAssignment
         if (inHalf.Length > 1)
         {
             tracker.Reset();
-            return new(FootballTipAction.Clear, null, null, "Show only one black bar in this player's half.");
+            return new(FootballTipAction.Clear, null, null, "Show only one black marker in this player's half.");
         }
         var track = tracker.Update(new(inHalf.Select(item => item.Tip).ToArray(), detection.Reason), frameTime, now);
         if (track.Confirmed && track.Observation is { } tip)
-            return new(FootballTipAction.Publish, tip, inHalf[0].Field, "Black bar tracked.");
+            return new(FootballTipAction.Publish, tip, inHalf[0].Field, "Black marker tracked.");
         return new(FootballTipAction.Hold, null, null,
-            $"Looking for a black bar in the {(player == 0 ? "left" : "right")} half.");
+            $"Looking for a black marker in the {(player == 0 ? "left" : "right")} half.");
     }
 }

@@ -7,12 +7,15 @@ internal static class BoardInteractionRegression
     {
         var session = new BoardSession();
         Require(session.Screen == BoardScreen.Menu, "The board did not start at the menu.");
-        string[] names = ["Dragon Slots", "Photo Copy", "Blackjack", "Water Garden", "Crown & Deed", "Globe", "Settings"];
+        string[] names = ["Dragon Slots", "Football", "Blackjack", "Water Garden", "Crown & Deed", "Globe", "Settings"];
         Require(session.Buttons.Where(button => button.Destination != BoardScreen.Menu).Select(button => button.Label).SequenceEqual(names), "Menu order or labels differ from the requested menu.");
         Require(session.Buttons.Single(button => button.Id == "settings") is { Destination: BoardScreen.Settings } &&
             session.Buttons.All(button => button.Destination != BoardScreen.HandTracking),
             "Hand-Tracking is still a menu tile, or the Settings cog is missing.");
-        BoardButton[] buttons = session.Buttons.Where(button => button.Destination != BoardScreen.Menu).ToArray();
+        BoardButton[] firstPage = session.Buttons.Where(button => button.Destination != BoardScreen.Menu).ToArray();
+        var photoMenu = new BoardSession();
+        OpenSecondMenuPage(photoMenu, 0);
+        BoardButton[] buttons = [.. firstPage, photoMenu.Buttons.Single(button => button.Id == "photo-copy")];
         long eventId = 0;
         for (int index = 0; index < buttons.Length; index++)
         {
@@ -23,18 +26,21 @@ internal static class BoardInteractionRegression
                 "A menu target is too small for the board.");
             Require(bounds.X > 0 && bounds.Y > 0 && bounds.X + bounds.Width < 1 && bounds.Y + bounds.Height < 1,
                 "A menu target reaches outside the board.");
-            Require(buttons.Count(other => other.Bounds.Contains(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2)) == 1,
+            var pageButtons = button.Destination == BoardScreen.PhotoCopy ? photoMenu.Buttons : firstPage;
+            Require(pageButtons.Count(other => other.Bounds.Contains(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2)) == 1,
                 "Menu targets overlap at a button's center.");
 
             int time = 100 + index * 4000;
+            if (button.Destination == BoardScreen.PhotoCopy) OpenSecondMenuPage(session, time - 1);
             Require(Update(session, time, Over(button)) is null, "Hover alone selected an application.");
             Require(session.HoveredButtonIds.SequenceEqual([button.Id]), "Hover did not use the shared target rectangle.");
             BoardNavigation? navigation = Update(session, time + 10, Over(button, ++eventId, time + 10));
             Require(navigation is { Previous: BoardScreen.Menu } && navigation.Current == button.Destination &&
                 navigation.ButtonId == button.Id && session.Screen == button.Destination, "Menu pinch opened the wrong application.");
-            Require(session.Title == names[index], "The application title is incorrect.");
+            Require(session.Title == button.Label, "The application title is incorrect.");
             Require(session.Buttons.Count >= 1 && (session.Buttons[0].Destination == BoardScreen.Menu ||
                 button.Destination == BoardScreen.CrownDeed && session.Buttons[0].Id == "mp-exit" ||
+                button.Destination == BoardScreen.Football && session.Buttons[0].Id == "football-exit" ||
                 button.Destination == BoardScreen.Globe && session.Buttons[0].Id == "globe-drawer-open" ||
                 button.Destination == BoardScreen.PhotoCopy && session.Buttons[0].Id == "photo-drawer-open" ||
                 button.Destination == BoardScreen.WaterGarden && session.Buttons[0].Id == "water-drawer-open"),
@@ -120,10 +126,10 @@ internal static class BoardInteractionRegression
                         session.Screen == BoardScreen.Menu,
                     "Water Garden's revealed long-press EXIT did not return to the launcher.");
             }
-            else if (button.Destination == BoardScreen.Slots)
+            else if (button.Destination is BoardScreen.Slots or BoardScreen.Football)
             {
-                // Slots uses a single-action hold on the viewer's edge row.
-                string exitId = "slot-exit";
+                // Both boards use a single-action hold on the viewer's edge row.
+                string exitId = button.Destination == BoardScreen.Slots ? "slot-exit" : "football-exit";
                 Require(session.Buttons.All(item => item.Hold == BoardButtonHold.Once) && session.Buttons[0].Id == exitId,
                     button.Destination + " bottom controls are not long-press buttons led by Exit.");
                 Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is null &&
@@ -281,9 +287,11 @@ internal static class BoardInteractionRegression
     internal static void CheckPhotoCopyNavigation()
     {
         var session = new BoardSession();
+        OpenSecondMenuPage(session, 0);
         Require(session.NavigationRevision == 0, "An unused session already has a navigation revision.");
-        Require(Update(session, 100, Over(session.Buttons[1], 1, 100)) is { Current: BoardScreen.PhotoCopy, ButtonId: "photo-copy" },
-            "The renamed Photo Copy target did not launch Photo Copy.");
+        var photo = session.Buttons.Single(button => button.Id == "photo-copy");
+        Require(Update(session, 100, Over(photo, 1, 100)) is { Current: BoardScreen.PhotoCopy, ButtonId: "photo-copy" },
+            "The second-page Photo Copy target did not launch Photo Copy.");
         Require(session.NavigationRevision == 1, "Launching Photo Copy did not advance the navigation revision.");
         session.PhotoCopyHasSwirl = true;
         Require(session.ActivateButton("photo-drawer-open", Time(110)) && session.TickPhotoCopy(Time(410)) &&
@@ -312,22 +320,22 @@ internal static class BoardInteractionRegression
     internal static void CheckAnchoredSelection()
     {
         var session = new BoardSession();
-        BoardButton photo = session.Buttons[1];
+        BoardButton target = session.Buttons.Single(button => button.Id == "football");
         // The compositor supplies the open-hand selection point even when the
         // current fingertip curls outside the target during a pinch.
-        BoardHandSample anchored = Over(photo) with { SelectionFrameTime = Time(100) };
-        Require(Update(session, 140, anchored) is null && session.HoveredButtonIds.SequenceEqual([photo.Id]),
+        BoardHandSample anchored = Over(target) with { SelectionFrameTime = Time(100) };
+        Require(Update(session, 140, anchored) is null && session.HoveredButtonIds.SequenceEqual([target.Id]),
             "The closing hand lost the highlight at its anchored selection point.");
         Require(Update(session, 200) is null && session.HoveredButtonIds.Count == 0,
             "A missing hand retained an anchored highlight.");
-        Require(Update(session, 260, anchored with { ExecuteEventId = 1, ExecuteUntil = Time(1260) })?.Current == BoardScreen.PhotoCopy,
-            "A recent selection anchor could not launch Photo Copy after a brief dropout.");
+        Require(Update(session, 260, anchored with { ExecuteEventId = 1, ExecuteUntil = Time(1260) })?.Current == BoardScreen.Football,
+            "A recent selection anchor could not launch Football after a brief dropout.");
 
         session = new BoardSession();
         BoardHandSample offTarget = new(.5, .5, Time(1200), 1, Time(100));
         Require(Update(session, 200, offTarget) is null && session.HoveredButtonIds.Count == 0,
             "An off-target anchor navigated or highlighted a target.");
-        Require(Update(session, 240, Over(photo, 1, 200) with { SelectionFrameTime = Time(220) }) is null,
+        Require(Update(session, 240, Over(target, 1, 200) with { SelectionFrameTime = Time(220) }) is null,
             "An off-target anchored pinch drifted onto a button and executed.");
 
         // Each sample carries its own anchor; neither ordering nor an off-target
@@ -337,7 +345,7 @@ internal static class BoardInteractionRegression
         Update(session, 140, anchored, other);
         Require(Update(session, 260,
             other with { ExecuteEventId = 1, ExecuteUntil = Time(1260) },
-            anchored with { ExecuteEventId = 2, ExecuteUntil = Time(1260) })?.Current == BoardScreen.PhotoCopy,
+            anchored with { ExecuteEventId = 2, ExecuteUntil = Time(1260) })?.Current == BoardScreen.Football,
             "Reordering two hands lost the pinching hand's independent selection anchor.");
     }
 
@@ -347,23 +355,23 @@ internal static class BoardInteractionRegression
             { (0, 751, 751), (201, 200, 200), (225, 200, 250) })
         {
             var session = new BoardSession();
-            BoardButton photo = session.Buttons[1];
-            BoardHandSample invalid = Over(photo, 1, now) with { SelectionFrameTime = Time(anchorTime) };
+            BoardButton target = session.Buttons.Single(button => button.Id == "football");
+            BoardHandSample invalid = Over(target, 1, now) with { SelectionFrameTime = Time(anchorTime) };
             Require(session.Update([invalid], Time(frameTime), Time(now)) is null && session.HoveredButtonIds.Count == 0,
                 "An expired or future selection anchor navigated or hovered a target.");
             Require(Update(session, now + 40,
-                Over(photo, 1, now) with { SelectionFrameTime = Time(now + 20) }) is null,
+                Over(target, 1, now) with { SelectionFrameTime = Time(now + 20) }) is null,
                 "An event rejected for its anchor replayed after the anchor became valid.");
             Require(Update(session, now + 80,
-                Over(photo, 2, now + 80) with { SelectionFrameTime = Time(now + 60) })?.Current == BoardScreen.PhotoCopy,
+                Over(target, 2, now + 80) with { SelectionFrameTime = Time(now + 60) })?.Current == BoardScreen.Football,
                 "Rejecting an invalid anchor prevented a later fresh pinch.");
         }
 
         var boundary = new BoardSession();
         // Inference latency does not consume the source-time selection window;
         // frame freshness still independently requires an observation under 350 ms.
-        Require(boundary.Update([Over(boundary.Buttons[1], 1, 1000) with { SelectionFrameTime = Time(0) }],
-            Time(750), Time(1000))?.Current == BoardScreen.PhotoCopy,
+        Require(boundary.Update([Over(boundary.Buttons.Single(button => button.Id == "football"), 1, 1000)
+                with { SelectionFrameTime = Time(0) }], Time(750), Time(1000))?.Current == BoardScreen.Football,
             "A valid 750 ms anchor was expired by inference latency.");
     }
 
@@ -517,6 +525,10 @@ internal static class BoardInteractionRegression
         catch (ArgumentOutOfRangeException) { return; }
         throw new InvalidOperationException(message);
     }
+
+    private static void OpenSecondMenuPage(BoardSession session, int settledAt) =>
+        Require(session.ActivateButton("menu-scroll-down", Time(settledAt - 650)) && session.TickMenu(Time(settledAt)),
+            "The Photo Copy fixture could not settle the second menu page.");
 
     internal static BoardHandSample Over(BoardButton button, long eventId = 0, int executeAt = 0) =>
         new(button.Bounds.X + button.Bounds.Width / 2, button.Bounds.Y + button.Bounds.Height / 2,

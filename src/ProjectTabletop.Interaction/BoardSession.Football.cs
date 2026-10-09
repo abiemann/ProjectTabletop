@@ -6,6 +6,7 @@ public sealed partial class BoardSession
 {
     private readonly FootballGame _football = new();
     public FootballSnapshot FootballState => _football.Snapshot;
+    public long FootballInputRevision { get; private set; }
 
     public void ShowFootball(DateTimeOffset? now = null) => Show(BoardScreen.Football, now ?? MonotonicClock.UtcNow);
 
@@ -14,8 +15,8 @@ public sealed partial class BoardSession
         if (Screen == BoardScreen.Football) _football.Advance(now);
     }
 
-    public void SetFootballInput(int player, Vector2? position, DateTimeOffset frameTime) =>
-        _football.SetPlayerInput(player, Screen == BoardScreen.Football ? position : null, frameTime);
+    public void SetFootballInput(int player, Vector2? position, DateTimeOffset frameTime, float? heading = null) =>
+        _football.SetPlayerInput(player, Screen == BoardScreen.Football ? position : null, frameTime, heading);
 
     public void ClearFootballInput(DateTimeOffset now)
     {
@@ -27,6 +28,7 @@ public sealed partial class BoardSession
     {
         _football.Reset(now);
         ClearFootballInput(now);
+        FootballInputRevision++;
         Revision++;
     }
 
@@ -35,6 +37,7 @@ public sealed partial class BoardSession
         if (mode == FootballState.Mode) return;
         _football.SetMode(mode, now);
         ClearFootballInput(now);
+        FootballInputRevision++;
         ResetHoldCaptionEvidence();
         BottomDrawerGestureBarrier(now);
     }

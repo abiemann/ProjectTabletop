@@ -1,3 +1,9 @@
+# Camera testing
+
+Before launching a test build, close any running Project Tabletop instance and
+verify that it has exited. Never run two instances against the camera: concurrent
+camera access can freeze the user's USB ports.
+
 # Shared board improvements
 
 Apply generally useful improvements to interaction, hand acquisition, spotlight

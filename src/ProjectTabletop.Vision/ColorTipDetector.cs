@@ -16,9 +16,20 @@ public sealed record ColorTipProfile(int Version, double HueDegrees, double HueT
         double.IsFinite(NormalizedArea) && NormalizedArea is >= .0000001 and <= .015;
 }
 
-/// <summary>A measured coloured component in raw, unmirrored camera pixels, not a predicted contact.</summary>
-public sealed record ColorTipObservation(PixelPoint Center, double RadiusPixels, double AreaPixels, double Score);
-public sealed record ColorTipDetectionResult(IReadOnlyList<ColorTipObservation> Candidates, string Reason);
+/// <summary>A measured component in raw, unmirrored camera pixels, not a predicted contact.</summary>
+public sealed record ColorTipObservation(PixelPoint Center, double RadiusPixels, double AreaPixels, double Score)
+{
+    /// <summary>The measured black bar's axis and thickness, when this is a black-bar observation.</summary>
+    public BlackBarGeometry? Bar { get; init; }
+}
+public sealed record ColorTipDetectionResult(IReadOnlyList<ColorTipObservation> Candidates, string Reason)
+{
+    /// <summary>Physical, individually validated black strips, for bounded continuation of a
+    /// previously measured pair. Colour-tip consumers continue to use Candidates only.</summary>
+    public IReadOnlyList<ColorTipObservation> SupportingBars { get; init; } = [];
+    public IReadOnlyList<PixelPoint> AmbiguousMarkerCenters { get; init; } = [];
+    public string Source { get; init; } = "global";
+}
 public sealed record ColorTipDetectionOptions(PixelPoint? PreferredCenter = null,
     IReadOnlyList<EyeTipProjectionFrame>? ProjectionFrames = null, DateTimeOffset FrameTime = default);
 

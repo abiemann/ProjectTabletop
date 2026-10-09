@@ -48,20 +48,20 @@ public sealed partial class MainWindow
         foreach (var actualTip in new[] { new PixelPoint(.7, .5), new PixelPoint(1.03, .5) })
         {
             using var scene = CreateMenu();
-            var pointingTip = new PixelPoint(.7, .33); // Photo Copy.
+            var pointingTip = new PixelPoint(.7, .33); // Football.
             var sourceTime = MonotonicClock.UtcNow;
             scene.SetHandCursors([new(pointingTip, DateTimeOffset.MinValue)], sourceTime);
             scene.SetHandCursors([new(actualTip, DateTimeOffset.MinValue, 0, pointingTip, sourceTime)],
                 MonotonicClock.UtcNow);
-            if (!scene.HoveredBoardButtons.SequenceEqual(["photo-copy"]))
-                throw new InvalidOperationException("Closing a pinch moved the highlight away from Photo Copy.");
+            if (!scene.HoveredBoardButtons.SequenceEqual(["football"]))
+                throw new InvalidOperationException("Closing a pinch moved the highlight away from Football.");
             var selectingFrame = MonotonicClock.UtcNow;
             scene.SetHandCursors([new HandCursor(actualTip, selectingFrame.AddSeconds(1), 1, pointingTip, sourceTime)
                 { TrackingId = 712 }], selectingFrame);
-            if (scene.CurrentBoardScreen != BoardScreen.PhotoCopy)
-                throw new InvalidOperationException("A curled fingertip prevented the pointed Photo Copy target from opening.");
-            var selection = AssertHandSelectionDiagnostic(scene, BoardScreen.Menu, BoardScreen.PhotoCopy,
-                "photo-copy", "Pinch", 712, selectingFrame);
+            if (scene.CurrentBoardScreen != BoardScreen.Football)
+                throw new InvalidOperationException("A curled fingertip prevented the pointed Football target from opening.");
+            var selection = AssertHandSelectionDiagnostic(scene, BoardScreen.Menu, BoardScreen.Football,
+                "football", "Pinch", 712, selectingFrame);
             scene.SetHandCursors([], MonotonicClock.UtcNow);
             scene.ClearHandTips(resetInput: false);
             foreach (var rejectedFrame in new[] { MonotonicClock.UtcNow.AddSeconds(-1), MonotonicClock.UtcNow.AddSeconds(1) })
@@ -69,7 +69,7 @@ public sealed partial class MainWindow
                     { TrackingId = 713 }], rejectedFrame);
             scene.SetHandCursors([new HandCursor(new(double.NaN, .88), MonotonicClock.UtcNow.AddSeconds(1), 2)
                 { TrackingId = 713 }], MonotonicClock.UtcNow);
-            if (!ReferenceEquals(selection, scene.GetLastHandBoardSelection()) || scene.CurrentBoardScreen != BoardScreen.PhotoCopy)
+            if (!ReferenceEquals(selection, scene.GetLastHandBoardSelection()) || scene.CurrentBoardScreen != BoardScreen.Football)
                 throw new InvalidOperationException("Idle or rejected observations overwrote the successful pinch route after navigation.");
         }
         using (var scene = CreateMenu())

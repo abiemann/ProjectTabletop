@@ -18,7 +18,7 @@ public sealed partial class MainWindow
         ResetFootballInput();
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
-        SetStatus("Football: learn the black crossbar on your cardboard T, or choose index finger under Football input. Keep one controller in each player's half; first to five wins. Cover EXIT, RESET or the player-mode caption for one second to select it.");
+        SetStatus("Football: learn a black bar or double-bar marker, or choose index finger under Football input. Keep one controller in each player's half; your object follows in front of the marker facing the opposing half. First to five wins. Cover EXIT, RESET or the player-mode caption for one second to select it.");
     }
 
     private void OnFootballModeChanged(object sender, SelectionChangedEventArgs e)
@@ -63,12 +63,13 @@ public sealed partial class MainWindow
         return new
         {
             phase = state.Phase.ToString(), mode = state.Mode.ToString(), state.Banner,
-            state.Score1, state.Score2, state.CountdownSeconds,
+            state.Score1, state.Score2, state.CountdownSeconds, state.RecoveringInput,
             ball = new { x = state.BallPosition.X, y = state.BallPosition.Y, height = state.BallHeight,
                 vx = state.BallVelocity.X, vy = state.BallVelocity.Y, vz = state.BallVerticalVelocity,
                 speedLimit = FootballGame.MaxBallSpeed },
             players = state.Kickers.Select(k => new { player = k.Index + 1, k.Present, k.IsAi,
-                style = k.Style.ToString(), x = k.Position.X, y = k.Position.Y, vx = k.Velocity.X, vy = k.Velocity.Y }).ToArray()
+                style = k.Style.ToString(), x = k.Position.X, y = k.Position.Y, vx = k.Velocity.X, vy = k.Velocity.Y,
+                headingDegrees = k.Heading * 180 / Math.PI, k.MarkerAnchored }).ToArray()
         };
     }
 }

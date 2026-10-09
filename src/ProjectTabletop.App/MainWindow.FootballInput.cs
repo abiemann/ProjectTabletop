@@ -19,18 +19,24 @@ public sealed partial class MainWindow
     // change the single marker remembered by Water Garden.
     private readonly object _footballInputGate = new();
     private readonly Dictionary<string, FootballCameraProfiles> _footballMarkerProfiles = new(StringComparer.Ordinal);
-    private readonly ColorTipTracker[] _footballTipTrackers = [new(), new()];
+    private readonly FootballMarkerTracker[] _footballTipTrackers = [new(), new()];
     private readonly bool[] _footballFingerInputs = [false, false];
     private readonly PixelPoint?[] _footballCameraTips = new PixelPoint?[2];
+    private readonly BlackBarGeometry?[] _footballCameraBars = new BlackBarGeometry?[2];
     private readonly DateTimeOffset[] _footballTipTimes = new DateTimeOffset[2];
-    private readonly string[] _footballInputReasons = ["Learn player 1's black bar.", "Learn player 2's black bar."];
+    private readonly string[] _footballInputReasons = ["Learn player 1's black marker.", "Learn player 2's black marker."];
+    private readonly string?[] _footballTrackingSources = new string?[2];
     private DispatcherQueueTimer? _footballInputTimer;
     private Task? _footballDetectionTask, _footballLearningTask;
     private long _footballInputGeneration, _footballDetectionTick;
+    private long _footballSceneInputRevision = -1;
     private DateTimeOffset _footballInputNotBefore;
     private int _footballLearningPlayer = -1, _footballFrameWidth, _footballFrameHeight;
     private bool _footballDetecting, _footballLearningBusy, _footballInputWasActive;
     private string? _footballMarkerSettingsError;
+    private FootballDetectionDiagnostics? _footballLastDetection;
+    private sealed record FootballDetectionDiagnostics(DateTimeOffset FrameTime, double ProcessingMilliseconds,
+        double FrameAgeMilliseconds, string[] Reasons, int[] CandidateCounts);
     private sealed record FootballCameraProfiles(BlackTipProfile? Player1, BlackTipProfile? Player2)
     {
         public BlackTipProfile? ForPlayer(int player) => player == 0 ? Player1 : Player2;
@@ -74,7 +80,7 @@ public sealed partial class MainWindow
         _footballInputTimer.Tick += (_, _) =>
         {
             bool active = _scene.CurrentBoardScreen == BoardScreen.Football;
-            if (active != _footballInputWasActive)
+            if (active != _footballInputWasActive || _scene.FootballInputRevision != _footballSceneInputRevision)
             {
                 ResetFootballInput();
                 _footballInputWasActive = active;
@@ -84,7 +90,7 @@ public sealed partial class MainWindow
                 var now = MonotonicClock.UtcNow;
                 for (int player = 0; player < 2; player++)
                     if (_footballTipTimes[player] != default &&
-                        (now - _footballTipTimes[player] > EyeTipLifetime || !_cameraWanted ||
+                        (now - _footballTipTimes[player] > FootballGame.TrackingRecoveryTimeout || !_cameraWanted ||
                          !_camera.IsRunning || _cameraHealthWarning || IsBoardScanMeasuring))
                     {
                         _footballTipTrackers[player].Reset();
@@ -101,9 +107,11 @@ public sealed partial class MainWindow
     {
         lock (_footballInputGate)
         {
+            _footballSceneInputRevision = _scene.FootballInputRevision;
             _footballInputGeneration++;
             _footballInputNotBefore = MonotonicClock.UtcNow;
             _footballDetectionTick = 0;
+            _footballLastDetection = null;
             _footballLearningPlayer = -1;
             _footballFrameWidth = _footballFrameHeight = 0;
             for (int player = 0; player < 2; player++)
@@ -117,7 +125,9 @@ public sealed partial class MainWindow
     private void ClearFootballPlayerLocked(int player, string reason, DateTimeOffset frameTime)
     {
         _footballCameraTips[player] = null;
+        _footballCameraBars[player] = null;
         _footballTipTimes[player] = default;
+        _footballTrackingSources[player] = null;
         _footballInputReasons[player] = reason;
         _scene.SetFootballPlayerCameraPoint(player, null, frameTime);
     }
@@ -145,7 +155,7 @@ public sealed partial class MainWindow
             if (_footballLearningBusy)
             { SetStatus("Wait for the current football learning attempt to finish."); return false; }
         if (!_cameraWanted || !_camera.IsRunning || _camera.ActiveDeviceId != _selectedCameraId || _cameraHealthWarning)
-        { SetStatus("Start the selected webcam before learning a football black bar."); return false; }
+        { SetStatus("Start the selected webcam before learning a football marker."); return false; }
         (player == 0 ? FootballPlayer1Input : FootballPlayer2Input).SelectedIndex = 0;
         ResetFootballInput();
         _footballInputWasActive = _scene.CurrentBoardScreen == BoardScreen.Football;
@@ -156,9 +166,9 @@ public sealed partial class MainWindow
         lock (_footballInputGate)
         {
             _footballLearningPlayer = player;
-            _footballInputReasons[player] = "Click inside this player's black bar in the live camera preview.";
+            _footballInputReasons[player] = "Click inside one black bar of this player's marker in the live camera preview.";
         }
-        SetStatus($"Click player {player + 1}'s black bar in the live camera preview. Face the black crossbar toward the webcam and keep it near the board.");
+        SetStatus($"Click inside one black bar of player {player + 1}'s marker in the live camera preview. For a double-bar marker, keep both parallel bars visible. Face the marker toward the webcam and keep it near the board.");
         UpdateFootballInputStatus();
         CameraCanvas.Invalidate();
         return true;
@@ -254,7 +264,7 @@ public sealed partial class MainWindow
                 var chosen = NearestStickTipCandidate(learned.Detection.Candidates, point.X, point.Y,
                     item => item.Center, item => item.RadiusPixels);
                 if (chosen is null)
-                    throw new InvalidOperationException("Click the centre of one clearly visible black crossbar, away from other dark objects.");
+                    throw new InvalidOperationException("Click inside one clearly visible bar of the marker, away from unrelated dark objects.");
                 var profiles = _footballMarkerProfiles.GetValueOrDefault(cameraId) ?? new(null, null);
                 _footballMarkerProfiles[cameraId] = player == 0
                     ? profiles with { Player1 = learned.Profile } : profiles with { Player2 = learned.Profile };
@@ -265,9 +275,10 @@ public sealed partial class MainWindow
             }
             SaveFootballMarkerSettings();
             learnedSuccessfully = true;
+            string markerName = learned.Profile.BarCount == 2 ? "double-bar marker" : "black bar";
             SetStatus(_footballMarkerSettingsError is null
-                ? $"Player {player + 1}'s football black bar is saved for this camera."
-                : $"Player {player + 1}'s black bar is learned for this session. " + _footballMarkerSettingsError);
+                ? $"Player {player + 1}'s {markerName} is saved for this camera."
+                : $"Player {player + 1}'s {markerName} is learned for this session. " + _footballMarkerSettingsError);
         }
         catch (Exception ex)
         {
@@ -303,6 +314,12 @@ public sealed partial class MainWindow
     {
         lock (_footballInputGate)
         {
+            if (_closing) return;
+            if (_scene.FootballInputRevision != _footballSceneInputRevision)
+            {
+                ResetFootballInput();
+                return;
+            }
             if (_closing || _footballDetecting || _footballLearningPlayer >= 0 ||
                 _scene.CurrentBoardScreen != BoardScreen.Football || !_cameraWanted || !_camera.IsRunning ||
                 _cameraHealthWarning || IsBoardScanMeasuring || frame.Timestamp < _footballInputNotBefore ||
@@ -313,13 +330,28 @@ public sealed partial class MainWindow
             var selected = Enumerable.Range(0, 2).Where(player => FootballHumanPlayer(player) &&
                 !_footballFingerInputs[player] && profiles.ForPlayer(player) is not null).ToArray();
             if (selected.Length == 0) return;
+            if (_footballFrameWidth != frame.Width || _footballFrameHeight != frame.Height)
+            {
+                bool changed = _footballFrameWidth != 0 || _footballFrameHeight != 0;
+                for (int player = 0; player < 2; player++)
+                {
+                    _footballTipTrackers[player].Reset();
+                    if (changed)
+                        ClearFootballPlayerLocked(player, "Camera dimensions changed. Confirming the marker again.", frame.Timestamp);
+                }
+                _footballFrameWidth = frame.Width;
+                _footballFrameHeight = frame.Height;
+                if (changed) return;
+            }
             long tick = Stopwatch.GetTimestamp();
             if (_footballDetectionTick != 0 && Stopwatch.GetElapsedTime(_footballDetectionTick, tick).TotalMilliseconds < 32) return;
             _footballDetectionTick = tick;
             _footballDetecting = true;
             long generation = _footballInputGeneration;
+            var searchHints = selected.Select(player => _footballTipTrackers[player].GetSearchHint(frame.Timestamp)).ToArray();
             _footballDetectionTask = Task.Run(() =>
             {
+                long started = Stopwatch.GetTimestamp();
                 try
                 {
                     // GPU reference readback can be slow; never hold the input
@@ -328,40 +360,51 @@ public sealed partial class MainWindow
                     // Both players share one colour conversion of this camera frame.
                     var detections = BlackTipDetector.DetectEach(frame.Width, frame.Height, frame.Stride, frame.Bgra,
                         selected.Select(player => profiles.ForPlayer(player)!).ToArray(),
-                        new(ProjectionFrames: references, FrameTime: frame.Timestamp));
+                        new(ProjectionFrames: references, FrameTime: frame.Timestamp), searchHints);
                     lock (_footballInputGate)
                     {
+                        if (_closing || generation != _footballInputGeneration) return;
+                        if (_scene.FootballInputRevision != _footballSceneInputRevision)
+                        {
+                            ResetFootballInput();
+                            return;
+                        }
                         if (_closing || generation != _footballInputGeneration || !_cameraWanted || !_camera.IsRunning ||
                             _cameraHealthWarning || IsBoardScanMeasuring || _camera.ActiveDeviceId != cameraId ||
                             _scene.CurrentBoardScreen != BoardScreen.Football) return;
-                        if (_footballFrameWidth != frame.Width || _footballFrameHeight != frame.Height)
-                        {
-                            foreach (var tracker in _footballTipTrackers) tracker.Reset();
-                            _footballFrameWidth = frame.Width;
-                            _footballFrameHeight = frame.Height;
-                        }
                         var now = MonotonicClock.UtcNow;
+                        _footballLastDetection = new(frame.Timestamp, Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                            (now - frame.Timestamp).TotalMilliseconds, detections.Select(item => item.Reason).ToArray(),
+                            detections.Select(item => item.Candidates.Count).ToArray());
                         bool fresh = EyeTipFrameFresh(frame, now);
                         for (int index = 0; index < selected.Length; index++)
                         {
                             int player = selected[index];
                             if (!fresh)
                             {
-                                _footballTipTrackers[player].Reset();
-                                ClearFootballPlayerLocked(player, "Waiting for fresh camera and projection images.", frame.Timestamp);
+                                // A late result cannot refresh input or erase the last trusted pose.
+                                // The game freezes at 250 ms and the normal recovery timer expires it.
+                                _footballInputReasons[player] = "Waiting for fresh camera and projection images.";
                                 continue;
                             }
                             // Identical bars are assigned by calibrated pitch half before temporal matching.
-                            var decision = FootballTipAssignment.Update(_footballTipTrackers[player], player,
-                                detections[index], camera => _scene.TryMapFootballCameraPoint(camera, out var field) ? field : null,
+                            var decision = _footballTipTrackers[player].Update(player, profiles.ForPlayer(player)!,
+                                detections[index], camera => _scene.TryMapFootballMarkerCameraPoint(camera, out var field) ? field : null,
                                 frame.Timestamp, now);
                             switch (decision.Action)
                             {
                                 case FootballTipAction.Publish:
+                                    if (!_scene.SetFootballPlayerBar(player, decision.Tip!, frame.Timestamp))
+                                    {
+                                        _footballTipTrackers[player].Reset();
+                                        ClearFootballPlayerLocked(player, "Keep the black marker on the grass in your half of the field.", frame.Timestamp);
+                                        break;
+                                    }
                                     _footballCameraTips[player] = decision.Tip!.Center;
+                                    _footballCameraBars[player] = decision.Tip.Bar;
                                     _footballTipTimes[player] = frame.Timestamp;
                                     _footballInputReasons[player] = decision.Reason;
-                                    _scene.SetFootballPlayerFieldPoint(player, decision.FieldPoint, frame.Timestamp);
+                                    _footballTrackingSources[player] = decision.Source;
                                     break;
                                 case FootballTipAction.Clear:
                                     ClearFootballPlayerLocked(player, decision.Reason, frame.Timestamp);
@@ -395,6 +438,12 @@ public sealed partial class MainWindow
         if (_scene.CurrentBoardScreen != BoardScreen.Football) return;
         lock (_footballInputGate)
         {
+            if (_closing) return;
+            if (_scene.FootballInputRevision != _footballSceneInputRevision)
+            {
+                ResetFootballInput();
+                return;
+            }
             bool fresh = !_closing && _cameraWanted && _camera.IsRunning && !_cameraHealthWarning &&
                 !IsBoardScanMeasuring && frame.Timestamp >= _footballInputNotBefore &&
                 EyeTipFrameFresh(frame, MonotonicClock.UtcNow);
@@ -419,10 +468,12 @@ public sealed partial class MainWindow
                 }
                 var (camera, field) = candidates[player][0];
                 _footballCameraTips[player] = camera;
+                _footballCameraBars[player] = null;
                 _footballTipTimes[player] = frame.Timestamp;
                 _footballFrameWidth = frame.Width;
                 _footballFrameHeight = frame.Height;
                 _footballInputReasons[player] = "Index fingertip tracked.";
+                _footballTrackingSources[player] = "finger";
                 _scene.SetFootballPlayerFieldPoint(player, field, frame.Timestamp);
             }
         }
@@ -444,10 +495,10 @@ public sealed partial class MainWindow
             var cameraId = _camera.ActiveDeviceId ?? _selectedCameraId;
             var profiles = cameraId is null ? null : _footballMarkerProfiles.GetValueOrDefault(cameraId);
             string Describe(int player) => $"P{player + 1}: " + (_footballLearningPlayer == player
-                ? "Click the black bar in the live camera preview."
+                ? "Click inside one black bar of the marker in the live camera preview."
                 : !FootballHumanPlayer(player) ? "The computer plays this side."
                 : _footballFingerInputs[player] ? _footballInputReasons[player]
-                : profiles?.ForPlayer(player) is null ? "Choose Learn black bar, then click its centre."
+                : profiles?.ForPlayer(player) is null ? "Choose Learn marker, then click inside one of its bars."
                 : _footballInputReasons[player]);
             FootballInputStatusText.Text = Describe(0) + "\n" + Describe(1) +
                 (_footballMarkerSettingsError is null ? "" : "\n" + _footballMarkerSettingsError);
@@ -465,6 +516,7 @@ public sealed partial class MainWindow
             {
                 cameraDeviceId = cameraId,
                 active = _scene.CurrentBoardScreen == BoardScreen.Football,
+                lastDetection = _footballLastDetection,
                 learningPlayer = _footballLearningPlayer >= 0 ? (int?)(_footballLearningPlayer + 1) : null,
                 players = Enumerable.Range(0, 2).Select(player => new
                 {
@@ -473,7 +525,8 @@ public sealed partial class MainWindow
                     learned = profiles?.ForPlayer(player) is not null,
                     profile = profiles?.ForPlayer(player),
                     visible = _footballCameraTips[player] is not null && now - _footballTipTimes[player] <= EyeTipLifetime,
-                    cameraPoint = _footballCameraTips[player], frameTime = _footballTipTimes[player],
+                    trackingSource = _footballTrackingSources[player],
+                    cameraPoint = _footballCameraTips[player], bar = _footballCameraBars[player], frameTime = _footballTipTimes[player],
                     reason = _footballInputReasons[player]
                 }).ToArray(),
                 settingsPath = FootballMarkerSettingsPath, settingsError = _footballMarkerSettingsError
@@ -493,6 +546,12 @@ public sealed partial class MainWindow
                 var center = new Vector2((float)(rect.X + point.X / frame.Width * rect.Width),
                     (float)(rect.Y + point.Y / frame.Height * rect.Height));
                 var color = player == 0 ? Colors.Orange : Colors.DeepSkyBlue;
+                if (_footballCameraBars[player] is { } bar)
+                {
+                    Vector2 PreviewPoint(PixelPoint p) => new((float)(rect.X + p.X / frame.Width * rect.Width),
+                        (float)(rect.Y + p.Y / frame.Height * rect.Height));
+                    drawing.DrawLine(PreviewPoint(bar.End1), PreviewPoint(bar.End2), color, 3);
+                }
                 drawing.DrawCircle(center, 12, Colors.Black, 5);
                 drawing.DrawCircle(center, 12, color, 2);
                 drawing.DrawText($"P{player + 1}", center.X + 16, center.Y - 13, color);

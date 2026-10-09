@@ -123,7 +123,7 @@
                         <Button Content="Water Garden" Click="WaterGarden_Click" />
                         <TextBlock Text="Move a calibrated stick tip across the water to make ripples. Learn its marker and enable Stick tip tracking in Hand interaction. Open the bottom-left arrow to find EXIT, RESET, and DUCK+. Hold a projected control for one second, then uncover it before pressing again. Laptop clicks also work." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Football" Click="OnOpenFootballBoard" />
-                        <TextBlock Text="Kick a lively football with a black cardboard T crossbar or your index finger. Play against the computer or another person, defending opposite goals. Player 1 uses the left half; player 2 uses the right." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <TextBlock Text="Kick a lively football with a black bar, a double-bar marker or your index finger. Play against the computer or another person, defending opposite goals. Player 1 uses the left half; player 2 uses the right." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Expander Header="Football game" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <StackPanel Spacing="10">
                                 <ComboBox x:Name="FootballModeBox" Header="Players" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="OnFootballModeChanged">
@@ -143,7 +143,7 @@
                                     <ComboBoxItem Content="Football boot" />
                                 </ComboBox>
                                 <Button Content="Reset football match" Click="OnResetFootball" />
-                                <TextBlock Text="Choose each player's input and learn the black bars under Football input below. Every kicker uses the same contact size." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <TextBlock Text="Choose each player's input and learn their marker under Football input below. Every kicker uses the same contact size." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                             </StackPanel>
                         </Expander>
                         <Button Content="Crown &amp; Deed" Click="CrownDeed_Click" />
@@ -186,20 +186,20 @@
                         <TextBlock Text="For a coloured pin, choose Learn colour tip and click inside its coloured surface. For an eye sticker, choose Learn eye tip and click its black pupil. A green circle confirms tracking. After board setup, open Water Garden and move the tip close to the board to make ripples." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Expander Header="Football input" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <StackPanel Spacing="10">
-                                <TextBlock Text="Use a cardboard T with a solid black top crossbar and an uncoloured stem. Choose Learn black bar, then click the centre of the black crossbar in the live webcam preview. Face the bar up toward the camera and keep it close to the board. Profiles are saved separately for each camera." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <TextBlock Text="Use one solid black rectangle, or two equal parallel bars with aligned ends and a clear gap. For a new marker, aim for bars about 1 cm thick and 5–6 cm long with a 1 cm gap. A cardboard T with a black top crossbar and an uncoloured stem also works. Choose Learn marker, then click inside one black bar in the live webcam preview. A nearby matching parallel bar is learned as part of the same marker. Face both bars up toward the camera and keep them close to the board. Markers work across the grass in your half, including behind your goal line. Profiles are saved separately for each camera." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                                 <ComboBox x:Name="FootballPlayer1Input" Header="Player 1 input" Tag="0" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="FootballInputMode_SelectionChanged">
-                                    <ComboBoxItem Content="Black T crossbar" />
+                                    <ComboBoxItem Content="Black bar / pair" />
                                     <ComboBoxItem Content="Index fingertip" />
                                 </ComboBox>
-                                <Button Content="Learn player 1 black bar" Tag="0" Click="LearnFootballTip_Click" />
+                                <Button Content="Learn player 1 marker" Tag="0" Click="LearnFootballTip_Click" />
                                 <ComboBox x:Name="FootballPlayer2Input" Header="Player 2 input" Tag="1" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="FootballInputMode_SelectionChanged">
-                                    <ComboBoxItem Content="Black T crossbar" />
+                                    <ComboBoxItem Content="Black bar / pair" />
                                     <ComboBoxItem Content="Index fingertip" />
                                 </ComboBox>
-                                <Button Content="Learn player 2 black bar" Tag="1" Click="LearnFootballTip_Click" />
+                                <Button Content="Learn player 2 marker" Tag="1" Click="LearnFootballTip_Click" />
                                 <Button Content="Cancel learning" Click="CancelFootballLearning_Click" />
-                                <TextBlock x:Name="FootballInputStatusText" Text="Learn a black bar for each human player, or choose Index fingertip." TextWrapping="Wrap" />
-                                <TextBlock Text="Both black bars may look identical: keep one in each half, player 1 on the left and player 2 on the right. For fingertip play, show the back of one hand in your half and point with the index finger. Player 2 input is used in two-human mode. Lost or hidden markers stop controlling the kicker." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <TextBlock x:Name="FootballInputStatusText" Text="Learn a black marker for each human player, or choose Index fingertip." TextWrapping="Wrap" />
+                                <TextBlock Text="Players' markers may look identical: keep one marker in each half, player 1 on the left and player 2 on the right. A learned pair counts as one marker. Show both bars to start tracking; brief coverage of one bar is tolerated. Your kicker sits directly in front of the marker, facing the opponent's half, and follows when you move or rotate it. For fingertip play, show the back of one hand in your half and point with the index finger. Player 2 input is used in two-human mode. Short tracking interruptions resume quietly; longer losses pause play." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                             </StackPanel>
                         </Expander>
                     </StackPanel>

@@ -6,16 +6,19 @@ public enum FootballMode { HumanVsAi, TwoHumans }
 public enum FootballKickerStyle { Car, Glove, Pan, Boot }
 public enum FootballPhase { WaitingForPlayers, Countdown, Playing, Goal, Finished }
 
-/// <summary>Heading is the cosmetic facing in radians, turned at a fixed simulated rate.</summary>
+/// <summary>Heading is the facing in radians: measured for a bar, otherwise turned at a fixed simulated rate.</summary>
 public sealed record FootballKickerSnapshot(int Index, Vector2 Position, Vector2 Velocity,
-    bool Present, FootballKickerStyle Style, bool IsAi, float Heading = 0);
+    bool Present, FootballKickerStyle Style, bool IsAi, float Heading = 0, bool MarkerAnchored = false);
 
 /// <summary>Field coordinates are centered: X goes left to right, Y goes top to bottom.
 /// BallHeight is its center above the turf, in the same units as the field.</summary>
 public sealed record FootballSnapshot(Vector2 BallPosition, Vector2 BallVelocity, float BallHeight,
     float BallVerticalVelocity, Quaternion BallRotation, IReadOnlyList<FootballKickerSnapshot> Kickers,
     int Score1, int Score2, FootballMode Mode, FootballPhase Phase, string Banner,
-    float CountdownSeconds, long Revision);
+    float CountdownSeconds, long Revision)
+{
+    public bool RecoveringInput { get; init; }
+}
 
 /// <summary>
 /// A deterministic, fixed-step bumper football game. All four appearances have identical circular
@@ -36,6 +39,7 @@ public sealed class FootballGame
     public const float AiMaxSpeed = .88f;
     public const int WinningScore = 5;
     public static readonly TimeSpan InputFreshness = TimeSpan.FromMilliseconds(250);
+    public static readonly TimeSpan TrackingRecoveryTimeout = TimeSpan.FromMilliseconds(750);
 
     private const float StepSeconds = 1f / 240;
     private const double StepDuration = 1.0 / 240;
@@ -53,6 +57,7 @@ public sealed class FootballGame
     private readonly Kicker[] _kickers = [new(0), new(1)];
     private FootballMode _mode = FootballMode.HumanVsAi;
     private FootballPhase _phase = FootballPhase.WaitingForPlayers;
+    private bool _recoveringInput;
     private Vector2 _ballPosition;
     private Vector2 _ballVelocity;
     private float _ballHeight = BallRadius;
@@ -76,11 +81,13 @@ public sealed class FootballGame
     /// <summary>
     /// Supply a fresh world-space marker/fingertip, or null when the player is lost or ambiguous.
     /// A caller may omit samples during a brief miss: the kicker holds its last target and becomes
-    /// absent after InputFreshness. Invalid/outside samples disarm the player. Large discontinuities
+    /// absent after InputFreshness. A brief absence freezes live play until tracking returns;
+    /// TrackingRecoveryTimeout ends that grace period. Invalid/outside samples disarm immediately. Large discontinuities
     /// reacquire without sweeping a bumper through the pitch, so a changed hand identity cannot
-    /// produce a phantom kick.
+    /// produce a phantom kick. A measured heading rigidly anchors the visible kicker to this pose;
+    /// its collision movement still uses bounded velocity derived from observation timestamps.
     /// </summary>
-    public void SetPlayerInput(int index, Vector2? position, DateTimeOffset observedAt)
+    public void SetPlayerInput(int index, Vector2? position, DateTimeOffset observedAt, float? heading = null)
     {
         ValidateIndex(index);
         if (index == 1 && _mode == FootballMode.HumanVsAi) return;
@@ -88,11 +95,14 @@ public sealed class FootballGame
         if (kicker.ObservedAt is { } last && (observedAt < last || observedAt == last && position is not null)) return;
         var previousAt = kicker.ObservedAt;
         kicker.ObservedAt = observedAt;
-        if (position is not { } point || !Finite(point) ||
+        if (position is not { } point || !Finite(point) || (heading is { } angle && !float.IsFinite(angle)) ||
             MathF.Abs(point.X) > Width / 2 || MathF.Abs(point.Y) > Height / 2)
         {
             kicker.HasInput = kicker.Present = false;
             kicker.Velocity = Vector2.Zero;
+            kicker.MeasuredHeading = null;
+            kicker.MeasuredSpeed = 0;
+            _recoveringInput = false;
             if (_phase is FootballPhase.Playing or FootballPhase.Countdown)
             {
                 _phase = FootballPhase.WaitingForPlayers;
@@ -103,18 +113,45 @@ public sealed class FootballGame
             return;
         }
 
+        // A fresh sample may arrive before Advance observes the expired recovery window.
+        // Do not let replacing its source timestamp turn a sustained disconnect into a quick resume.
+        if (kicker.HasInput && previousAt is { } lastValid && observedAt - lastValid > TrackingRecoveryTimeout &&
+            (_phase is FootballPhase.Playing or FootballPhase.Countdown))
+        {
+            _phase = FootballPhase.WaitingForPlayers;
+            _phaseRemaining = 0;
+            _accumulator = 0;
+            _recoveringInput = false;
+        }
+
         point = ClampKicker(point);
         float distance = Vector2.Distance(kicker.Target, point);
-        bool discontinuity = previousAt is { } before && kicker.HasInput &&
-            distance > .30f && distance / Math.Max(.001, (observedAt - before).TotalSeconds) > MaxKickerSpeed * 1.8;
+        // A symmetric bar can change its opponent-facing side when it passes side-on.
+        // Its anchor then switches across the bar without having travelled that path.
+        // Treat the abrupt facing change as reacquisition, even for a short offset.
+        bool facingFlip = heading is { } nextAngle && kicker.MeasuredHeading is { } lastAngle &&
+            MathF.Abs(MathF.IEEERemainder(nextAngle - lastAngle, MathF.Tau)) > MathF.PI / 2;
+        bool discontinuity = facingFlip || (previousAt is { } before && kicker.HasInput &&
+            distance > .30f && distance / Math.Max(.001, (observedAt - before).TotalSeconds) > MaxKickerSpeed * 1.8);
         bool reacquired = !kicker.HasInput || previousAt is null ||
-            observedAt - previousAt > InputFreshness || discontinuity;
+            observedAt - previousAt > InputFreshness || discontinuity ||
+            heading.HasValue != kicker.MeasuredHeading.HasValue;
         kicker.HasInput = true;
         kicker.Target = point;
+        kicker.MeasuredHeading = heading is { } measured ? MathF.IEEERemainder(measured, MathF.Tau) : null;
+        if (kicker.MeasuredHeading is { } facing)
+        {
+            kicker.Heading = facing;
+            if (previousAt is { } sampleAt && distance > .000001f)
+                kicker.MeasuredSpeed = (float)Math.Min(MaxKickerSpeed,
+                    distance / Math.Max(.001, (observedAt - sampleAt).TotalSeconds));
+        }
+        else kicker.MeasuredSpeed = 0;
         if (reacquired)
         {
             kicker.Position = point;
             kicker.Velocity = Vector2.Zero;
+            kicker.MeasuredSpeed = 0;
             kicker.CollisionQuiet = .10f;
         }
         if (discontinuity) kicker.Present = false;
@@ -145,6 +182,7 @@ public sealed class FootballGame
         if (_lastAdvance is { } last && now < last) return;
         _score1 = _score2 = _lastScorer = 0;
         _phase = FootballPhase.WaitingForPlayers;
+        _recoveringInput = false;
         _phaseRemaining = 0;
         _servePending = true;
         _lastAdvance = now;
@@ -159,6 +197,8 @@ public sealed class FootballGame
             kicker.Position = kicker.Target = new(kicker.Index == 0 ? -.52f : .52f, 0);
             kicker.Velocity = Vector2.Zero;
             kicker.Heading = kicker.Index == 0 ? 0 : MathF.PI;
+            kicker.MeasuredHeading = null;
+            kicker.MeasuredSpeed = 0;
             kicker.CollisionQuiet = .10f;
         }
         Change();
@@ -170,26 +210,44 @@ public sealed class FootballGame
         double elapsed = _lastAdvance is { } last ? (now - last).TotalSeconds : 0;
         _lastAdvance = now;
         var phase = _phase;
+        bool wasRecovering = _recoveringInput;
         bool changed = UpdatePresence(now, out bool ready);
-        // A suspended window must not catch up several seconds of football against an absent hand.
+        // A short render hitch discards simulation debt without restarting a match or its
+        // countdown. A sustained window suspension still requires a reconnect countdown.
         if (elapsed > .20)
         {
+            bool sustained = elapsed > TrackingRecoveryTimeout.TotalSeconds;
             elapsed = 0;
             _accumulator = 0;
-            foreach (var kicker in _kickers)
+            changed |= FreezeKickerMotion();
+            if (sustained && (_phase is FootballPhase.Playing or FootballPhase.Countdown))
             {
-                changed |= kicker.Velocity != Vector2.Zero;
-                kicker.Velocity = Vector2.Zero;
-                kicker.CollisionQuiet = .10f;
-            }
-            if (_phase is FootballPhase.Playing or FootballPhase.Countdown)
                 _phase = FootballPhase.WaitingForPlayers;
+                _phaseRemaining = 0;
+                changed = true;
+            }
         }
-        if (!ready && _phase is FootballPhase.Playing or FootballPhase.Countdown)
+        _recoveringInput = !ready && (_phase is FootballPhase.Playing or FootballPhase.Countdown) &&
+            _kickers.All(kicker => IsAi(kicker) || CanRecover(kicker, now));
+        if (!ready && !_recoveringInput && (_phase is FootballPhase.Playing or FootballPhase.Countdown))
         {
             _phase = FootballPhase.WaitingForPlayers;
             _phaseRemaining = 0;
             _accumulator = 0;
+        }
+        changed |= wasRecovering != _recoveringInput;
+        if (_recoveringInput || wasRecovering)
+        {
+            // Freeze both teams and the ball, preserving momentum only for the later resume.
+            // Fresh observations may reposition a human visually, but cannot bank a kick.
+            elapsed = 0;
+            _accumulator = 0;
+            changed |= FreezeKickerMotion();
+        }
+        if (_recoveringInput)
+        {
+            if (changed) Change();
+            return;
         }
         if (ready && _phase == FootballPhase.WaitingForPlayers)
         {
@@ -238,13 +296,37 @@ public sealed class FootballGame
                 kicker.HasInput && kicker.ObservedAt is { } at && now >= at && now - at <= InputFreshness;
             if (!present)
             {
-                changed |= kicker.Velocity != Vector2.Zero;
+                bool retainPose = (_phase is FootballPhase.Playing or FootballPhase.Countdown) && CanRecover(kicker, now);
+                changed |= kicker.Velocity != Vector2.Zero || !retainPose && kicker.MeasuredHeading is not null;
                 kicker.Velocity = Vector2.Zero;
+                if (!retainPose) kicker.MeasuredHeading = null;
+                kicker.MeasuredSpeed = 0;
                 kicker.CollisionQuiet = .10f;
             }
             changed |= kicker.Present != present;
             kicker.Present = present;
             ready &= present;
+        }
+        return changed;
+    }
+
+    private static bool CanRecover(Kicker kicker, DateTimeOffset now) => kicker.HasInput &&
+        kicker.ObservedAt is { } at && now >= at && now - at <= TrackingRecoveryTimeout;
+
+    private bool FreezeKickerMotion()
+    {
+        bool changed = false;
+        foreach (var kicker in _kickers)
+        {
+            if (!IsAi(kicker) && kicker.HasInput && kicker.Position != kicker.Target)
+            {
+                kicker.Position = kicker.Target;
+                changed = true;
+            }
+            changed |= kicker.Velocity != Vector2.Zero;
+            kicker.Velocity = Vector2.Zero;
+            kicker.MeasuredSpeed = 0;
+            kicker.CollisionQuiet = .10f;
         }
         return changed;
     }
@@ -345,13 +427,20 @@ public sealed class FootballGame
                     ? Limit((_aiTarget - kicker.Position) * 7, AiMaxSpeed) : Vector2.Zero;
                 kicker.Velocity += Limit(desired - kicker.Velocity, 4f * StepSeconds);
             }
+            else if (kicker.MeasuredHeading is not null)
+            {
+                // The rendered pose is the measured target, while collision follows its sampled
+                // segment at the observation speed. Never turn a 30Hz camera displacement into
+                // a 240Hz impulse or extrapolate beyond the observed bar position.
+                kicker.Velocity = Limit((kicker.Target - kicker.Position) / StepSeconds, kicker.MeasuredSpeed);
+            }
             // Approximately 28ms of follow-through smooths camera sampling. Dividing a whole
             // camera-frame displacement by one 240Hz physics step would turn a gentle nudge
             // into a maximum-speed kick every time a fresh camera observation arrived.
             else kicker.Velocity = Limit((kicker.Target - kicker.Position) * 36, MaxKickerSpeed);
             kicker.Position = ClampKicker(kicker.Position + kicker.Velocity * StepSeconds);
             kicker.Velocity = (kicker.Position - kicker.StepStart) / StepSeconds;
-            TurnToward(kicker);
+            if (kicker.MeasuredHeading is null) TurnToward(kicker);
         }
     }
 
@@ -525,9 +614,12 @@ public sealed class FootballGame
             _ => "First to 5"
         };
         var kickers = Array.AsReadOnly(_kickers.Select(kicker => new FootballKickerSnapshot(kicker.Index,
-            kicker.Position, kicker.Velocity, kicker.Present, kicker.Style, IsAi(kicker), kicker.Heading)).ToArray());
-        return new(_ballPosition, _ballVelocity, _ballHeight, _ballVerticalVelocity, _ballRotation, kickers,
-            _score1, _score2, _mode, _phase, banner, _phaseRemaining, Revision);
+            kicker.MeasuredHeading is not null ? kicker.Target : kicker.Position,
+            kicker.Velocity, kicker.Present, kicker.Style, IsAi(kicker), kicker.Heading,
+            kicker.MeasuredHeading is not null)).ToArray());
+        return new(_ballPosition, _recoveringInput ? Vector2.Zero : _ballVelocity, _ballHeight,
+            _recoveringInput ? 0 : _ballVerticalVelocity, _ballRotation, kickers,
+            _score1, _score2, _mode, _phase, banner, _phaseRemaining, Revision) { RecoveringInput = _recoveringInput };
     }
 
     private static bool SweepCircle(Vector2 relative, Vector2 velocity, float radius, float duration, out float time)
@@ -575,6 +667,8 @@ public sealed class FootballGame
         public float CollisionQuiet;
         public float HopCooldown;
         public float Heading = index == 0 ? 0 : MathF.PI;
+        public float? MeasuredHeading;
+        public float MeasuredSpeed;
         public FootballKickerStyle Style = index == 0 ? FootballKickerStyle.Car : FootballKickerStyle.Glove;
     }
 }

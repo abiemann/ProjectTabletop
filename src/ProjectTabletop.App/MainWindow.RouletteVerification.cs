@@ -219,7 +219,7 @@ public sealed partial class MainWindow
         byte[] initial = await Capture("menu-top");
         var initialButtons = scene.CurrentBoardButtons.Select(button => (button.Id, button.Bounds)).ToArray();
         Check(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
-            ["slots", "photo-copy", "blackjack", "water-garden", "crown-deed", "globe", "settings", "menu-scroll-down"]) &&
+            ["slots", "football", "blackjack", "water-garden", "crown-deed", "globe", "settings", "menu-scroll-down"]) &&
             scene.CurrentBoardButtons.Single(button => button.Id == "water-garden").Bounds.Contains(.72, .53),
             "The initial menu does not show six cards with Water Garden beside Blackjack and a separate scroll handle.");
         scene.GetHandAcquisitionContext(fixture.Now);
@@ -252,15 +252,15 @@ public sealed partial class MainWindow
         fixture.Now = started + BoardSession.MenuScrollDuration;
         await Capture("menu-scrolled");
         Check(board.MenuScrolled && !board.MenuScrolling && scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(
-            ["roulette", "paint", "football", "settings", "menu-scroll-up"]),
-            "The settled second page did not show Roulette, Paint and the fixed navigation controls.");
+            ["roulette", "paint", "photo-copy", "settings", "menu-scroll-up"]),
+            "The settled second page did not show Roulette, Paint, Photo Copy and the fixed navigation controls.");
         var roulette = scene.CurrentBoardButtons.Single(button => button.Id == "roulette");
         var paint = scene.CurrentBoardButtons.Single(button => button.Id == "paint");
         Check(Math.Abs(board.GetMenuScrollOffset(fixture.Now) - .60) < 1e-9 &&
             Math.Abs(roulette.Bounds.Y - .25) < 1e-9 && roulette.Bounds.Height == .16 &&
             Math.Abs(paint.Bounds.Y - .25) < 1e-9 && paint.Bounds.Height == .16 &&
             roulette.Bounds.X == .08 && paint.Bounds.X == .52 &&
-            board.GetMenuCards(fixture.Now).Where(button => button.Id is not ("roulette" or "paint" or "football"))
+            board.GetMenuCards(fixture.Now).Where(button => button.Id is not ("roulette" or "paint" or "photo-copy"))
                 .All(button => button.Bounds.Y + button.Bounds.Height <= BoardSession.MenuCardViewport.Y),
             "A full-page scroll left an original card in the viewport or misplaced Roulette or Paint's visible/input bounds.");
         fixture.Now += TimeSpan.FromMilliseconds(1);

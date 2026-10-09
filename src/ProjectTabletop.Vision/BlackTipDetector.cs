@@ -3,24 +3,36 @@ using OpenCvSharp;
 
 namespace ProjectTabletop.Vision;
 
-/// <summary>The learned black crossbar of a cardboard T. Area is relative to the camera frame;
-/// aspect ratio uses a rotated rectangle, so rotating the bat does not invalidate the profile.</summary>
+/// <summary>A learned black crossbar or a pair of parallel bars. Area and aspect describe one
+/// strip; paired spacing is perpendicular centre distance divided by strip length.</summary>
 public sealed record BlackTipProfile(int Version, double Value, double Saturation,
-    double NormalizedArea, double AspectRatio = 1)
+    double NormalizedArea, double AspectRatio = 1, int BarCount = 1, double SpacingRatio = 0)
 {
     public double NormalizedRadius => Math.Sqrt(NormalizedArea / Math.PI);
     public bool IsValid => Version == 1 && double.IsFinite(Value) && Value is >= 0 and <= .38 &&
         double.IsFinite(Saturation) && Saturation is >= 0 and <= .70 &&
         double.IsFinite(NormalizedArea) && NormalizedArea is >= .0000001 and <= .025 &&
-        double.IsFinite(AspectRatio) && AspectRatio is >= 1.6 and <= 8;
+        double.IsFinite(AspectRatio) && AspectRatio is >= 1.6 and <= 16 &&
+        double.IsFinite(SpacingRatio) && (BarCount == 1 && SpacingRatio == 0 ||
+            BarCount == 2 && SpacingRatio is >= .12 and <= .80);
 }
+
+/// <summary>Raw-camera midpoints of a bar's short edges (End1/End2) and long edges
+/// (Side1/Side2). These axes have no inherent forward direction: the caller preserves its
+/// chosen front across frames. Map all four points through calibration before deriving a pose.</summary>
+public sealed record BlackBarGeometry(PixelPoint End1, PixelPoint End2, PixelPoint Side1, PixelPoint Side2);
 
 public sealed record BlackTipLearningOptions(IReadOnlyList<EyeTipProjectionFrame>? ProjectionFrames = null,
     DateTimeOffset FrameTime = default);
 
+/// <summary>A recent measured full marker and a bounded prediction used only to locate an
+/// additional local search. It never supplies an unmeasured controller position.</summary>
+public sealed record BlackTipSearchHint(ColorTipObservation Marker, PixelPoint ExpectedCenter,
+    DateTimeOffset LastFullFrame);
+
 /// <summary>
-/// Detects the solid black top crossbar of a cardboard T, not its uncoloured handle. Learned
-/// size and elongation reject round holes; fresh projected-scene references veto the app's
+/// Detects a solid black crossbar or two parallel bars as one marker. Learned
+/// size, elongation and pair spacing reject unrelated marks; fresh scene references veto the app's
 /// own black artwork. Returns the common measured-component contract for ColorTipTracker.
 /// Callers must partition identical bats by calibrated player half BEFORE temporal association.
 /// </summary>
@@ -45,10 +57,13 @@ public static class BlackTipDetector
         {
             int index = (y * image.Width + x) * 3;
             double value = image.Hsv[index + 2] / 255.0, saturation = image.Hsv[index + 1] / 255.0;
-            if (value <= .38 && (saturation <= .70 || value <= .12)) patch.Add((value, saturation));
+            // Projected colour can saturate black ink without making it bright. Rejecting
+            // that tint fragments a thin bar as it crosses the pitch's light and dark stripes.
+            // Darkness, shape, local contrast and the artwork veto identify the physical ink.
+            if (value <= .38) patch.Add((value, saturation));
         }
         if (patch.Count < 7)
-            throw new InvalidOperationException("Click the solid black middle of the T's crossbar. Keep the handle uncoloured.");
+            throw new InvalidOperationException("Click the solid black middle of one bar. Keep any handle uncoloured.");
         var seed = new BlackTipProfile(1, patch.Select(item => item.Value).Order().ElementAt(patch.Count / 2),
             Math.Min(.70, patch.Select(item => item.Saturation).Order().ElementAt(patch.Count / 2)), .0001, 3);
         using Mat mask = image.Mask(seed);
@@ -65,18 +80,48 @@ public static class BlackTipDetector
             NormalizedArea = selected.Observation.AreaPixels / (width * (double)height),
             AspectRatio = selected.Aspect
         };
-        if (!result.IsValid) throw new InvalidOperationException("The crossbar is outside the supported size or shape. Make its width about 2–8 times its thickness.");
+        if (!result.IsValid) throw new InvalidOperationException("The crossbar is outside the supported size or shape. Make its width about 2–16 times its thickness.");
+        EyeTipProjectionMatcher? projection = null;
         if (options?.ProjectionFrames is { } frames)
         {
-            var projection = new EyeTipProjectionMatcher(frames, options.FrameTime);
+            projection = new EyeTipProjectionMatcher(frames, options.FrameTime);
             if (!projection.Ready)
                 throw new InvalidOperationException("Wait for a current projected-board reference, then click the physical crossbar again.");
             if (!projection.ContainsBoardPoint(selected.Observation.Center))
-                throw new InvalidOperationException("Place the cardboard T on the projected board, then click its black crossbar again.");
-            if (!projection.IsPhysicalCandidate(selected.Observation.Center, selected.Observation.RadiusPixels,
+                throw new InvalidOperationException("Place the black marker on the projected board, then click inside one bar again.");
+            if (!projection.IsPhysicalBlackBarCandidate(selected.Observation,
                 image.Gray, image.Width, image.Height, image.ScaleX, image.ScaleY))
-                throw new InvalidOperationException("That mark is part of the projected picture. Click the black crossbar on your cardboard T.");
+                throw new InvalidOperationException("That mark is part of the projected picture. Click inside a physical black bar.");
         }
+        var strips = contours.Where((_, index) => hierarchy[index].Parent < 0)
+            .Select(contour => Component(contour, image, result, selected.Observation.AreaPixels))
+            .Where(item => item is not null).Select(item => item!.Observation)
+            .OrderBy(item => ColorTipDetector.Distance(item.Center, selected.Observation.Center)).Take(128)
+            .Where(item => projection is null || projection.IsPhysicalBlackBarCandidate(item,
+                image.Gray, image.Width, image.Height, image.ScaleX, image.ScaleY)).ToArray();
+        var pairs = FindPairs(strips, null);
+        int selectedIndex = Array.FindIndex(strips, item =>
+            ColorTipDetector.Distance(item.Center, selected.Observation.Center) < 1);
+        var touching = pairs.Where(pair => pair.First == selectedIndex || pair.Second == selectedIndex).ToArray();
+        if (touching.Length > 1 || touching.Length == 1 && pairs.Any(pair => pair != touching[0] &&
+            (pair.First == touching[0].First || pair.Second == touching[0].First ||
+             pair.First == touching[0].Second || pair.Second == touching[0].Second)))
+            throw new InvalidOperationException("This bar has more than one matching neighbour. Show one separate pair of parallel bars, then click either strip.");
+        if (touching.Length == 1)
+        {
+            var pair = touching[0];
+            var first = strips[pair.First];
+            var second = strips[pair.Second];
+            result = result with
+            {
+                BarCount = 2,
+                SpacingRatio = pair.Match.SpacingRatio,
+                NormalizedArea = (first.AreaPixels + second.AreaPixels) / (2 * width * (double)height),
+                AspectRatio = (StripAspect(first) + StripAspect(second)) * .5
+            };
+        }
+        if (!result.IsValid)
+            throw new InvalidOperationException("The marker is outside the supported size or shape. Show the complete bar or parallel pair.");
         return result;
     }
 
@@ -88,10 +133,13 @@ public static class BlackTipDetector
     /// conversion and projected-scene reference are shared; only the dark threshold and the
     /// learned size and shape differ per profile.</summary>
     public static IReadOnlyList<ColorTipDetectionResult> DetectEach(int width, int height, int stride, byte[] bgra,
-        IReadOnlyList<BlackTipProfile> profiles, ColorTipDetectionOptions? options = null)
+        IReadOnlyList<BlackTipProfile> profiles, ColorTipDetectionOptions? options = null,
+        IReadOnlyList<BlackTipSearchHint?>? searchHints = null)
     {
         ValidateFrame(width, height, stride, bgra);
         ArgumentNullException.ThrowIfNull(profiles);
+        if (searchHints is not null && searchHints.Count != profiles.Count)
+            throw new ArgumentException("Supply one search hint per profile.", nameof(searchHints));
         foreach (var profile in profiles)
         {
             ArgumentNullException.ThrowIfNull(profile, nameof(profiles));
@@ -105,34 +153,208 @@ public static class BlackTipDetector
         if (projection is { Ready: false })
             return profiles.Select(_ => new ColorTipDetectionResult([], "waiting-for-projected-bat-reference")).ToArray();
         var image = new BlackImage(width, height, stride, bgra);
-        return profiles.Select(profile => Detect(image, profile, width * (double)height,
-            options?.PreferredCenter, projection)).ToArray();
+        return profiles.Select((profile, index) => Detect(image, profile, width * (double)height,
+            options?.PreferredCenter, projection, searchHints?[index], options?.FrameTime ?? default)).ToArray();
     }
 
     private static ColorTipDetectionResult Detect(BlackImage image, BlackTipProfile profile, double framePixels,
-        PixelPoint? preferred, EyeTipProjectionMatcher? projection)
+        PixelPoint? preferred, EyeTipProjectionMatcher? projection, BlackTipSearchHint? hint, DateTimeOffset frameTime)
     {
-        using Mat mask = image.Mask(profile);
-        Cv2.FindContours(mask, out Point[][] contours, out HierarchyIndex[] hierarchy,
-            RetrievalModes.CComp, ContourApproximationModes.ApproxSimple);
         double expectedArea = profile.NormalizedArea * framePixels;
+        var strips = ExtractStrips(image, profile, expectedArea, preferred, projection);
+        if (profile.BarCount == 2)
+        {
+            var supporting = strips.ToList();
+            var ambiguous = new List<PixelPoint>();
+            var pairs = FindPairs(strips, profile.SpacingRatio);
+            var partners = new int[strips.Length];
+            foreach (var pair in pairs) { partners[pair.First]++; partners[pair.Second]++; }
+            ambiguous.AddRange(pairs.Where(pair => partners[pair.First] > 1 || partners[pair.Second] > 1)
+                .Select(pair => pair.Match.Observation.Center));
+            // A strip cannot be used in two markers. Reject ambiguous local pairings instead
+            // of choosing whichever partner happens to score first in this camera frame.
+            var unambiguous = pairs.Where(pair => partners[pair.First] == 1 && partners[pair.Second] == 1)
+                .Select(pair => pair.Match.Observation).ToList();
+            if (partners.Any(count => count == 0))
+            {
+                // White goal lines can brighten one bar. Recover its partner only when a
+                // normally dark physical strip anchors the learned pair. Two newly bright
+                // strips cannot become a controller, and complete pairs keep their identity.
+                var lit = ExtractStrips(image, profile, expectedArea, preferred, projection, .08);
+                MergeStrips(supporting, lit);
+                var anchor = lit.Select(strip => Array.FindIndex(strips, normal => SameStrip(normal, strip))).ToArray();
+                var supported = FindPairs(lit, profile.SpacingRatio).Where(pair =>
+                    (anchor[pair.First] >= 0 && partners[anchor[pair.First]] == 0 ||
+                     anchor[pair.Second] >= 0 && partners[anchor[pair.Second]] == 0) &&
+                    (anchor[pair.First] < 0 || partners[anchor[pair.First]] == 0) &&
+                    (anchor[pair.Second] < 0 || partners[anchor[pair.Second]] == 0)).ToArray();
+                var litPartners = new int[lit.Length];
+                foreach (var pair in supported) { litPartners[pair.First]++; litPartners[pair.Second]++; }
+                ambiguous.AddRange(supported.Where(pair => litPartners[pair.First] > 1 || litPartners[pair.Second] > 1)
+                    .Select(pair => pair.Match.Observation.Center));
+                unambiguous.AddRange(supported.Where(pair => litPartners[pair.First] == 1 && litPartners[pair.Second] == 1)
+                    .Select(pair => pair.Match.Observation));
+            }
+            string source = "global";
+            // Both strips can brighten together under a projected goal or car. A short-lived
+            // acquired pose permits a bounded local threshold, still using measured shape,
+            // contrast and per-strip artwork rejection. Keep the global scan above so another
+            // marker in the same half is never hidden by this search window.
+            if (ValidHint(hint, frameTime) && !unambiguous.Any(item => NearHint(item, hint!)))
+            {
+                var region = image.SearchRegion(hint!);
+                double allowance = image.LocalAllowance(profile, region);
+                var local = ExtractStrips(image, profile, expectedArea, hint!.ExpectedCenter, projection,
+                    allowance, region);
+                MergeStrips(supporting, local);
+                var localPairs = FindPairs(local, profile.SpacingRatio);
+                var localPartners = new int[local.Length];
+                foreach (var pair in localPairs) { localPartners[pair.First]++; localPartners[pair.Second]++; }
+                ambiguous.AddRange(localPairs.Where(pair => localPartners[pair.First] > 1 || localPartners[pair.Second] > 1)
+                    .Select(pair => pair.Match.Observation.Center));
+                var recovered = localPairs.Where(pair => localPartners[pair.First] == 1 && localPartners[pair.Second] == 1)
+                    .Select(pair => pair.Match.Observation).Where(item => NearHint(item, hint)).ToArray();
+                unambiguous.AddRange(recovered);
+                if (recovered.Length > 0) source = "local-contrast";
+            }
+            var paired = (preferred is { } center
+                ? unambiguous.OrderBy(item => ColorTipDetector.Distance(item.Center, center))
+                : unambiguous.OrderByDescending(item => item.Score)).Take(16).ToArray();
+            return new(paired, paired.Length == 0 ? "no-black-bar-pair" :
+                paired.Length == 1 ? "black-bar-pair-candidate" : "multiple-black-bar-pairs")
+            { SupportingBars = supporting, AmbiguousMarkerCenters = ambiguous, Source = source };
+        }
+        var accepted = strips.Take(16).ToArray();
+        return new(accepted, accepted.Length == 0 ? "no-black-crossbar" :
+            accepted.Length == 1 ? "black-crossbar-candidate" : "multiple-black-crossbars");
+    }
+
+    private static ColorTipObservation[] ExtractStrips(BlackImage image, BlackTipProfile profile, double expectedArea,
+        PixelPoint? preferred, EyeTipProjectionMatcher? projection, double valueAllowance = 0, Rect? region = null)
+    {
+        using Mat mask = image.Mask(profile, valueAllowance, region);
+        Cv2.FindContours(mask, out Point[][] contours, out HierarchyIndex[] hierarchy,
+            RetrievalModes.CComp, ContourApproximationModes.ApproxSimple, region?.TopLeft);
         var candidates = contours.Where((_, index) => hierarchy[index].Parent < 0)
-            .Select(contour => Component(contour, image, profile, expectedArea))
+            .Where(contour => region is not { } bounds || contour.All(point => point.X > bounds.Left &&
+                point.X < bounds.Right - 1 && point.Y > bounds.Top && point.Y < bounds.Bottom - 1))
+            .Select(contour => Component(contour, image, profile, expectedArea, valueAllowance))
             .Where(item => item is not null).Select(item => item!.Observation);
         var ranked = preferred is { } point
             ? candidates.OrderBy(item => ColorTipDetector.Distance(item.Center, point)).ThenByDescending(item => item.Score)
             : candidates.OrderByDescending(item => item.Score);
-        var accepted = ranked.Take(128).Where(item => projection is null ||
-            projection.IsPhysicalCandidate(item.Center, item.RadiusPixels, image.Gray, image.Width, image.Height,
-                image.ScaleX, image.ScaleY)).Take(16).ToArray();
-        return new(accepted, accepted.Length == 0 ? "no-black-crossbar" :
-            accepted.Length == 1 ? "black-crossbar-candidate" : "multiple-black-crossbars");
+        return ranked.Take(128).Where(item => projection is null ||
+            projection.IsPhysicalBlackBarCandidate(item, image.Gray, image.Width, image.Height,
+                image.ScaleX, image.ScaleY)).ToArray();
+    }
+
+    private static void MergeStrips(List<ColorTipObservation> target, IEnumerable<ColorTipObservation> additions)
+    {
+        foreach (var strip in additions)
+        {
+            int same = target.FindIndex(previous => SameStrip(previous, strip));
+            if (same < 0) target.Add(strip);
+            else if (strip.Score > target[same].Score) target[same] = strip;
+        }
+    }
+
+    private static bool ValidHint(BlackTipSearchHint? hint, DateTimeOffset frameTime) =>
+        hint?.Marker.Bar is not null && frameTime != default && hint.LastFullFrame != default &&
+        frameTime >= hint.LastFullFrame && frameTime - hint.LastFullFrame <= TimeSpan.FromMilliseconds(350) &&
+        double.IsFinite(hint.ExpectedCenter.X) && double.IsFinite(hint.ExpectedCenter.Y) &&
+        double.IsFinite(hint.Marker.Center.X) && double.IsFinite(hint.Marker.Center.Y) &&
+        ColorTipDetector.Distance(hint.Marker.Bar.End1, hint.Marker.Bar.End2) is >= 6 and <= 1000;
+
+    private static bool NearHint(ColorTipObservation item, BlackTipSearchHint hint)
+    {
+        if (item.Bar is not { } a || hint.Marker.Bar is not { } b) return false;
+        double length = ColorTipDetector.Distance(b.End1, b.End2), measured = ColorTipDetector.Distance(a.End1, a.End2);
+        double width = ColorTipDetector.Distance(b.Side1, b.Side2), measuredWidth = ColorTipDetector.Distance(a.Side1, a.Side2);
+        double dot = ((a.End2.X - a.End1.X) * (b.End2.X - b.End1.X) +
+            (a.End2.Y - a.End1.Y) * (b.End2.Y - b.End1.Y)) / (length * measured);
+        return measured >= length * .78 && measured <= length * 1.28 &&
+            measuredWidth >= width * .70 && measuredWidth <= width * 1.4 && Math.Abs(dot) >= .766 &&
+            ColorTipDetector.Distance(item.Center, hint.ExpectedCenter) <= Math.Max(28, length * .8);
+    }
+
+    private static bool SameStrip(ColorTipObservation normal, ColorTipObservation lit)
+    {
+        if (normal.Bar is not { } a || lit.Bar is not { } b) return false;
+        double length = ColorTipDetector.Distance(a.End1, a.End2), litLength = ColorTipDetector.Distance(b.End1, b.End2);
+        double width = ColorTipDetector.Distance(a.Side1, a.Side2);
+        if (length < 1 || litLength < 1 || Math.Min(length, litLength) / Math.Max(length, litLength) < .75 ||
+            ColorTipDetector.Distance(normal.Center, lit.Center) > Math.Max(3, width * .65)) return false;
+        double dot = ((a.End2.X - a.End1.X) * (b.End2.X - b.End1.X) +
+            (a.End2.Y - a.End1.Y) * (b.End2.Y - b.End1.Y)) / (length * litLength);
+        return Math.Abs(dot) >= .966;
+    }
+
+    private sealed record PairMatch(ColorTipObservation Observation, double SpacingRatio);
+    private sealed record StripPair(int First, int Second, PairMatch Match);
+
+    private static List<StripPair> FindPairs(IReadOnlyList<ColorTipObservation> strips, double? expectedSpacing)
+    {
+        var pairs = new List<StripPair>();
+        for (int first = 0; first < strips.Count; first++)
+        for (int second = first + 1; second < strips.Count; second++)
+            if (MatchPair(strips[first], strips[second], expectedSpacing) is { } match)
+                pairs.Add(new(first, second, match));
+        return pairs;
+    }
+
+    private static double StripAspect(ColorTipObservation strip) => strip.Bar is { } bar
+        ? ColorTipDetector.Distance(bar.End1, bar.End2) / ColorTipDetector.Distance(bar.Side1, bar.Side2) : 0;
+
+    private static PairMatch? MatchPair(ColorTipObservation first, ColorTipObservation second, double? expectedSpacing)
+    {
+        if (first.Bar is not { } a || second.Bar is not { } b) return null;
+        double al = ColorTipDetector.Distance(a.End1, a.End2), bl = ColorTipDetector.Distance(b.End1, b.End2);
+        double aw = ColorTipDetector.Distance(a.Side1, a.Side2), bw = ColorTipDetector.Distance(b.Side1, b.Side2);
+        if (al < 1 || bl < 1 || aw < 1 || bw < 1 || al / aw < 2.4 || bl / bw < 2.4 ||
+            Math.Min(al, bl) / Math.Max(al, bl) < .70 || Math.Min(aw, bw) / Math.Max(aw, bw) < .50 ||
+            Math.Min(first.AreaPixels, second.AreaPixels) / Math.Max(first.AreaPixels, second.AreaPixels) < .55) return null;
+        double ax = (a.End2.X - a.End1.X) / al, ay = (a.End2.Y - a.End1.Y) / al;
+        double bx = (b.End2.X - b.End1.X) / bl, by = (b.End2.Y - b.End1.Y) / bl;
+        double alignment = ax * bx + ay * by;
+        if (Math.Abs(alignment) < .966) return null; // About fifteen degrees, independent of axis sign.
+        if (alignment < 0) { bx = -bx; by = -by; }
+        double ux = ax + bx, uy = ay + by, norm = Math.Sqrt(ux * ux + uy * uy);
+        ux /= norm; uy /= norm;
+        double vx = -uy, vy = ux, length = (al + bl) * .5;
+        double dx = second.Center.X - first.Center.X, dy = second.Center.Y - first.Center.Y;
+        double along = Math.Abs(dx * ux + dy * uy), across = Math.Abs(dx * vx + dy * vy);
+        double spacing = across / length;
+        if (along > length * .22 + 1 || across < Math.Max(aw, bw) * 1.35 ||
+            spacing is < .12 or > .80 || expectedSpacing is { } expected &&
+            Math.Abs(spacing - expected) > Math.Max(.04, expected * .27)) return null;
+
+        var corners = Corners(a).Concat(Corners(b)).ToArray();
+        double minU = corners.Min(p => p.X * ux + p.Y * uy), maxU = corners.Max(p => p.X * ux + p.Y * uy);
+        double minV = corners.Min(p => p.X * vx + p.Y * vy), maxV = corners.Max(p => p.X * vx + p.Y * vy);
+        double midU = (minU + maxU) * .5, midV = (minV + maxV) * .5;
+        PixelPoint Point(double u, double v) => new(u * ux + v * vx, u * uy + v * vy);
+        double area = first.AreaPixels + second.AreaPixels;
+        var observation = new ColorTipObservation(Point(midU, midV), Math.Sqrt(area / Math.PI), area,
+            (first.Score + second.Score) * .5)
+        {
+            Bar = new(Point(minU, midV), Point(maxU, midV), Point(midU, minV), Point(midU, maxV))
+        };
+        return new(observation, spacing);
+
+        static IEnumerable<PixelPoint> Corners(BlackBarGeometry bar)
+        {
+            double hx = (bar.Side2.X - bar.Side1.X) * .5, hy = (bar.Side2.Y - bar.Side1.Y) * .5;
+            yield return new(bar.End1.X + hx, bar.End1.Y + hy);
+            yield return new(bar.End1.X - hx, bar.End1.Y - hy);
+            yield return new(bar.End2.X + hx, bar.End2.Y + hy);
+            yield return new(bar.End2.X - hx, bar.End2.Y - hy);
+        }
     }
 
     private sealed record ComponentShape(ColorTipObservation Observation, double Aspect);
 
     private static ComponentShape? Component(Point[] contour, BlackImage image, BlackTipProfile profile,
-        double? expectedArea)
+        double? expectedArea, double valueAllowance = 0)
     {
         double area = Math.Abs(Cv2.ContourArea(contour));
         if (area < 12 || area > image.Width * (double)image.Height * .025) return null;
@@ -142,11 +364,16 @@ public static class BlackTipDetector
         RotatedRect rotated = Cv2.MinAreaRect(contour);
         double longSide = Math.Max(rotated.Size.Width, rotated.Size.Height),
             shortSide = Math.Min(rotated.Size.Width, rotated.Size.Height);
-        if (shortSide < 2.4 || longSide / shortSide > 8.4) return null;
+        if (shortSide < 2.4 || longSide / shortSide > 16.4) return null;
         double aspect = longSide / shortSide;
         double fill = area / Math.Max(1, longSide * shortSide);
         double hullArea = Math.Abs(Cv2.ContourArea(Cv2.ConvexHull(contour)));
-        if (fill < .54 || area / Math.Max(1, hullArea) < .74) return null;
+        // A half-pixel change at the edge is substantial for a four-pixel-wide printed
+        // bar, especially beneath bright projected artwork. Allow that bounded raster
+        // uncertainty only for thin bars, while still rejecting deep concavities.
+        double edgeAreaAllowance = shortSide <= 6 && aspect >= 6 ? longSide * .5 : 0;
+        if (fill < .54 || area / Math.Max(1, hullArea) < .60 ||
+            area + edgeAreaAllowance < hullArea * .74) return null;
         if (expectedArea is not null && (aspect < Math.Max(1.45, profile.AspectRatio / 1.8) ||
             aspect > profile.AspectRatio * 1.8)) return null;
         double rawArea = area * image.ScaleX * image.ScaleY;
@@ -156,13 +383,29 @@ public static class BlackTipDetector
         double cx = moments.M10 / moments.M00, cy = moments.M01 / moments.M00;
         // Hole contours are children; this explicit dark-core check also rejects an enclosing
         // ring whose geometric centroid falls in its light interior.
-        if (!image.DarkCore(cx, cy, profile)) return null;
+        if (!image.DarkCore(cx, cy, profile, valueAllowance)) return null;
         double contrast = image.Contrast(contour, bounds);
         if (contrast < 13) return null;
         double sizeScore = expectedArea is { } desired ? Math.Exp(-Math.Abs(Math.Log(rawArea / desired))) : 1;
         double shapeScore = expectedArea is null ? fill : Math.Exp(-Math.Abs(Math.Log(aspect / profile.AspectRatio))) * fill;
         double score = Math.Clamp(.45 * sizeScore + .40 * shapeScore + .15 * Math.Min(1, contrast / 55), 0, 1);
-        return new(new(new(cx * image.ScaleX, cy * image.ScaleY), Math.Sqrt(rawArea / Math.PI), rawArea, score), aspect);
+        // Fit in raw pixels after scaling each coordinate independently. Carrying a reduced
+        // image's angle through nonidentical X/Y scales would skew both orientation and width.
+        RotatedRect rawRectangle = Cv2.MinAreaRect(contour.Select(point =>
+            new Point2f((float)(point.X * image.ScaleX), (float)(point.Y * image.ScaleY))).ToArray());
+        Point2f[] corners = rawRectangle.Points();
+        PixelPoint Midpoint(int first, int second) => new(
+            (corners[first].X + corners[second].X) * .5, (corners[first].Y + corners[second].Y) * .5);
+        var acrossFirstEdges = (First: Midpoint(0, 1), Second: Midpoint(2, 3));
+        var acrossOtherEdges = (First: Midpoint(1, 2), Second: Midpoint(3, 0));
+        bool firstIsLong = ColorTipDetector.Distance(acrossFirstEdges.First, acrossFirstEdges.Second) >=
+            ColorTipDetector.Distance(acrossOtherEdges.First, acrossOtherEdges.Second);
+        var ends = firstIsLong ? acrossFirstEdges : acrossOtherEdges;
+        var sides = firstIsLong ? acrossOtherEdges : acrossFirstEdges;
+        return new(new(new(cx * image.ScaleX, cy * image.ScaleY), Math.Sqrt(rawArea / Math.PI), rawArea, score)
+        {
+            Bar = new(ends.First, ends.Second, sides.First, sides.Second)
+        }, aspect);
     }
 
     private sealed class BlackImage
@@ -193,31 +436,59 @@ public static class BlackTipDetector
             Marshal.Copy(gray.Data, Gray, 0, Gray.Length);
         }
 
-        private bool IsDark(int pixel, BlackTipProfile profile)
+        private bool IsDark(int pixel, BlackTipProfile profile, double valueAllowance = 0)
         {
-            double value = Hsv[pixel * 3 + 2] / 255.0, saturation = Hsv[pixel * 3 + 1] / 255.0;
-            double maximumValue = Math.Clamp(profile.Value * 1.7 + .07, .18, .42);
-            double maximumSaturation = Math.Clamp(profile.Saturation + .30, .36, .72);
-            return value <= maximumValue && (saturation <= maximumSaturation || value <= .12);
+            double value = Hsv[pixel * 3 + 2] / 255.0;
+            double maximumValue = Math.Min(.50, Math.Clamp(profile.Value * 1.7 + .07, .18, .42) + valueAllowance);
+            return value <= maximumValue;
         }
 
-        public Mat Mask(BlackTipProfile profile)
+        public Mat Mask(BlackTipProfile profile, double valueAllowance = 0, Rect? region = null)
         {
-            byte[] pixels = new byte[Width * Height];
-            for (int i = 0; i < pixels.Length; i++) if (IsDark(i, profile)) pixels[i] = 255;
-            Mat mask = new(Height, Width, MatType.CV_8UC1);
+            Rect bounds = region ?? new(0, 0, Width, Height);
+            byte[] pixels = new byte[bounds.Width * bounds.Height];
+            for (int y = 0; y < bounds.Height; y++)
+            for (int x = 0; x < bounds.Width; x++)
+                if (IsDark((bounds.Y + y) * Width + bounds.X + x, profile, valueAllowance))
+                    pixels[y * bounds.Width + x] = 255;
+            Mat mask = new(bounds.Height, bounds.Width, MatType.CV_8UC1);
             Marshal.Copy(pixels, 0, mask.Data, pixels.Length);
             using Mat kernel = Cv2.GetStructuringElement(MorphShapes.Cross, new Size(3, 3));
             Cv2.MorphologyEx(mask, mask, MorphTypes.Open, kernel);
             return mask;
         }
 
-        public bool DarkCore(double x, double y, BlackTipProfile profile)
+        public Rect SearchRegion(BlackTipSearchHint hint)
+        {
+            double radius = Math.Clamp(ColorTipDetector.Distance(hint.Marker.Bar!.End1, hint.Marker.Bar.End2) * 1.8, 48, 192);
+            int left = Math.Clamp((int)Math.Floor((hint.ExpectedCenter.X - radius) / ScaleX), 0, Width - 1);
+            int top = Math.Clamp((int)Math.Floor((hint.ExpectedCenter.Y - radius) / ScaleY), 0, Height - 1);
+            int right = Math.Clamp((int)Math.Ceiling((hint.ExpectedCenter.X + radius) / ScaleX), left + 1, Width);
+            int bottom = Math.Clamp((int)Math.Ceiling((hint.ExpectedCenter.Y + radius) / ScaleY), top + 1, Height);
+            return new(left, top, right - left, bottom - top);
+        }
+
+        public double LocalAllowance(BlackTipProfile profile, Rect region)
+        {
+            var histogram = new int[256];
+            int count = 0, step = Math.Max(1, Math.Max(region.Width, region.Height) / 50);
+            for (int y = region.Top; y < region.Bottom; y += step)
+            for (int x = region.Left; x < region.Right; x += step)
+            { histogram[Hsv[(y * Width + x) * 3 + 2]]++; count++; }
+            int percentile = 0, total = 0;
+            for (; percentile < 255; percentile++)
+            { total += histogram[percentile]; if (total >= count * .80) break; }
+            double baseline = Math.Clamp(profile.Value * 1.7 + .07, .18, .42);
+            // Ink must remain appreciably darker than its local illuminated surroundings.
+            return Math.Clamp(percentile / 255.0 * .72 - baseline, 0, .12);
+        }
+
+        public bool DarkCore(double x, double y, BlackTipProfile profile, double valueAllowance = 0)
         {
             int cx = (int)Math.Round(x), cy = (int)Math.Round(y), count = 0;
             for (int dy = -1; dy <= 1; dy++)
             for (int dx = -1; dx <= 1; dx++)
-                if (IsDark((cy + dy) * Width + cx + dx, profile)) count++;
+                if (IsDark((cy + dy) * Width + cx + dx, profile, valueAllowance)) count++;
             return count >= 7;
         }
 

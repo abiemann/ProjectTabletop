@@ -11,7 +11,8 @@ internal static class FootballBoardRegression
         CheckNavigationModesAndAppearance();
         CheckCalibrationBarrier();
         CheckCaptionControls();
-        Console.WriteLine("Football board verification passed: page-two launch, modes, appearances, " +
+        CheckInputRevision();
+        Console.WriteLine("Football board verification passed: first-page launch, modes, appearances, " +
             "match reset, fresh-input calibration barrier, caption holds, gesture isolation and exit.");
     }
 
@@ -20,14 +21,13 @@ internal static class FootballBoardRegression
         var board = new BoardSession();
         var opened = new List<BoardScreen>();
         board.BoardOpened += opened.Add;
-        Require(!board.Buttons.Any(button => button.Id == "football") &&
-            board.ActivateButton("menu-scroll-down", At(10)) && board.TickMenu(At(660)),
-            "Football must be reached on the second menu page.");
+        Require(board.Buttons.Any(button => button.Id == "football") && !board.MenuScrolled,
+            "Football must be available on the first menu page.");
         var card = board.Buttons.Single(button => button.Id == "football");
         Require(card.Label == "Football" && card.Destination == BoardScreen.Football &&
-            Math.Abs(card.Bounds.Y - .45) < .00001 && card.Bounds.X == .08 &&
+            Math.Abs(card.Bounds.Y - .25) < .00001 && card.Bounds.X == .52 &&
             board.ActivateButton("football", At(700)) && board.Screen == BoardScreen.Football && board.Title == "Football",
-            "Football page-two card did not open its board.");
+            "Football first-page card did not open its board.");
         Require(opened.SequenceEqual([BoardScreen.Football]) &&
             board.Buttons.Select(button => button.Id).SequenceEqual(["football-exit", "football-reset", "football-mode"]) &&
             board.Buttons.All(button => button.Hold == BoardButtonHold.Once),
@@ -98,6 +98,7 @@ internal static class FootballBoardRegression
     {
         var board = new BoardSession();
         board.ShowFootball(At(0));
+        long inputRevision = board.FootballInputRevision;
         var reset = board.Buttons.Single(button => button.Id == "football-reset");
         var hand = new BoardHandSample(reset.Bounds.X + reset.Bounds.Width / 2,
             reset.Bounds.Y + reset.Bounds.Height / 2, At(1010), 1);
@@ -110,20 +111,48 @@ internal static class FootballBoardRegression
         for (int ms = 1200; ms < 2200; ms += 100)
             Require(Hold(board, "football-reset", ms).Count == 0,
                 "Football RESET must require one second of broken lettering.");
-        Require(Hold(board, "football-reset", 2200).SequenceEqual(["football-reset"]),
-            "A full caption hold must activate Football RESET.");
+        Require(Hold(board, "football-reset", 2200).SequenceEqual(["football-reset"]) &&
+            board.FootballInputRevision == inputRevision + 1,
+            "A full caption hold must activate Football RESET and invalidate tracked observations once.");
         long afterReset = board.Revision;
         for (int ms = 2300; ms <= 3400; ms += 100)
-            Require(Hold(board, "football-reset", ms).Count == 0 && board.Revision == afterReset,
+            Require(Hold(board, "football-reset", ms).Count == 0 && board.Revision == afterReset &&
+                board.FootballInputRevision == inputRevision + 1,
                 "A covered RESET must not keep resetting Football.");
         Clear(board, "football-mode", 3500);
         for (int ms = 3600; ms < 4600; ms += 100) Hold(board, "football-mode", ms);
         Require(Hold(board, "football-mode", 4600).SequenceEqual(["football-mode"]) &&
-            board.FootballState.Mode == FootballMode.TwoHumans,
-            "The mode caption must switch to two humans after a deliberate hold.");
+            board.FootballState.Mode == FootballMode.TwoHumans &&
+            board.FootballInputRevision == inputRevision + 2,
+            "The mode caption must switch to two humans and invalidate tracked observations after a deliberate hold.");
         for (int ms = 4700; ms <= 5900; ms += 100)
-            Require(Hold(board, "football-mode", ms).Count == 0 && board.FootballState.Mode == FootballMode.TwoHumans,
+            Require(Hold(board, "football-mode", ms).Count == 0 && board.FootballState.Mode == FootballMode.TwoHumans &&
+                board.FootballInputRevision == inputRevision + 2,
                 "The replacement VS AI caption must not act under the same unreleased hand.");
+    }
+
+    private static void CheckInputRevision()
+    {
+        var board = new BoardSession();
+        long revision = board.FootballInputRevision;
+        board.ShowFootball(At(0));
+        Require(board.FootballInputRevision == ++revision,
+            "Opening Football must invalidate observations from the previous match.");
+        board.ClearFootballInput(At(10));
+        Require(board.FootballInputRevision == revision,
+            "Clearing scene observations must not create an input-revision feedback loop.");
+        board.SetFootballMode(FootballMode.HumanVsAi, At(20));
+        Require(board.FootballInputRevision == revision,
+            "Selecting the existing football mode must not invalidate observations.");
+        board.SetFootballMode(FootballMode.TwoHumans, At(30));
+        Require(board.FootballInputRevision == ++revision,
+            "Changing football mode through the API must invalidate observations once.");
+        board.ResetFootball(At(40));
+        Require(board.FootballInputRevision == ++revision,
+            "Resetting football through the API must invalidate observations once.");
+        board.SetFootballStyle(0, FootballKickerStyle.Pan);
+        Require(board.FootballInputRevision == revision,
+            "Changing appearance must not invalidate tracked input.");
     }
 
     private static IReadOnlyList<string> Hold(BoardSession board, string id, int ms) =>

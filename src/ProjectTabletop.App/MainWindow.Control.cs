@@ -433,6 +433,25 @@ public sealed partial class MainWindow
             case "capture_raw_frame":
                 return new { path = await SaveRawSnapshotAsync() };
             case "start_camera":
+                if (parameters.TryGetProperty("deviceId", out var cameraDeviceIdParameter))
+                {
+                    if (cameraDeviceIdParameter.ValueKind != JsonValueKind.String ||
+                        string.IsNullOrWhiteSpace(cameraDeviceIdParameter.GetString()))
+                        throw new ArgumentException("Provide deviceId as a nonempty camera device ID string.");
+                    string requestedCameraId = cameraDeviceIdParameter.GetString()!;
+                    CameraChoice? FindRequestedCamera() => CameraComboBox.Items.OfType<CameraChoice>()
+                        .FirstOrDefault(choice => string.Equals(choice.Device.Id, requestedCameraId, StringComparison.Ordinal));
+                    var requestedCamera = FindRequestedCamera() ??
+                        throw new ArgumentException("The requested deviceId does not match an available camera.");
+                    // Validate before changing the running camera. Stop also cancels a pending
+                    // start/reconnect; selection then runs its normal synchronous reset handler.
+                    if (_camera.IsRunning || _cameraWanted) await StopCameraAsync();
+                    if (_closing) throw new InvalidOperationException("The app is closing.");
+                    // Refresh can replace the choice objects while the stop is awaiting capture.
+                    requestedCamera = FindRequestedCamera() ??
+                        throw new InvalidOperationException("The requested camera is no longer available.");
+                    CameraComboBox.SelectedItem = requestedCamera;
+                }
                 return new { started = await StartSelectedCameraAsync(), status = CameraStatusText.Text };
             case "stop_camera":
                 await StopCameraAsync();
