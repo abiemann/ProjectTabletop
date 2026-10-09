@@ -26,6 +26,57 @@ public sealed class FootballMarkerTrackerTests
         Assert.Equal(FootballTipAction.Publish, Update(tracker, Full(113, 102), 1263).Action);
     }
 
+    [Theory]
+    [InlineData(33, 80)]
+    [InlineData(66, 120)]
+    [InlineData(100, 170)]
+    [InlineData(150, 205)]
+    public void FastMeasuredFullPairsStayAcquiredThroughAccelerationAndReversal(int interval, int distance)
+    {
+        var tracker = new FootballMarkerTracker();
+        PixelPoint? CameraField(PixelPoint point) => new(point.X / 3200, point.Y / 1200);
+        FootballTipDecision Measure(double x, int time) => tracker.Update(0, Profile, Full(x, 500),
+            CameraField, Epoch.AddMilliseconds(time), Epoch.AddMilliseconds(time));
+        Assert.Equal(FootballTipAction.Hold, Measure(800, 0).Action);
+        Assert.Equal(FootballTipAction.Publish, Measure(800, 33).Action);
+
+        int frameTime = 33;
+        // Accelerate from rest, continue the shot, then reverse for the next shot.
+        // Every pose must be an actual current pair, never the predicted search position.
+        foreach (double x in new[] { 800 - distance, 800 - distance * 2, 800 - distance, 800 })
+        {
+            var measured = Measure(x, frameTime += interval);
+            Assert.Equal(FootballTipAction.Publish, measured.Action);
+            Assert.Equal("full-marker", measured.Source);
+            Assert.Equal(new PixelPoint(x, 500), measured.Tip!.Center);
+        }
+    }
+
+    [Fact]
+    public void FastPairAllowanceStillRequiresConfirmationForDistantOrExpiredMarkers()
+    {
+        PixelPoint? CameraField(PixelPoint point) => new(point.X / 3200, point.Y / 1200);
+        foreach (int gap in new[] { 33, 250, 600, 751 })
+        {
+            var tracker = new FootballMarkerTracker();
+            tracker.Update(0, Profile, Full(800, 500), CameraField, Epoch, Epoch);
+            tracker.Update(0, Profile, Full(800, 500), CameraField,
+                Epoch.AddMilliseconds(33), Epoch.AddMilliseconds(33));
+            var time = Epoch.AddMilliseconds(33 + gap);
+            // Seven lengths exceeds the capped full-pair reach, even after a long gap.
+            var target = new PixelPoint(gap == 751 ? 810 : 1122, 500);
+            var replacement = new ColorTipDetectionResult([Marker(target.X, target.Y)], "black-bar-pair-candidate");
+            var pending = tracker.Update(0, Profile, replacement, CameraField, time, time);
+            Assert.Equal(FootballTipAction.Hold, pending.Action);
+            Assert.Equal("confirming", pending.Source);
+            Assert.Null(pending.Tip);
+            var confirmedAt = time.AddMilliseconds(33);
+            var confirmed = tracker.Update(0, Profile, replacement, CameraField, confirmedAt, confirmedAt);
+            Assert.Equal(FootballTipAction.Publish, confirmed.Action);
+            Assert.Equal(target, confirmed.Tip!.Center);
+        }
+    }
+
     [Fact]
     public void OnlyRecentConfirmedPairMayContinueFromOneMeasuredStrip()
     {

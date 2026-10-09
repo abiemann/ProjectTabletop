@@ -16,6 +16,7 @@ internal static class FootballGameRegression
         CheckGoalsPostsAndHighBalls();
         CheckInputSafetyAndAppearances();
         CheckAiAndDeterminism();
+        CheckAiGetsBehindTheBall();
         CheckWaitingKickersIdleFramesAndHeading();
         CheckMeasuredBarPose();
         CheckMeasuredBarCollisionSafety();
@@ -387,6 +388,50 @@ internal static class FootballGameRegression
             "Human observations must not teleport the computer player.");
     }
 
+    private static void CheckAiGetsBehindTheBall()
+    {
+        foreach (float y in new[] { -.32f, 0f, .32f })
+        {
+            var rig = Playing(FootballMode.HumanVsAi);
+            SeedBall(rig.Game, new(.46f, y), Vector2.Zero);
+            SeedAi(rig.Game, new(.32f, y));
+            bool reachedBehind = false, returned = false, usedClearLane = false;
+            for (int frame = 0; frame < 480; frame++)
+            {
+                rig.Step();
+                var state = rig.Game.Snapshot;
+                var ai = state.Kickers[1];
+                usedClearLane |= MathF.Abs(ai.Position.Y - y) > .10f;
+                reachedBehind |= ai.Position.X > state.BallPosition.X + .057f;
+                Require(state.BallPosition.X <= .465f && state.Score1 == 0,
+                    "An AI caught in front of the ball must go around it, not push it towards its own goal.");
+                Require(ai.Velocity.Length() <= FootballGame.AiMaxSpeed + .0001f,
+                    "Going around the ball must preserve the physical AI speed limit.");
+                if (state.BallVelocity.X < -.25f)
+                {
+                    returned = true;
+                    break;
+                }
+            }
+            Require(usedClearLane && reachedBehind && returned,
+                "The AI must circle a stationary ball, reach its own-goal side, then physically kick left.");
+        }
+
+        var aligned = Playing(FootballMode.HumanVsAi);
+        SeedBall(aligned.Game, new(.45f, 0), Vector2.Zero);
+        SeedAi(aligned.Game, new(.65f, 0));
+        bool directReturn = false;
+        for (int frame = 0; frame < 100; frame++)
+        {
+            aligned.Step();
+            var state = aligned.Game.Snapshot;
+            Require(MathF.Abs(state.Kickers[1].Position.Y) < .01f,
+                "An AI already aligned behind the ball should strike directly without circling it.");
+            if (state.BallVelocity.X < -.25f) { directReturn = true; break; }
+        }
+        Require(directReturn, "An AI behind the ball did not deliver a physical leftward strike.");
+    }
+
     private static void CheckWaitingKickersIdleFramesAndHeading()
     {
         var game = new FootballGame();
@@ -582,6 +627,19 @@ internal static class FootballGameRegression
         Set("_snapshot", null);
         void Set(string name, object? value) => typeof(FootballGame)
             .GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(game, value);
+    }
+
+    private static void SeedAi(FootballGame game, Vector2 position)
+    {
+        var kickers = (Array)typeof(FootballGame).GetField("_kickers", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(game)!;
+        var ai = kickers.GetValue(1)!;
+        foreach (string name in new[] { "Position", "Target", "StepStart" })
+            ai.GetType().GetField(name)!.SetValue(ai, position);
+        ai.GetType().GetField("Velocity")!.SetValue(ai, Vector2.Zero);
+        ai.GetType().GetField("CollisionQuiet")!.SetValue(ai, 0f);
+        typeof(FootballGame).GetField("_aiThinkRemaining", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(game, 0f);
+        typeof(FootballGame).GetField("_aiRouteSide", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(game, 0);
+        typeof(FootballGame).GetField("_snapshot", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(game, null);
     }
 
     private sealed class Rig(FootballGame game, DateTimeOffset now)

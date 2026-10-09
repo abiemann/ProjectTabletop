@@ -29,6 +29,10 @@ public sealed partial class MainWindow
         if (_closing) throw new InvalidOperationException("The app is closing.");
         switch (method)
         {
+            case "set_football_diagnostic_capture":
+                return SetFootballDiagnosticCapture(parameters.GetProperty("enabled").GetBoolean());
+            case "capture_football_diagnostics":
+                return await SaveFootballDiagnosticsAsync();
             case "set_projection_size":
                 return SetProjectionSize(parameters);
             case "set_board_facing":

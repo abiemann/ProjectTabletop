@@ -73,6 +73,7 @@ public sealed class FootballGame
     private double _accumulator;
     private float _aiThinkRemaining;
     private Vector2 _aiTarget = new(.52f, 0);
+    private int _aiRouteSide;
     private FootballSnapshot? _snapshot;
 
     public long Revision { get; private set; }
@@ -189,6 +190,7 @@ public sealed class FootballGame
         _accumulator = 0;
         _aiThinkRemaining = 0;
         _aiTarget = new(.52f, 0);
+        _aiRouteSide = 0;
         CenterBall();
         foreach (var kicker in _kickers)
         {
@@ -398,21 +400,10 @@ public sealed class FootballGame
             _aiThinkRemaining -= StepSeconds;
             if (_aiThinkRemaining <= 0)
             {
-                // Observe only every 120ms, defend the right half, and approach from behind the ball.
+                // Observe only every 120ms; positioning and strikes use the same
+                // bounded physical movement as before.
                 _aiThinkRemaining += .12f;
-                float interceptY = _ballPosition.Y;
-                if (_ballVelocity.X > .1f)
-                {
-                    float until = Math.Clamp((.52f - _ballPosition.X) / _ballVelocity.X, 0, .6f);
-                    interceptY += _ballVelocity.Y * until;
-                }
-                _aiTarget = _ballPosition.X > .08f
-                    ? new Vector2(_ballPosition.X + KickerRadius + BallRadius * .5f, _ballPosition.Y)
-                    : new Vector2(.52f, interceptY);
-                if (_ballPosition.X > .15f && Vector2.Distance(_kickers[1].Position, _ballPosition) < .19f)
-                    _aiTarget.X = _ballPosition.X - .11f;
-                _aiTarget = new(Math.Clamp(_aiTarget.X, .04f, Width / 2 - KickerRadius),
-                    Math.Clamp(_aiTarget.Y, -Height / 2 + KickerRadius, Height / 2 - KickerRadius));
+                _aiTarget = ChooseAiTarget();
             }
         }
         foreach (var kicker in _kickers)
@@ -443,6 +434,57 @@ public sealed class FootballGame
             if (kicker.MeasuredHeading is null) TurnToward(kicker);
         }
     }
+
+    private Vector2 ChooseAiTarget()
+    {
+        var position = _kickers[1].Position;
+        var offset = position - _ballPosition;
+        float contact = KickerRadius + BallRadius;
+        float clearance = contact + .055f;
+        float sideLimit = Height / 2 - KickerRadius;
+
+        // Player two shoots left. Proximity alone cannot authorize a strike:
+        // when caught on the left of the ball it would drive it into its own goal.
+        if (_ballPosition.X > .08f && offset.X >= contact * .6f &&
+            MathF.Abs(offset.Y) <= contact * .55f && offset.Length() < .24f)
+        {
+            _aiRouteSide = 0;
+            return ClampAiTarget(new(_ballPosition.X - .14f, _ballPosition.Y));
+        }
+
+        float interceptY = _ballPosition.Y;
+        if (_ballVelocity.X > .1f)
+        {
+            float until = Math.Clamp((.52f - _ballPosition.X) / _ballVelocity.X, 0, .6f);
+            interceptY += _ballVelocity.Y * until;
+        }
+        var target = _ballPosition.X > .08f
+            ? new Vector2(_ballPosition.X + clearance, _ballPosition.Y)
+            : new Vector2(.52f, interceptY);
+
+        // Reach the own-goal side via a clear lateral lane. Driving directly
+        // through the ball to a point behind it is itself an own-goal kick.
+        // Keep the chosen lane during the manoeuvre to avoid switching sides.
+        if (position.X < _ballPosition.X + clearance * .9f && target.X > _ballPosition.X)
+        {
+            if (_aiRouteSide == 0)
+                _aiRouteSide = MathF.Abs(offset.Y) > .035f ? Math.Sign(offset.Y) : (_ballPosition.Y > 0 ? -1 : 1);
+            if (MathF.Abs(_ballPosition.Y + _aiRouteSide * clearance) > sideLimit)
+                _aiRouteSide = -_aiRouteSide;
+            float laneY = _ballPosition.Y + _aiRouteSide * clearance;
+            float laneX = _ballPosition.X + clearance;
+            if (offset.Y * _aiRouteSide < clearance * .9f)
+                laneX = position.X < _ballPosition.X
+                    ? Math.Min(position.X, _ballPosition.X - clearance) : position.X;
+            return ClampAiTarget(new(laneX, laneY));
+        }
+        _aiRouteSide = 0;
+        return ClampAiTarget(target);
+    }
+
+    private static Vector2 ClampAiTarget(Vector2 target) => new(
+        Math.Clamp(target.X, .04f, Width / 2 - KickerRadius),
+        Math.Clamp(target.Y, -Height / 2 + KickerRadius, Height / 2 - KickerRadius));
 
     // Cosmetic facing follows play at a fixed rate of simulated time, so every
     // canvas draws the same heading however many frames it renders.

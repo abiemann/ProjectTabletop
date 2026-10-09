@@ -111,9 +111,17 @@ public sealed class FootballMarkerTracker
     {
         if (_measured is null || frameTime - _lastMeasured > IdentityLifetime) return false;
         double length = Length(_measured), age = Math.Max(0, (frameTime - _lastMeasured).TotalSeconds);
-        double reach = Math.Max(32, length * .9) + Math.Min(.25, age) * 240;
+        // A fully validated, unique pair can travel several marker lengths during a
+        // forward shot. The old fixed 240px/s allowance repeatedly re-confirmed it,
+        // resetting velocity on every frame of a fast stroke. Scale the motion
+        // allowance with the measured marker, but cap its total reach so a distant
+        // replacement still needs confirmation. Center it on the last measurement
+        // so a shot's sudden reversal is not penalized by forward prediction. This
+        // does not relax lone-strip inference or publish an extrapolated position.
+        double reach = Math.Min(Math.Max(32, length * 6),
+            Math.Max(32, length * .9) + Math.Min(.25, age) * Math.Max(240, length * 40));
         return item.AreaPixels >= _measured.AreaPixels * .45 && item.AreaPixels <= _measured.AreaPixels * 2.2 &&
-            ColorTipDetector.Distance(item.Center, PredictedCenter(frameTime)) <= reach;
+            ColorTipDetector.Distance(item.Center, _measured.Center) <= reach;
     }
 
     private ColorTipObservation? ContinuePair(ColorTipObservation strip, BlackTipProfile profile, DateTimeOffset frameTime)

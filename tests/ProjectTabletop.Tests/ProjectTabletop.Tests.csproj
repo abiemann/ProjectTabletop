@@ -27,5 +27,6 @@
     <Compile Include="..\..\src\ProjectTabletop.App\Camera\CameraFrame.cs" Link="App\CameraFrame.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\HandTrackingVideoRecorder.cs" Link="App\HandTrackingVideoRecorder.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\HandTrackingVideoRecorderVerification.cs" Link="App\HandTrackingVideoRecorderVerification.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Settings\FootballMarkerSettingsStore.cs" Link="App\FootballMarkerSettingsStore.cs" />
   </ItemGroup>
 </Project>

@@ -28,52 +28,27 @@ public sealed partial class MainWindow
     private readonly string?[] _footballTrackingSources = new string?[2];
     private DispatcherQueueTimer? _footballInputTimer;
     private Task? _footballDetectionTask, _footballLearningTask;
-    private long _footballInputGeneration, _footballDetectionTick;
+    private long _footballInputGeneration;
     private long _footballSceneInputRevision = -1;
     private DateTimeOffset _footballInputNotBefore;
     private int _footballLearningPlayer = -1, _footballFrameWidth, _footballFrameHeight;
     private bool _footballDetecting, _footballLearningBusy, _footballInputWasActive;
-    private string? _footballMarkerSettingsError;
+    private bool _footballProfileReloadPending = true;
+    private string? _footballMarkerLoadError, _footballMarkerSaveError;
+    private string? FootballMarkerSettingsError => _footballMarkerSaveError ?? _footballMarkerLoadError;
+    private FootballSettingsLoadDiagnostics? _footballSettingsLastLoad;
     private FootballDetectionDiagnostics? _footballLastDetection;
     private sealed record FootballDetectionDiagnostics(DateTimeOffset FrameTime, double ProcessingMilliseconds,
-        double FrameAgeMilliseconds, string[] Reasons, int[] CandidateCounts);
-    private sealed record FootballCameraProfiles(BlackTipProfile? Player1, BlackTipProfile? Player2)
-    {
-        public BlackTipProfile? ForPlayer(int player) => player == 0 ? Player1 : Player2;
-    }
-    private sealed record FootballMarkerSettings(int Version, Dictionary<string, FootballCameraProfiles> Cameras);
+        double FrameAgeMilliseconds, string[] Reasons, int[] CandidateCounts, int[] PlayerNumbers,
+        int[] SupportingBarCounts, int[] AmbiguousMarkerCounts, string[] DetectorSources, string[] TrackerDecisionSources);
+    private sealed record FootballSettingsLoadDiagnostics(DateTimeOffset AttemptedAt, string Status,
+        int SavedCameras, int LoadedCameras);
     private string FootballMarkerSettingsPath => Path.Combine(_appDataDirectory, "football-stick-tips.json");
     private bool IsLearningFootballTip { get { lock (_footballInputGate) return _footballLearningPlayer >= 0; } }
 
     private void InitializeFootballInput()
     {
-        try
-        {
-            if (File.Exists(FootballMarkerSettingsPath))
-            {
-                if (new FileInfo(FootballMarkerSettingsPath).Length > 131072)
-                    throw new InvalidDataException("The saved football marker settings are too large.");
-                using var document = JsonDocument.Parse(File.ReadAllText(FootballMarkerSettingsPath));
-                if (document.RootElement.ValueKind != JsonValueKind.Object ||
-                    !document.RootElement.TryGetProperty("Version", out var version) || version.ValueKind != JsonValueKind.Number ||
-                    !version.TryGetInt32(out int format))
-                    throw new InvalidDataException("The saved football marker settings are invalid.");
-                // Version 1 was the earlier colour-marker experiment. Its
-                // profiles do not describe a black cardboard bar; leave them
-                // untouched until the user successfully learns a new bar.
-                if (format != 1)
-                {
-                    var saved = document.Deserialize<FootballMarkerSettings>();
-                    if (saved is not { Version: 2, Cameras: not null } || saved.Cameras.Count > 64 ||
-                        saved.Cameras.Any(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Key.Length > 4096 ||
-                            pair.Value is null || pair.Value.Player1 is { IsValid: false } || pair.Value.Player2 is { IsValid: false }))
-                        throw new InvalidDataException("The saved football marker settings are invalid.");
-                    foreach (var pair in saved.Cameras) _footballMarkerProfiles.Add(pair.Key, pair.Value);
-                }
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
-        { _footballMarkerSettingsError = "Football marker settings could not be loaded: " + ex.Message; }
+        LoadFootballMarkerSettings();
 
         _footballInputTimer = DispatcherQueue.CreateTimer();
         _footballInputTimer.Interval = TimeSpan.FromMilliseconds(100);
@@ -87,6 +62,18 @@ public sealed partial class MainWindow
             }
             lock (_footballInputGate)
             {
+                // Camera enumeration and opening a board happen after startup. Retry once
+                // per camera/board session if a saved human profile was unavailable then.
+                // Never read settings on the frame-processing path or replace a learned pose.
+                if (_footballProfileReloadPending && active && _camera.IsRunning &&
+                    !_footballLearningBusy && _footballLearningPlayer < 0 && _camera.ActiveDeviceId is { } cameraId)
+                {
+                    _footballProfileReloadPending = false;
+                    var profiles = _footballMarkerProfiles.GetValueOrDefault(cameraId);
+                    if (Enumerable.Range(0, 2).Any(player => FootballHumanPlayer(player) &&
+                        !_footballFingerInputs[player] && profiles?.ForPlayer(player) is null))
+                        LoadFootballMarkerSettings();
+                }
                 var now = MonotonicClock.UtcNow;
                 for (int player = 0; player < 2; player++)
                     if (_footballTipTimes[player] != default &&
@@ -103,6 +90,34 @@ public sealed partial class MainWindow
         UpdateFootballInputStatus();
     }
 
+    private void LoadFootballMarkerSettings()
+    {
+        lock (_footballInputGate)
+        {
+            try
+            {
+                var loaded = FootballMarkerSettingsStore.Read(FootballMarkerSettingsPath);
+                if (loaded.Settings is { } saved)
+                    foreach (var pair in saved.Cameras)
+                    {
+                        var current = _footballMarkerProfiles.GetValueOrDefault(pair.Key);
+                        // A retry can fill missing profiles, but must not replace a more
+                        // recent in-memory learning result when saving that result failed.
+                        _footballMarkerProfiles[pair.Key] = current is null ? pair.Value : new(
+                            current.Player1 ?? pair.Value.Player1, current.Player2 ?? pair.Value.Player2);
+                    }
+                _footballMarkerLoadError = null;
+                _footballSettingsLastLoad = new(MonotonicClock.UtcNow, loaded.Status,
+                    loaded.Settings?.Cameras.Count ?? 0, _footballMarkerProfiles.Count);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+            {
+                _footballMarkerLoadError = "Football marker settings could not be loaded: " + ex.Message;
+                _footballSettingsLastLoad = new(MonotonicClock.UtcNow, "failed", 0, _footballMarkerProfiles.Count);
+            }
+        }
+    }
+
     private void ResetFootballInput()
     {
         lock (_footballInputGate)
@@ -110,7 +125,7 @@ public sealed partial class MainWindow
             _footballSceneInputRevision = _scene.FootballInputRevision;
             _footballInputGeneration++;
             _footballInputNotBefore = MonotonicClock.UtcNow;
-            _footballDetectionTick = 0;
+            _footballProfileReloadPending = true;
             _footballLastDetection = null;
             _footballLearningPlayer = -1;
             _footballFrameWidth = _footballFrameHeight = 0;
@@ -276,9 +291,9 @@ public sealed partial class MainWindow
             SaveFootballMarkerSettings();
             learnedSuccessfully = true;
             string markerName = learned.Profile.BarCount == 2 ? "double-bar marker" : "black bar";
-            SetStatus(_footballMarkerSettingsError is null
+            SetStatus(FootballMarkerSettingsError is null
                 ? $"Player {player + 1}'s {markerName} is saved for this camera."
-                : $"Player {player + 1}'s {markerName} is learned for this session. " + _footballMarkerSettingsError);
+                : $"Player {player + 1}'s {markerName} is learned for this session. " + FootballMarkerSettingsError);
         }
         catch (Exception ex)
         {
@@ -304,10 +319,10 @@ public sealed partial class MainWindow
             string temporary = FootballMarkerSettingsPath + ".tmp";
             File.WriteAllText(temporary, JsonSerializer.Serialize(saved, new JsonSerializerOptions { WriteIndented = true }));
             File.Move(temporary, FootballMarkerSettingsPath, overwrite: true);
-            _footballMarkerSettingsError = null;
+            _footballMarkerSaveError = _footballMarkerLoadError = null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        { _footballMarkerSettingsError = "Football marker settings could not be saved: " + ex.Message; }
+        { _footballMarkerSaveError = "Football marker settings could not be saved: " + ex.Message; }
     }
 
     private void QueueFootballDetection(CameraFrame frame)
@@ -343,9 +358,9 @@ public sealed partial class MainWindow
                 _footballFrameHeight = frame.Height;
                 if (changed) return;
             }
-            long tick = Stopwatch.GetTimestamp();
-            if (_footballDetectionTick != 0 && Stopwatch.GetElapsedTime(_footballDetectionTick, tick).TotalMilliseconds < 32) return;
-            _footballDetectionTick = tick;
+            // Camera capture already limits delivery to an average 30 Hz. A second
+            // minimum gap skips early frames after late ones, exactly when a fast
+            // shot needs every view. The single in-flight task bounds detector work.
             _footballDetecting = true;
             long generation = _footballInputGeneration;
             var searchHints = selected.Select(player => _footballTipTrackers[player].GetSearchHint(frame.Timestamp)).ToArray();
@@ -373,9 +388,8 @@ public sealed partial class MainWindow
                             _cameraHealthWarning || IsBoardScanMeasuring || _camera.ActiveDeviceId != cameraId ||
                             _scene.CurrentBoardScreen != BoardScreen.Football) return;
                         var now = MonotonicClock.UtcNow;
-                        _footballLastDetection = new(frame.Timestamp, Stopwatch.GetElapsedTime(started).TotalMilliseconds,
-                            (now - frame.Timestamp).TotalMilliseconds, detections.Select(item => item.Reason).ToArray(),
-                            detections.Select(item => item.Candidates.Count).ToArray());
+                        double processingMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                        var decisionSources = new string[selected.Length];
                         bool fresh = EyeTipFrameFresh(frame, now);
                         for (int index = 0; index < selected.Length; index++)
                         {
@@ -384,6 +398,7 @@ public sealed partial class MainWindow
                             {
                                 // A late result cannot refresh input or erase the last trusted pose.
                                 // The game freezes at 250 ms and the normal recovery timer expires it.
+                                decisionSources[index] = "stale-frame";
                                 _footballInputReasons[player] = "Waiting for fresh camera and projection images.";
                                 continue;
                             }
@@ -391,6 +406,7 @@ public sealed partial class MainWindow
                             var decision = _footballTipTrackers[player].Update(player, profiles.ForPlayer(player)!,
                                 detections[index], camera => _scene.TryMapFootballMarkerCameraPoint(camera, out var field) ? field : null,
                                 frame.Timestamp, now);
+                            decisionSources[index] = decision.Source;
                             switch (decision.Action)
                             {
                                 case FootballTipAction.Publish:
@@ -416,6 +432,16 @@ public sealed partial class MainWindow
                                     break;
                             }
                         }
+                        _footballLastDetection = new(frame.Timestamp, processingMilliseconds,
+                            (now - frame.Timestamp).TotalMilliseconds, detections.Select(item => item.Reason).ToArray(),
+                            detections.Select(item => item.Candidates.Count).ToArray(), selected.Select(player => player + 1).ToArray(),
+                            detections.Select(item => item.SupportingBars.Count).ToArray(),
+                            detections.Select(item => item.AmbiguousMarkerCenters.Count).ToArray(),
+                            detections.Select(item => item.Source).ToArray(), decisionSources);
+                        RecordFootballDetection(frame, references, selected,
+                            selected.Select(player => profiles.ForPlayer(player)!).ToArray(), searchHints, detections,
+                            decisionSources, selected.Select(player => _footballTipTimes[player] == default ?
+                                (double?)null : (frame.Timestamp - _footballTipTimes[player]).TotalMilliseconds).ToArray());
                     }
                 }
                 catch (Exception ex)
@@ -501,7 +527,7 @@ public sealed partial class MainWindow
                 : profiles?.ForPlayer(player) is null ? "Choose Learn marker, then click inside one of its bars."
                 : _footballInputReasons[player]);
             FootballInputStatusText.Text = Describe(0) + "\n" + Describe(1) +
-                (_footballMarkerSettingsError is null ? "" : "\n" + _footballMarkerSettingsError);
+                (FootballMarkerSettingsError is null ? "" : "\n" + FootballMarkerSettingsError);
         }
     }
 
@@ -529,7 +555,8 @@ public sealed partial class MainWindow
                     cameraPoint = _footballCameraTips[player], bar = _footballCameraBars[player], frameTime = _footballTipTimes[player],
                     reason = _footballInputReasons[player]
                 }).ToArray(),
-                settingsPath = FootballMarkerSettingsPath, settingsError = _footballMarkerSettingsError
+                settingsPath = FootballMarkerSettingsPath, settingsError = FootballMarkerSettingsError,
+                settingsLoad = _footballSettingsLastLoad
             };
         }
     }
