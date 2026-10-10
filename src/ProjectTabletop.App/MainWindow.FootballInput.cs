@@ -364,6 +364,7 @@ public sealed partial class MainWindow
             _footballDetecting = true;
             long generation = _footballInputGeneration;
             var searchHints = selected.Select(player => _footballTipTrackers[player].GetSearchHint(frame.Timestamp)).ToArray();
+            var turf = _scene.GetFootballCameraTurfPolygon();
             _footballDetectionTask = Task.Run(() =>
             {
                 long started = Stopwatch.GetTimestamp();
@@ -375,7 +376,7 @@ public sealed partial class MainWindow
                     // Both players share one colour conversion of this camera frame.
                     var detections = BlackTipDetector.DetectEach(frame.Width, frame.Height, frame.Stride, frame.Bgra,
                         selected.Select(player => profiles.ForPlayer(player)!).ToArray(),
-                        new(ProjectionFrames: references, FrameTime: frame.Timestamp), searchHints);
+                        new(ProjectionFrames: references, FrameTime: frame.Timestamp), searchHints, turf);
                     lock (_footballInputGate)
                     {
                         if (_closing || generation != _footballInputGeneration) return;
@@ -441,7 +442,7 @@ public sealed partial class MainWindow
                         RecordFootballDetection(frame, references, selected,
                             selected.Select(player => profiles.ForPlayer(player)!).ToArray(), searchHints, detections,
                             decisionSources, selected.Select(player => _footballTipTimes[player] == default ?
-                                (double?)null : (frame.Timestamp - _footballTipTimes[player]).TotalMilliseconds).ToArray());
+                                (double?)null : (frame.Timestamp - _footballTipTimes[player]).TotalMilliseconds).ToArray(), turf);
                     }
                 }
                 catch (Exception ex)

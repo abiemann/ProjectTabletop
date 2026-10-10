@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
 using OpenCvSharp;
 
@@ -47,16 +48,15 @@ public static class BlackTipDetector
         if (!double.IsFinite(click.X) || !double.IsFinite(click.Y) || click.X < 3 || click.Y < 3 ||
             click.X >= width - 3 || click.Y >= height - 3)
             throw new ArgumentException("Click inside the black crossbar, away from the camera edge.");
-        var image = new BlackImage(width, height, stride, bgra);
-        int cx = (int)Math.Round(click.X / image.ScaleX), cy = (int)Math.Round(click.Y / image.ScaleY);
+        using var image = new BlackImage(width, height, stride, bgra);
+        int cx = (int)Math.Round(image.ToImageX(click.X)), cy = (int)Math.Round(image.ToImageY(click.Y));
         if (cx < 2 || cy < 2 || cx >= image.Width - 2 || cy >= image.Height - 2)
             throw new ArgumentException("Click the black crossbar away from the camera edge.");
         var patch = new List<(double Value, double Saturation)>();
         for (int y = cy - 1; y <= cy + 1; y++)
         for (int x = cx - 1; x <= cx + 1; x++)
         {
-            int index = (y * image.Width + x) * 3;
-            double value = image.Hsv[index + 2] / 255.0, saturation = image.Hsv[index + 1] / 255.0;
+            double value = image.Value[y * image.Width + x] / 255.0, saturation = image.Saturation(x, y) / 255.0;
             // Projected colour can saturate black ink without making it bright. Rejecting
             // that tint fragments a thin bar as it crosses the pitch's light and dark stripes.
             // Darkness, shape, local contrast and the artwork veto identify the physical ink.
@@ -89,16 +89,14 @@ public static class BlackTipDetector
                 throw new InvalidOperationException("Wait for a current projected-board reference, then click the physical crossbar again.");
             if (!projection.ContainsBoardPoint(selected.Observation.Center))
                 throw new InvalidOperationException("Place the black marker on the projected board, then click inside one bar again.");
-            if (!projection.IsPhysicalBlackBarCandidate(selected.Observation,
-                image.Gray, image.Width, image.Height, image.ScaleX, image.ScaleY))
+            if (!Physical(projection, selected.Observation, image))
                 throw new InvalidOperationException("That mark is part of the projected picture. Click inside a physical black bar.");
         }
         var strips = contours.Where((_, index) => hierarchy[index].Parent < 0)
             .Select(contour => Component(contour, image, result, selected.Observation.AreaPixels))
             .Where(item => item is not null).Select(item => item!.Observation)
             .OrderBy(item => ColorTipDetector.Distance(item.Center, selected.Observation.Center)).Take(128)
-            .Where(item => projection is null || projection.IsPhysicalBlackBarCandidate(item,
-                image.Gray, image.Width, image.Height, image.ScaleX, image.ScaleY)).ToArray();
+            .Where(item => projection is null || Physical(projection, item, image)).ToArray();
         var pairs = FindPairs(strips, null);
         int selectedIndex = Array.FindIndex(strips, item =>
             ColorTipDetector.Distance(item.Center, selected.Observation.Center) < 1);
@@ -132,9 +130,12 @@ public static class BlackTipDetector
     /// <summary>Detects each learned bar in one camera frame, in profile order. The colour
     /// conversion and projected-scene reference are shared; only the dark threshold and the
     /// learned size and shape differ per profile.</summary>
+    /// <param name="searchArea">Optional raw-camera polygon containing every possible marker
+    /// centre, such as the calibrated grass. Only its bounds plus a marker-sized margin are
+    /// converted and searched; the camera's surroundings cannot add work or candidates.</param>
     public static IReadOnlyList<ColorTipDetectionResult> DetectEach(int width, int height, int stride, byte[] bgra,
         IReadOnlyList<BlackTipProfile> profiles, ColorTipDetectionOptions? options = null,
-        IReadOnlyList<BlackTipSearchHint?>? searchHints = null)
+        IReadOnlyList<BlackTipSearchHint?>? searchHints = null, IReadOnlyList<PixelPoint>? searchArea = null)
     {
         ValidateFrame(width, height, stride, bgra);
         ArgumentNullException.ThrowIfNull(profiles);
@@ -152,16 +153,42 @@ public static class BlackTipDetector
             new(options.ProjectionFrames, options.FrameTime);
         if (projection is { Ready: false })
             return profiles.Select(_ => new ColorTipDetectionResult([], "waiting-for-projected-bat-reference")).ToArray();
-        var image = new BlackImage(width, height, stride, bgra);
+        if (profiles.Count == 0) return [];
+        using var image = new BlackImage(width, height, stride, bgra, SearchBounds(searchArea, profiles, width, height));
+        // Both players usually see the same physical strips. The projected-scene check
+        // depends only on the measured strip, so compare each one at most once per frame.
+        var vetoes = new Dictionary<ColorTipObservation, bool>();
         return profiles.Select((profile, index) => Detect(image, profile, width * (double)height,
-            options?.PreferredCenter, projection, searchHints?[index], options?.FrameTime ?? default)).ToArray();
+            options?.PreferredCenter, projection, searchHints?[index], options?.FrameTime ?? default, vetoes)).ToArray();
     }
 
+    // Marker strips extend beyond their centre, and both the contrast ring and the
+    // projected-scene comparison sample around each strip. Keep all of that inside.
+    private static Rect? SearchBounds(IReadOnlyList<PixelPoint>? area, IReadOnlyList<BlackTipProfile> profiles,
+        int width, int height)
+    {
+        if (area is not { Count: >= 3 } || area.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
+            return null;
+        double length = profiles.Max(profile =>
+            Math.Sqrt(profile.NormalizedArea * width * (double)height * profile.AspectRatio));
+        double margin = Math.Max(96, length * 2.5);
+        int left = (int)Math.Floor(Math.Max(0, area.Min(point => point.X) - margin));
+        int top = (int)Math.Floor(Math.Max(0, area.Min(point => point.Y) - margin));
+        int right = (int)Math.Ceiling(Math.Min(width, area.Max(point => point.X) + margin));
+        int bottom = (int)Math.Ceiling(Math.Min(height, area.Max(point => point.Y) + margin));
+        return right - left < 16 || bottom - top < 16 ? null : new(left, top, right - left, bottom - top);
+    }
+
+    private static bool Physical(EyeTipProjectionMatcher projection, ColorTipObservation strip, BlackImage image) =>
+        projection.IsPhysicalBlackBarCandidate(strip, image.Gray, image.Width, image.Height,
+            image.ScaleX, image.ScaleY, image.OriginX, image.OriginY);
+
     private static ColorTipDetectionResult Detect(BlackImage image, BlackTipProfile profile, double framePixels,
-        PixelPoint? preferred, EyeTipProjectionMatcher? projection, BlackTipSearchHint? hint, DateTimeOffset frameTime)
+        PixelPoint? preferred, EyeTipProjectionMatcher? projection, BlackTipSearchHint? hint, DateTimeOffset frameTime,
+        Dictionary<ColorTipObservation, bool> vetoes)
     {
         double expectedArea = profile.NormalizedArea * framePixels;
-        var strips = ExtractStrips(image, profile, expectedArea, preferred, projection);
+        var strips = ExtractStrips(image, profile, expectedArea, preferred, projection, vetoes);
         if (profile.BarCount == 2)
         {
             var supporting = strips.ToList();
@@ -180,7 +207,7 @@ public static class BlackTipDetector
                 // White goal lines can brighten one bar. Recover its partner only when a
                 // normally dark physical strip anchors the learned pair. Two newly bright
                 // strips cannot become a controller, and complete pairs keep their identity.
-                var lit = ExtractStrips(image, profile, expectedArea, preferred, projection, .08);
+                var lit = ExtractStrips(image, profile, expectedArea, preferred, projection, vetoes, .08);
                 MergeStrips(supporting, lit);
                 var anchor = lit.Select(strip => Array.FindIndex(strips, normal => SameStrip(normal, strip))).ToArray();
                 var supported = FindPairs(lit, profile.SpacingRatio).Where(pair =>
@@ -204,7 +231,7 @@ public static class BlackTipDetector
             {
                 var region = image.SearchRegion(hint!);
                 double allowance = image.LocalAllowance(profile, region);
-                var local = ExtractStrips(image, profile, expectedArea, hint!.ExpectedCenter, projection,
+                var local = ExtractStrips(image, profile, expectedArea, hint!.ExpectedCenter, projection, vetoes,
                     allowance, region);
                 MergeStrips(supporting, local);
                 var localPairs = FindPairs(local, profile.SpacingRatio);
@@ -230,7 +257,8 @@ public static class BlackTipDetector
     }
 
     private static ColorTipObservation[] ExtractStrips(BlackImage image, BlackTipProfile profile, double expectedArea,
-        PixelPoint? preferred, EyeTipProjectionMatcher? projection, double valueAllowance = 0, Rect? region = null)
+        PixelPoint? preferred, EyeTipProjectionMatcher? projection, Dictionary<ColorTipObservation, bool> vetoes,
+        double valueAllowance = 0, Rect? region = null)
     {
         using Mat mask = image.Mask(profile, valueAllowance, region);
         Cv2.FindContours(mask, out Point[][] contours, out HierarchyIndex[] hierarchy,
@@ -244,8 +272,8 @@ public static class BlackTipDetector
             ? candidates.OrderBy(item => ColorTipDetector.Distance(item.Center, point)).ThenByDescending(item => item.Score)
             : candidates.OrderByDescending(item => item.Score);
         return ranked.Take(128).Where(item => projection is null ||
-            projection.IsPhysicalBlackBarCandidate(item, image.Gray, image.Width, image.Height,
-                image.ScaleX, image.ScaleY)).ToArray();
+            (vetoes.TryGetValue(item, out bool physical) ? physical : vetoes[item] = Physical(projection, item, image)))
+            .ToArray();
     }
 
     private static void MergeStrips(List<ColorTipObservation> target, IEnumerable<ColorTipObservation> additions)
@@ -357,7 +385,7 @@ public static class BlackTipDetector
         double? expectedArea, double valueAllowance = 0)
     {
         double area = Math.Abs(Cv2.ContourArea(contour));
-        if (area < 12 || area > image.Width * (double)image.Height * .025) return null;
+        if (area < 12 || area > image.FrameWidth * (double)image.FrameHeight * .025) return null;
         Rect bounds = Cv2.BoundingRect(contour);
         if (bounds.X < 1 || bounds.Y < 1 || bounds.Right >= image.Width - 1 || bounds.Bottom >= image.Height - 1)
             return null;
@@ -392,7 +420,7 @@ public static class BlackTipDetector
         // Fit in raw pixels after scaling each coordinate independently. Carrying a reduced
         // image's angle through nonidentical X/Y scales would skew both orientation and width.
         RotatedRect rawRectangle = Cv2.MinAreaRect(contour.Select(point =>
-            new Point2f((float)(point.X * image.ScaleX), (float)(point.Y * image.ScaleY))).ToArray());
+            new Point2f((float)image.ToRawX(point.X), (float)image.ToRawY(point.Y))).ToArray());
         Point2f[] corners = rawRectangle.Points();
         PixelPoint Midpoint(int first, int second) => new(
             (corners[first].X + corners[second].X) * .5, (corners[first].Y + corners[second].Y) * .5);
@@ -402,69 +430,115 @@ public static class BlackTipDetector
             ColorTipDetector.Distance(acrossOtherEdges.First, acrossOtherEdges.Second);
         var ends = firstIsLong ? acrossFirstEdges : acrossOtherEdges;
         var sides = firstIsLong ? acrossOtherEdges : acrossFirstEdges;
-        return new(new(new(cx * image.ScaleX, cy * image.ScaleY), Math.Sqrt(rawArea / Math.PI), rawArea, score)
+        return new(new(new(image.ToRawX(cx), image.ToRawY(cy)), Math.Sqrt(rawArea / Math.PI), rawArea, score)
         {
             Bar = new(ends.First, ends.Second, sides.First, sides.Second)
         }, aspect);
     }
 
-    private sealed class BlackImage
+    private static readonly Mat CrossKernel = Cv2.GetStructuringElement(MorphShapes.Cross, new Size(3, 3));
+
+    /// <summary>The HSV value (max of R, G and B) and luminance of the searched area. Only
+    /// value is needed to find black ink, so the full HSV conversion is never computed for
+    /// detection. Buffers are pooled: per-frame multi-megabyte arrays forced repeated
+    /// full garbage collections while a game was running.</summary>
+    private sealed class BlackImage : IDisposable
     {
+        private readonly Mat _source, _reduced, _value;
         public int Width { get; }
         public int Height { get; }
+        // The reduced dimensions of the whole camera frame, for frame-relative limits.
+        public int FrameWidth { get; }
+        public int FrameHeight { get; }
         public double ScaleX { get; }
         public double ScaleY { get; }
-        public byte[] Hsv { get; }
+        // The raw camera pixel at image pixel (0, 0).
+        public double OriginX { get; }
+        public double OriginY { get; }
+        public byte[] Value { get; }
         public byte[] Gray { get; }
 
-        public BlackImage(int width, int height, int stride, byte[] bgra)
+        public BlackImage(int width, int height, int stride, byte[] bgra, Rect? crop = null)
         {
-            using Mat source = Mat.FromPixelData(height, width, MatType.CV_8UC4, bgra, stride);
-            using Mat reduced = new();
+            _source = Mat.FromPixelData(height, width, MatType.CV_8UC4, bgra, stride);
+            var area = crop ?? new Rect(0, 0, width, height);
             double reduction = Math.Min(1, MaximumDimension / (double)Math.Max(width, height));
-            if (reduction < 1) Cv2.Resize(source, reduced, new Size(Math.Max(1, (int)Math.Round(width * reduction)),
-                Math.Max(1, (int)Math.Round(height * reduction))), interpolation: InterpolationFlags.Area);
-            else source.CopyTo(reduced);
-            Width = reduced.Width; Height = reduced.Height;
-            ScaleX = width / (double)Width; ScaleY = height / (double)Height;
-            using Mat bgr = new(), hsv = new(), gray = new();
-            Cv2.CvtColor(reduced, bgr, ColorConversionCodes.BGRA2BGR);
-            Cv2.CvtColor(bgr, hsv, ColorConversionCodes.BGR2HSV);
-            Cv2.CvtColor(reduced, gray, ColorConversionCodes.BGRA2GRAY);
-            Hsv = new byte[Width * Height * 3]; Gray = new byte[Width * Height];
-            Marshal.Copy(hsv.Data, Hsv, 0, Hsv.Length);
-            Marshal.Copy(gray.Data, Gray, 0, Gray.Length);
+            FrameWidth = reduction < 1 ? Math.Max(1, (int)Math.Round(width * reduction)) : width;
+            FrameHeight = reduction < 1 ? Math.Max(1, (int)Math.Round(height * reduction)) : height;
+            // A full-resolution crop is only a view of the caller's pinned camera buffer.
+            var view = new Mat(_source, area);
+            if (reduction < 1)
+            {
+                _reduced = new Mat();
+                Cv2.Resize(view, _reduced, new Size(Math.Max(1, (int)Math.Round(area.Width * reduction)),
+                    Math.Max(1, (int)Math.Round(area.Height * reduction))), interpolation: InterpolationFlags.Area);
+                view.Dispose();
+            }
+            else _reduced = view;
+            Width = _reduced.Width; Height = _reduced.Height;
+            ScaleX = area.Width / (double)Width; ScaleY = area.Height / (double)Height;
+            OriginX = area.X; OriginY = area.Y;
+            _value = new Mat();
+            Cv2.Split(_reduced, out Mat[] channels);
+            try
+            {
+                // HSV value is exactly max(B, G, R) for 8-bit images.
+                Cv2.Max(channels[0], channels[1], _value);
+                Cv2.Max(_value, channels[2], _value);
+            }
+            finally { foreach (var channel in channels) channel.Dispose(); }
+            using Mat gray = new();
+            Cv2.CvtColor(_reduced, gray, ColorConversionCodes.BGRA2GRAY);
+            int pixels = Width * Height;
+            Value = ArrayPool<byte>.Shared.Rent(pixels);
+            Gray = ArrayPool<byte>.Shared.Rent(pixels);
+            Marshal.Copy(_value.Data, Value, 0, pixels);
+            Marshal.Copy(gray.Data, Gray, 0, pixels);
         }
 
-        private bool IsDark(int pixel, BlackTipProfile profile, double valueAllowance = 0)
+        public double ToImageX(double rawX) => (rawX - OriginX) / ScaleX;
+        public double ToImageY(double rawY) => (rawY - OriginY) / ScaleY;
+        public double ToRawX(double imageX) => OriginX + imageX * ScaleX;
+        public double ToRawY(double imageY) => OriginY + imageY * ScaleY;
+
+        /// <summary>OpenCV's 8-bit HSV saturation of one pixel; learning reads only a 3×3 patch.</summary>
+        public byte Saturation(int x, int y)
         {
-            double value = Hsv[pixel * 3 + 2] / 255.0;
-            double maximumValue = Math.Min(.50, Math.Clamp(profile.Value * 1.7 + .07, .18, .42) + valueAllowance);
-            return value <= maximumValue;
+            using var pixel = new Mat(_reduced, new Rect(x, y, 1, 1));
+            using Mat bgr = new(), hsv = new();
+            Cv2.CvtColor(pixel, bgr, ColorConversionCodes.BGRA2BGR);
+            Cv2.CvtColor(bgr, hsv, ColorConversionCodes.BGR2HSV);
+            return hsv.At<Vec3b>(0, 0).Item1;
         }
+
+        private static double MaximumValue(BlackTipProfile profile, double valueAllowance) =>
+            Math.Min(.50, Math.Clamp(profile.Value * 1.7 + .07, .18, .42) + valueAllowance);
+
+        private bool IsDark(int pixel, BlackTipProfile profile, double valueAllowance = 0) =>
+            Value[pixel] / 255.0 <= MaximumValue(profile, valueAllowance);
 
         public Mat Mask(BlackTipProfile profile, double valueAllowance = 0, Rect? region = null)
         {
             Rect bounds = region ?? new(0, 0, Width, Height);
-            byte[] pixels = new byte[bounds.Width * bounds.Height];
-            for (int y = 0; y < bounds.Height; y++)
-            for (int x = 0; x < bounds.Width; x++)
-                if (IsDark((bounds.Y + y) * Width + bounds.X + x, profile, valueAllowance))
-                    pixels[y * bounds.Width + x] = 255;
-            Mat mask = new(bounds.Height, bounds.Width, MatType.CV_8UC1);
-            Marshal.Copy(pixels, 0, mask.Data, pixels.Length);
-            using Mat kernel = Cv2.GetStructuringElement(MorphShapes.Cross, new Size(3, 3));
-            Cv2.MorphologyEx(mask, mask, MorphTypes.Open, kernel);
+            // The largest 8-bit value that IsDark accepts, so the vectorized threshold
+            // selects exactly the same pixels as the per-pixel test.
+            double maximum = MaximumValue(profile, valueAllowance);
+            int threshold = -1;
+            for (int value = 0; value < 256 && value / 255.0 <= maximum; value++) threshold = value;
+            using var source = new Mat(_value, bounds);
+            Mat mask = new();
+            Cv2.Threshold(source, mask, threshold, 255, ThresholdTypes.BinaryInv);
+            Cv2.MorphologyEx(mask, mask, MorphTypes.Open, CrossKernel);
             return mask;
         }
 
         public Rect SearchRegion(BlackTipSearchHint hint)
         {
             double radius = Math.Clamp(ColorTipDetector.Distance(hint.Marker.Bar!.End1, hint.Marker.Bar.End2) * 1.8, 48, 192);
-            int left = Math.Clamp((int)Math.Floor((hint.ExpectedCenter.X - radius) / ScaleX), 0, Width - 1);
-            int top = Math.Clamp((int)Math.Floor((hint.ExpectedCenter.Y - radius) / ScaleY), 0, Height - 1);
-            int right = Math.Clamp((int)Math.Ceiling((hint.ExpectedCenter.X + radius) / ScaleX), left + 1, Width);
-            int bottom = Math.Clamp((int)Math.Ceiling((hint.ExpectedCenter.Y + radius) / ScaleY), top + 1, Height);
+            int left = Math.Clamp((int)Math.Floor(ToImageX(hint.ExpectedCenter.X - radius)), 0, Width - 1);
+            int top = Math.Clamp((int)Math.Floor(ToImageY(hint.ExpectedCenter.Y - radius)), 0, Height - 1);
+            int right = Math.Clamp((int)Math.Ceiling(ToImageX(hint.ExpectedCenter.X + radius)), left + 1, Width);
+            int bottom = Math.Clamp((int)Math.Ceiling(ToImageY(hint.ExpectedCenter.Y + radius)), top + 1, Height);
             return new(left, top, right - left, bottom - top);
         }
 
@@ -474,7 +548,7 @@ public static class BlackTipDetector
             int count = 0, step = Math.Max(1, Math.Max(region.Width, region.Height) / 50);
             for (int y = region.Top; y < region.Bottom; y += step)
             for (int x = region.Left; x < region.Right; x += step)
-            { histogram[Hsv[(y * Width + x) * 3 + 2]]++; count++; }
+            { histogram[Value[y * Width + x]]++; count++; }
             int percentile = 0, total = 0;
             for (; percentile < 255; percentile++)
             { total += histogram[percentile]; if (total >= count * .80) break; }
@@ -511,6 +585,15 @@ public static class BlackTipDetector
                 { surround += Gray[y * Width + x]; surroundCount++; }
             }
             return coreCount < 3 || surroundCount < 8 ? 0 : surround / surroundCount - core / coreCount;
+        }
+
+        public void Dispose()
+        {
+            ArrayPool<byte>.Shared.Return(Value);
+            ArrayPool<byte>.Shared.Return(Gray);
+            _value.Dispose();
+            _reduced.Dispose();
+            _source.Dispose();
         }
     }
 

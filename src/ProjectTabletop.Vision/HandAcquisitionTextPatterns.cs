@@ -12,6 +12,11 @@ internal sealed class HandAcquisitionTextPatterns
         double[][] HighPass, double[][] Blurred, double Background, int[] Evidence, double InkBackground)
     {
         public HashSet<int> EvidenceSupport { get; } = Evidence.ToHashSet();
+        // Correlations read only the evidence pixels. Patterns compared with the
+        // camera hold those values in Evidence order rather than the full raster.
+        public double[][] EvidenceHighPass { get; } =
+            HighPass.Select(pattern => Evidence.Select(index => pattern[index]).ToArray()).ToArray();
+        public Dictionary<int, double[]> ExposedHighPass { get; } = [];
         public double CleanCorrelation { get; set; }
         public int? RegisteredVariant { get; set; }
         public int RegisteredDx { get; set; }
@@ -35,6 +40,8 @@ internal sealed class HandAcquisitionTextPatterns
     private readonly List<Template> _templates = [];
     private const int LogicalSize = 1000;
     private static readonly double[] Blurs = [0, .5, 1, 1.5, 2, 2.5, 3, 4];
+    private static readonly double[] ExposureGains = [2, 3, 4, 6, 8, 12];
+    private static readonly double[] ExposureBackgrounds = [80, 120, 160, 200];
 
     internal HandAcquisitionTextPatterns(HandAcquisitionSceneImage scene)
     {
@@ -124,7 +131,7 @@ internal sealed class HandAcquisitionTextPatterns
             double best = -1, bestMeanExpected = 0, bestMeanCurrent = 0, bestGain = 0, bestStd = 0;
             int bestVariant = 0, bestDx = 0, bestDy = 0;
             double bestScaleX = 1, bestScaleY = 1;
-            double[] bestExpected = template.HighPass[0];
+            double[] bestExpected = template.EvidenceHighPass[0];
             double bestExposureGain = 1, bestExposureBackground = template.Background;
             // Tentative alignment bounds the cost of a still-obstructed startup
             // label. It never establishes clean appearance; periodically retry
@@ -132,8 +139,10 @@ internal sealed class HandAcquisitionTextPatterns
             int? cachedVariant = template.RegisteredVariant ?? template.TentativeVariant;
             bool appearanceChanged = template.PreviousHighPass is { } previous &&
                 template.Evidence.Average(index => Math.Abs(cameraHighPass[index] - previous[index])) > 3;
+            // Stagger the periodic retries so several unverified labels do not
+            // all repeat their full search on the same camera frame.
             bool fullSearch = cachedVariant is null || template.RegisteredVariant is null &&
-                (++template.ObservationCount % 8 == 0 || appearanceChanged);
+                ((++template.ObservationCount + template.Region) % 8 == 0 || appearanceChanged);
             template.PreviousHighPass = cameraHighPass;
             int cachedDx = template.RegisteredVariant is null ? template.TentativeDx : template.RegisteredDx;
             int cachedDy = template.RegisteredVariant is null ? template.TentativeDy : template.RegisteredDy;
@@ -198,22 +207,25 @@ internal sealed class HandAcquisitionTextPatterns
             // by less than the registration-change threshold. A stale exposure
             // model must still be refreshed when intact clipped letters stop
             // matching, without resetting their verified optical geometry.
-            if (best < Math.Max(.82, template.CleanCorrelation * .90) && bestStd >= 3 && clipped)
+            // An unverified label retries this model with its bounded full
+            // search, like its registration; repeating it on every frame cost
+            // hundreds of milliseconds while a startup label stayed obstructed.
+            bool registered = template.RegisteredVariant is not null;
+            if (best < Math.Max(.82, template.CleanCorrelation * .90) && bestStd >= 3 && clipped &&
+                (registered || fullSearch))
             {
                 int originalDx = bestDx, originalDy = bestDy;
-                bool registered = template.RegisteredVariant is not null;
                 if (registered) { originalDx = template.RegisteredDx; originalDy = template.RegisteredDy; }
                 int exposureFirstVariant = registered ? Math.Max(1, template.RegisteredVariant!.Value - 1) : 1;
                 int exposureLastVariant = registered ? Math.Min(6, template.RegisteredVariant!.Value + 1) : 6;
                 double exposureScaleX = registered ? template.RegisteredScaleX : 1;
                 double exposureScaleY = registered ? template.RegisteredScaleY : 1;
-                foreach (double exposureGain in new double[] { 2, 3, 4, 6, 8, 12 })
-                foreach (double exposureBackground in new double[] { 80, 120, 160, 200 })
+                for (int gain = 0; gain < ExposureGains.Length; gain++)
+                for (int background = 0; background < ExposureBackgrounds.Length; background++)
                 for (int variant = exposureFirstVariant; variant <= exposureLastVariant; variant++)
                 {
-                    double[] exposed = HighPass(template.Blurred[variant].Select(value =>
-                        Math.Clamp(exposureBackground + exposureGain * (value - template.Background), 0, 255)).ToArray(),
-                        template.Width, template.Height);
+                    double exposureGain = ExposureGains[gain], exposureBackground = ExposureBackgrounds[background];
+                    double[] exposed = ExposedEvidenceHighPass(template, variant, gain, background);
                     for (int dy = registered ? originalDy : Math.Max(-8, originalDy - 3);
                         dy <= (registered ? originalDy : Math.Min(8, originalDy + 3)); dy++)
                     for (int dx = registered ? originalDx : Math.Max(-8, originalDx - 3);
@@ -237,11 +249,13 @@ internal sealed class HandAcquisitionTextPatterns
             void Evaluate(int variant, int dx, int dy, double scaleX, double scaleY,
                 double[]? exposed = null, double exposureGain = 1, double exposureBackground = 0)
             {
-                double[] expectedPattern = exposed ?? template.HighPass[variant];
+                double[] expectedPattern = exposed ?? template.EvidenceHighPass[variant];
                 double sumA = 0, sumB = 0, sumAA = 0, sumBB = 0, sumAB = 0;
-                foreach (int index in template.Evidence)
+                int[] evidence = template.Evidence;
+                for (int k = 0; k < evidence.Length; k++)
                 {
-                    double a = expectedPattern[index];
+                    int index = evidence[k];
+                    double a = expectedPattern[k];
                     double b = scaleX == 1 && scaleY == 1 ? cameraHighPass[index + dy * template.Width + dx]
                         : AffineSample(cameraHighPass, template.Width, template.Height, index, dx, dy, scaleX, scaleY);
                     sumA += a; sumB += b; sumAA += a * a; sumBB += b * b; sumAB += a * b;
@@ -284,9 +298,10 @@ internal sealed class HandAcquisitionTextPatterns
             if (bestStd >= 3)
             {
                 double threshold = Math.Max(2, bestStd * .45);
-                foreach (int index in template.Evidence)
+                for (int k = 0; k < template.Evidence.Length; k++)
                 {
-                    double expected = bestGain * (bestExpected[index] - bestMeanExpected) + bestMeanCurrent;
+                    int index = template.Evidence[k];
+                    double expected = bestGain * (bestExpected[k] - bestMeanExpected) + bestMeanCurrent;
                     double actual = bestScaleX == 1 && bestScaleY == 1 ? cameraHighPass[index + bestDy * template.Width + bestDx]
                         : AffineSample(cameraHighPass, template.Width, template.Height, index, bestDx, bestDy, bestScaleX, bestScaleY);
                     if (Math.Abs(actual - expected) <= threshold) continue;
@@ -322,13 +337,16 @@ internal sealed class HandAcquisitionTextPatterns
             {
                 int start = glyphLeft + (glyphRight - glyphLeft) * sector / sectors.Length;
                 int end = glyphLeft + (glyphRight - glyphLeft) * (sector + 1) / sectors.Length;
-                int[] indices = template.Evidence.Where(index => index % template.Width >= start && index % template.Width < end).ToArray();
+                // Evidence positions, so the evidence-ordered pattern can be read directly.
+                int[] indices = Enumerable.Range(0, template.Evidence.Length).Where(k =>
+                    template.Evidence[k] % template.Width >= start && template.Evidence[k] % template.Width < end).ToArray();
                 sectorEvidence[sector] = indices;
                 if (indices.Length < 24) { sectors[sector] = 1; continue; }
                 double sumA = 0, sumB = 0, sumAA = 0, sumBB = 0, sumAB = 0;
-                foreach (int index in indices)
+                foreach (int k in indices)
                 {
-                    double a = bestExpected[index];
+                    int index = template.Evidence[k];
+                    double a = bestExpected[k];
                     double b = bestScaleX == 1 && bestScaleY == 1 ? cameraHighPass[index + bestDy * template.Width + bestDx]
                         : AffineSample(cameraHighPass, template.Width, template.Height, index, bestDx, bestDy, bestScaleX, bestScaleY);
                     sumA += a; sumB += b; sumAA += a * a; sumBB += b * b; sumAB += a * b;
@@ -344,8 +362,8 @@ internal sealed class HandAcquisitionTextPatterns
             var locallyChanged = new HashSet<int>();
             for (int sector = 0; sector < sectors.Length - 1; sector++)
                 if (severe[sector] && severe[sector + 1])
-                    foreach (int index in sectorEvidence[sector].Concat(sectorEvidence[sector + 1]))
-                        if (changedIndices.Contains(index)) locallyChanged.Add(index);
+                    foreach (int k in sectorEvidence[sector].Concat(sectorEvidence[sector + 1]))
+                        if (changedIndices.Contains(template.Evidence[k])) locallyChanged.Add(template.Evidence[k]);
             double localCoverage = locallyChanged.Count / 1_000_000.0 /
                 (_scene.BoardTriggerRegions![template.Region].Width * _scene.BoardTriggerRegions[template.Region].Height);
             if (localCoverage >= HandAcquisitionPresenceTracker.MinimumControlCoverage)
@@ -428,6 +446,17 @@ internal sealed class HandAcquisitionTextPatterns
         ink = Math.Abs(template.Blurred[0][index] - template.InkBackground) > 24 &&
             Math.Abs(template.HighPass[0][index]) > 6;
         return true;
+    }
+    // A pure function of the template and exposure model; compute it once per label.
+    private static double[] ExposedEvidenceHighPass(Template template, int variant, int gain, int background)
+    {
+        int key = (variant * ExposureGains.Length + gain) * ExposureBackgrounds.Length + background;
+        if (template.ExposedHighPass.TryGetValue(key, out var cached)) return cached;
+        double exposureGain = ExposureGains[gain], exposureBackground = ExposureBackgrounds[background];
+        double[] exposed = HighPass(template.Blurred[variant].Select(value =>
+            Math.Clamp(exposureBackground + exposureGain * (value - template.Background), 0, 255)).ToArray(),
+            template.Width, template.Height);
+        return template.ExposedHighPass[key] = template.Evidence.Select(index => exposed[index]).ToArray();
     }
     private static double[] HighPass(double[] image, int width, int height)
     {

@@ -56,9 +56,7 @@ public sealed partial class SceneCompositor
             screen = _boardSession.Screen;
             navigation = _boardSession.NavigationRevision;
             var size = source.SizeInPixels;
-            double scale = Math.Min(1, 2048.0 / Math.Max(size.Width, size.Height));
-            width = Math.Max(1, (int)Math.Round(size.Width * scale));
-            height = Math.Max(1, (int)Math.Round(size.Height * scale));
+            (width, height) = EyeProjectionSize(cameraMap, surfaceMap, (int)size.Width, (int)size.Height);
             if (_eyeProjectionTarget is { } pooled && pooled.Device == source.Device &&
                 pooled.SizeInPixels.Width == width && pooled.SizeInPixels.Height == height)
                 capture = pooled;
@@ -71,8 +69,10 @@ public sealed partial class SceneCompositor
             try
             {
                 using (var drawing = capture.CreateDrawingSession())
+                    // A large reduction needs a prefiltered downscale; linear sampling
+                    // would skip source pixels and break up thin lines.
                     drawing.DrawImage(source, new Rect(0, 0, width, height), new Rect(0, 0, size.Width, size.Height),
-                        1, CanvasImageInterpolation.Linear, CanvasComposite.Copy);
+                        1, CanvasImageInterpolation.HighQualityCubic, CanvasComposite.Copy);
             }
             catch
             {
@@ -121,6 +121,32 @@ public sealed partial class SceneCompositor
             while (_eyeProjectionFrames.Count > 3) _eyeProjectionFrames.Dequeue();
             return _eyeProjectionFrames.ToArray();
         }
+    }
+
+    // Tip detectors compare this image with the camera's own view of the board, one
+    // sample per camera pixel. Match that resolution along each board axis: extra
+    // pixels were skipped by the comparison, yet each capture paid for reading
+    // them back from the GPU and converting them on the detection thread.
+    private static (int Width, int Height) EyeProjectionSize(Homography cameraMap, Homography surfaceMap,
+        int sourceWidth, int sourceHeight)
+    {
+        try
+        {
+            Point2 Camera(double u, double v) => cameraMap.InverseTransform(surfaceMap.Transform(new Point2(u, v)));
+            static double Distance(Point2 a, Point2 b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+            Point2[] corners = [Camera(0, 0), Camera(1, 0), Camera(1, 1), Camera(0, 1)];
+            // Use the longer of opposite edges so the nearer side of an oblique view keeps its detail.
+            double across = Math.Max(Distance(corners[0], corners[1]), Distance(corners[3], corners[2]));
+            double down = Math.Max(Distance(corners[0], corners[3]), Distance(corners[1], corners[2]));
+            if (double.IsFinite(across) && double.IsFinite(down) && across >= 1 && down >= 1)
+                return (Fit(across, sourceWidth), Fit(down, sourceHeight));
+        }
+        catch (InvalidOperationException) { }
+        double scale = Math.Min(1, 2048.0 / Math.Max(sourceWidth, sourceHeight));
+        return (Math.Max(1, (int)Math.Round(sourceWidth * scale)), Math.Max(1, (int)Math.Round(sourceHeight * scale)));
+
+        static int Fit(double length, int sourceLength) =>
+            Math.Max(1, Math.Min(Math.Min(2048, sourceLength), (int)Math.Ceiling(length)));
     }
 
     private void ReturnEyeProjectionTarget(CanvasRenderTarget capture)

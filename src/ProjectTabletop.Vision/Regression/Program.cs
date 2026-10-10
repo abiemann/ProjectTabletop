@@ -75,6 +75,12 @@ if (args is ["--hand-reflectance-fit"])
     return;
 }
 
+if (args is ["--hand-acquisition-exposure"])
+{
+    HandAcquisitionExposureSearchRegression.Run();
+    return;
+}
+
 if (args is ["--hand-acquisition-compact-native-replay", var compactNativeSnapshot])
 {
     HandAcquisitionCompactControlRegression.ReplayNative(compactNativeSnapshot);
@@ -252,6 +258,7 @@ BoardDetectionRegression.CheckCalibrationSpot();
 AmbientBoardEdgeSupportRegression.Run();
 HandAcquisitionMotionRegression.Run();
 HandAcquisitionPresenceRegression.Run();
+HandAcquisitionExposureSearchRegression.Run();
 HandTrackingSearchRegionsRegression.Run();
 HandPalmColorCorrectionRegression.Run();
 HandCandidateContinuityRegression.Run();

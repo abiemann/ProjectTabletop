@@ -23,6 +23,7 @@ public class VisionTests
     [Fact] public void AmbientBoardEdgeSupport() => AmbientBoardEdgeSupportRegression.Run();
     [Fact] public void HandAcquisitionMotion() => HandAcquisitionMotionRegression.Run();
     [Fact] public void HandAcquisitionPresence() => HandAcquisitionPresenceRegression.Run();
+    [Fact] public void HandAcquisitionExposureSearch() => HandAcquisitionExposureSearchRegression.Run();
     [Fact] public void HandTrackingSearchRegions() => HandTrackingSearchRegionsRegression.Run();
     [Fact] public void HandPalmColorCorrection() => HandPalmColorCorrectionRegression.Run();
     [Fact] public void HandCandidateContinuity() => HandCandidateContinuityRegression.Run();

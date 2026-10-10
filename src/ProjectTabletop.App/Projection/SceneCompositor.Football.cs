@@ -167,6 +167,30 @@ public sealed partial class SceneCompositor
         return new((1 - width) / 2, .15 + (.69 - height) / 2, width, height);
     }
 
+    /// <summary>The whole grass surface, where a marker centre may lie, as a raw-camera
+    /// polygon. Detection searches only around it, never the room beyond the board.</summary>
+    public PixelPoint[]? GetFootballCameraTurfPolygon()
+    {
+        lock (_gate)
+        {
+            SyncFootballSession();
+            if (!_footballActive) return null;
+            var field = FootballFieldBounds();
+            double left = FootballFieldGeometry.TurfLeft / FootballFieldGeometry.Width;
+            double top = FootballFieldGeometry.TurfTop / FootballFieldGeometry.Height;
+            double right = (FootballFieldGeometry.TurfLeft + FootballFieldGeometry.TurfWidth) / FootballFieldGeometry.Width;
+            double bottom = (FootballFieldGeometry.TurfTop + FootballFieldGeometry.TurfHeight) / FootballFieldGeometry.Height;
+            try
+            {
+                return new[] { (left, top), (right, top), (right, bottom), (left, bottom) }
+                    .Select(corner => _boardCameraMap!.InverseTransform(_boardSurfaceMap!.Transform(new Point2(
+                        field.X + corner.Item1 * field.Width, field.Y + corner.Item2 * field.Height))))
+                    .Select(point => new PixelPoint(point.X, point.Y)).ToArray();
+            }
+            catch (InvalidOperationException) { return null; }
+        }
+    }
+
     public bool TryMapFootballCameraPoint(PixelPoint camera, out PixelPoint normalized)
         => TryMapFootballCameraPoint(camera, out normalized, requireInside: true);
 

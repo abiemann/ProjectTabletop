@@ -9,7 +9,7 @@ public sealed partial class MainWindow
     private sealed record FootballDiagnosticObservation(CameraFrame Frame,
         IReadOnlyList<EyeTipProjectionFrame>? References, int[] Players, BlackTipProfile[] Profiles,
         BlackTipSearchHint?[] Hints, IReadOnlyList<ColorTipDetectionResult> Results,
-        string[] Decisions, double?[] InputAgeMilliseconds);
+        string[] Decisions, double?[] InputAgeMilliseconds, PixelPoint[]? SearchArea);
     private readonly object _footballDiagnosticGate = new();
     private bool _footballDiagnosticCapture;
     private FootballDiagnosticObservation? _currentFootballDiagnostic, _missedFootballDiagnostic;
@@ -26,7 +26,8 @@ public sealed partial class MainWindow
 
     private void RecordFootballDetection(CameraFrame frame, IReadOnlyList<EyeTipProjectionFrame>? references,
         int[] players, BlackTipProfile[] profiles, BlackTipSearchHint?[] hints,
-        IReadOnlyList<ColorTipDetectionResult> results, string[] decisions, double?[] inputAgeMilliseconds)
+        IReadOnlyList<ColorTipDetectionResult> results, string[] decisions, double?[] inputAgeMilliseconds,
+        PixelPoint[]? searchArea)
     {
         lock (_footballDiagnosticGate)
         {
@@ -34,7 +35,7 @@ public sealed partial class MainWindow
             // Frames and scene references are immutable owned buffers. Retain only two
             // observations, and write nothing unless the local diagnostic client requests it.
             var observation = new FootballDiagnosticObservation(frame, references, players, profiles, hints, results,
-                decisions, inputAgeMilliseconds);
+                decisions, inputAgeMilliseconds, searchArea);
             _currentFootballDiagnostic = observation;
             // A full-pair miss bridged by one strip is still successful tracking.
             // Preserve a sustained measured-input miss, not that benign recovery.
@@ -79,7 +80,7 @@ public sealed partial class MainWindow
             {
                 frame.Timestamp, frame.Width, frame.Height, frame.Stride,
                 observation.Players, observation.Profiles, observation.Hints, observation.Results,
-                observation.Decisions, observation.InputAgeMilliseconds,
+                observation.Decisions, observation.InputAgeMilliseconds, observation.SearchArea,
                 expectedHistory = history
             }));
         }

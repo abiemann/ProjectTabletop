@@ -553,6 +553,168 @@ public class BlackTipVisionTests
         }
     }
 
+    [Fact]
+    public void SearchAreaCropMeasuresLikeTheFullFrameAndIgnoresTheRoomBeyondIt()
+    {
+        const int width = 640, height = 400;
+        var training = Frame(width, height);
+        WidePair(training, 400, 200, 0);
+        var profile = BlackTipDetector.Learn(width, height, width * 4, training, new(400, 192));
+        Assert.Equal(2, profile.BarCount);
+        var image = Frame(width, height);
+        WidePair(image, 420, 210, 35);
+        WidePair(image, 100, 300, 100);
+        var full = BlackTipDetector.DetectEach(width, height, width * 4, image, [profile])[0];
+        Assert.Equal(2, full.Candidates.Count);
+        // The crop starts away from the frame origin, exercising every raw/image offset.
+        PixelPoint[] grass = [new(360, 150), new(480, 150), new(480, 270), new(360, 270)];
+        var cropped = BlackTipDetector.DetectEach(width, height, width * 4, image, [profile], searchArea: grass)[0];
+        var inside = Assert.Single(cropped.Candidates);
+        var reference = full.Candidates.Single(item => item.Center.X > 300);
+        Assert.Equal(reference.Center.X, inside.Center.X, 6);
+        Assert.Equal(reference.Center.Y, inside.Center.Y, 6);
+        Assert.Equal(reference.AreaPixels, inside.AreaPixels, 6);
+        Assert.Equal(reference.Score, inside.Score, 6);
+        foreach (var (expected, actual) in new[] { (reference.Bar!.End1, inside.Bar!.End1), (reference.Bar.End2, inside.Bar.End2),
+            (reference.Bar.Side1, inside.Bar.Side1), (reference.Bar.Side2, inside.Bar.Side2) })
+        {
+            Assert.Equal(expected.X, actual.X, 3);
+            Assert.Equal(expected.Y, actual.Y, 3);
+        }
+
+        // The projected-scene veto samples the cropped camera image at the same raw pixels.
+        double[] map = [1.0 / width, 0, 0, 0, 1.0 / height, 0, 0, 0, 1];
+        var projectedMarker = new ColorTipDetectionOptions(ProjectionFrames:
+            [new(width, height, image, map, Epoch)], FrameTime: Epoch);
+        Assert.Empty(BlackTipDetector.DetectEach(width, height, width * 4, image, [profile], projectedMarker,
+            searchArea: grass)[0].Candidates);
+        var emptyBoard = new ColorTipDetectionOptions(ProjectionFrames:
+            [new(width, height, Frame(width, height), map, Epoch)], FrameTime: Epoch);
+        Assert.Single(BlackTipDetector.DetectEach(width, height, width * 4, image, [profile], emptyBoard,
+            searchArea: grass)[0].Candidates);
+    }
+
+    [Fact]
+    public void HighResolutionCropPreservesRawBarGeometryAndProjectedArtworkRejection()
+    {
+        // Both the full frame and the offset crop require reduction, with independently
+        // rounded X/Y dimensions. Resampling can shift edges by a raw camera pixel.
+        const int width = 3841, height = 1441;
+        var training = Frame(width, height);
+        Bar(training, 2400, 900, 120, 16, width: width, height: height);
+        var profile = BlackTipDetector.Learn(width, height, width * 4, training, new(2400, 900));
+        PixelPoint[] grass = [new(2300, 830), new(2670, 830), new(2670, 1110), new(2300, 1110)];
+        double[] map = [1.0 / width, 0, 0, 0, 1.0 / height, 0, 0, 0, 1];
+        var emptyBoard = new ColorTipDetectionOptions(ProjectionFrames:
+            [new(width, height, Frame(width, height), map, Epoch)], FrameTime: Epoch);
+        foreach (double angle in new[] { 35, 90 })
+        {
+            var camera = Frame(width, height);
+            Bar(camera, 2500, 950, 120, 16, angle, width: width, height: height);
+            Bar(camera, 600, 300, 120, 16, 15, width: width, height: height);
+            var full = BlackTipDetector.DetectEach(width, height, width * 4, camera, [profile], emptyBoard)[0];
+            Assert.Equal(2, full.Candidates.Count);
+            var expected = full.Candidates.Single(item => item.Center.X > 2000);
+            var cropped = BlackTipDetector.DetectEach(width, height, width * 4, camera, [profile], emptyBoard,
+                searchArea: grass)[0];
+            var actual = Assert.Single(cropped.Candidates);
+            AssertBarGeometry(expected, 2500, 950, 120, 16, angle, 4);
+            AssertBarGeometry(actual, 2500, 950, 120, 16, angle, 4);
+            Assert.InRange(actual.Center.X, expected.Center.X - 2, expected.Center.X + 2);
+            Assert.InRange(actual.Center.Y, expected.Center.Y - 2, expected.Center.Y + 2);
+            Assert.InRange(actual.AreaPixels / expected.AreaPixels, .85, 1.15);
+
+            var projectedMarker = new ColorTipDetectionOptions(ProjectionFrames:
+                [new(width, height, camera, map, Epoch)], FrameTime: Epoch);
+            Assert.Empty(BlackTipDetector.DetectEach(width, height, width * 4, camera, [profile], projectedMarker,
+                searchArea: grass)[0].Candidates);
+        }
+    }
+
+    [Fact]
+    public void CroppedRecentHintRecoversLocallyLitPairWithoutAcceptingProjectedOrExpiredEvidence()
+    {
+        const int width = 640, height = 400;
+        var training = LitPair(400, 200, 0, 20);
+        var profile = BlackTipDetector.Learn(width, height, width * 4, training, new(400, 192));
+        Assert.Equal(2, profile.BarCount);
+        var acquired = Assert.Single(BlackTipDetector.Detect(width, height, width * 4, training, profile).Candidates);
+        var camera = LitPair(420, 210, 20, 75);
+        PixelPoint[] grass = [new(360, 150), new(480, 150), new(480, 270), new(360, 270)];
+        double[] map = [1.0 / width, 0, 0, 0, 1.0 / height, 0, 0, 0, 1];
+        var options = new ColorTipDetectionOptions(ProjectionFrames:
+            [new(width, height, Background(), map, Epoch)], FrameTime: Epoch.AddMilliseconds(80));
+        var hint = new BlackTipSearchHint(acquired, new(420, 210), Epoch);
+
+        // Both strips have brightened beyond the ordinary threshold. Neither the crop
+        // nor a stale remembered position may independently turn them into a marker.
+        Assert.Empty(BlackTipDetector.DetectEach(width, height, width * 4, camera, [profile], options,
+            searchArea: grass)[0].Candidates);
+        Assert.Empty(BlackTipDetector.DetectEach(width, height, width * 4, camera, [profile], options,
+            [hint with { LastFullFrame = Epoch.AddMilliseconds(-400) }], grass)[0].Candidates);
+        var full = BlackTipDetector.DetectEach(width, height, width * 4, camera, [profile], options, [hint])[0];
+        var cropped = BlackTipDetector.DetectEach(width, height, width * 4, camera, [profile], options, [hint], grass)[0];
+        Assert.Equal("local-contrast", full.Source);
+        Assert.Equal("local-contrast", cropped.Source);
+        var expected = Assert.Single(full.Candidates);
+        var actual = Assert.Single(cropped.Candidates);
+        AssertBarGeometry(actual, 420, 210, 46, 22, 20, 2.5);
+        Assert.Equal(expected.Center.X, actual.Center.X, 6);
+        Assert.Equal(expected.Center.Y, actual.Center.Y, 6);
+        Assert.Equal(expected.AreaPixels, actual.AreaPixels, 6);
+
+        var projectedMarker = options with { ProjectionFrames = [new(width, height, camera, map, Epoch)] };
+        Assert.Empty(BlackTipDetector.DetectEach(width, height, width * 4, camera, [profile], projectedMarker,
+            [hint], grass)[0].Candidates);
+
+        static byte[] Background()
+        {
+            var image = Frame(width, height);
+            for (int i = 0; i < image.Length; i += 4)
+            { image[i] = 150; image[i + 1] = 195; image[i + 2] = 165; }
+            return image;
+        }
+
+        static byte[] LitPair(int cx, int cy, double angle, byte brightness)
+        {
+            var image = Background();
+            double radians = angle * Math.PI / 180;
+            int dx = (int)Math.Round(-Math.Sin(radians) * 8), dy = (int)Math.Round(Math.Cos(radians) * 8);
+            Bar(image, cx - dx, cy - dy, 46, 6, angle, brightness, width, height);
+            Bar(image, cx + dx, cy + dy, 46, 6, angle, brightness, width, height);
+            return image;
+        }
+    }
+
+    [Fact]
+    public void PooledDetectionBuffersNeverCarryPixelsBetweenFrames()
+    {
+        var training = Frame();
+        Pair(training, 160, 120);
+        var profile = Learn(training, 160, 112);
+        var first = Frame();
+        Pair(first, 120, 110, 25);
+        var expected = Detect(first, profile);
+        Assert.Single(expected.Candidates);
+        var crowded = Frame();
+        Pair(crowded, 90, 80, 60);
+        Pair(crowded, 230, 160, 140);
+        Bar(crowded, 260, 60, 30, 8, 10);
+        Assert.Equal(2, Detect(crowded, profile).Candidates.Count);
+        var again = Detect(first, profile);
+        Assert.Equal(expected.Candidates, again.Candidates);
+        Assert.Equal(expected.SupportingBars, again.SupportingBars);
+    }
+
+    private static void WidePair(byte[] image, int cx, int cy, double angle)
+    {
+        const int width = 640, height = 400;
+        double radians = angle * Math.PI / 180;
+        int dx = (int)Math.Round(-Math.Sin(radians) * 8), dy = (int)Math.Round(Math.Cos(radians) * 8);
+        Bar(image, cx - dx, cy - dy, 46, 6, angle, width: width, height: height);
+        Bar(image, cx + dx, cy + dy, 46, 6, angle, width: width, height: height);
+    }
+
     private static void Pair(byte[] image, int cx, int cy, double angle = 0, int spacing = 16)
     {
         double radians = angle * Math.PI / 180;

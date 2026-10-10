@@ -33,6 +33,16 @@ public sealed partial class MainWindow
         Check(scene.TryMapFootballCameraPoint(playerCamera, out var uv) && Math.Abs(uv.X - .22) < .0001 &&
             Math.Abs(uv.Y - .5) < .0001, "Field letterboxing and camera inverse disagreed.");
         Check(!scene.TryMapFootballCameraPoint(Camera(.5, .04, inset), out _), "Scoreboard accepted a playing point.");
+        // Marker detection searches only around this outline, so it must hold the whole
+        // pitch, yet leave out board area well beyond the grass.
+        var turf = scene.GetFootballCameraTurfPolygon();
+        bool InTurfBounds(PixelPoint point) => turf is { Length: 4 } &&
+            point.X >= turf.Min(corner => corner.X) && point.X <= turf.Max(corner => corner.X) &&
+            point.Y >= turf.Min(corner => corner.Y) && point.Y <= turf.Max(corner => corner.Y);
+        Check(new[] { (field.X, field.Y), (field.X + field.Width, field.Y), (field.X, field.Y + field.Height),
+                (field.X + field.Width, field.Y + field.Height) }.All(corner => InTurfBounds(Camera(corner.Item1, corner.Item2, inset))) &&
+            !InTurfBounds(Camera(.5, .04, inset)) && !InTurfBounds(Camera(.5, .97, inset)),
+            "The camera search outline did not match the calibrated grass.");
         for (int frame = 0; frame < 155; frame++)
         {
             now += TimeSpan.FromMilliseconds(16);
@@ -43,6 +53,13 @@ public sealed partial class MainWindow
         Check(scene.FootballState.Phase == FootballPhase.Playing && scene.FootballState.Kickers.All(k => k.Present),
             "Fresh calibrated input did not start a human-versus-AI match.");
         await Save(target, "football-playing");
+        // The tip detectors' projected-scene reference matches the camera's own view of
+        // the board (1000 synthetic camera pixels less the safety inset), not the projector raster.
+        var projectedReference = scene.GetEyeTipProjectionFrames();
+        double cameraSpan = 1000 * (1 - inset);
+        Check(projectedReference.Count == 1 && Math.Abs(projectedReference[0].Width - cameraSpan) <= 2 &&
+            Math.Abs(projectedReference[0].Height - cameraSpan) <= 2,
+            "The projected-scene reference did not match the camera's view of the board.");
         Check(scene.GetHandAcquisitionContext(now) is { ContinuousSearchPolygon: null },
             "Black-bar play searched the pitch for hands.");
         scene.SetFootballFingerInput(0, true);

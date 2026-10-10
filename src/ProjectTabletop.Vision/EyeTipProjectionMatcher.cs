@@ -66,27 +66,31 @@ internal sealed class EyeTipProjectionMatcher
         int width, int height, double scaleX, double scaleY) =>
         IsPhysicalCandidate(tip.Center, tip.RadiusPixels, gray, width, height, scaleX, scaleY, profile);
 
+    /// <param name="originX">The raw camera X of gray pixel (0, 0) when gray is a crop.</param>
     public bool IsPhysicalBlackBarCandidate(ColorTipObservation strip, byte[] gray, int width, int height,
-        double scaleX, double scaleY) => IsPhysicalCandidate(strip.Center, strip.RadiusPixels, gray,
-            width, height, scaleX, scaleY, null, strip.Bar);
+        double scaleX, double scaleY, double originX = 0, double originY = 0) => IsPhysicalCandidate(
+            strip.Center, strip.RadiusPixels, gray, width, height, scaleX, scaleY, null, strip.Bar, originX, originY);
 
     private bool IsPhysicalCandidate(PixelPoint center, double radiusPixels, byte[] gray, int width, int height,
-        double scaleX, double scaleY, ColorTipProfile? color, BlackBarGeometry? bar = null)
+        double scaleX, double scaleY, ColorTipProfile? color, BlackBarGeometry? bar = null,
+        double originX = 0, double originY = 0)
     {
         bool inBoard = false;
         foreach (Reference frame in _frames)
         {
             if (!frame.InBoard(center.X, center.Y)) continue;
             inBoard = true;
-            if (Matches(frame, center, radiusPixels, gray, width, height, scaleX, scaleY, color, bar)) return false;
+            if (Matches(frame, center, radiusPixels, gray, width, height, scaleX, scaleY, color, bar,
+                originX, originY)) return false;
         }
         return inBoard;
     }
 
     private static bool Matches(Reference frame, PixelPoint center, double radiusPixels, byte[] gray,
-        int width, int height, double scaleX, double scaleY, ColorTipProfile? color, BlackBarGeometry? bar)
+        int width, int height, double scaleX, double scaleY, ColorTipProfile? color, BlackBarGeometry? bar,
+        double originX, double originY)
     {
-        double cx = center.X / scaleX, cy = center.Y / scaleY;
+        double cx = (center.X - originX) / scaleX, cy = (center.Y - originY) / scaleY;
         int radius = (int)Math.Round(Math.Clamp(radiusPixels / Math.Max(scaleX, scaleY) * 3, 8, 28));
         int size = (radius + Margin) * 2 + 1;
         double left = cx - radius - Margin, top = cy - radius - Margin;
@@ -95,9 +99,9 @@ internal sealed class EyeTipProjectionMatcher
         for (int y = 0; y < size; y++)
         for (int x = 0; x < size; x++)
         {
-            expected[y * size + x] = frame.Sample((left + x) * scaleX, (top + y) * scaleY);
+            expected[y * size + x] = frame.Sample(originX + (left + x) * scaleX, originY + (top + y) * scaleY);
             if (color is not null) expectedColor![y * size + x] =
-                frame.ColorMatches((left + x) * scaleX, (top + y) * scaleY, color);
+                frame.ColorMatches(originX + (left + x) * scaleX, originY + (top + y) * scaleY, color);
         }
 
         Span<int> locations = stackalloc int[Grid * Grid];
@@ -109,8 +113,8 @@ internal sealed class EyeTipProjectionMatcher
         double barX = 0, barY = 0, axisX = 0, axisY = 0, halfLength = 0, halfWidth = 0;
         if (bar is not null)
         {
-            barX = (bar.End1.X + bar.End2.X) * .5 / scaleX;
-            barY = (bar.End1.Y + bar.End2.Y) * .5 / scaleY;
+            barX = ((bar.End1.X + bar.End2.X) * .5 - originX) / scaleX;
+            barY = ((bar.End1.Y + bar.End2.Y) * .5 - originY) / scaleY;
             axisX = (bar.End2.X - bar.End1.X) / scaleX;
             axisY = (bar.End2.Y - bar.End1.Y) / scaleY;
             double length = Math.Sqrt(axisX * axisX + axisY * axisY);
