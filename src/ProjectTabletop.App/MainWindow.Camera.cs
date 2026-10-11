@@ -22,6 +22,8 @@ public sealed partial class MainWindow
     private static readonly TimeSpan UnchangedCameraImageReconnect = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan[] CameraReconnectBackoff =
         [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(60)];
+    private static readonly TimeSpan CameraPreviewInterval = TimeSpan.FromMilliseconds(40);
+    private int _cameraPreviewRedrawPending;
     private readonly SemaphoreSlim _cameraOperation = new(1, 1);
     private readonly AsyncResultGate _pieceDetectionResults = new();
     private CameraFrame? _cameraHealthSample;
@@ -375,11 +377,7 @@ public sealed partial class MainWindow
         QueueFootballDetection(frame);
         QueueHandTrackingVideoFrame(frame);
         var now = Stopwatch.GetTimestamp();
-        if (_lastPreviewTick == 0 || Stopwatch.GetElapsedTime(_lastPreviewTick, now) >= TimeSpan.FromMilliseconds(40))
-        {
-            _lastPreviewTick = now;
-            DispatcherQueue.TryEnqueue(() => { if (!_closing) CameraCanvas.Invalidate(); });
-        }
+        RequestCameraPreviewRedraw();
 
         if (Volatile.Read(ref _boardSetupActive))
         {
@@ -392,6 +390,29 @@ public sealed partial class MainWindow
         QueuePaintDetection(frame, now);
         QueueHandDetection(frame, now);
         QueuePieceDetection(frame, pieceGeneration);
+    }
+
+    // Each preview redraw uploads a whole camera frame on the UI thread, which
+    // also publishes hand results. Camera frames and detector results therefore
+    // share one redraw at most every 40 ms. A request inside that interval is
+    // deferred to its end, never dropped, so the latest overlay is always drawn.
+    private void RequestCameraPreviewRedraw()
+    {
+        if (_closing || Interlocked.Exchange(ref _cameraPreviewRedrawPending, 1) != 0) return;
+        var wait = CameraPreviewInterval - Stopwatch.GetElapsedTime(Interlocked.Read(ref _lastPreviewTick));
+        if (wait <= TimeSpan.Zero) EnqueueCameraPreviewRedraw();
+        else _ = Task.Delay(wait).ContinueWith(_ => EnqueueCameraPreviewRedraw(), TaskScheduler.Default);
+    }
+
+    private void EnqueueCameraPreviewRedraw()
+    {
+        if (DispatcherQueue.TryEnqueue(() =>
+            {
+                Interlocked.Exchange(ref _lastPreviewTick, Stopwatch.GetTimestamp());
+                Volatile.Write(ref _cameraPreviewRedrawPending, 0);
+                if (!_closing) CameraCanvas.Invalidate();
+            })) return;
+        Volatile.Write(ref _cameraPreviewRedrawPending, 0);
     }
 
     private void ResetPieceDetections()
@@ -436,12 +457,7 @@ public sealed partial class MainWindow
                     _visionError = null;
                     return true;
                 });
-                if (published)
-                    DispatcherQueue.TryEnqueue(() =>
-                    {
-                        if (!_closing && _frozenFrame is null &&
-                            generation == _pieceDetectionResults.Capture()) CameraCanvas.Invalidate();
-                    });
+                if (published) RequestCameraPreviewRedraw();
             }
             catch (Exception ex)
             {

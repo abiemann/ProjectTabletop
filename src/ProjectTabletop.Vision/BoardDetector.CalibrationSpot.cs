@@ -6,24 +6,61 @@ namespace ProjectTabletop.Vision;
 /// <summary>Camera position and apparent radius of one projected dark calibration disk.</summary>
 public sealed record CalibrationSpotDetection(PixelPoint Center, double Confidence, double RadiusPixels);
 
+/// <summary>
+/// A solid-white camera frame reduced once, so each of the many frames checked
+/// for the registration dots does not repeat that work. Immutable and shareable.
+/// </summary>
+public sealed class CalibrationSpotReference
+{
+    internal CalibrationSpotReference(int width, int height, int reducedWidth, int reducedHeight, byte[] gray)
+    {
+        Width = width;
+        Height = height;
+        ReducedWidth = reducedWidth;
+        ReducedHeight = reducedHeight;
+        Gray = gray;
+    }
+
+    public int Width { get; }
+    public int Height { get; }
+    internal int ReducedWidth { get; }
+    internal int ReducedHeight { get; }
+    internal byte[] Gray { get; }
+}
+
 public static partial class BoardDetector
 {
+    public static CalibrationSpotReference PrepareCalibrationSpotReference(int width, int height,
+        int stride, byte[] whiteBgra)
+    {
+        using Mat white = ReducedGray(width, height, stride, whiteBgra);
+        var gray = new byte[checked(white.Width * white.Height)];
+        Marshal.Copy(white.Data, gray, 0, gray.Length);
+        return new(width, height, white.Width, white.Height, gray);
+    }
+
+    public static CalibrationSpotDetection? DetectDarkCalibrationSpot(int width, int height,
+        int stride, byte[] whiteBgra, byte[] spotBgra) =>
+        DetectDarkCalibrationSpot(PrepareCalibrationSpotReference(width, height, stride, whiteBgra),
+            width, height, stride, spotBgra);
+
     /// <summary>
     /// Locate a dark disk projected on a solid-white field by comparing fresh
     /// camera frames before and after the disk appears. The global median change
     /// is removed to tolerate webcam auto-exposure drift. Returns null when the
     /// change is not a distinct compact spot.
     /// </summary>
-    public static CalibrationSpotDetection? DetectDarkCalibrationSpot(int width, int height,
-        int stride, byte[] whiteBgra, byte[] spotBgra)
+    public static CalibrationSpotDetection? DetectDarkCalibrationSpot(CalibrationSpotReference white,
+        int width, int height, int stride, byte[] spotBgra)
     {
-        using Mat white = ReducedGray(width, height, stride, whiteBgra);
+        ArgumentNullException.ThrowIfNull(white);
+        if (width != white.Width || height != white.Height)
+            throw new ArgumentException("The spot frame must match the white reference's dimensions.");
         using Mat spot = ReducedGray(width, height, stride, spotBgra);
-        int reducedWidth = white.Width, reducedHeight = white.Height;
+        int reducedWidth = white.ReducedWidth, reducedHeight = white.ReducedHeight;
         int count = checked(reducedWidth * reducedHeight);
-        byte[] before = new byte[count];
+        byte[] before = white.Gray;
         byte[] after = new byte[count];
-        Marshal.Copy(white.Data, before, 0, count);
         Marshal.Copy(spot.Data, after, 0, count);
         var sampleDeltas = new List<int>(count / 64 + 1);
         for (int y = 0; y < reducedHeight; y += 8)
@@ -48,7 +85,7 @@ public static partial class BoardDetector
             upperTail -= histogram[highValue--];
         highValue++;
         if (highValue < 26) return null;
-        using Mat difference = new(white.Height, white.Width, MatType.CV_8UC1);
+        using Mat difference = new(reducedHeight, reducedWidth, MatType.CV_8UC1);
         Marshal.Copy(corrected, 0, difference.Data, count);
         using Mat smooth = new();
         using Mat mask = new();
@@ -58,7 +95,7 @@ public static partial class BoardDetector
         Cv2.FindContours(mask, out Point[][] contours, out _,
             RetrievalModes.External, ContourApproximationModes.ApproxSimple);
 
-        double frameArea = white.Width * (double)white.Height;
+        double frameArea = reducedWidth * (double)reducedHeight;
         var candidates = new List<(Point Center, double Radius, double Score)>();
         foreach (Point[] contour in contours)
         {
@@ -74,8 +111,8 @@ public static partial class BoardDetector
             if (moments.M00 <= 0) continue;
             Point center = new((int)Math.Round(moments.M10 / moments.M00),
                 (int)Math.Round(moments.M01 / moments.M00));
-            if (center.X < white.Width * 0.05 || center.Y < white.Height * 0.05 ||
-                center.X > white.Width * 0.95 || center.Y > white.Height * 0.95) continue;
+            if (center.X < reducedWidth * 0.05 || center.Y < reducedHeight * 0.05 ||
+                center.X > reducedWidth * 0.95 || center.Y > reducedHeight * 0.95) continue;
             double contrast = smooth.At<byte>(center.Y, center.X);
             if (contrast < threshold + 8) continue;
             candidates.Add((center, Math.Sqrt(area / Math.PI),
@@ -86,9 +123,9 @@ public static partial class BoardDetector
         if (candidates.Count > 1 && candidates[1].Score >= candidates[0].Score * 0.72)
             return null;
         var selected = candidates[0];
-        double scale = width / (double)white.Width;
+        double scale = width / (double)reducedWidth;
         return new CalibrationSpotDetection(
-            new PixelPoint(selected.Center.X * scale, selected.Center.Y * height / (double)white.Height),
+            new PixelPoint(selected.Center.X * scale, selected.Center.Y * height / (double)reducedHeight),
             Math.Clamp(selected.Score / 28, 0, 1), selected.Radius * scale);
     }
 

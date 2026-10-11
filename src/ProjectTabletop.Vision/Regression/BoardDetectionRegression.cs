@@ -309,8 +309,25 @@ internal static class BoardDetectionRegression
         if (afterExposureShift is null || Math.Abs(afterExposureShift.Center.X - center.X) > 4 ||
             Math.Abs(afterExposureShift.Center.Y - center.Y) > 4)
             throw new Exception("Calibration spot was lost after global exposure shift.");
+        // Setup reduces the white field once and reuses it for every checked frame.
+        var reference = BoardDetector.PrepareCalibrationSpotReference(sceneWidth, sceneHeight, sceneWidth * 4,
+            BytesOf(white));
+        if (BoardDetector.DetectDarkCalibrationSpot(reference, sceneWidth, sceneHeight, sceneWidth * 4,
+                BytesOf(spot)) != found ||
+            BoardDetector.DetectDarkCalibrationSpot(reference, sceneWidth, sceneHeight, sceneWidth * 4,
+                BytesOf(shiftedExposure)) != afterExposureShift ||
+            BoardDetector.DetectDarkCalibrationSpot(reference, sceneWidth, sceneHeight, sceneWidth * 4,
+                BytesOf(white)) is not null)
+            throw new Exception("A reused white reference changed calibration spot results.");
+        try
+        {
+            BoardDetector.DetectDarkCalibrationSpot(reference, sceneWidth - 2, sceneHeight, sceneWidth * 4,
+                BytesOf(spot));
+            throw new Exception("A white reference accepted a frame of another size.");
+        }
+        catch (ArgumentException) { }
         Console.WriteLine("Dark-spot regression: camera centroid within 4 px, exposure shift tolerated; " +
-            "unchanged frame rejected");
+            "unchanged frame rejected; reused white reference matched and size mismatch rejected");
     }
 
     internal static bool Near(BoardDetection? actual, Point[] expected, double tolerance) =>

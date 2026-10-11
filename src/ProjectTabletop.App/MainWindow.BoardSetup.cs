@@ -29,6 +29,11 @@ public sealed partial class MainWindow
     private long _boardPhaseStartedTick;
     private CameraFrame? _lastAnalyzedBoardFrame;
     private CameraFrame? _whiteBoardReference;
+    private WhiteSpotReference? _whiteSpotReference;
+    private const int MaximumPendingSpotChecks = 2;
+    private readonly object _spotCheckGate = new();
+    private readonly Queue<CalibrationSpotCheck> _pendingSpotChecks = new();
+    private bool _spotCheckRunning;
     private BoardDetection? _physicalBoard;
     private BoardDetection? _ambientBoard;
     private BoardDetection? _projectorField;
@@ -60,6 +65,10 @@ public sealed partial class MainWindow
     private static readonly TimeSpan RegistrationSpotSettle = TimeSpan.FromSeconds(1) / BoardSetupSpotCount;
 
     private enum BoardSetupPhase { Inactive, Switching, ScanAmbient, ScanWhite, ShowCorners, MeasureSpots, GridReady, Failed }
+
+    private sealed record CalibrationSpotCheck(CameraFrame Frame, CameraFrame White, int SpotIndex,
+        long Generation, SceneCompositor.BoardSpotPresentation Presentation);
+    private sealed record WhiteSpotReference(CameraFrame Frame, CalibrationSpotReference Reduced);
 
     private sealed record BoardPreviewState(BoardDetection Detection, int Width, int Height,
                                             DateTimeOffset Timestamp);
@@ -216,6 +225,8 @@ public sealed partial class MainWindow
         _boardAnimationUpdated = 0;
         Interlocked.Exchange(ref _lastAnalyzedBoardFrame, null);
         _whiteBoardReference = null;
+        Volatile.Write(ref _whiteSpotReference, null);
+        lock (_spotCheckGate) _pendingSpotChecks.Clear();
         _physicalBoard = null;
         _ambientBoard = null;
         _projectorField = null;
@@ -270,20 +281,19 @@ public sealed partial class MainWindow
         };
         if (phaseStarted == 0 || Stopwatch.GetElapsedTime(phaseStarted, tick) < settle)
             return;
-        var previous = Interlocked.Read(ref _lastBoardDetectTick);
-        var retry = phase == BoardSetupPhase.MeasureSpots ? TimeSpan.Zero : TimeSpan.FromMilliseconds(200);
-        if (previous != 0 && Stopwatch.GetElapsedTime(previous, tick) < retry)
+        if (phase == BoardSetupPhase.MeasureSpots)
+        {
+            if (_scene.CalibrationSpotPresentation is { } presentation &&
+                (frame.ArrivedAt ?? frame.Timestamp) > presentation.DrawnAt)
+                QueueCalibrationSpotCheck(frame, presentation);
             return;
-        var presentation = phase == BoardSetupPhase.MeasureSpots ? _scene.CalibrationSpotPresentation : null;
-        if (phase == BoardSetupPhase.MeasureSpots && (presentation is null ||
-            (frame.ArrivedAt ?? frame.Timestamp) <= presentation.DrawnAt)) return;
+        }
+        var previous = Interlocked.Read(ref _lastBoardDetectTick);
+        if (previous != 0 && Stopwatch.GetElapsedTime(previous, tick) < TimeSpan.FromMilliseconds(200))
+            return;
         if (Interlocked.CompareExchange(ref _detecting, 1, 0) != 0) return;
         Interlocked.Exchange(ref _lastBoardDetectTick, tick);
-        // Early latency observations must not consume the first post-settle
-        // registration frame when the camera delivers identical pixels twice.
-        bool earlyDot = presentation is not null &&
-            (frame.ArrivedAt ?? frame.Timestamp) - presentation.DrawnAt < RegistrationSpotSettle;
-        var priorFrame = earlyDot ? null : Interlocked.Exchange(ref _lastAnalyzedBoardFrame, frame);
+        var priorFrame = Interlocked.Exchange(ref _lastAnalyzedBoardFrame, frame);
         if (priorFrame is not null && priorFrame.Width == frame.Width && priorFrame.Height == frame.Height &&
             priorFrame.Stride == frame.Stride && priorFrame.Bgra.AsSpan().SequenceEqual(frame.Bgra))
         {
@@ -291,8 +301,6 @@ public sealed partial class MainWindow
             return;
         }
         var generation = Interlocked.Read(ref _boardSetupGeneration);
-        var spotIndex = Volatile.Read(ref _spotIndex);
-        var whiteReference = Volatile.Read(ref _whiteBoardReference);
         _ = Task.Run(() =>
         {
             try
@@ -320,13 +328,6 @@ public sealed partial class MainWindow
                 }
                 else if (phase == BoardSetupPhase.ShowCorners)
                     DispatcherQueue.TryEnqueue(() => ProcessSetupCornersShown(frame, generation));
-                else if (whiteReference is not null && whiteReference.Width == frame.Width &&
-                         whiteReference.Height == frame.Height && whiteReference.Stride == frame.Stride)
-                {
-                    var spot = BoardDetector.DetectDarkCalibrationSpot(frame.Width, frame.Height,
-                        frame.Stride, whiteReference.Bgra, frame.Bgra);
-                    DispatcherQueue.TryEnqueue(() => ProcessCalibrationSpot(frame, spot, spotIndex, generation, presentation!));
-                }
                 _visionError = null;
             }
             catch (Exception ex)
@@ -335,6 +336,69 @@ public sealed partial class MainWindow
             }
             finally { Interlocked.Exchange(ref _detecting, 0); }
         });
+    }
+
+    // Dot checks run one at a time in camera arrival order, so the first frame
+    // showing each dot sets the latency estimate even when it arrives during
+    // the previous check. A two-frame backlog covers that; beyond it, frames
+    // are dropped rather than queued. Alignment still waits for its settle time.
+    private void QueueCalibrationSpotCheck(CameraFrame frame, SceneCompositor.BoardSpotPresentation presentation)
+    {
+        var white = Volatile.Read(ref _whiteBoardReference);
+        if (white is null || white.Width != frame.Width || white.Height != frame.Height) return;
+        var check = new CalibrationSpotCheck(frame, white, Volatile.Read(ref _spotIndex),
+            Interlocked.Read(ref _boardSetupGeneration), presentation);
+        lock (_spotCheckGate)
+        {
+            if (_spotCheckRunning)
+            {
+                if (_pendingSpotChecks.Count < MaximumPendingSpotChecks) _pendingSpotChecks.Enqueue(check);
+                return;
+            }
+            _spotCheckRunning = true;
+        }
+        _ = Task.Run(() =>
+        {
+            while (true)
+            {
+                try { RunCalibrationSpotCheck(check); }
+                catch (Exception ex) { _visionError = "Cardboard scan failed: " + ex.Message; }
+                lock (_spotCheckGate)
+                {
+                    if (!_pendingSpotChecks.TryDequeue(out var next))
+                    {
+                        _spotCheckRunning = false;
+                        return;
+                    }
+                    check = next;
+                }
+            }
+        });
+    }
+
+    private void RunCalibrationSpotCheck(CalibrationSpotCheck check)
+    {
+        if (check.Generation != Interlocked.Read(ref _boardSetupGeneration)) return;
+        var frame = check.Frame;
+        // Early latency observations must not consume the first post-settle
+        // registration frame when the camera delivers identical pixels twice.
+        bool earlyDot = (frame.ArrivedAt ?? frame.Timestamp) - check.Presentation.DrawnAt < RegistrationSpotSettle;
+        var priorFrame = earlyDot ? null : Interlocked.Exchange(ref _lastAnalyzedBoardFrame, frame);
+        if (priorFrame is not null && priorFrame.Width == frame.Width && priorFrame.Height == frame.Height &&
+            priorFrame.Stride == frame.Stride && priorFrame.Bgra.AsSpan().SequenceEqual(frame.Bgra)) return;
+        // The white field is reduced once per scan, not once per checked frame.
+        var white = Volatile.Read(ref _whiteSpotReference);
+        if (white is null || !ReferenceEquals(white.Frame, check.White))
+        {
+            white = new(check.White, BoardDetector.PrepareCalibrationSpotReference(check.White.Width,
+                check.White.Height, check.White.Stride, check.White.Bgra));
+            Volatile.Write(ref _whiteSpotReference, white);
+        }
+        var spot = BoardDetector.DetectDarkCalibrationSpot(white.Reduced, frame.Width, frame.Height,
+            frame.Stride, frame.Bgra);
+        DispatcherQueue.TryEnqueue(() => ProcessCalibrationSpot(frame, spot, check.SpotIndex, check.Generation,
+            check.Presentation));
+        _visionError = null;
     }
 
     private TrustedBoardPrior? CompatibleTrustedBoardPrior(CameraFrame frame)

@@ -311,7 +311,7 @@ public sealed partial class MainWindow
                                 QueueCrownDeedSave();
                             }
                         }
-                        if (_frozenFrame is null) CameraCanvas.Invalidate();
+                        if (_frozenFrame is null) RequestCameraPreviewRedraw();
                         UpdateHandTrackingStatus();
                     });
                     if (!completionQueued)

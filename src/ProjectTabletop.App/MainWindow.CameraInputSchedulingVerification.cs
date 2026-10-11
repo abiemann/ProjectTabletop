@@ -1,4 +1,6 @@
 #if DEBUG
+using System.Diagnostics;
+
 namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
@@ -32,8 +34,44 @@ public sealed partial class MainWindow
         await drained.Task.WaitAsync(TimeSpan.FromSeconds(5));
         if (_eyeTipUiRefresh.IsPending)
             throw new InvalidOperationException("A completed stick status update did not release its pending slot.");
+
+        // The stick callback also requests a preview. Let that work finish before
+        // independently checking a burst and the final request in a throttle window.
+        await WaitForPreviewIdleAsync();
+        Interlocked.Exchange(ref _lastPreviewTick, 0);
+        for (int frame = 0; frame < 100; frame++) RequestCameraPreviewRedraw();
+        if (Volatile.Read(ref _cameraPreviewRedrawPending) != 1 || Interlocked.Read(ref _lastPreviewTick) != 0)
+            throw new InvalidOperationException("Camera preview requests did not share one pending UI redraw.");
+        await WaitForPreviewIdleAsync();
+        if (Interlocked.Read(ref _lastPreviewTick) == 0)
+            throw new InvalidOperationException("The queued camera preview did not run.");
+
+        // No new frame follows this request: it must survive the throttle and
+        // eventually redraw by itself. Assert completion, not precise timer timing.
+        var lastPreview = Stopwatch.GetTimestamp();
+        Interlocked.Exchange(ref _lastPreviewTick, lastPreview);
+        RequestCameraPreviewRedraw();
+        if (Volatile.Read(ref _cameraPreviewRedrawPending) != 1)
+            throw new InvalidOperationException("The final camera preview request was dropped inside the throttle window.");
+        await WaitForPreviewIdleAsync();
+        if (Interlocked.Read(ref _lastPreviewTick) <= lastPreview)
+            throw new InvalidOperationException("The deferred final camera preview did not run without another frame.");
+
         return new { passed = true, handWorkerHeldThroughUiPublication = true,
-            completedHandResultReleasesWorker = true, stickStatusRefreshesCoalesced = true };
+            completedHandResultReleasesWorker = true, stickStatusRefreshesCoalesced = true,
+            cameraPreviewRequestsCoalesced = true, cameraPreviewPendingSlotReleased = true,
+            deferredFinalCameraPreviewRuns = true };
+
+        async Task WaitForPreviewIdleAsync()
+        {
+            var started = Stopwatch.GetTimestamp();
+            while (Volatile.Read(ref _cameraPreviewRedrawPending) != 0)
+            {
+                if (Stopwatch.GetElapsedTime(started) >= TimeSpan.FromSeconds(5))
+                    throw new InvalidOperationException("A camera preview redraw did not release its pending slot.");
+                await Task.Delay(10);
+            }
+        }
     }
 }
 #endif

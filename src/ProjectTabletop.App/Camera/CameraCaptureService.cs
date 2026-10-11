@@ -1,10 +1,10 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices.WindowsRuntime;
 using ProjectTabletop.Interaction;
 using Windows.Graphics.Imaging;
 using Windows.Media.Capture;
 using Windows.Media.Capture.Frames;
 using Windows.Media.MediaProperties;
-using Windows.Storage.Streams;
 
 namespace ProjectTabletop.App.Camera;
 
@@ -24,6 +24,11 @@ public sealed class CameraCaptureService : IAsyncDisposable
     private volatile bool _disposed;
     private CameraCopyRateBudget _copyBudget = new(31.25);
     private long _epoch;
+    // A wedged driver or USB connection can fail each format slowly. Bound repeated
+    // slow failures, but keep searching after quick mode rejections so a working
+    // lower-resolution format or another color source still gets a chance.
+    private const int MaximumFormatFailures = 4;
+    private static readonly TimeSpan FormatFailureTimeBudget = TimeSpan.FromSeconds(5);
     private volatile bool _captureEveryFrame;
 
     // During the brief setup-dot measurement, do not add the normal copy-rate cap
@@ -129,6 +134,10 @@ public sealed class CameraCaptureService : IAsyncDisposable
 
             Exception? lastFailure = null;
             var started = false;
+            var failures = 0;
+            var failedFormatTime = TimeSpan.Zero;
+            // The format attempts below change each source's format; remember the originals.
+            var nativeFormats = sourceList.Select(source => new SourceFormat(source, source.CurrentFormat)).ToList();
             if (hasExclusiveControl)
             {
                 // Search every color source, including separate preview/record streams.
@@ -136,6 +145,8 @@ public sealed class CameraCaptureService : IAsyncDisposable
                 foreach (var candidate in CameraFrameRatePolicy.Order(formats,
                     candidate => VideoMode(candidate.Format), requestedFramesPerSecond))
                 {
+                    if (failures >= MaximumFormatFailures && failedFormatTime >= FormatFailureTimeBudget) break;
+                    var attemptStarted = Stopwatch.GetTimestamp();
                     try
                     {
                         await candidate.Source.SetFormatAsync(candidate.Format);
@@ -148,20 +159,33 @@ public sealed class CameraCaptureService : IAsyncDisposable
                         started = true;
                         break;
                     }
-                    catch (Exception ex) { lastFailure = ex; }
+                    catch (Exception ex)
+                    {
+                        lastFailure = ex;
+                        failures++;
+                        failedFormatTime += Stopwatch.GetElapsedTime(attemptStarted);
+                    }
                 }
             }
 
             if (!started)
             {
-                // SharedReadOnly cannot change formats. Also try a driver's current native
-                // format if it refuses all explicitly requested formats under exclusive control.
-                foreach (var source in CameraFrameRatePolicy.Order(sourceList,
-                    source => VideoMode(source.CurrentFormat), requestedFramesPerSecond))
+                // SharedReadOnly cannot change formats. Under exclusive control no
+                // attempted format worked, so restore each source's original native
+                // format, which the attempts above replaced, and start with that.
+                foreach (var native in CameraFrameRatePolicy.Order(nativeFormats,
+                    native => VideoMode(native.Format), requestedFramesPerSecond))
                 {
                     try
                     {
-                        await StartReaderAsync(capture, source);
+                        if (hasExclusiveControl)
+                        {
+                            try { await native.Source.SetFormatAsync(native.Format); }
+                            // Some drivers reject format changes but can still stream
+                            // their current mode. StartReader validates and reports it.
+                            catch (Exception ex) { lastFailure = ex; }
+                        }
+                        await StartReaderAsync(capture, native.Source);
                         started = true;
                         break;
                     }
@@ -260,10 +284,10 @@ public sealed class CameraCaptureService : IAsyncDisposable
             var width = bgraBitmap.PixelWidth;
             var height = bgraBitmap.PixelHeight;
             var stride = checked(width * 4);
+            // Copy once, straight into the owned array; an intermediate WinRT buffer
+            // doubled the large allocations and copies at 60/100 fps.
             var bytes = new byte[checked(stride * height)];
-            var buffer = new Windows.Storage.Streams.Buffer((uint)bytes.Length);
-            bgraBitmap.CopyToBuffer(buffer);
-            using (var reader = DataReader.FromBuffer(buffer)) reader.ReadBytes(bytes);
+            bgraBitmap.CopyToBuffer(bytes.AsBuffer());
 
             var owned = new CameraFrame(width, height, stride, bytes, MonotonicClock.UtcNow) { ArrivedAt = arrivedAt };
             if (_running && epoch == Interlocked.Read(ref _epoch) && ReferenceEquals(sender, _reader))

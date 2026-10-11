@@ -374,7 +374,7 @@ public sealed partial class MainWindow
             // since this callback was queued. Scene input is published on
             // the worker immediately; only laptop updates are coalesced.
             UpdateEyeTipStatus();
-            CameraCanvas.Invalidate();
+            RequestCameraPreviewRedraw();
         });
     }
 
