@@ -25,8 +25,12 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Compile Include="..\..\src\ProjectTabletop.App\Camera\CameraFrame.cs" Link="App\CameraFrame.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Camera\CameraFrameRatePolicy.cs" Link="App\CameraFrameRatePolicy.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Camera\FrameWorker.cs" Link="App\FrameWorker.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Camera\CoalescedDispatch.cs" Link="App\CoalescedDispatch.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\HandTrackingVideoRecorder.cs" Link="App\HandTrackingVideoRecorder.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\HandTrackingVideoRecorderVerification.cs" Link="App\HandTrackingVideoRecorderVerification.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Settings\FootballMarkerSettingsStore.cs" Link="App\FootballMarkerSettingsStore.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Settings\CameraFrameRateSettingsStore.cs" Link="App\CameraFrameRateSettingsStore.cs" />
   </ItemGroup>
 </Project>

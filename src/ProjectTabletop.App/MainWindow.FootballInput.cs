@@ -18,6 +18,7 @@ public sealed partial class MainWindow
     // Football owns two independent profiles. Learning either player must never
     // change the single marker remembered by Water Garden.
     private readonly object _footballInputGate = new();
+    private readonly FrameWorker _footballInputWorker = new();
     private readonly Dictionary<string, FootballCameraProfiles> _footballMarkerProfiles = new(StringComparer.Ordinal);
     private readonly FootballMarkerTracker[] _footballTipTrackers = [new(), new()];
     private readonly bool[] _footballFingerInputs = [false, false];
@@ -27,12 +28,12 @@ public sealed partial class MainWindow
     private readonly string[] _footballInputReasons = ["Learn player 1's black marker.", "Learn player 2's black marker."];
     private readonly string?[] _footballTrackingSources = new string?[2];
     private DispatcherQueueTimer? _footballInputTimer;
-    private Task? _footballDetectionTask, _footballLearningTask;
+    private Task? _footballLearningTask;
     private long _footballInputGeneration;
     private long _footballSceneInputRevision = -1;
     private DateTimeOffset _footballInputNotBefore;
     private int _footballLearningPlayer = -1, _footballFrameWidth, _footballFrameHeight;
-    private bool _footballDetecting, _footballLearningBusy, _footballInputWasActive;
+    private bool _footballLearningBusy, _footballInputWasActive;
     private bool _footballProfileReloadPending = true;
     private string? _footballMarkerLoadError, _footballMarkerSaveError;
     private string? FootballMarkerSettingsError => _footballMarkerSaveError ?? _footballMarkerLoadError;
@@ -335,7 +336,7 @@ public sealed partial class MainWindow
                 ResetFootballInput();
                 return;
             }
-            if (_closing || _footballDetecting || _footballLearningPlayer >= 0 ||
+            if (_closing || _footballInputWorker.IsBusy || _footballLearningPlayer >= 0 ||
                 _scene.CurrentBoardScreen != BoardScreen.Football || !_cameraWanted || !_camera.IsRunning ||
                 _cameraHealthWarning || IsBoardScanMeasuring || frame.Timestamp < _footballInputNotBefore ||
                 !EyeTipFrameFresh(frame, MonotonicClock.UtcNow)) return;
@@ -358,14 +359,13 @@ public sealed partial class MainWindow
                 _footballFrameHeight = frame.Height;
                 if (changed) return;
             }
-            // Camera capture already limits delivery to an average 30 Hz. A second
+            // Camera capture already bounds delivery at the negotiated rate. A second
             // minimum gap skips early frames after late ones, exactly when a fast
             // shot needs every view. The single in-flight task bounds detector work.
-            _footballDetecting = true;
             long generation = _footballInputGeneration;
             var searchHints = selected.Select(player => _footballTipTrackers[player].GetSearchHint(frame.Timestamp)).ToArray();
             var turf = _scene.GetFootballCameraTurfPolygon();
-            _footballDetectionTask = Task.Run(() =>
+            _footballInputWorker.TryRun(Stopwatch.GetTimestamp(), TimeSpan.Zero, _ =>
             {
                 long started = Stopwatch.GetTimestamp();
                 try
@@ -455,7 +455,6 @@ public sealed partial class MainWindow
                                 ClearFootballPlayerLocked(player, "Marker detection failed: " + ex.Message, MonotonicClock.UtcNow);
                             }
                 }
-                finally { lock (_footballInputGate) _footballDetecting = false; }
             });
         }
     }
@@ -591,9 +590,9 @@ public sealed partial class MainWindow
     {
         _footballInputTimer?.Stop();
         ResetFootballInput();
-        Task? detection, learning;
-        lock (_footballInputGate) { detection = _footballDetectionTask; learning = _footballLearningTask; }
-        if (detection is not null) await detection;
+        Task? learning;
+        lock (_footballInputGate) learning = _footballLearningTask;
+        await _footballInputWorker.WorkerTask;
         if (learning is not null) await learning;
     }
 }

@@ -8,9 +8,8 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     private readonly PaintDisturbanceTracker _paintDisturbances = new();
-    private Task? _paintDetectionTask;
-    private int _paintDetecting;
-    private long _lastPaintDetectionTick;
+    private readonly FrameWorker _paintWorker = new();
+    private static readonly TimeSpan PaintDetectionInterval = TimeSpan.FromMilliseconds(125);
     private long _paintTrackerGeneration = -1;
     private object? _lastPaintDetection;
 
@@ -41,14 +40,12 @@ public sealed partial class MainWindow
         {
             if (frame.Timestamp < _handInputNotBefore) return InputFrameQueueResult.PredatesReset;
             if (_closing || !_handTrackingEnabled || IsBoardScanMeasuring ||
-                Volatile.Read(ref _cameraHealthWarning) || Volatile.Read(ref _paintDetecting) != 0 ||
-                _lastPaintDetectionTick != 0 && Stopwatch.GetElapsedTime(_lastPaintDetectionTick, tick) < TimeSpan.FromMilliseconds(125)) return InputFrameQueueResult.Skipped;
+                Volatile.Read(ref _cameraHealthWarning) ||
+                !_paintWorker.CanRun(tick, PaintDetectionInterval)) return InputFrameQueueResult.Skipped;
             var context = _scene.GetPaintDisturbanceContext();
             if (context is null) return InputFrameQueueResult.Skipped;
-            _paintDetecting = 1;
-            _lastPaintDetectionTick = tick;
             long generation = _handGeneration;
-            _paintDetectionTask = Task.Run(() =>
+            bool queued = _paintWorker.TryRun(tick, PaintDetectionInterval, work =>
             {
                 var started = Stopwatch.GetTimestamp();
                 try
@@ -66,7 +63,7 @@ public sealed partial class MainWindow
                     if (result.ConfirmedCandidateCount > 0) Volatile.Write(ref _lastConfirmedPaintDiagnostic, diagnostic);
 #endif
                     var milliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-                    DispatcherQueue.TryEnqueue(() =>
+                    work.TryPost(_dispatchInputResult, () =>
                     {
                         lock (_handGate)
                         {
@@ -81,11 +78,12 @@ public sealed partial class MainWindow
                 catch (Exception error)
                 {
                     _paintDisturbances.Reset();
-                    Volatile.Write(ref _lastPaintDetection, new { frameTime = frame.Timestamp, error = error.Message });
+                    lock (_handGate)
+                        if (!_closing && generation == _handGeneration)
+                            Volatile.Write(ref _lastPaintDetection, new { frameTime = frame.Timestamp, error = error.Message });
                 }
-                finally { Interlocked.Exchange(ref _paintDetecting, 0); }
             });
-            return InputFrameQueueResult.Queued;
+            return queued ? InputFrameQueueResult.Queued : InputFrameQueueResult.Skipped;
         }
     }
 }

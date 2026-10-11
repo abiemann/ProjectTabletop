@@ -43,6 +43,13 @@ static async Task RunMcpAsync()
                 Name = "set_hand_tracking",
                 Description = "Enable or disable hand tracking, camera fingertip markers, and white hand spotlights on the registered board."
             });
+    static McpServerTool CameraFrameRateTool() =>
+        McpServerTool.Create((Func<int, Task<string>>)SetCameraFrameRateAsync,
+            new McpServerToolCreateOptions
+            {
+                Name = "set_camera_frame_rate",
+                Description = "Request 30, 60 or 100 fps for the selected webcam. Saves the preference and restarts an active camera; board setup must then be rerun. Returns the actual negotiated rate when running."
+            });
     static McpServerTool StickTrackingTool() =>
         McpServerTool.Create((Func<bool, Task<string>>)SetStickTrackingAsync,
             new McpServerToolCreateOptions
@@ -137,6 +144,7 @@ static async Task RunMcpAsync()
             Tool("stop_scan", "Stop the cardboard scan and remove the scan projection."),
             Tool("start_camera", "Start or reconnect the selected webcam."),
             Tool("stop_camera", "Stop the webcam."),
+            CameraFrameRateTool(),
             Tool("open_output", "Open the projector output on the selected display."),
             BackgroundMediaTool(),
             HandTrackingTool(),
@@ -184,6 +192,9 @@ static Task<string> SetBackgroundMediaAsync(string path) =>
 
 static Task<string> SetHandTrackingAsync(bool enabled) =>
     CallToolAsync("set_hand_tracking", JsonSerializer.SerializeToElement(new { enabled }));
+
+static Task<string> SetCameraFrameRateAsync(int framesPerSecond) =>
+    CallToolAsync("set_camera_frame_rate", JsonSerializer.SerializeToElement(new { framesPerSecond }));
 
 static Task<string> SetStickTrackingAsync(bool enabled) =>
     CallToolAsync("set_stick_tracking", JsonSerializer.SerializeToElement(new { enabled }));

@@ -13,6 +13,14 @@ reported. Preserve intentional board-specific behavior, such as gesture-test
 feedback, game rules, capture regions, and animation timing. Verify representative
 boards, including the main menu and navigation controls.
 
+# Code reuse and runtime performance
+
+Prefer small shared implementations for behavior used by multiple boards or
+detectors. Reuse existing components before adding parallel implementations.
+Optimize for low input latency and runtime speed: avoid unnecessary frame copies,
+allocations, stale work queues, and blocking between independent detectors.
+Preserve intentional per-board policies and measure claimed performance gains.
+
 # Normal hand orientation
 
 Regular board operation uses palm-down hands: the camera sees the back of the

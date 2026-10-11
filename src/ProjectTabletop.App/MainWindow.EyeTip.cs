@@ -15,19 +15,19 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
-    private static readonly TimeSpan EyeTipInterval = TimeSpan.FromMilliseconds(66);
     private static readonly TimeSpan EyeTipLifetime = TimeSpan.FromMilliseconds(250);
     private readonly object _eyeTipGate = new();
     private readonly SemaphoreSlim _eyeTipDetectorGate = new(1, 1);
     private readonly EyeTipTracker _eyeTipTracker = new();
+    private readonly FrameWorker _eyeTipWorker = new();
+    private readonly CoalescedDispatch _eyeTipUiRefresh = new();
     private readonly Dictionary<string, double> _eyeTipProfiles = new(StringComparer.Ordinal);
     private DispatcherQueueTimer? _eyeTipTimer;
-    private Task? _eyeTipTask;
     private EyeTipPreview? _eyeTipPreview;
-    private bool _eyeTipEnabled, _eyeTipLearning, _eyeTipDetecting;
+    private bool _eyeTipEnabled, _eyeTipLearning;
     private string? _eyeTipCameraId, _eyeTipSettingsError;
     private string _eyeTipReason = "tracking-off";
-    private long _eyeTipGeneration, _eyeTipLastQueuedTick;
+    private long _eyeTipGeneration;
     private DateTimeOffset _eyeTipNotBefore, _eyeTipLastAssociated;
 
     private sealed record EyeTipSettings(int Version, Dictionary<string, double> Cameras);
@@ -100,7 +100,6 @@ public sealed partial class MainWindow
         {
             _eyeTipGeneration++;
             _eyeTipNotBefore = MonotonicClock.UtcNow;
-            _eyeTipLastQueuedTick = 0;
             _eyeTipLastAssociated = default;
             _eyeTipPreview = null;
             _eyeTipTracker.Reset();
@@ -110,12 +109,7 @@ public sealed partial class MainWindow
             _eyeTipReason = reason;
             PublishWaterStickTipLocked();
         }
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (_closing) return;
-            UpdateEyeTipStatus();
-            CameraCanvas.Invalidate();
-        });
+        QueueEyeTipStatusRefresh();
     }
 
     private void StickTrackingToggle_Toggled(object sender, RoutedEventArgs e)
@@ -263,20 +257,18 @@ public sealed partial class MainWindow
     {
         lock (_eyeTipGate)
         {
-            var now = Stopwatch.GetTimestamp();
             var colorProfile = ActiveColorTipProfileLocked();
-            if (_closing || !_eyeTipEnabled || _eyeTipDetecting || _colorTipLearning ||
+            if (_closing || !_eyeTipEnabled || _eyeTipWorker.IsBusy || _colorTipLearning ||
                 (!_eyeTipLearning && colorProfile is null && LearnedEyeTipRadiusLocked() is null) ||
                 _eyeTipCameraId != _cameraWantedDeviceId || frame.Timestamp < _eyeTipNotBefore ||
-                !EyeTipFrameFresh(frame, MonotonicClock.UtcNow) || _cameraHealthWarning ||
-                (_eyeTipLastQueuedTick != 0 && Stopwatch.GetElapsedTime(_eyeTipLastQueuedTick, now) < EyeTipInterval)) return;
-            _eyeTipDetecting = true;
-            _eyeTipLastQueuedTick = now;
+                !EyeTipFrameFresh(frame, MonotonicClock.UtcNow) || _cameraHealthWarning) return;
+            // The single worker drops arrivals while busy; no second rate cap
+            // should discard fresh 60/100 fps stick positions.
             long generation = _eyeTipGeneration;
             double? expectedRadius = LearnedEyeTipRadiusLocked() * frame.Width;
             PixelPoint? preferredCenter = _eyeTipPreview?.Track.Observation?.Center;
             PixelPoint? colorCenter = _colorTipPreview?.Track.Observation?.Center;
-            _eyeTipTask = Task.Run(async () =>
+            _eyeTipWorker.TryRun(Stopwatch.GetTimestamp(), TimeSpan.Zero, async _ =>
             {
                 try
                 {
@@ -366,16 +358,24 @@ public sealed partial class MainWindow
                 }
                 finally
                 {
-                    lock (_eyeTipGate) _eyeTipDetecting = false;
-                    DispatcherQueue.TryEnqueue(() =>
-                    {
-                        if (_closing || generation != _eyeTipGeneration) return;
-                        UpdateEyeTipStatus();
-                        CameraCanvas.Invalidate();
-                    });
+                    QueueEyeTipStatusRefresh();
                 }
             });
         }
+    }
+
+    private void QueueEyeTipStatusRefresh()
+    {
+        if (_closing) return;
+        _eyeTipUiRefresh.TryPost(_dispatchInputResult, () =>
+        {
+            if (_closing) return;
+            // Read the latest state, including a reset or camera change
+            // since this callback was queued. Scene input is published on
+            // the worker immediately; only laptop updates are coalesced.
+            UpdateEyeTipStatus();
+            CameraCanvas.Invalidate();
+        });
     }
 
     private object GetStickTipStatus()
@@ -533,8 +533,7 @@ public sealed partial class MainWindow
     {
         _eyeTipTimer?.Stop();
         ResetEyeTipTracking("tracking-off");
-        Task? task;
-        lock (_eyeTipGate) { _eyeTipEnabled = false; task = _eyeTipTask; }
-        if (task is not null) await task;
+        lock (_eyeTipGate) _eyeTipEnabled = false;
+        await _eyeTipWorker.WorkerTask;
     }
 }

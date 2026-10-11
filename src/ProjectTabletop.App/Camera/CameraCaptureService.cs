@@ -22,12 +22,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
     private CameraFrame? _latestFrame;
     private volatile bool _running;
     private volatile bool _disposed;
-    // About 30 copies per second on average, like the former 32 ms minimum gap.
-    // Up to two copies of allowance carry over, so the on-time frame after a
-    // late one still arrives from a 30 fps webcam.
-    private const double MaximumCopiesPerSecond = 31.25, MaximumCopyAllowance = 2;
-    private double _copyAllowance;
-    private long _copyAllowanceTicks;
+    private CameraCopyRateBudget _copyBudget = new(31.25);
     private long _epoch;
     private volatile bool _captureEveryFrame;
 
@@ -42,6 +37,10 @@ public sealed class CameraCaptureService : IAsyncDisposable
     public string? ActiveDeviceId { get; private set; }
     public bool IsRunning => _running;
     public (int Width, int Height, double FramesPerSecond)? NegotiatedFormat { get; private set; }
+    public int RequestedFramesPerSecond { get; private set; } = 30;
+    public IReadOnlyList<int> SupportedRequestedFramesPerSecond { get; private set; } = Array.Empty<int>();
+    public bool HasExclusiveFormatControl { get; private set; }
+    public double NormalCopyFramesPerSecond => _copyBudget.CopiesPerSecond;
 
     public static async Task<IReadOnlyList<CameraDeviceInfo>> ListDevicesAsync()
     {
@@ -56,15 +55,18 @@ public sealed class CameraCaptureService : IAsyncDisposable
         return devices;
     }
 
-    public async Task StartAsync(string id)
+    public async Task StartAsync(string id, int requestedFramesPerSecond = 30)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        if (!CameraFrameRatePolicy.IsRequestedRate(requestedFramesPerSecond))
+            throw new ArgumentOutOfRangeException(nameof(requestedFramesPerSecond), "Choose 30, 60 or 100 fps.");
         ObjectDisposedException.ThrowIf(_disposed, this);
         await _lifecycle.WaitAsync();
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             await StopCoreAsync();
+            RequestedFramesPerSecond = requestedFramesPerSecond;
 
             var groups = await MediaFrameSourceGroup.FindAllAsync();
             MediaFrameSourceGroup? group = null;
@@ -113,44 +115,62 @@ public sealed class CameraCaptureService : IAsyncDisposable
                 if (IsColorVideo(info) && capture.FrameSources.TryGetValue(info.Id, out var candidate))
                     sourceList.Add(candidate);
             }
-            var source = sourceList
-                .OrderByDescending(HasPreferredFormat)
-                .ThenByDescending(value => (long)value.CurrentFormat.VideoFormat.Width * value.CurrentFormat.VideoFormat.Height)
-                .FirstOrDefault();
-            if (source is null)
+            if (sourceList.Count == 0)
                 throw new InvalidOperationException("Windows did not expose a color frame source for this webcam.");
 
+            HasExclusiveFormatControl = hasExclusiveControl;
+            var formats = new List<SourceFormat>();
+            foreach (var candidate in sourceList)
+                for (var i = 0; i < candidate.SupportedFormats.Count; i++)
+                    formats.Add(new SourceFormat(candidate, candidate.SupportedFormats[i]));
+            SupportedRequestedFramesPerSecond = CameraFrameRatePolicy.SupportedRequestedRates(
+                formats.Select(candidate => VideoMode(candidate.Format))
+                    .Concat(sourceList.Select(candidate => VideoMode(candidate.CurrentFormat))));
+
+            Exception? lastFailure = null;
+            var started = false;
             if (hasExclusiveControl)
             {
-                var supportedFormats = new List<MediaFrameFormat>();
-                for (var i = 0; i < source.SupportedFormats.Count; i++)
-                    supportedFormats.Add(source.SupportedFormats[i]);
-                var preferred = supportedFormats
-                    .Where(IsPreferredFormat)
-                    .OrderByDescending(format => FramesPerSecond(format) >= 25)
-                    .ThenByDescending(format => (long)format.VideoFormat.Width * format.VideoFormat.Height)
-                    .ThenBy(format => Math.Abs(FramesPerSecond(format) - 30))
-                    .FirstOrDefault();
-                if (preferred is not null)
+                // Search every color source, including separate preview/record streams.
+                // A rejected advertised mode must not hide another usable 60/100 fps mode.
+                foreach (var candidate in CameraFrameRatePolicy.Order(formats,
+                    candidate => VideoMode(candidate.Format), requestedFramesPerSecond))
                 {
-                    try { await source.SetFormatAsync(preferred); }
-                    catch { /* Keep the camera's current native format if its driver rejects a listed format. */ }
+                    try
+                    {
+                        await candidate.Source.SetFormatAsync(candidate.Format);
+                        var actual = VideoMode(candidate.Source.CurrentFormat);
+                        if (!CameraFrameRatePolicy.IsUsable(actual) ||
+                            Math.Abs(actual.FramesPerSecond - FramesPerSecond(candidate.Format)) >
+                                FramesPerSecond(candidate.Format) * .01)
+                            continue;
+                        await StartReaderAsync(capture, candidate.Source);
+                        started = true;
+                        break;
+                    }
+                    catch (Exception ex) { lastFailure = ex; }
                 }
             }
-            var current = source.CurrentFormat;
-            if (!IsUsableFormat(current))
-                throw new InvalidOperationException($"The webcam supplied {current.VideoFormat.Width} × {current.VideoFormat.Height} at {FramesPerSecond(current):0.#} fps. Select a camera with at least 720p at 20 fps, or close another app holding its format.");
-            NegotiatedFormat = ((int)current.VideoFormat.Width, (int)current.VideoFormat.Height,
-                FramesPerSecond(current));
 
-            var reader = await capture.CreateFrameReaderAsync(source, MediaEncodingSubtypes.Bgra8);
-            _reader = reader;
-            reader.AcquisitionMode = MediaFrameReaderAcquisitionMode.Realtime;
-            reader.FrameArrived += OnFrameArrived;
-            _running = true;
-            var status = await reader.StartAsync();
-            if (status != MediaFrameReaderStartStatus.Success)
-                throw new InvalidOperationException($"Windows could not start the selected webcam ({status}).");
+            if (!started)
+            {
+                // SharedReadOnly cannot change formats. Also try a driver's current native
+                // format if it refuses all explicitly requested formats under exclusive control.
+                foreach (var source in CameraFrameRatePolicy.Order(sourceList,
+                    source => VideoMode(source.CurrentFormat), requestedFramesPerSecond))
+                {
+                    try
+                    {
+                        await StartReaderAsync(capture, source);
+                        started = true;
+                        break;
+                    }
+                    catch (Exception ex) { lastFailure = ex; }
+                }
+            }
+            if (!started)
+                throw new InvalidOperationException("The webcam could not provide usable color video. " +
+                    "Select a camera with 720p–4K video at 20–100 fps, or close another app holding its format.", lastFailure);
             ActiveDeviceId = id;
         }
         catch
@@ -159,6 +179,51 @@ public sealed class CameraCaptureService : IAsyncDisposable
             throw;
         }
         finally { _lifecycle.Release(); }
+    }
+
+    private async Task StartReaderAsync(MediaCapture capture, MediaFrameSource source)
+    {
+        MediaFrameReader? reader = null;
+        try
+        {
+            var actual = VideoMode(source.CurrentFormat);
+            if (!CameraFrameRatePolicy.IsUsable(actual))
+                throw new InvalidOperationException("The webcam changed to an unsupported video format.");
+            _copyBudget = new CameraCopyRateBudget(CameraFrameRatePolicy.CopyRateLimit(
+                RequestedFramesPerSecond, actual.FramesPerSecond));
+            reader = await capture.CreateFrameReaderAsync(source, MediaEncodingSubtypes.Bgra8);
+            _reader = reader;
+            reader.AcquisitionMode = MediaFrameReaderAcquisitionMode.Realtime;
+            reader.FrameArrived += OnFrameArrived;
+            _running = true;
+            var status = await reader.StartAsync();
+            if (status != MediaFrameReaderStartStatus.Success)
+                throw new InvalidOperationException($"Windows could not start the selected webcam ({status}).");
+            // Always report the native format, even when fallback or another app prevented
+            // the requested rate. CPU copy throttling is not a negotiated camera rate.
+            actual = VideoMode(source.CurrentFormat);
+            if (!CameraFrameRatePolicy.IsUsable(actual))
+                throw new InvalidOperationException("The webcam changed to an unsupported video format on startup.");
+            lock (_frameGate)
+                _copyBudget = new CameraCopyRateBudget(CameraFrameRatePolicy.CopyRateLimit(
+                    RequestedFramesPerSecond, actual.FramesPerSecond));
+            NegotiatedFormat = (actual.Width, actual.Height, actual.FramesPerSecond);
+        }
+        catch
+        {
+            _running = false;
+            Interlocked.Increment(ref _epoch);
+            _reader = null;
+            if (reader is not null)
+            {
+                reader.FrameArrived -= OnFrameArrived;
+                try { await reader.StopAsync(); } catch { }
+                lock (_frameGate) reader.Dispose();
+            }
+            NegotiatedFormat = null;
+            Volatile.Write(ref _latestFrame, null);
+            throw;
+        }
     }
 
     public CameraFrame? CaptureSnapshot()
@@ -184,13 +249,9 @@ public sealed class CameraCaptureService : IAsyncDisposable
             if (bitmap is null) return;
 
             // A camera frame is copied to CPU memory for analysis; projector video stays on GPU.
-            // The average 30 Hz cap bounds allocations when a webcam advertises 60 Hz or more.
-            // A fixed minimum gap instead dropped the on-time frame after each late one.
-            var now = Stopwatch.GetTimestamp();
-            _copyAllowance = _copyAllowanceTicks == 0 ? MaximumCopyAllowance : Math.Min(MaximumCopyAllowance,
-                _copyAllowance + Stopwatch.GetElapsedTime(_copyAllowanceTicks, now).TotalSeconds * MaximumCopiesPerSecond);
-            _copyAllowanceTicks = now;
-            if (!_captureEveryFrame && _copyAllowance < 1) return;
+            // Follow the selected/negotiated rate, allowing minor delivery jitter without
+            // retaining more than two frames of credit. Calibration bypasses this budget.
+            if (!_copyBudget.TryTake(Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency, _captureEveryFrame)) return;
 
             using var converted = bitmap.BitmapPixelFormat == BitmapPixelFormat.Bgra8
                 ? null
@@ -208,7 +269,6 @@ public sealed class CameraCaptureService : IAsyncDisposable
             if (_running && epoch == Interlocked.Read(ref _epoch) && ReferenceEquals(sender, _reader))
             {
                 Volatile.Write(ref _latestFrame, owned);
-                _copyAllowance = Math.Max(0, _copyAllowance - 1);
                 delivered = owned;
             }
         }
@@ -252,7 +312,8 @@ public sealed class CameraCaptureService : IAsyncDisposable
         Interlocked.Increment(ref _epoch);
         ActiveDeviceId = null;
         NegotiatedFormat = null;
-        _copyAllowanceTicks = 0;
+        SupportedRequestedFramesPerSecond = Array.Empty<int>();
+        HasExclusiveFormatControl = false;
         var reader = _reader;
         _reader = null;
         if (reader is not null)
@@ -290,26 +351,14 @@ public sealed class CameraCaptureService : IAsyncDisposable
         return false;
     }
 
-    private static bool HasPreferredFormat(MediaFrameSource source)
-    {
-        for (var i = 0; i < source.SupportedFormats.Count; i++)
-            if (IsPreferredFormat(source.SupportedFormats[i])) return true;
-        return false;
-    }
-
     private static double FramesPerSecond(MediaFrameFormat format) =>
         format.FrameRate.Denominator == 0 ? 0 :
         (double)format.FrameRate.Numerator / format.FrameRate.Denominator;
 
-    private static bool IsPreferredFormat(MediaFrameFormat format) =>
-        format.VideoFormat.Width is >= 1280 and <= 1920 &&
-        format.VideoFormat.Height is >= 720 and <= 1080 &&
-        FramesPerSecond(format) is >= 20 and <= 60;
+    private static CameraVideoMode VideoMode(MediaFrameFormat format) =>
+        new((int)format.VideoFormat.Width, (int)format.VideoFormat.Height, FramesPerSecond(format));
 
-    private static bool IsUsableFormat(MediaFrameFormat format) =>
-        format.VideoFormat.Width >= 1280 && format.VideoFormat.Height >= 720 &&
-        format.VideoFormat.Width <= 3840 && format.VideoFormat.Height <= 2160 &&
-        FramesPerSecond(format) is >= 20 and <= 60;
+    private sealed record SourceFormat(MediaFrameSource Source, MediaFrameFormat Format);
 
     private void RaiseFailure(string message)
     {

@@ -49,6 +49,8 @@ public sealed partial class MainWindow
                     lastDetection = _lastHoldButtonDetection, lastActivation = _lastHoldButtonActivation,
                     progress = _scene.CurrentHoldProgress };
 #if DEBUG
+            case "verify_camera_input_scheduling":
+                return await VerifyCameraInputSchedulingAsync();
             case "verify_camera_latency":
                 return VerifyCameraLatency();
             case "verify_photo_copy_memory_save":
@@ -180,6 +182,16 @@ public sealed partial class MainWindow
                     cameraFrameUtc = frame?.Timestamp,
                     cameraWidth = frame?.Width,
                     cameraHeight = frame?.Height,
+                    cameraFrameRate = new
+                    {
+                        requested = _requestedCameraFramesPerSecond,
+                        activeRequested = _camera.IsRunning ? (int?)_camera.RequestedFramesPerSecond : null,
+                        negotiated = _camera.NegotiatedFormat?.FramesPerSecond,
+                        normalCopyFramesPerSecond = _camera.NormalCopyFramesPerSecond,
+                        supported = _camera.SupportedRequestedFramesPerSecond,
+                        exclusiveFormatControl = _camera.HasExclusiveFormatControl,
+                        status = CameraFrameRateStatusText.Text
+                    },
                     cameraHealthWarning = _cameraHealthWarning,
                     display = SelectedDisplay?.ToString(),
                     projectionSetup = new
@@ -439,6 +451,15 @@ public sealed partial class MainWindow
                 return new { path = await SaveSlotsPreviewAsync() };
             case "capture_raw_frame":
                 return new { path = await SaveRawSnapshotAsync() };
+            case "set_camera_frame_rate":
+                if (!parameters.TryGetProperty("framesPerSecond", out var rateParameter) ||
+                    rateParameter.ValueKind != JsonValueKind.Number ||
+                    !rateParameter.TryGetInt32(out int requestedRate) || requestedRate is not (30 or 60 or 100))
+                    throw new ArgumentException("Provide framesPerSecond as 30, 60 or 100.");
+                await SetCameraFrameRateAsync(requestedRate);
+                return new { requested = _requestedCameraFramesPerSecond,
+                    negotiated = _camera.NegotiatedFormat?.FramesPerSecond,
+                    cameraRunning = _camera.IsRunning, status = CameraFrameRateStatusText.Text };
             case "start_camera":
                 if (parameters.TryGetProperty("deviceId", out var cameraDeviceIdParameter))
                 {

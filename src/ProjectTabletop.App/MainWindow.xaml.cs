@@ -17,6 +17,7 @@ public sealed partial class MainWindow : Window
     // Globe approaches the captured starting view on each fresh launch.
     private readonly SceneCompositor _scene = new(globe: CreateHomeGlobe());
     private readonly CameraCaptureService _camera = new();
+    private readonly Func<Action, bool> _dispatchInputResult;
     private readonly object _visionGate = new();
     private VisionEngine _vision = new();
     private ProjectionWindow? _output;
@@ -66,6 +67,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _dispatchInputResult = action => DispatcherQueue.TryEnqueue(() => action());
         _scene.LicensesRequested += () => DispatcherQueue.TryEnqueue(() => _ = ShowLicensesAsync());
         _scene.BoardOpened += BoardOpenedForStickTracking;
         AppPalette.ApplyTitleBar(AppWindow.TitleBar);
@@ -84,6 +86,7 @@ public sealed partial class MainWindow : Window
         RefreshDisplays();
         InitializeProjectionSettings();
         InitializeDisplayAudio();
+        InitializeCameraFrameRates();
         _ = RefreshCamerasAsync();
         UpdateTrainingStatus();
         SyncVisionSettingsControls();

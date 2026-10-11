@@ -220,6 +220,7 @@ public sealed partial class MainWindow
         if (!_initialized || SelectedCamera is not { } selected ||
             _selectedCameraId == selected.Device.Id) return;
         _selectedCameraId = selected.Device.Id;
+        LoadSelectedCameraFrameRate();
         ClearHandTracking();
         ResetEyeTipTracking("camera-changed", selected.Device.Id);
         _scene.ClearBoardMediaClip();
@@ -253,11 +254,12 @@ public sealed partial class MainWindow
         _nextCameraReconnectAtUtc = DateTimeOffset.MinValue;
         _cameraRecoveryReason = null;
         var version = Interlocked.Increment(ref _cameraOperationVersion);
-        return await StartCameraCoreAsync(choice, version);
+        return await StartCameraCoreAsync(choice, version, _requestedCameraFramesPerSecond);
     }
 
-    private async Task<bool> StartCameraCoreAsync(CameraChoice choice, long version)
+    private async Task<bool> StartCameraCoreAsync(CameraChoice choice, long version, int? requestedFramesPerSecond = null)
     {
+        int requestedRate = requestedFramesPerSecond ?? _requestedCameraFramesPerSecond;
         await _cameraOperation.WaitAsync();
         try
         {
@@ -273,7 +275,7 @@ public sealed partial class MainWindow
             _frozenFrame = null;
             Volatile.Write(ref _latestCameraFrame, null);
             CameraCanvas.Invalidate();
-            await _camera.StartAsync(choice.Device.Id);
+            await _camera.StartAsync(choice.Device.Id, requestedRate);
             if (version != _cameraOperationVersion || !_cameraWanted || _closing) return false;
             var format = _camera.NegotiatedFormat;
             _cameraLiveStatus = format is null
@@ -285,6 +287,7 @@ public sealed partial class MainWindow
                 ? $"Connected: {choice.Device.DisplayName}. Waiting for video frames…"
                 : _cameraLiveStatus;
             _cameraHealthWarning = CameraStatusText.Text != _cameraLiveStatus;
+            UpdateCameraFrameRateStatus();
             return true;
         }
         catch (Exception ex)
@@ -294,6 +297,7 @@ public sealed partial class MainWindow
                 _cameraRecoveryReason = "Webcam could not start: " + ex.Message + ".";
                 CameraStatusText.Text = _cameraRecoveryReason;
                 _cameraHealthWarning = true;
+                UpdateCameraFrameRateStatus();
             }
             return false;
         }
@@ -323,6 +327,7 @@ public sealed partial class MainWindow
             Volatile.Write(ref _latestCameraFrame, null);
             CameraCanvas.Invalidate();
             CameraStatusText.Text = "Camera stopped.";
+            UpdateCameraFrameRateStatus();
             _visionError = null;
         }
         catch (Exception ex) { CameraStatusText.Text = "Camera stop failed: " + ex.Message; }

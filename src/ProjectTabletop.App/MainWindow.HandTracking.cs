@@ -15,9 +15,6 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     private static readonly TimeSpan HandDetectionInterval = TimeSpan.FromMilliseconds(80);
-    // Half the 33 ms frame period: the camera already averages about 30 fps, and a
-    // full-period gap skipped the on-time frame that follows each late one.
-    private static readonly TimeSpan TrackedHandInterval = TimeSpan.FromMilliseconds(16);
     private static readonly TimeSpan HandMarkerLifetime = TimeSpan.FromMilliseconds(350);
     private readonly object _handGate = new();
     private readonly HandGestureTracker _handGestures = new();
@@ -27,14 +24,12 @@ public sealed partial class MainWindow
     // history there, so camera/UI resets never wait for a network inference.
     private long _handEngineGeneration = -1;
     private DateTimeOffset? _lastHandEngineFrameTime;
-    private Task? _handDetectionTask;
+    private readonly FrameWorker _handWorker = new();
     private DispatcherQueueTimer? _handStatusTimer;
     private HandPreview? _handPreview;
     private volatile bool _handTrackingEnabled = true;
-    private bool _handDetecting;
     private long _handGeneration;
     private DateTimeOffset _handInputNotBefore;
-    private long _lastHandDetectionTick;
     private string? _handTrackingError;
     private string? _handLatencyWarning;
     private HandDetectionDiagnostics? _lastHandDetection;
@@ -160,7 +155,7 @@ public sealed partial class MainWindow
             _handLatencyWarning = null;
             _lastHandDetection = null;
             _lastHandAcquisitionDetection = null;
-            _lastHandDetectionTick = 0;
+            _handWorker.ResetCadence();
             _scene.ClearHandTips();
             _scene.InvalidatePhotoCopyCapture();
             _scene.SetPaintInputAvailable(false);
@@ -182,12 +177,11 @@ public sealed partial class MainWindow
             if (_closing || !_cameraWanted || !_camera.IsRunning || _cameraOperation.CurrentCount == 0 ||
                 Volatile.Read(ref _cameraHealthWarning) ||
                 !_handTrackingEnabled || _handTrackingError is not null ||
-                IsBoardScanMeasuring || _handDetecting) return InputFrameQueueResult.Skipped;
+                IsBoardScanMeasuring || _handWorker.IsBusy) return InputFrameQueueResult.Skipped;
             var interval = _handPreview is { Cursors.Length: > 0 } preview &&
                 frame.Timestamp - preview.Timestamp <= HandMarkerLifetime
-                ? TrackedHandInterval : HandDetectionInterval;
-            if (_lastHandDetectionTick != 0 &&
-                Stopwatch.GetElapsedTime(_lastHandDetectionTick, tick) < interval) return InputFrameQueueResult.Skipped;
+                ? TimeSpan.Zero : HandDetectionInterval;
+            if (!_handWorker.CanRun(tick, interval)) return InputFrameQueueResult.Skipped;
             var acquisitionContext = _scene.GetHandAcquisitionContext(frame.Timestamp);
             // These frames cannot show the new search light yet and would only
             // repeat the failed unlit search, delaying the first lit frame.
@@ -195,12 +189,10 @@ public sealed partial class MainWindow
                 frame.Timestamp - acquisitionContext.IlluminationStartedAt < HandAcquisitionPresenceTracker.SearchLightSettling)
                 return InputFrameQueueResult.Skipped;
             var holdContext = _scene.GetHoldButtonContext(frame.Timestamp);
-            _lastHandDetectionTick = tick;
-            _handDetecting = true;
             var generation = _handGeneration;
             var requestedInTester = IsHandTrackingTester;
             var sequence = Interlocked.Increment(ref _handDetectionSequence);
-            _handDetectionTask = Task.Run(() =>
+            bool queued = _handWorker.TryRun(tick, interval, work =>
             {
                 try
                 {
@@ -225,7 +217,7 @@ public sealed partial class MainWindow
                     // replaces the light with its own spotlight.
                     if (acquisitionContext is { ObserveMotion: true, IlluminatedHint: null } &&
                         acquisitionHints.LightingHints.Count > 0)
-                        DispatcherQueue.TryEnqueue(() =>
+                        work.TryPost(_dispatchInputResult, () =>
                         {
                             lock (_handGate)
                                 if (!_closing && generation == _handGeneration && _handTrackingEnabled &&
@@ -244,7 +236,7 @@ public sealed partial class MainWindow
                             hand.IndexTip.X >= 0 && hand.IndexTip.X < frame.Width &&
                             hand.IndexTip.Y >= 0 && hand.IndexTip.Y < frame.Height)
                         .ToArray();
-                    var enqueued = DispatcherQueue.TryEnqueue(() =>
+                    bool completionQueued = work.TryPost(_dispatchInputResult, () =>
                     {
                         lock (_handGate)
                         {
@@ -322,7 +314,7 @@ public sealed partial class MainWindow
                         if (_frozenFrame is null) CameraCanvas.Invalidate();
                         UpdateHandTrackingStatus();
                     });
-                    if (!enqueued)
+                    if (!completionQueued)
                         LogHandDetection(sequence, requestedInTester, frame, generation, engineReset,
                             inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, [], "dispatch_rejected");
                 }
@@ -330,7 +322,7 @@ public sealed partial class MainWindow
                 {
                     LogHandTrackingEvent("detection_error", new { sequence, frameTime = frame.Timestamp,
                         requestedGeneration = generation, error = ex.ToString() }, force: requestedInTester);
-                    DispatcherQueue.TryEnqueue(() =>
+                    work.TryPost(_dispatchInputResult, () =>
                     {
                         lock (_handGate)
                         {
@@ -342,9 +334,8 @@ public sealed partial class MainWindow
                         UpdateHandTrackingStatus();
                     });
                 }
-                finally { lock (_handGate) _handDetecting = false; }
             });
-            return InputFrameQueueResult.Queued;
+            return queued ? InputFrameQueueResult.Queued : InputFrameQueueResult.Skipped;
         }
     }
 
@@ -419,13 +410,11 @@ public sealed partial class MainWindow
     {
         _handStatusTimer?.Stop();
         ClearHandTracking();
-        Task? pending;
-        lock (_handGate) pending = _handDetectionTask;
-        if (pending is not null) await pending;
+        await _handWorker.WorkerTask;
         if (_photoCopyTask is { } photoCopyTask) await photoCopyTask;
         if (_paintSaveTask is { } paintSaveTask) await paintSaveTask;
         if (_photoCopyObservationTask is { } observationTask) await observationTask;
-        if (_paintDetectionTask is { } paintTask) await paintTask;
+        await _paintWorker.WorkerTask;
         _handEngine?.Dispose();
         _handEngine = null;
         if (_handVideoRecorder is not null) await _handVideoRecorder.DisposeAsync();

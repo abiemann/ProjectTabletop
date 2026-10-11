@@ -104,12 +104,10 @@ public sealed partial class MainWindow
         {
             var originalCutoff = _handInputNotBefore;
             bool originalEnabled = _handTrackingEnabled;
-            var originalHandTask = _handDetectionTask;
-            var originalPaintTask = _paintDetectionTask;
-            var originalHandTick = _lastHandDetectionTick;
-            var originalPaintTick = _lastPaintDetectionTick;
-            bool originalHandDetecting = _handDetecting;
-            int originalPaintDetecting = _paintDetecting;
+            var originalHandTask = _handWorker.WorkerTask;
+            var originalPaintTask = _paintWorker.WorkerTask;
+            bool originalHandDetecting = _handWorker.IsBusy;
+            bool originalPaintDetecting = _paintWorker.IsBusy;
             try
             {
                 // Disable inference even if a regression removes the timestamp check.
@@ -126,10 +124,9 @@ public sealed partial class MainWindow
                         QueuePaintDetection(frame, System.Diagnostics.Stopwatch.GetTimestamp()) != expected)
                         throw new InvalidOperationException("A hand or Paint queue admitted pre-reset pixels or rejected the reset boundary.");
                 }
-                if (!ReferenceEquals(originalHandTask, _handDetectionTask) ||
-                    !ReferenceEquals(originalPaintTask, _paintDetectionTask) ||
-                    originalHandTick != _lastHandDetectionTick || originalPaintTick != _lastPaintDetectionTick ||
-                    originalHandDetecting != _handDetecting || originalPaintDetecting == 0 && _paintDetecting != 0)
+                if (!ReferenceEquals(originalHandTask, _handWorker.WorkerTask) ||
+                    !ReferenceEquals(originalPaintTask, _paintWorker.WorkerTask) ||
+                    !originalHandDetecting && _handWorker.IsBusy || !originalPaintDetecting && _paintWorker.IsBusy)
                     throw new InvalidOperationException("A rejected hand or Paint frame changed inference bookkeeping.");
             }
             finally
