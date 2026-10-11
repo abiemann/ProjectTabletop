@@ -126,6 +126,8 @@ public sealed partial class MainWindow
     {
         if (SelectedDisplay is null) throw new InvalidOperationException("Select an output display first.");
         var profile = EnteredProjectionProfile();
+        if (parameters.TryGetProperty("projectorLatencyMilliseconds", out var latency))
+            profile = profile with { ProjectorLatencyMilliseconds = latency.GetDouble() };
         if (parameters.TryGetProperty("lensHeightCentimeters", out var height))
             profile = profile with { LensHeightCentimeters = height.ValueKind == JsonValueKind.Null ? null : height.GetDouble() };
         if (parameters.TryGetProperty("throwRatio", out var ratio))
@@ -134,8 +136,10 @@ public sealed partial class MainWindow
             profile = profile with { MeasuredBoardShortSideCentimeters = shortSide.ValueKind == JsonValueKind.Null ? null : shortSide.GetDouble() };
         if (parameters.TryGetProperty("measuredBoardLongSideCentimeters", out var longSide))
             profile = profile with { MeasuredBoardLongSideCentimeters = longSide.ValueKind == JsonValueKind.Null ? null : longSide.GetDouble() };
-        if (!profile.IsValid) throw new ArgumentException("Invalid height, throw ratio, or measured board dimensions. The short side cannot exceed the long side.");
+        if (!profile.IsValid) throw new ArgumentException("Invalid height, throw ratio, board dimensions, or projector latency. The short side cannot exceed the long side; latency must be 0–2000 ms.");
         _loadingProjectionProfile = true;
+        ProjectorLatencyNumberBox.Value = profile.ProjectorLatencyMilliseconds;
+        _cameraLatency.ProjectorMilliseconds = profile.ProjectorLatencyMilliseconds;
         ProjectorLensHeightNumberBox.Value = profile.LensHeightCentimeters ?? double.NaN;
         ProjectorThrowRatioNumberBox.Value = profile.ThrowRatio ?? double.NaN;
         MeasuredBoardShortSideNumberBox.Value = profile.MeasuredBoardShortSideCentimeters ?? double.NaN;
@@ -143,8 +147,10 @@ public sealed partial class MainWindow
         MeasuredBoardSizeExpander.IsExpanded = profile.MeasuredBoardShortSideCentimeters is not null ||
             profile.MeasuredBoardLongSideCentimeters is not null;
         _loadingProjectionProfile = false;
+        UpdateCameraLatencyStatus();
         ProjectorSize_ValueChanged(ProjectorLensHeightNumberBox, null!);
         return new { profile.LensHeightCentimeters, profile.ThrowRatio,
+            profile.ProjectorLatencyMilliseconds,
             profile.MeasuredBoardShortSideCentimeters, profile.MeasuredBoardLongSideCentimeters,
             boardSizeEstimate = CurrentBoardSizeEstimate(), opticalBoardSizeEstimate = CurrentOpticalBoardSizeEstimate(),
             estimateSource = BoardSizeSource };
@@ -157,6 +163,7 @@ public sealed partial class MainWindow
         MeasuredBoardShortSideCentimeters = OptionalNumber(MeasuredBoardShortSideNumberBox.Value),
         MeasuredBoardLongSideCentimeters = OptionalNumber(MeasuredBoardLongSideNumberBox.Value),
         EnableDisplayAudio = _displayAudioRequested,
+        ProjectorLatencyMilliseconds = _cameraLatency.ProjectorMilliseconds,
         BoardFacingDegrees = _boardFacingDegrees,
         LastAlignment = _cameraAlignment
     };
@@ -233,6 +240,9 @@ public sealed partial class MainWindow
             profile = _sessionProjectionProfiles.GetValueOrDefault(key) ??
                 _projectionSetup.Profiles.GetValueOrDefault(key) ?? profile;
         _loadingProjectionProfile = true;
+        ProjectorLatencyNumberBox.Value = profile.ProjectorLatencyMilliseconds;
+        _cameraLatency.ProjectorMilliseconds = profile.ProjectorLatencyMilliseconds;
+        ResetCameraLatency();
         ProjectorLensHeightNumberBox.Value = profile.LensHeightCentimeters ?? double.NaN;
         ProjectorThrowRatioNumberBox.Value = profile.ThrowRatio ?? double.NaN;
         MeasuredBoardShortSideNumberBox.Value = profile.MeasuredBoardShortSideCentimeters ?? double.NaN;

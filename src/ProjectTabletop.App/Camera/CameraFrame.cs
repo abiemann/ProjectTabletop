@@ -11,4 +11,9 @@ public sealed record CameraFrame(
     int Height,
     int Stride,
     byte[] Bgra,
-    DateTimeOffset Timestamp);
+    DateTimeOffset Timestamp)
+{
+    /// <summary>Host callback arrival, before conversion/copy. Used only for the
+    /// optical latency estimate; Timestamp keeps its existing post-copy meaning.</summary>
+    public DateTimeOffset? ArrivedAt { get; init; }
+}

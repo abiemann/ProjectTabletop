@@ -42,6 +42,13 @@ public sealed partial class SceneCompositor : IDisposable
     private DateTimeOffset _handFrameTime;
     private DateTimeOffset _handVisualResetThrough, _lastHandVisualFrameTime;
     private int _boardCalibrationSpot = -1;
+    private long _boardCalibrationSpotRevision;
+    private BoardSpotPresentation? _boardSpotPresentation;
+    internal sealed record BoardSpotPresentation(int SpotIndex, long Revision, DateTimeOffset DrawnAt);
+    internal BoardSpotPresentation? CalibrationSpotPresentation
+    {
+        get { lock (_gate) return _boardSetup && !_blackOutput ? _boardSpotPresentation : null; }
+    }
     private DateTimeOffset _boardSetupStarted;
     private long _projectorFrames;
     private long _previewFrames;
@@ -327,6 +334,7 @@ public sealed partial class SceneCompositor : IDisposable
             _blackOutput = false;
             _boardGrid = null;
             _boardCalibrationSpot = -1;
+            _boardSpotPresentation = null;
             _setupFlairCorners = null;
         }
     }
@@ -367,6 +375,8 @@ public sealed partial class SceneCompositor : IDisposable
         {
             if (!_boardSetup) return;
             _boardCalibrationSpot = index;
+            _boardCalibrationSpotRevision++;
+            _boardSpotPresentation = null;
         }
     }
 
@@ -548,6 +558,12 @@ public sealed partial class SceneCompositor : IDisposable
                                                  (float)(output.Y + point.Y * output.Height));
                         ds.FillCircle(center, (float)Math.Min(output.Width, output.Height) * 0.035f,
                             Colors.Black);
+                        // Start at the first projector draw, never the earlier UI request
+                        // or the laptop preview. Scan-out/display delay is estimated by
+                        // the measurement's projector allowance, not measured here.
+                        if (!preview && _boardSpotPresentation is null)
+                            _boardSpotPresentation = new(_boardCalibrationSpot,
+                                _boardCalibrationSpotRevision, MonotonicClock.UtcNow);
                     }
                 }
                 return;

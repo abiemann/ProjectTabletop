@@ -135,6 +135,21 @@ public sealed partial class MainWindow
             "Version 2 settings without new fields changed optics, invented a board reference, or disabled display audio.");
 
         var audioOnly = new ProjectionSizeProfile { EnableDisplayAudio = false };
+        var latencySettings = new ProjectionSetupSettings();
+        latencySettings.Profiles[key] = combined with { ProjectorLatencyMilliseconds = 32.5 };
+        latencySettings.Profiles[secondKey] = empty with { ProjectorLatencyMilliseconds = 0 };
+        var restoredLatency = ParseProjectionSettings(JsonSerializer.Serialize(latencySettings), "unused", fourThree);
+        Require(restoredLatency.Profiles[key].ProjectorLatencyMilliseconds == 32.5 &&
+            restoredLatency.Profiles[secondKey].ProjectorLatencyMilliseconds == 0 &&
+            restoredLatency.Profiles[key].MeasuredBoardSize == combined.MeasuredBoardSize,
+            "Projector latency was lost on reload or crossed output profiles.");
+        Require(ParseProjectionSettings(oldVersionTwo, "unused", fourThree).Profiles[key].ProjectorLatencyMilliseconds ==
+            CameraLatencyMeasurement.DefaultProjectorMilliseconds, "An older profile did not default to 17 ms.");
+        foreach (double invalid in new[] { -1d, 2001d, double.NaN, double.PositiveInfinity })
+            Require(!(empty with { ProjectorLatencyMilliseconds = invalid }).IsValid, "Invalid projector latency was accepted.");
+        Require((empty with { ProjectorLatencyMilliseconds = 2000 }).IsValid &&
+            EnteredProjectionProfile().ProjectorLatencyMilliseconds == _cameraLatency.ProjectorMilliseconds,
+            "Editing other output preferences would discard the entered projector latency.");
         Require(audioOnly.IsValid && audioOnly.ImageSize(fourThree, out _) is null &&
                 audioOnly.MeasuredBoardSize is null,
             "An audio-only output preference required size settings or invented dimensions.");

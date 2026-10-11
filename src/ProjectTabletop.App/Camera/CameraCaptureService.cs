@@ -29,6 +29,11 @@ public sealed class CameraCaptureService : IAsyncDisposable
     private double _copyAllowance;
     private long _copyAllowanceTicks;
     private long _epoch;
+    private volatile bool _captureEveryFrame;
+
+    // During the brief setup-dot measurement, do not add the normal copy-rate cap
+    // to a faster webcam's measured response. The latest-frame-only policy remains.
+    public bool CaptureEveryFrame { get => _captureEveryFrame; set => _captureEveryFrame = value; }
 
     public event EventHandler<CameraFrame>? FrameReceived;
     public event EventHandler<string>? CaptureFailed;
@@ -165,6 +170,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
 
     private void OnFrameArrived(MediaFrameReader sender, MediaFrameArrivedEventArgs args)
     {
+        var arrivedAt = MonotonicClock.UtcNow;
         if (!Monitor.TryEnter(_frameGate)) return;
         CameraFrame? delivered = null;
         string? error = null;
@@ -184,7 +190,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
             _copyAllowance = _copyAllowanceTicks == 0 ? MaximumCopyAllowance : Math.Min(MaximumCopyAllowance,
                 _copyAllowance + Stopwatch.GetElapsedTime(_copyAllowanceTicks, now).TotalSeconds * MaximumCopiesPerSecond);
             _copyAllowanceTicks = now;
-            if (_copyAllowance < 1) return;
+            if (!_captureEveryFrame && _copyAllowance < 1) return;
 
             using var converted = bitmap.BitmapPixelFormat == BitmapPixelFormat.Bgra8
                 ? null
@@ -198,11 +204,11 @@ public sealed class CameraCaptureService : IAsyncDisposable
             bgraBitmap.CopyToBuffer(buffer);
             using (var reader = DataReader.FromBuffer(buffer)) reader.ReadBytes(bytes);
 
-            var owned = new CameraFrame(width, height, stride, bytes, MonotonicClock.UtcNow);
+            var owned = new CameraFrame(width, height, stride, bytes, MonotonicClock.UtcNow) { ArrivedAt = arrivedAt };
             if (_running && epoch == Interlocked.Read(ref _epoch) && ReferenceEquals(sender, _reader))
             {
                 Volatile.Write(ref _latestFrame, owned);
-                _copyAllowance--;
+                _copyAllowance = Math.Max(0, _copyAllowance - 1);
                 delivered = owned;
             }
         }

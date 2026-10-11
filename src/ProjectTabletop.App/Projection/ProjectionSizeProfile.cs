@@ -28,6 +28,7 @@ internal sealed record ProjectionSizeProfile
     public double? MeasuredBoardShortSideCentimeters { get; init; }
     public double? MeasuredBoardLongSideCentimeters { get; init; }
     public bool EnableDisplayAudio { get; init; } = true;
+    public double ProjectorLatencyMilliseconds { get; init; } = CameraLatencyMeasurement.DefaultProjectorMilliseconds;
     public double? BoardFacingDegrees { get; init; }
     // The last registration's camera-to-projector map on this output. It only
     // places the next scan's corner flair before that scan's own dots measure.
@@ -35,7 +36,9 @@ internal sealed record ProjectionSizeProfile
 
     public bool IsValid => ValidOptics && ValidMeasuredInputs && (BoardFacingDegrees is null ||
         double.IsFinite(BoardFacingDegrees.Value) && BoardFacingDegrees is >= 0 and < 360) &&
-        (LastAlignment is null || LastAlignment.IsValid);
+        (LastAlignment is null || LastAlignment.IsValid) &&
+        double.IsFinite(ProjectorLatencyMilliseconds) &&
+        ProjectorLatencyMilliseconds is >= 0 and <= CameraLatencyMeasurement.MaximumTotalMilliseconds;
 
     // A supplied board reference does not depend on an optical estimate. Keep
     // only its two editable inputs in the persisted profile, not derived state.

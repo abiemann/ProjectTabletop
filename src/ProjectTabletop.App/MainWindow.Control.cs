@@ -49,6 +49,8 @@ public sealed partial class MainWindow
                     lastDetection = _lastHoldButtonDetection, lastActivation = _lastHoldButtonActivation,
                     progress = _scene.CurrentHoldProgress };
 #if DEBUG
+            case "verify_camera_latency":
+                return VerifyCameraLatency();
             case "verify_photo_copy_memory_save":
                 return await VerifyPhotoCopyMemorySaveAsync();
             case "verify_board_resolution":
@@ -211,6 +213,7 @@ public sealed partial class MainWindow
                     boardSetupActive = Volatile.Read(ref _boardSetupActive),
                     boardClipReady = _scene.HasBoardMediaClip,
                     boardSetupStatus = BoardSetupControlStatus,
+                    cameraLatency = CameraLatencyStatus,
                     boardReveal = _scene.GetBoardRevealDiagnostics(),
             boardResolution = _scene.GetBoardResolutionDiagnostics(),
             outputRendering = _output?.RenderResolution,

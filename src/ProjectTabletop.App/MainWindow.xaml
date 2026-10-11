@@ -40,6 +40,13 @@
                             <Button Content="Stop" Click="StopCamera_Click" />
                         </StackPanel>
                         <TextBlock x:Name="CameraStatusText" Text="Camera stopped" TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <NumberBox x:Name="ProjectorLatencyNumberBox" Header="Projector latency (ms)" Value="17"
+                                   Minimum="0" Maximum="2000" SmallChange="1" SpinButtonPlacementMode="Compact"
+                                   ValueChanged="ProjectorLatency_ValueChanged"
+                                   ToolTipService.ToolTip="Subtracted from the setup-dot response time. Saved for the selected projector and display mode; changing it recalculates the current result." />
+                        <TextBlock x:Name="CameraLatencyText" Text="Estimated camera latency: measured during board setup."
+                                   TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}"
+                                   ToolTipService.ToolTip="First observed setup-dot frame minus its first projector draw minus the entered projector latency. Includes camera exposure, buffering and delivery; display scheduling and frame sampling affect this estimate." />
                     </StackPanel>
                 </Border>
 
