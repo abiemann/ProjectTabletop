@@ -14,13 +14,13 @@ ProjectTabletop is a local Windows C# app for an interactive projected tabletop.
 
 ## Install on Windows
 
-Download **ProjectTabletop-1.1.0-win-x64-setup.exe** from [GitHub Releases](https://github.com/abiemann/ProjectTabletop/releases/latest). The setup targets Windows 11 on an x64 PC and includes .NET, the Windows App SDK, native camera-analysis dependencies, artwork and hand models. Visual Studio and a separate .NET installation are not required.
+Download **ProjectTabletop-1.2.0-win-x64-setup.exe** from [GitHub Releases](https://github.com/abiemann/ProjectTabletop/releases/tag/v1.2.0). The setup targets Windows 11 on an x64 PC and includes .NET, the Windows App SDK, native camera-analysis dependencies, artwork and hand models. Visual Studio and a separate .NET installation are not required.
 
-Setup installs for the current user without administrator rights and adds a Start menu shortcut. Updates preserve your settings, saved games and exported pictures; these also survive uninstall. The installer is unsigned, so Windows may display an unknown-publisher warning. See [installation and first-run instructions](docs/INSTALL.md), [1.1 release notes](docs/releases/1.1.0.md), and [the release process](docs/RELEASING.md).
+Setup installs for the current user without administrator rights and adds a Start menu shortcut. Updates preserve your settings, saved games and exported pictures; these also survive uninstall. The installer is unsigned, so Windows may display an unknown-publisher warning. See [installation and first-run instructions](docs/INSTALL.md), [1.2 release notes](docs/releases/1.2.0.md), and [the release process](docs/RELEASING.md).
 
-Version 1.1 adds [Water Garden](#water-garden), with a flowing rock waterfall, floating rubber ducks and water you can stir using a real stick with a learned marker. **Paint** is beside **Roulette** on the second menu page.
+Version 1.2.0 adds [Football](#football): a bouncy projected football game for two people or one player against the computer, controlled with a learned single or double black bar, a cardboard T's black crossbar or an index fingertip. Select **PLAY** to begin a first-to-five match with red and blue car-front kickers, victory confetti and stadium sounds.
 
-The current source also includes [Football](#football): a bouncy projected football game for two people or one player against the computer, controlled with a printed black bar, a cardboard T's black crossbar or an index fingertip.
+The release also adds **30, 60 and 100 fps** camera preferences with automatic fallback to an available rate, plus an **Estimated camera latency** readout during board setup. Independent input workers keep fresh hand and marker observations moving without queuing old frames. See [First setup](#first-setup) for camera controls and [Water Garden](#water-garden) for the improved stick contact and waves.
 
 The [Windows workflow](.github/workflows/windows.yml) builds and tests on pushes and pull requests, creates a setup, and checks installation, startup, board navigation, a GPU preview, shutdown and uninstall on a hosted Windows runner. A matching version tag publishes the verified setup, SHA-256 checksums and a payload manifest to GitHub Releases.
 

@@ -70,6 +70,13 @@ try {
         $result = Invoke-Control $route.Key
         if ($result.boardApp -ne $route.Value) { throw "Navigation failed: $($route.Key)" }
     }
+    $football = Invoke-Control 'show_football'
+    $footballState = Invoke-Control 'get_football'
+    if ($football.boardApp -ne 'Football' -or $footballState.state.phase -ne 'Ready' -or
+        $footballState.state.score1 -ne 0 -or $footballState.state.score2 -ne 0) {
+        throw 'Installed Football must open at 0-0 and wait for PLAY.'
+    }
+    $footballState | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath (Join-Path $work 'football-ready.json') -Encoding utf8
     $blackjack = Invoke-Control 'show_blackjack'
     if ($blackjack.boardApp -ne 'Blackjack') { throw 'Blackjack must be selected before capturing its preview.' }
     $preview = Invoke-Control 'capture_blackjack_preview'
