@@ -21,6 +21,8 @@ public sealed partial class SceneCompositor
     private long _footballSessionInputRevision = -1, _footballInputEpoch;
     private bool _footballActive, _footballArtworkPublished;
     private DateTimeOffset _footballResetThrough;
+    private DateTimeOffset? _footballVictoryStarted;
+    private int _footballVictoryFrame = -1;
     private readonly DateTimeOffset[] _footballSourceTimes = new DateTimeOffset[2];
     private readonly bool[] _footballFingerPlayers = new bool[2];
     private readonly float?[] _footballBarHeadings = new float?[2];
@@ -38,6 +40,10 @@ public sealed partial class SceneCompositor
         get { lock (_gate) { SyncFootballSession(); return _footballInputEpoch; } }
     }
     public double FootballPreviewAspect { get { lock (_gate) return PaintBoardAspect(); } }
+    internal double FootballVictorySeconds
+    {
+        get { lock (_gate) return _footballVictoryFrame < 0 ? -1 : _footballVictoryFrame / 60.0; }
+    }
 
     public void ShowFootball()
     {
@@ -133,6 +139,7 @@ public sealed partial class SceneCompositor
 
     private void ClearFootballObservations()
     {
+        if (_boardSession.FootballState.Phase != FootballPhase.Finished) ResetFootballVictory();
         _footballSessionInputRevision = _boardSession.FootballInputRevision;
         _footballInputEpoch++;
         _footballResetThrough = _footballClock();
@@ -144,6 +151,7 @@ public sealed partial class SceneCompositor
 
     private void SyncFootballSession()
     {
+        if (_footballNavigation != _boardSession.NavigationRevision) ResetFootballVictory();
         bool active = !_disposed && _boardSession.Screen == BoardScreen.Football &&
             !_blackOutput && !_boardSetup && _calibrationTarget < 0 && !IsBoardRevealActive &&
             _boardCameraMap is not null && _boardSurfaceMap is not null;
@@ -302,8 +310,35 @@ public sealed partial class SceneCompositor
     private long FootballVisualRevision()
     {
         SyncFootballSession();
-        _boardSession.TickFootball(_footballClock());
-        return _boardSession.FootballState.Revision;
+        var now = _footballClock();
+        _boardSession.TickFootball(now);
+        var state = _boardSession.FootballState;
+        UpdateFootballVictory(state, now);
+        // The game deliberately stops advancing after a win. Keep its visual
+        // celebration moving at 60 Hz, then reuse the settled confetti image.
+        return unchecked(state.Revision * ((long)(FootballRenderer.VictoryDurationSeconds * 60) + 2) +
+            _footballVictoryFrame + 1);
+    }
+
+    internal void UpdateFootballVictory(FootballSnapshot state, DateTimeOffset now)
+    {
+        if (_boardSession.Screen != BoardScreen.Football || state.Phase != FootballPhase.Finished)
+        {
+            ResetFootballVictory();
+            return;
+        }
+        // Only entering Finished starts the clock. New camera observations,
+        // previews and appearance changes must never fire the cannons again.
+        _footballVictoryStarted ??= now;
+        double elapsed = Math.Clamp((now - _footballVictoryStarted.Value).TotalSeconds,
+            0, FootballRenderer.VictoryDurationSeconds);
+        _footballVictoryFrame = Math.Max(_footballVictoryFrame, (int)Math.Floor(elapsed * 60));
+    }
+
+    private void ResetFootballVictory()
+    {
+        _footballVictoryStarted = null;
+        _footballVictoryFrame = -1;
     }
 
     private FootballRenderer GetFootballRenderer(CanvasDevice device)
@@ -355,7 +390,8 @@ public sealed partial class SceneCompositor
         {
             GetFootballRenderer(ds.Device).Draw(ds,
                 new Rect(field.X * BoardSurfaceSize * aspect, field.Y * BoardSurfaceSize,
-                    field.Width * BoardSurfaceSize * aspect, field.Height * BoardSurfaceSize), _boardSession.FootballState);
+                    field.Width * BoardSurfaceSize * aspect, field.Height * BoardSurfaceSize), _boardSession.FootballState,
+                FootballVictorySeconds);
         }
         finally { ds.Transform = previous; }
 

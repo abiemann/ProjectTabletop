@@ -151,7 +151,7 @@
                                     <ComboBoxItem Content="Frying pan" />
                                     <ComboBoxItem Content="Football boot" />
                                 </ComboBox>
-                                <ComboBox x:Name="FootballPlayer2StyleBox" Header="Player 2 / AI kicker" SelectedIndex="1" Tag="1" HorizontalAlignment="Stretch" SelectionChanged="OnFootballStyleChanged">
+                                <ComboBox x:Name="FootballPlayer2StyleBox" Header="Player 2 / AI kicker" SelectedIndex="0" Tag="1" HorizontalAlignment="Stretch" SelectionChanged="OnFootballStyleChanged">
                                     <ComboBoxItem Content="Car front" />
                                     <ComboBoxItem Content="Boxing glove" />
                                     <ComboBoxItem Content="Frying pan" />

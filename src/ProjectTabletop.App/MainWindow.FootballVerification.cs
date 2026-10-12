@@ -28,6 +28,8 @@ public sealed partial class MainWindow
         using var target = new CanvasRenderTarget(device, 1600, 900, 96);
         Draw(scene, target);
         Check(scene.FootballState.Phase == FootballPhase.WaitingForPlayers, "Football started without a player.");
+        Check(scene.FootballState.Kickers.All(k => k.Style == FootballKickerStyle.Car),
+            "Both teams did not start with car-front artwork.");
         var field = scene.FootballFieldBounds();
         var playerCamera = Camera(field.X + field.Width * .22, field.Y + field.Height * .5, inset);
         Check(scene.TryMapFootballCameraPoint(playerCamera, out var uv) && Math.Abs(uv.X - .22) < .0001 &&
@@ -215,6 +217,81 @@ public sealed partial class MainWindow
         await Save(raw, "football-airborne-shadow");
         RenderRaw(snapshot);
         await Save(raw, "football-car-front-and-glove");
+        RenderRaw(snapshot with
+        {
+            Kickers = new[]
+            {
+                snapshot.Kickers[0] with { MarkerAnchored = true },
+                snapshot.Kickers[1] with { Style = FootballKickerStyle.Car, Heading = MathF.PI }
+            }
+        });
+        byte[] teamCars = raw.GetPixelBytes();
+        int redCarPixels = CountTeamStripePixels(teamCars, 432, 736, blue: false);
+        int blueCarPixels = CountTeamStripePixels(teamCars, 1412, 396, blue: true);
+        Check(redCarPixels > 100 && blueCarPixels > 100,
+            "The two car fronts did not render their distinct red and blue stripes.");
+        await Save(raw, "football-red-and-blue-car-fronts");
+        // A finished match is otherwise static, so drive the victory clock
+        // explicitly and compare the native pixels with its undecorated scene.
+        var victory = snapshot with
+        {
+            Phase = FootballPhase.Finished,
+            Score1 = FootballGame.WinningScore,
+            Score2 = 3,
+            Kickers = new[]
+            {
+                snapshot.Kickers[0] with { Position = new(-.4f, 0), MarkerAnchored = true },
+                snapshot.Kickers[1] with { Position = new(.4f, 0), Style = FootballKickerStyle.Car, Heading = MathF.PI }
+            }
+        };
+        VerifyVictoryClock();
+        int confettiPixels = 0, confettiOnCarPixels = 0;
+        foreach (int winner in new[] { 0, 1 })
+        {
+            var finished = victory with
+            {
+                Score1 = winner == 0 ? FootballGame.WinningScore : 3,
+                Score2 = winner == 1 ? FootballGame.WinningScore : 3
+            };
+            RenderRaw(finished);
+            byte[] undecorated = raw.GetPixelBytes();
+            byte[]? settled = null;
+            foreach (double seconds in winner == 0 ? new[] { .35, 1.7, 4, 10 } : new[] { 1.7, 10 })
+            {
+                RenderRaw(finished, seconds);
+                byte[] celebrated = raw.GetPixelBytes();
+                int winnerLeft = winner == 0 ? 0 : 912;
+                int loserLeft = winner == 0 ? 912 : 0;
+                Check(ChangedPixels(undecorated, celebrated, loserLeft, 0, 912, 1132) == 0,
+                    "Victory confetti crossed onto the losing player's half.");
+                int changes = ChangedPixels(undecorated, celebrated, winnerLeft, 0, 912, 1132);
+                Check(changes > 1500, "The winning half did not receive a substantial confetti shower.");
+                confettiPixels = Math.Max(confettiPixels, changes);
+                await Save(raw, $"football-player-{winner + 1}-victory-{seconds:0.00}s");
+                if (seconds == FootballRenderer.VictoryDurationSeconds)
+                {
+                    settled = celebrated;
+                    // This lies inside the opaque hood, away from its alpha edge.
+                    // A large RGB change here verifies pieces render over the car.
+                    int onCar = ChangedPixels(undecorated, celebrated,
+                        winner == 0 ? 496 : 1296, 546, 32, 40, minimumChange: 24);
+                    Check(onCar > 20, "The winning car did not receive settled confetti on its hood.");
+                    confettiOnCarPixels += onCar;
+                }
+            }
+            RenderRaw(finished, FootballRenderer.VictoryDurationSeconds + 10);
+            Check(settled is not null && settled.AsSpan().SequenceEqual(raw.GetPixelBytes()),
+                "Settled victory confetti continued changing after the animation ended.");
+        }
+        foreach (var phase in new[] { FootballPhase.Playing, FootballPhase.Goal })
+        {
+            var ordinary = victory with { Phase = phase, Score1 = 3, Score2 = 2 };
+            RenderRaw(ordinary);
+            byte[] before = raw.GetPixelBytes();
+            RenderRaw(ordinary, 1.7);
+            Check(before.AsSpan().SequenceEqual(raw.GetPixelBytes()),
+                "An ordinary goal or active match incorrectly fired victory cannons.");
+        }
         using (var thumbnail = new CanvasRenderTarget(device, 1200, 600, 96))
         {
             using (var drawing = thumbnail.CreateDrawingSession()) renderer.DrawThumbnail(drawing, new Rect(0, 0, 1200, 600));
@@ -232,10 +309,65 @@ public sealed partial class MainWindow
             await Save(output, aspect == 1 ? "football-square" : "football-portrait");
             VerifyGrassMarkerBounds(fitted, fittedInset, output);
         }
-        return new { passed = true, renderedFrames, shadowPixels, calibratedInput = true,
+        return new { passed = true, renderedFrames, shadowPixels, redCarPixels, blueCarPixels,
+            confettiPixels, confettiOnCarPixels, victoryClock = true, winnerHalfOnly = true,
+            victorySettles = true, ordinaryGoalsWithoutConfetti = true,
+            teamCarArtwork = true, calibratedInput = true,
             staleAndFutureRejected = true, shortLossRecoversQuietly = true, lossPausesPlay = true, twoPlayers = true,
             quarterTurnMapping = true, barPositionAndRotationAnchored = true, markersUseSurroundingGrass = true,
             captionControls = true, continuousFingerAcquisition = true, directory, images };
+
+        void VerifyVictoryClock()
+        {
+            using var clockScene = MakeScene(16.0 / 9, out _);
+            Check(clockScene.FootballVictorySeconds < 0, "A new Football board already had a victory clock.");
+            clockScene.UpdateFootballVictory(victory, now);
+            Check(clockScene.FootballVictorySeconds == 0, "Entering Finished did not start the victory clock.");
+            clockScene.UpdateFootballVictory(victory, now.AddMilliseconds(8));
+            Check(clockScene.FootballVictorySeconds == 0, "The victory clock changed within its 60 Hz frame.");
+            clockScene.UpdateFootballVictory(victory with { Revision = victory.Revision + 1 }, now.AddMilliseconds(125));
+            Check(Math.Abs(clockScene.FootballVictorySeconds - 7.0 / 60) < .000001,
+                "Repeated finished snapshots restarted the celebration or skipped frame quantization.");
+            clockScene.UpdateFootballVictory(victory, now.AddSeconds(20));
+            Check(clockScene.FootballVictorySeconds == FootballRenderer.VictoryDurationSeconds,
+                "The victory clock did not stop at the settled frame.");
+            clockScene.UpdateFootballVictory(victory, now.AddSeconds(5));
+            Check(clockScene.FootballVictorySeconds == FootballRenderer.VictoryDurationSeconds,
+                "A repeated earlier draw rewound the victory clock.");
+            clockScene.UpdateFootballVictory(snapshot, now.AddSeconds(21));
+            Check(clockScene.FootballVictorySeconds < 0, "A new match retained the old victory clock.");
+            clockScene.UpdateFootballVictory(victory with { Score1 = 3, Score2 = FootballGame.WinningScore }, now.AddSeconds(22));
+            clockScene.UpdateFootballVictory(victory with { Score1 = 3, Score2 = FootballGame.WinningScore }, now.AddSeconds(22.5));
+            Check(clockScene.FootballVictorySeconds == .5, "The next winner did not start a fresh celebration.");
+        }
+
+        static int ChangedPixels(byte[] before, byte[] after, int left, int top, int width, int height, int minimumChange = 1)
+        {
+            int changed = 0;
+            for (int y = top; y < top + height; y++)
+            for (int x = left; x < left + width; x++)
+            {
+                int offset = (y * 1824 + x) * 4;
+                if (Math.Abs(before[offset] - after[offset]) >= minimumChange ||
+                    Math.Abs(before[offset + 1] - after[offset + 1]) >= minimumChange ||
+                    Math.Abs(before[offset + 2] - after[offset + 2]) >= minimumChange ||
+                    Math.Abs(before[offset + 3] - after[offset + 3]) >= minimumChange) changed++;
+            }
+            return changed;
+        }
+
+        static int CountTeamStripePixels(byte[] pixels, int centerX, int centerY, bool blue)
+        {
+            int count = 0;
+            for (int y = centerY - 80; y <= centerY + 80; y++)
+            for (int x = centerX - 80; x <= centerX + 80; x++)
+            {
+                int offset = (y * 1824 + x) * 4;
+                int b = pixels[offset], g = pixels[offset + 1], r = pixels[offset + 2];
+                if (blue ? b > r + 30 && b > g + 10 : r > b + 30 && r > g + 25) count++;
+            }
+            return count;
+        }
 
         void VerifyGrassMarkerBounds(SceneCompositor current, double padding, CanvasRenderTarget output)
         {
@@ -348,11 +480,11 @@ public sealed partial class MainWindow
             current.Draw(drawing, (float)output.Size.Width, (float)output.Size.Height, preview: false, runningSlowly: false);
             renderedFrames++;
         }
-        void RenderRaw(FootballSnapshot state)
+        void RenderRaw(FootballSnapshot state, double victorySeconds = -1)
         {
             using var drawing = raw.CreateDrawingSession();
             drawing.Clear(Windows.UI.Color.FromArgb(255, 13, 30, 25));
-            renderer.Draw(drawing, new Rect(112, 66, 1600, 1000), state);
+            renderer.Draw(drawing, new Rect(112, 66, 1600, 1000), state, victorySeconds);
             renderedFrames++;
         }
         async Task Save(CanvasRenderTarget output, string name)

@@ -711,6 +711,6 @@ public sealed class FootballGame
         public float Heading = index == 0 ? 0 : MathF.PI;
         public float? MeasuredHeading;
         public float MeasuredSpeed;
-        public FootballKickerStyle Style = index == 0 ? FootballKickerStyle.Car : FootballKickerStyle.Glove;
+        public FootballKickerStyle Style = FootballKickerStyle.Car;
     }
 }

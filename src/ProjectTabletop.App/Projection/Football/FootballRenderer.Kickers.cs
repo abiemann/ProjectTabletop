@@ -11,7 +11,7 @@ namespace ProjectTabletop.App.Projection.Football;
 internal sealed partial class FootballRenderer
 {
     private void DrawKicker(CanvasDrawingSession ds, FootballKickerStyle style,
-        Vector2 position, float heading, Color team, bool present, bool human = true)
+        Vector2 position, float heading, Color team, bool present, bool human = true, bool blueCar = false)
     {
         var before = ds.Transform;
         ds.Transform = Matrix3x2.CreateRotation(heading) * Matrix3x2.CreateTranslation(position) * before;
@@ -23,7 +23,7 @@ internal sealed partial class FootballRenderer
                 ds.DrawCircle(Vector2.Zero, FootballGame.KickerRadius * 1000, Ink(team.R, team.G, team.B, 78), 1.5f);
             switch (style)
             {
-                case FootballKickerStyle.Car: DrawCar(ds); break;
+                case FootballKickerStyle.Car: DrawCar(ds, blueCar); break;
                 case FootballKickerStyle.Glove: DrawGlove(ds, team); break;
                 case FootballKickerStyle.Pan: DrawPan(ds, team); break;
                 case FootballKickerStyle.Boot: DrawBoot(ds, team); break;
@@ -83,7 +83,7 @@ internal sealed partial class FootballRenderer
     }
 
     private void DrawKickerShadow(CanvasDrawingSession ds, FootballKickerStyle style,
-        Vector2 position, float heading, byte opacity)
+        Vector2 position, float heading, byte opacity, bool blueCar = false)
     {
         if (style != FootballKickerStyle.Car)
         {
@@ -91,7 +91,7 @@ internal sealed partial class FootballRenderer
             return;
         }
 
-        if (_carShadow is not { } shadow) return;
+        if ((blueCar ? _blueCarShadow : _carShadow) is not { } shadow) return;
         var before = ds.Transform;
         ds.Transform = Matrix3x2.CreateRotation(heading - MathF.PI / 2) *
             Matrix3x2.CreateTranslation(position + new Vector2(10, 14)) * before;
@@ -102,9 +102,9 @@ internal sealed partial class FootballRenderer
         finally { ds.Transform = before; }
     }
 
-    private void DrawCar(CanvasDrawingSession ds)
+    private void DrawCar(CanvasDrawingSession ds, bool blueCar)
     {
-        if (_kickerImages?.Image("car-front.png") is not { } car) return;
+        if (_kickerImages?.Image(blueCar ? "car-front-blue.png" : "car-front.png") is not { } car) return;
         var before = ds.Transform;
         ds.Transform = Matrix3x2.CreateRotation(-MathF.PI / 2) * before;
         try { ds.DrawImage(car, CarDestinationBounds, CarSourceBounds); }

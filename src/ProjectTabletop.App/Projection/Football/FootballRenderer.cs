@@ -20,13 +20,14 @@ internal sealed partial class FootballRenderer : IDisposable
     private CanvasRenderTarget? _pitch;
     private BitmapAssetSet? _kickerImages;
     private ShadowEffect? _carShadow;
+    private ShadowEffect? _blueCarShadow;
     private bool _disposed;
 
     internal FootballRenderer(CanvasDevice device) => _device = device;
 
     internal bool PitchReady
     {
-        get { lock (_pitchGate) return _pitch is not null && _carShadow is not null; }
+        get { lock (_pitchGate) return _pitch is not null && _carShadow is not null && _blueCarShadow is not null; }
     }
     internal bool PitchCompleted { get { lock (_pitchGate) return _pitchTask is { IsCompleted: true }; } }
     internal string? PitchError { get { lock (_pitchGate) return _pitchTask?.Exception?.GetBaseException().Message; } }
@@ -43,7 +44,7 @@ internal sealed partial class FootballRenderer : IDisposable
             if (_pitchTask is null)
             {
                 _kickerImages = new(_device, Path.Combine(AppContext.BaseDirectory, "Assets", "Football"),
-                    ["car-front.png"]);
+                    ["car-front.png", "car-front-blue.png"]);
                 _pitchTask = BuildResourcesAsync(_kickerImages);
                 _ = _pitchTask.ContinueWith(task => _ = task.Exception, CancellationToken.None,
                     TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
@@ -60,9 +61,16 @@ internal sealed partial class FootballRenderer : IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             var car = images.Image("car-front.png") ?? throw new InvalidDataException(
                 "Football car artwork: " + images.Errors.GetValueOrDefault("car-front.png", "not loaded"));
+            var blueCar = images.Image("car-front-blue.png") ?? throw new InvalidDataException(
+                "Football blue car artwork: " + images.Errors.GetValueOrDefault("car-front-blue.png", "not loaded"));
             _carShadow = new ShadowEffect
             {
                 Source = car, BlurAmount = 14,
+                ShadowColor = Ink(16, 27, 18)
+            };
+            _blueCarShadow = new ShadowEffect
+            {
+                Source = blueCar, BlurAmount = 14,
                 ShadowColor = Ink(16, 27, 18)
             };
         }
@@ -94,7 +102,7 @@ internal sealed partial class FootballRenderer : IDisposable
     }
 
     /// <param name="fieldBounds">The playable rectangle, excluding the 0.1-metre-deep goals.</param>
-    internal void Draw(CanvasDrawingSession ds, Rect fieldBounds, FootballSnapshot snapshot)
+    internal void Draw(CanvasDrawingSession ds, Rect fieldBounds, FootballSnapshot snapshot, double victorySeconds = -1)
     {
         if (fieldBounds.Width <= 0 || fieldBounds.Height <= 0) return;
         var pitch = Pitch;
@@ -112,7 +120,8 @@ internal sealed partial class FootballRenderer : IDisposable
             {
                 var position = FieldPoint(kicker.Position);
                 DrawKickerShadow(ds, kicker.Style, position, kicker.Heading,
-                    kicker.Present || snapshot.RecoveringInput ? (byte)132 : (byte)28);
+                    kicker.Present || snapshot.RecoveringInput || snapshot.Phase == FootballPhase.Finished
+                        ? (byte)132 : (byte)28, blueCar: kicker.Index == 1);
             }
             float lift = Math.Max(0, snapshot.BallHeight - FootballGame.BallRadius) * 1000;
             var ground = FieldPoint(snapshot.BallPosition);
@@ -128,12 +137,14 @@ internal sealed partial class FootballRenderer : IDisposable
             // Bars supply a measured heading; fingers and AI turn toward play.
             foreach (var kicker in snapshot.Kickers)
                 DrawKicker(ds, kicker.Style, FieldPoint(kicker.Position), kicker.Heading,
-                    kicker.Index == 0 ? Ink(239, 91, 53) : Ink(52, 161, 224), kicker.Present || snapshot.RecoveringInput,
-                    !kicker.IsAi && !kicker.MarkerAnchored);
+                    kicker.Index == 0 ? Ink(239, 91, 53) : Ink(52, 161, 224),
+                    kicker.Present || snapshot.RecoveringInput || snapshot.Phase == FootballPhase.Finished,
+                    !kicker.IsAi && !kicker.MarkerAnchored, blueCar: kicker.Index == 1);
             _ball.Draw(ds, ballCenter, radius, snapshot.BallRotation);
             // Elevated crossbars occlude a low ball at the goal mouth.
             DrawGoal(ds, false, true);
             DrawGoal(ds, true, true);
+            DrawVictory(ds, snapshot, victorySeconds);
         }
         finally { ds.Transform = previous; }
     }
@@ -357,8 +368,12 @@ internal sealed partial class FootballRenderer : IDisposable
         lock (_pitchGate)
         {
             _disposed = true;
+            _confettiPaper?.Dispose();
+            _confettiPaper = null;
             _carShadow?.Dispose();
             _carShadow = null;
+            _blueCarShadow?.Dispose();
+            _blueCarShadow = null;
             _kickerImages?.Dispose();
             _kickerImages = null;
             _pitch?.Dispose();

@@ -43,3 +43,29 @@ Edit prompt:
 Original native football artwork is covered by the project's license. The car
 cutout derives from the user-supplied image; this provenance record does not
 establish a separate license for that source image.
+
+## Victory confetti
+
+The red, white, blue and gold confetti launches from opposite offscreen sides;
+no cannon bodies are drawn. This original native artwork uses a cached paper
+sprite batched across 2,400 pieces, each with its own launch time, tumbling
+motion, flutter and landing point.
+Three volleys cover the winner's half, including the car, then settle until the
+next match. The celebration uses a shared presentation clock, independent of
+camera tracking and the finished game's physics. No external artwork is used.
+
+## Blue opponent car
+
+`car-front-blue.png` is a matching variant of the existing cutout, edited with
+the built-in image-generation tool on 2026-10-11. Alexander supplied
+`codex-clipboard-424f675e-b765-4a46-ae00-7727697b06fb.png` as a reference for the
+twin tapered hood stripes, requesting them in blue. The white body, cropped
+windscreen, orientation and sprite placement match the red car. Both players
+default to the car; player 2 uses this blue variant in human and AI modes.
+Both bitmaps are decoded once per graphics device, share the same destination
+geometry, and cast shadows from their own alpha. The PNG's real alpha channel,
+exterior corners and removed windscreen area were verified before integration.
+
+Edit prompt (built-in tool):
+
+> Use case: precise-object-edit. Asset type: transparent car-front sprite for a projected football game. Input 1 is the EDIT TARGET: the existing cropped white car-front sprite with red stripes. Input 2 is a STRIPE DESIGN REFERENCE ONLY. Modify only the painted hood stripes on input 1. Remove the red center racing stripes completely and restore matching pearl-white hood paint there. Add TWO separate symmetric vivid cobalt/azure BLUE stripes, shaped like the slender angular tapered wedges on the hood in input 2: wide near the windshield with diagonal cut upper ends slanting toward the car center, tapering into long narrow tips near the front bumper, separated by a broad white center gap. Include subtle blue carbon-fiber texture and the thin angular white divisions from the reference, keeping blue bright and readable at game size. Preserve the exact car body, lighting, grille, headlights, windshield wipers, existing curved cropped-back windshield edge, overhead perspective, nose pointing DOWN, silhouette, position, overall aspect ratio and transparent margin of input 1. No reconstruction of the missing rear car or full windshield. Do not copy the reference screenshot UI or its background. Output PNG with genuine RGBA transparency: ALL exterior/background/cutaway pixels alpha0, no checkerboard in the image pixels, no matte, no exterior shadow, no text. Keep the original canvas dimensions and placement if possible. Change only the hood stripes.
