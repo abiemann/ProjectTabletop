@@ -98,8 +98,13 @@ internal sealed partial class FootballRenderer : IDisposable
             ds.DrawImage(pitch, new Rect(0, 0, width, 400), crop);
             var center = new Vector2(width * .80f, 178);
             DrawSoftShadow(ds, center + new Vector2(47, 89), 127, 93, 165);
-            DrawKickerShadow(ds, FootballKickerStyle.Car, new(width * .66f, 300), -.47f, 115);
-            DrawKicker(ds, FootballKickerStyle.Car, new(width * .66f, 300), -.47f, Ink(239, 91, 53), true, false);
+            var carCenter = new Vector2(width * .65f - 50 / scale, 288);
+            var thumbnailTransform = ds.Transform;
+            // Give the bonnet more presence on the menu card, including its shadow.
+            ds.Transform = Matrix3x2.CreateScale(1.4f, carCenter) * thumbnailTransform;
+            DrawKickerShadow(ds, FootballKickerStyle.Car, carCenter, -.47f, 115);
+            DrawKicker(ds, FootballKickerStyle.Car, carCenter, -.47f, Ink(239, 91, 53), true, false);
+            ds.Transform = thumbnailTransform;
             _ball.Draw(ds, center, 112, Quaternion.CreateFromYawPitchRoll(.47f, -.35f, .28f));
         }
         finally { ds.Transform = before; }
