@@ -5,7 +5,7 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
-    private readonly DisplaySoundPlayer _footballCrowdSound = new("Football crowd", .55);
+    private readonly DisplaySoundPlayer _footballCrowdSound = new("Football crowd", .275);
     private readonly DisplaySoundVoices _footballGoalSounds = new("Football goal", .55);
     private readonly DisplaySoundPlayer _footballMatchSound = new("Football match", .78);
     private readonly DisplaySoundPlayer _footballAmbienceSound = new("Football stadium ambience", .45);
