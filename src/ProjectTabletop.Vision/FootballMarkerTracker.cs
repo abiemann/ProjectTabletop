@@ -153,8 +153,16 @@ public sealed class FootballMarkerTracker
         double length = Length(strip), oldLength = Length(_full);
         double width = ColorTipDetector.Distance(bar.Side1, bar.Side2);
         double oldWidth = ColorTipDetector.Distance(previous.Side1, previous.Side2) - oldLength * profile.SpacingRatio;
-        if (length < oldLength * .78 || length > oldLength * 1.25 || oldWidth < 1 ||
-            width < oldWidth * .55 || width > oldWidth * 1.65) return null;
+        if (!MatchesSize(oldLength, oldWidth, 0))
+        {
+            // Projected artwork can stretch a pair's envelope without lengthening
+            // its physical strips. The measured ink area and learned proportions
+            // provide an alternate size check; sparse ink keeps the envelope path.
+            double expectedLength = Math.Sqrt(_full.AreaPixels * .5 * profile.AspectRatio);
+            double expectedWidth = Math.Sqrt(_full.AreaPixels * .5 / profile.AspectRatio);
+            // Integer-pixel contour edges allow one raw-camera pixel of outline rounding.
+            if (!MatchesSize(expectedLength, expectedWidth, 1)) return null;
+        }
         double ux = (bar.End2.X - bar.End1.X) / length, uy = (bar.End2.Y - bar.End1.Y) / length;
         double oldUx = (previous.End2.X - previous.End1.X) / oldLength;
         double oldUy = (previous.End2.Y - previous.End1.Y) / oldLength;
@@ -163,8 +171,11 @@ public sealed class FootballMarkerTracker
         if (dot < 0) { ux = -ux; uy = -uy; }
         double nx = -uy, ny = ux, spacing = profile.SpacingRatio * length;
         var predicted = PredictedCenter(frameTime);
-        var minus = new PixelPoint(strip.Center.X - nx * spacing * .5, strip.Center.Y - ny * spacing * .5);
-        var plus = new PixelPoint(strip.Center.X + nx * spacing * .5, strip.Center.Y + ny * spacing * .5);
+        // Match complete-pair geometry: use the measured outline center. Bright
+        // projected patches can shift the ink's mass centroid inside that outline.
+        var stripCenter = new PixelPoint((bar.End1.X + bar.End2.X) * .5, (bar.End1.Y + bar.End2.Y) * .5);
+        var minus = new PixelPoint(stripCenter.X - nx * spacing * .5, stripCenter.Y - ny * spacing * .5);
+        var plus = new PixelPoint(stripCenter.X + nx * spacing * .5, stripCenter.Y + ny * spacing * .5);
         double minusDistance = ColorTipDetector.Distance(minus, predicted);
         double plusDistance = ColorTipDetector.Distance(plus, predicted);
         if (Math.Abs(minusDistance - plusDistance) < Math.Max(2.5, spacing * .35)) return null;
@@ -181,6 +192,10 @@ public sealed class FootballMarkerTracker
                 new(center.X - nx * (spacing + width) * .5, center.Y - ny * (spacing + width) * .5),
                 new(center.X + nx * (spacing + width) * .5, center.Y + ny * (spacing + width) * .5))
         };
+
+        bool MatchesSize(double expectedLength, double expectedWidth, double edgeAllowance) =>
+            expectedWidth >= 1 && length >= expectedLength * .78 && length <= expectedLength * 1.25 &&
+            width >= expectedWidth * .55 && width <= expectedWidth * 1.65 + edgeAllowance;
     }
 
     private void Remember(ColorTipObservation item, DateTimeOffset frameTime, bool fullPair, bool resetVelocity)

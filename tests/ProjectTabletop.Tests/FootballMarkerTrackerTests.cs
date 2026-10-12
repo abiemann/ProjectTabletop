@@ -188,6 +188,143 @@ public sealed class FootballMarkerTrackerTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ForwardShotContinuesFromMeasuredStripGeometryUnderProjectedCar(bool asymmetricInk)
+    {
+        // Measured geometry from the 2026-10-12 04:25:43.491Z failure. The rear
+        // strip remains intact while the car's projected artwork covers the front
+        // strip. The previous pair's envelope was 101px long despite ~74px ink.
+        var profile = new BlackTipProfile(1, .1450980392156863, .596078431372549,
+            .0007806471836419753, 3.3998357117836475, 2, .45576511276587967);
+        var previous = new ColorTipObservation(new(1404.9136860286696, 469.17181592478994),
+            30.71596494738128, 2964, .8334375561418049)
+        {
+            Bar = new(new(1399.9353992050808, 519.3090115675432),
+                new(1409.8919728522585, 419.03462028203677),
+                new(1377.359651770552, 466.4358853661423),
+                new(1432.4677202867874, 471.90774648343756))
+        };
+        var strip = new ColorTipObservation(new(1383.5669929481107, 456.08893800652555),
+            22.450917682180222, 1583.5, .9526150957537616)
+        {
+            Bar = new(new(1379.96728515625, 493.8459167480469),
+                new(1387.107421875, 418.1609802246094),
+                new(1372.2509765625, 454.9386901855469),
+                new(1394.82373046875, 457.0682067871094))
+        };
+        var expected = new PixelPoint(1372.7302555718527, 469.64868135138124);
+        if (asymmetricInk)
+        {
+            // Second captured forward shot, 2026-10-12 04:37:07.945Z. Projection
+            // removes ink at one edge, shifting its mass centroid away from the
+            // rectangle center used by complete-pair geometry.
+            previous = new(new(1409.5344241338955, 509.4014521912942),
+                29.92067103010745, 2812.5, .8578093578311943)
+            {
+                Bar = new(new(1405.1154461401843, 470.4761123879698),
+                    new(1413.9534021276068, 548.3267919946186),
+                    new(1437.3230583012107, 506.2467626373659),
+                    new(1381.7457899665806, 512.5561417452225))
+            };
+            strip = new(new(1337.3238866396762, 496.2463407038306),
+                22.606338099481658, 1605.5, .7597175367366015)
+            {
+                Bar = new(new(1341, 539), new(1341, 459), new(1324, 499), new(1358, 499))
+            };
+            expected = new(1371.4086291908745, 500.5581601473272);
+        }
+        // Three preceding measurements reproduce the saved bounded search prediction
+        // without exceeding its per-frame velocity limit.
+        double dx = (previous.Center.X - expected.X) * .033 / (.08 * .84);
+        double dy = (previous.Center.Y - expected.Y) * .033 / (.08 * .84);
+        PixelPoint Shift(PixelPoint point, int steps) => new(point.X + dx * steps, point.Y + dy * steps);
+        ColorTipObservation Preceding(int steps) => previous with
+        {
+            Center = Shift(previous.Center, steps),
+            Bar = new(Shift(previous.Bar.End1, steps), Shift(previous.Bar.End2, steps),
+                Shift(previous.Bar.Side1, steps), Shift(previous.Bar.Side2, steps))
+        };
+        PixelPoint? Field(PixelPoint point) => new(1 - point.X / 1920, point.Y / 1080);
+        var tracker = new FootballMarkerTracker();
+        FootballTipDecision Observe(ColorTipDetectionResult result, double ms) => tracker.Update(0, profile,
+            result, Field, Epoch.AddMilliseconds(ms), Epoch.AddMilliseconds(ms));
+        Assert.Equal(FootballTipAction.Hold, Observe(new([Preceding(2)], "black-bar-pair-candidate"), 0).Action);
+        Assert.Equal(FootballTipAction.Publish, Observe(new([Preceding(1)], "black-bar-pair-candidate"), 33).Action);
+        Assert.Equal(FootballTipAction.Publish, Observe(new([previous], "black-bar-pair-candidate"), 66).Action);
+        double missedAt = 66 + (asymmetricInk ? 113.0842 : 127.8868);
+        var hint = tracker.GetSearchHint(Epoch.AddMilliseconds(missedAt))!;
+        Assert.InRange(Math.Abs(hint.ExpectedCenter.X - expected.X), 0, .001);
+        Assert.InRange(Math.Abs(hint.ExpectedCenter.Y - expected.Y), 0, .001);
+        var measured = Observe(Empty() with { SupportingBars = [strip] }, missedAt);
+        Assert.Equal(FootballTipAction.Publish, measured.Action);
+        Assert.Equal("single-strip", measured.Source);
+        Assert.InRange(measured.Tip!.Center.X, asymmetricInk ? 1359 : 1366, asymmetricInk ? 1360 : 1367);
+        Assert.InRange(measured.Tip.Center.Y, asymmetricInk ? 498.9 : 454, asymmetricInk ? 499.1 : 455);
+        Assert.Equal(strip.AreaPixels * 2, measured.Tip.AreaPixels);
+        // No strip means no invented movement; partial evidence cannot extend expiry.
+        Assert.Equal(FootballTipAction.Hold, Observe(Empty(), 227).Action);
+        Assert.Equal(FootballTipAction.Hold,
+            Observe(Empty() with { SupportingBars = [strip] }, 417).Action);
+    }
+
+    [Theory]
+    [InlineData(20, 6)]
+    [InlineData(70, 6)]
+    [InlineData(46, 2)]
+    [InlineData(46, 11)]
+    public void PartialInkDimensionsStillRejectDifferentPhysicalMarks(double length, double width)
+    {
+        var tracker = Confirmed();
+        var strip = Shape(100, 92, length, width, length * width, 0);
+        var result = Update(tracker, Empty() with { SupportingBars = [strip] }, 66);
+        Assert.Equal(FootballTipAction.Hold, result.Action);
+        Assert.Null(result.Tip);
+    }
+
+    [Fact]
+    public void SparseButValidPairKeepsItsMeasuredLengthWhenOneStripClears()
+    {
+        var training = Frame();
+        Paint(training, 102, tapered: false);
+        Paint(training, 134, tapered: false);
+        var profile = BlackTipDetector.Learn(400, 300, 1600, training, new(100, 102));
+        var sparse = Frame();
+        Paint(sparse, 102, tapered: true);
+        Paint(sparse, 134, tapered: true);
+        var full = BlackTipDetector.Detect(400, 300, 1600, sparse, profile);
+        var marker = Assert.Single(full.Candidates);
+        Assert.InRange(marker.AreaPixels / (2 * 92 * 12), .54, .63);
+        var clear = Frame();
+        Paint(clear, 102, tapered: false);
+        var partial = BlackTipDetector.Detect(400, 300, 1600, clear, profile);
+        Assert.Empty(partial.Candidates);
+        Assert.Single(partial.SupportingBars);
+        var tracker = new FootballMarkerTracker();
+        FootballTipDecision Observe(ColorTipDetectionResult result, int ms) => tracker.Update(0, profile,
+            result, Field, Epoch.AddMilliseconds(ms), Epoch.AddMilliseconds(ms));
+        Assert.Equal(FootballTipAction.Hold, Observe(full, 0).Action);
+        Assert.Equal(FootballTipAction.Publish, Observe(full, 33).Action);
+        var continued = Observe(partial, 66);
+        Assert.Equal(FootballTipAction.Publish, continued.Action);
+        Assert.Equal("single-strip", continued.Source);
+        Assert.Equal(new PixelPoint(100, 118), continued.Tip!.Center);
+
+        static void Paint(byte[] pixels, int centerY, bool tapered)
+        {
+            // Convex, low-fill outlines remain valid detector evidence. Uneven
+            // projection can remove corner ink while preserving the bar's extent.
+            for (int y = centerY - 6; y <= centerY + 6; y++)
+            for (int x = 54; x <= 146; x++)
+            {
+                if (tapered && Math.Abs(y - centerY) > 1.5 + 5 * (1 - Math.Abs(x - 100) / 46.0)) continue;
+                int i = (y * 400 + x) * 4;
+                pixels[i] = 8; pixels[i + 1] = 40; pixels[i + 2] = 12;
+            }
+        }
+    }
+
     [Fact]
     public void ProjectorDistortedPairFromCapturedFrameDoesNotDisarmAnAcquiredPlayer()
     {
