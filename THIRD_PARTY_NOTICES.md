@@ -107,6 +107,29 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Football sound recordings
+
+The bundled Football sound effects use the following recordings. These sources
+are dedicated to the public domain under
+[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/):
+
+- Referee whistles: [Rosa-Orenes256, Referee whistle sound.wav](https://freesound.org/people/Rosa-Orenes256/sounds/538422/).
+- Crowd cheers: [mglennsound, AF Crowd Cheer LOOP .wav](https://freesound.org/people/mglennsound/sounds/678544/).
+- Group voices arranged into neutral chants: [khenshom, Hey - Men Shouting together - Jewish Wedding](https://freesound.org/people/khenshom/sounds/527740/).
+- Victory celebration: [FoolBoyMedia, Crowd Cheer II](https://freesound.org/people/FoolBoyMedia/sounds/397435/).
+
+The two additional goal cheers are by Quistard, recorded at Southampton vs Hull
+at Saint Mary's Stadium: [Football Crowd - Goal- Cheer](https://freesound.org/people/Quistard/sounds/237678/)
+and [Football Crowd - Goal Cheer](https://freesound.org/people/Quistard/sounds/237679/).
+Both are licensed under [Creative Commons Attribution 3.0 Unported](https://creativecommons.org/licenses/by/3.0/).
+
+ProjectTabletop trims, arranges, mixes and adjusts the levels of these recordings.
+Full editing details, source checksums and both license texts are bundled in
+`Assets/Football/Audio` and available through **Settings → Licenses**.
+See the [Football audio credits](https://github.com/abiemann/ProjectTabletop/blob/main/src/ProjectTabletop.App/Assets/Football/Audio/AUDIO.md).
+These source recordings retain their respective terms independently of the project's
+license.
+
 ## ComputeSharp
 
 The Paint, Globe and Water Garden GPU shaders use [ComputeSharp](https://github.com/Sergio0694/ComputeSharp)

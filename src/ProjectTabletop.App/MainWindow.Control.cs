@@ -49,6 +49,8 @@ public sealed partial class MainWindow
                     lastDetection = _lastHoldButtonDetection, lastActivation = _lastHoldButtonActivation,
                     progress = _scene.CurrentHoldProgress };
 #if DEBUG
+            case "verify_football_audio":
+                return await VerifyFootballAudioAsync();
             case "verify_camera_input_scheduling":
                 return await VerifyCameraInputSchedulingAsync();
             case "verify_camera_latency":
@@ -214,6 +216,7 @@ public sealed partial class MainWindow
                     },
                     outputOpen = _output is not null,
                     photoCopyAudio = _photocopierSound.Status,
+                    footballAudio = FootballAudioDiagnostics,
                     displayAudio = DisplayAudioDiagnostics,
                     outputVisible = _output?.AppWindow.IsVisible ?? false,
                     outputFullScreen = _output?.IsFullScreen ?? false,

@@ -13,6 +13,7 @@ namespace ProjectTabletop.App.Projection;
 public sealed partial class SceneCompositor
 {
     private readonly Func<DateTimeOffset> _footballClock;
+    private readonly FootballAudioTimeline _footballAudio = new();
     private FootballRenderer? _footballRenderer;
     private CanvasDevice? _footballDevice;
     private CanvasRenderTarget? _footballThumbnail;
@@ -38,6 +39,9 @@ public sealed partial class SceneCompositor
         (_footballFingerPlayers[0] || _footballFingerPlayers[1] && _boardSession.FootballState.Mode == FootballMode.TwoHumans);
 
     public FootballSnapshot FootballState { get { lock (_gate) return _boardSession.FootballState; } }
+    // Handlers must only enqueue the small cue value. Playback must not block the render lock.
+    public event Action<FootballAudioUpdate>? FootballAudioRequested;
+    public long FootballAudioGeneration { get { lock (_gate) return _footballAudio.Generation; } }
     public bool FootballInputActive
     {
         get { lock (_gate) { SyncFootballSession(); return _footballActive; } }
@@ -154,6 +158,7 @@ public sealed partial class SceneCompositor
         Array.Clear(_footballBarHeadings);
         _boardSession.ClearFootballInput(_footballResetThrough);
         _renderedBoardState = null;
+        UpdateFootballAudio(_boardSession.FootballState, _footballClock());
     }
 
     private void SyncFootballSession()
@@ -170,6 +175,7 @@ public sealed partial class SceneCompositor
             _boardSession.FootballState.Phase != FootballPhase.Finished &&
             !_blackOutput && !_boardSetup && _calibrationTarget < 0 && !IsBoardRevealActive &&
             _boardCameraMap is not null && _boardSurfaceMap is not null;
+        UpdateFootballAudio(_boardSession.FootballState, _footballClock());
         if (active == _footballActive && _footballNavigation == _boardSession.NavigationRevision &&
             _footballSessionInputRevision == _boardSession.FootballInputRevision &&
             ReferenceEquals(_footballCameraMap, _boardCameraMap) && ReferenceEquals(_footballSurfaceMap, _boardSurfaceMap)) return;
@@ -338,11 +344,22 @@ public sealed partial class SceneCompositor
         _boardSession.TickFootball(now);
         var state = _boardSession.FootballState;
         UpdateFootballVictory(state, now);
+        UpdateFootballAudio(state, now);
         // The game deliberately stops advancing after a win. Keep its visual
         // celebration and the following control entrance moving at 60 Hz, then
         // reuse the fully settled image.
         return unchecked(state.Revision * ((long)(FootballPresentationSeconds * 60) + 2) +
             _footballVictoryFrame + 1);
+    }
+
+    internal void UpdateFootballAudio(FootballSnapshot state, DateTimeOffset now)
+    {
+        bool visible = !_disposed && _boardSession.Screen == BoardScreen.Football &&
+            !_blackOutput && !_boardSetup && _calibrationTarget < 0 && !IsBoardRevealActive &&
+            _boardCameraMap is not null && _boardSurfaceMap is not null;
+        var update = _footballAudio.Update(state, now, _boardSession.NavigationRevision,
+            _boardSession.FootballInputRevision, visible);
+        if (update.Cues != FootballAudioCue.None) FootballAudioRequested?.Invoke(update);
     }
 
     internal void UpdateFootballVictory(FootballSnapshot state, DateTimeOffset now)

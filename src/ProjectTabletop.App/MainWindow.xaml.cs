@@ -70,6 +70,7 @@ public sealed partial class MainWindow : Window
         _dispatchInputResult = action => DispatcherQueue.TryEnqueue(() => action());
         _scene.LicensesRequested += () => DispatcherQueue.TryEnqueue(() => _ = ShowLicensesAsync());
         _scene.BoardOpened += BoardOpenedForStickTracking;
+        _scene.FootballAudioRequested += FootballAudioRequested;
         AppPalette.ApplyTitleBar(AppWindow.TitleBar);
         InitializeHandDetectionLogging();
         _camera.FrameReceived += Camera_FrameReceived;
@@ -245,6 +246,9 @@ public sealed partial class MainWindow : Window
         ResetPieceDetections();
         DisposeDisplayAudio();
         _photocopierSound.Dispose();
+        _scene.FootballAudioRequested -= FootballAudioRequested;
+        _footballCrowdSound.Dispose();
+        _footballMatchSound.Dispose();
         _statusTimer.Stop();
         await DisposeEyeTipTrackingAsync();
         await DisposeFootballInputAsync();

@@ -22,6 +22,9 @@ public sealed partial class MainWindow
         {
             new("ProjectTabletop Noncommercial License 1.0", Path.Combine(installationDirectory, "LICENSE")),
             new("Third-party notices and credits", Path.Combine(installationDirectory, "THIRD_PARTY_NOTICES.md")),
+            new("Football / Sound effects and credits", Path.Combine(installationDirectory, "Assets", "Football", "Audio", "AUDIO.md")),
+            new("Football / CC0 sound license", Path.Combine(installationDirectory, "Assets", "Football", "Audio", "CC0-1.0.txt")),
+            new("Football / Attribution 3.0 sound license", Path.Combine(installationDirectory, "Assets", "Football", "Audio", "CC-BY-3.0.txt")),
             new("Hand models / Palm detector license", Path.Combine(installationDirectory, "Models", "Hands", "LICENSE-palm_detection_mediapipe.txt")),
             new("Hand models / Hand landmark estimator license", Path.Combine(installationDirectory, "Models", "Hands", "LICENSE-handpose_estimation_mediapipe.txt")),
             new("Hand models / Sources and credits", Path.Combine(installationDirectory, "Models", "Hands", "README.md"))

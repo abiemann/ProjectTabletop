@@ -24,6 +24,8 @@ public sealed partial class MainWindow
         var now = MonotonicClock.UtcNow;
         int renderedFrames = 0;
         using var scene = MakeScene(16.0 / 9, out double inset);
+        var audioCues = new List<FootballAudioUpdate>();
+        scene.FootballAudioRequested += audioCues.Add;
         // The pitch is built off the render path; the board shows Loading until then.
         await scene.EnsureBoardArtworkResourcesAsync(device, BoardScreen.Football);
         using var target = new CanvasRenderTarget(device, 1600, 900, 96);
@@ -65,6 +67,8 @@ public sealed partial class MainWindow
         }
         Check(scene.FootballState.Phase == FootballPhase.Playing && scene.FootballState.Kickers.All(k => k.Present),
             "Fresh calibrated input did not start a human-versus-AI match.");
+        Check(audioCues.Count(cue => (cue.Cues & FootballAudioCue.StartWhistle) != 0) == 1,
+            "Football did not emit exactly one kickoff whistle from its live scene tick.");
         await Save(target, "football-playing");
         // The tip detectors' projected-scene reference matches the camera's own view of
         // the board (1000 synthetic camera pixels less the safety inset), not the projector raster.

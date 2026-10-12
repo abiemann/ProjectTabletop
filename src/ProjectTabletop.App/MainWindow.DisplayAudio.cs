@@ -119,6 +119,10 @@ public sealed partial class MainWindow
             : unavailableStatus ?? "No matching audio output is available for this display.";
         _photocopierSound.ConfigureOutput(SelectedDisplay?.PhysicalMode?.FriendlyName,
             _displayAudioDevice, available && _displayAudioRequested);
+        _footballCrowdSound.ConfigureOutput(SelectedDisplay?.PhysicalMode?.FriendlyName,
+            _displayAudioDevice, available && _displayAudioRequested);
+        _footballMatchSound.ConfigureOutput(SelectedDisplay?.PhysicalMode?.FriendlyName,
+            _displayAudioDevice, available && _displayAudioRequested);
     }
 
     private void EnableDisplayAudio_Changed(object sender, RoutedEventArgs args)
