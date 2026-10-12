@@ -166,7 +166,7 @@ public sealed partial class MainWindow
             {
                 var profile = ColorTipDetector.Learn(frame.Width, frame.Height, frame.Stride, frame.Bgra, new(x, y));
                 var detection = ColorTipDetector.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra, profile,
-                    new(PreferredCenter: new(x, y), ProjectionFrames: StickTipProjectionReference(),
+                    new(PreferredCenter: new(x, y), ProjectionFrames: StickTipProjectionReference(frame, learning: true),
                         FrameTime: frame.Timestamp));
                 return (Profile: profile, Detection: detection);
             }

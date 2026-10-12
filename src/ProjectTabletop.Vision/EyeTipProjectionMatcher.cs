@@ -186,7 +186,11 @@ internal sealed class EyeTipProjectionMatcher
                 if (!complete) continue;
                 double bEnergy = bSquares - bSum * bSum / count;
                 if (bEnergy < count * 16) continue;
-                if (cross / Math.Sqrt(energy * bEnergy) >= MatchCorrelation) return true;
+                // A faint turf stripe can correlate with actual black ink after arbitrary
+                // normalization. It cannot explain more than four times its contrast.
+                // Apply this bound only to bars; eye/colour comparisons stay unchanged.
+                if (cross / Math.Sqrt(energy * bEnergy) >= MatchCorrelation &&
+                    (bar is null || energy <= bEnergy * 16)) return true;
             }
         }
         return false;

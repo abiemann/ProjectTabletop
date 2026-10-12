@@ -264,7 +264,7 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException("Wait for fresh webcam video, then click the tip again.");
             var learned = await Task.Run(() =>
             {
-                var references = StickTipProjectionReference();
+                var references = StickTipProjectionReference(frame, learning: true);
                 var profile = BlackTipDetector.Learn(frame.Width, frame.Height, frame.Stride, frame.Bgra, point,
                     new(ProjectionFrames: references, FrameTime: frame.Timestamp));
                 var detection = BlackTipDetector.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra, profile,
@@ -372,7 +372,7 @@ public sealed partial class MainWindow
                 {
                     // GPU reference readback can be slow; never hold the input
                     // lock while reading it or scanning either camera image.
-                    var references = StickTipProjectionReference();
+                    var references = StickTipProjectionReference(frame);
                     // Both players share one colour conversion of this camera frame.
                     var detections = BlackTipDetector.DetectEach(frame.Width, frame.Height, frame.Stride, frame.Bgra,
                         selected.Select(player => profiles.ForPlayer(player)!).ToArray(),
@@ -411,8 +411,14 @@ public sealed partial class MainWindow
                             switch (decision.Action)
                             {
                                 case FootballTipAction.Publish:
-                                    if (!_scene.SetFootballPlayerBar(player, decision.Tip!, frame.Timestamp))
+                                    if (!_scene.SetFootballPlayerBar(player, decision.Tip!, frame.Timestamp, out bool ignoredFrame))
                                     {
+                                        if (ignoredFrame)
+                                        {
+                                            decisionSources[index] = "publication-frame-rejected";
+                                            _footballInputReasons[player] = "Waiting for fresh camera and projection images.";
+                                            break;
+                                        }
                                         _footballTipTrackers[player].Reset();
                                         ClearFootballPlayerLocked(player, "Keep the black marker on the grass in your half of the field.", frame.Timestamp);
                                         break;

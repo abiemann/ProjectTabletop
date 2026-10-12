@@ -241,6 +241,28 @@ public static class BlackTipDetector
                     .Select(pair => pair.Match.Observation.Center));
                 var recovered = localPairs.Where(pair => localPartners[pair.First] == 1 && localPartners[pair.Second] == 1)
                     .Select(pair => pair.Match.Observation).Where(item => NearHint(item, hint)).ToArray();
+                if (recovered.Length == 0 && local.Length > 0)
+                {
+                    // A projected red car can brighten one colour channel of black ink
+                    // while its luminance and outline remain dark. Recover that strip
+                    // only near a recently measured pair and beside a normally dark,
+                    // physically validated partner. Never acquire coloured pairs this way.
+                    var luminance = ExtractStrips(image, profile, expectedArea, hint.ExpectedCenter, projection,
+                        vetoes, region: region, useLuminance: true);
+                    var luminancePairs = FindPairs(luminance, profile.SpacingRatio);
+                    var luminancePartners = new int[luminance.Length];
+                    foreach (var pair in luminancePairs)
+                    { luminancePartners[pair.First]++; luminancePartners[pair.Second]++; }
+                    bool Anchored(StripPair pair) => local.Any(strip => SameStrip(strip, luminance[pair.First]) ||
+                        SameStrip(strip, luminance[pair.Second]));
+                    ambiguous.AddRange(luminancePairs.Where(pair => Anchored(pair) &&
+                            (luminancePartners[pair.First] > 1 || luminancePartners[pair.Second] > 1))
+                        .Select(pair => pair.Match.Observation.Center));
+                    recovered = luminancePairs.Where(pair => Anchored(pair) &&
+                            luminancePartners[pair.First] == 1 && luminancePartners[pair.Second] == 1)
+                        .Select(pair => pair.Match.Observation).Where(item => NearHint(item, hint)).ToArray();
+                    if (recovered.Length > 0) MergeStrips(supporting, luminance);
+                }
                 unambiguous.AddRange(recovered);
                 if (recovered.Length > 0) source = "local-contrast";
             }
@@ -258,15 +280,15 @@ public static class BlackTipDetector
 
     private static ColorTipObservation[] ExtractStrips(BlackImage image, BlackTipProfile profile, double expectedArea,
         PixelPoint? preferred, EyeTipProjectionMatcher? projection, Dictionary<ColorTipObservation, bool> vetoes,
-        double valueAllowance = 0, Rect? region = null)
+        double valueAllowance = 0, Rect? region = null, bool useLuminance = false)
     {
-        using Mat mask = image.Mask(profile, valueAllowance, region);
+        using Mat mask = image.Mask(profile, valueAllowance, region, useLuminance);
         Cv2.FindContours(mask, out Point[][] contours, out HierarchyIndex[] hierarchy,
             RetrievalModes.CComp, ContourApproximationModes.ApproxSimple, region?.TopLeft);
         var candidates = contours.Where((_, index) => hierarchy[index].Parent < 0)
             .Where(contour => region is not { } bounds || contour.All(point => point.X > bounds.Left &&
                 point.X < bounds.Right - 1 && point.Y > bounds.Top && point.Y < bounds.Bottom - 1))
-            .Select(contour => Component(contour, image, profile, expectedArea, valueAllowance))
+            .Select(contour => Component(contour, image, profile, expectedArea, valueAllowance, useLuminance))
             .Where(item => item is not null).Select(item => item!.Observation);
         var ranked = preferred is { } point
             ? candidates.OrderBy(item => ColorTipDetector.Distance(item.Center, point)).ThenByDescending(item => item.Score)
@@ -382,7 +404,7 @@ public static class BlackTipDetector
     private sealed record ComponentShape(ColorTipObservation Observation, double Aspect);
 
     private static ComponentShape? Component(Point[] contour, BlackImage image, BlackTipProfile profile,
-        double? expectedArea, double valueAllowance = 0)
+        double? expectedArea, double valueAllowance = 0, bool useLuminance = false)
     {
         double area = Math.Abs(Cv2.ContourArea(contour));
         if (area < 12 || area > image.FrameWidth * (double)image.FrameHeight * .025) return null;
@@ -411,7 +433,7 @@ public static class BlackTipDetector
         double cx = moments.M10 / moments.M00, cy = moments.M01 / moments.M00;
         // Hole contours are children; this explicit dark-core check also rejects an enclosing
         // ring whose geometric centroid falls in its light interior.
-        if (!image.DarkCore(cx, cy, profile, valueAllowance)) return null;
+        if (!image.DarkCore(cx, cy, profile, valueAllowance, useLuminance)) return null;
         double contrast = image.Contrast(contour, bounds);
         if (contrast < 13) return null;
         double sizeScore = expectedArea is { } desired ? Math.Exp(-Math.Abs(Math.Log(rawArea / desired))) : 1;
@@ -514,10 +536,10 @@ public static class BlackTipDetector
         private static double MaximumValue(BlackTipProfile profile, double valueAllowance) =>
             Math.Min(.50, Math.Clamp(profile.Value * 1.7 + .07, .18, .42) + valueAllowance);
 
-        private bool IsDark(int pixel, BlackTipProfile profile, double valueAllowance = 0) =>
-            Value[pixel] / 255.0 <= MaximumValue(profile, valueAllowance);
+        private bool IsDark(int pixel, BlackTipProfile profile, double valueAllowance = 0, bool useLuminance = false) =>
+            (useLuminance ? Gray[pixel] : Value[pixel]) / 255.0 <= MaximumValue(profile, valueAllowance);
 
-        public Mat Mask(BlackTipProfile profile, double valueAllowance = 0, Rect? region = null)
+        public Mat Mask(BlackTipProfile profile, double valueAllowance = 0, Rect? region = null, bool useLuminance = false)
         {
             Rect bounds = region ?? new(0, 0, Width, Height);
             // The largest 8-bit value that IsDark accepts, so the vectorized threshold
@@ -525,7 +547,8 @@ public static class BlackTipDetector
             double maximum = MaximumValue(profile, valueAllowance);
             int threshold = -1;
             for (int value = 0; value < 256 && value / 255.0 <= maximum; value++) threshold = value;
-            using var source = new Mat(_value, bounds);
+            using var luminance = useLuminance ? Mat.FromPixelData(Height, Width, MatType.CV_8UC1, Gray) : null;
+            using var source = new Mat(luminance ?? _value, bounds);
             Mat mask = new();
             Cv2.Threshold(source, mask, threshold, 255, ThresholdTypes.BinaryInv);
             Cv2.MorphologyEx(mask, mask, MorphTypes.Open, CrossKernel);
@@ -557,12 +580,12 @@ public static class BlackTipDetector
             return Math.Clamp(percentile / 255.0 * .72 - baseline, 0, .12);
         }
 
-        public bool DarkCore(double x, double y, BlackTipProfile profile, double valueAllowance = 0)
+        public bool DarkCore(double x, double y, BlackTipProfile profile, double valueAllowance = 0, bool useLuminance = false)
         {
             int cx = (int)Math.Round(x), cy = (int)Math.Round(y), count = 0;
             for (int dy = -1; dy <= 1; dy++)
             for (int dx = -1; dx <= 1; dx++)
-                if (IsDark((cy + dy) * Width + cx + dx, profile, valueAllowance)) count++;
+                if (IsDark((cy + dy) * Width + cx + dx, profile, valueAllowance, useLuminance)) count++;
             return count >= 7;
         }
 

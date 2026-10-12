@@ -687,6 +687,71 @@ public class BlackTipVisionTests
     }
 
     [Fact]
+    public void RecentPairRecoversProjectorTintOnlyBesideMeasuredDarkInk()
+    {
+        var background = Frame();
+        Fill(background, 0, 0, Width, Height, 160, 160, 160);
+        var training = background.ToArray();
+        Bar(training, 160, 112, 46, 6, brightness: 51);
+        Bar(training, 160, 128, 46, 6, brightness: 51);
+        var profile = Learn(training, 160, 112);
+        var full = Assert.Single(Detect(training, profile).Candidates);
+        var hint = new BlackTipSearchHint(full, full.Center, Epoch);
+        var tinted = training.ToArray();
+        // Observed under the red car: max channel 163, luminance only 88.
+        Fill(tinted, 137, 109, 47, 7, 41, 59, 163);
+        var options = Options(background) with { FrameTime = Epoch.AddMilliseconds(33) };
+        ColorTipDetectionResult DetectTinted(byte[] camera, ColorTipDetectionOptions context,
+            BlackTipSearchHint? searchHint) => BlackTipDetector.DetectEach(Width, Height, Width * 4,
+                camera, [profile], context, [searchHint])[0];
+
+        var recovered = DetectTinted(tinted, options, hint);
+        Assert.Equal("local-contrast", recovered.Source);
+        AssertBarGeometry(Assert.Single(recovered.Candidates), 160, 120, 46, 22, 0, 1.8);
+        Assert.Empty(DetectTinted(tinted, options, null).Candidates);
+        Assert.Empty(DetectTinted(tinted, options with { FrameTime = Epoch.AddMilliseconds(400) }, hint).Candidates);
+        var bothTinted = tinted.ToArray();
+        Fill(bothTinted, 137, 125, 47, 7, 41, 59, 163);
+        Assert.Empty(DetectTinted(bothTinted, options, hint).Candidates);
+
+        // A rendered pair, either rendered partner, and an unrelated distant
+        // physical pair cannot supply the missing ink measurement.
+        Assert.Empty(DetectTinted(tinted, Options(tinted) with { FrameTime = options.FrameTime }, hint).Candidates);
+        var projectedTint = background.ToArray();
+        Fill(projectedTint, 137, 109, 47, 7, 41, 59, 163);
+        Assert.Empty(DetectTinted(tinted, Options(projectedTint) with { FrameTime = options.FrameTime }, hint).Candidates);
+        var projectedAnchor = background.ToArray();
+        Bar(projectedAnchor, 160, 128, 46, 6, brightness: 51);
+        Assert.Empty(DetectTinted(tinted, Options(projectedAnchor) with { FrameTime = options.FrameTime }, hint).Candidates);
+        Assert.Empty(DetectTinted(tinted, options, hint with { ExpectedCenter = new(60, 60) }).Candidates);
+    }
+
+    [Fact]
+    public void FaintProjectedStripesCannotExplainHighContrastPhysicalInk()
+    {
+        var projection = Frame();
+        Fill(projection, 0, 0, Width, Height, 160, 160, 160);
+        Bar(projection, 160, 120, 46, 6, brightness: 136);
+        var camera = projection.ToArray();
+        Bar(camera, 160, 120, 46, 6);
+        var profile = Learn(camera, 160, 120);
+        // The weak rendered stripe has exactly the physical bar's shape. Pure
+        // normalized correlation wrongly vetoes it despite a 5.8x contrast gap.
+        var physical = Assert.Single(BlackTipDetector.Detect(Width, Height, Width * 4,
+            camera, profile, Options(projection)).Candidates);
+        AssertBarGeometry(physical, 160, 120, 46, 6, 0, 1);
+
+        // Real projected ink still vetoes, including an ordinary exposure change.
+        Assert.Empty(BlackTipDetector.Detect(Width, Height, Width * 4,
+            camera, profile, Options(camera)).Candidates);
+        var brighterCamera = camera.ToArray();
+        Fill(brighterCamera, 0, 0, Width, Height, 240, 240, 240);
+        Bar(brighterCamera, 160, 120, 46, 6);
+        Assert.Empty(BlackTipDetector.Detect(Width, Height, Width * 4,
+            brighterCamera, profile, Options(camera)).Candidates);
+    }
+
+    [Fact]
     public void PooledDetectionBuffersNeverCarryPixelsBetweenFrames()
     {
         var training = Frame();

@@ -10,7 +10,7 @@ namespace ProjectTabletop.App.Projection.Football;
 
 internal sealed partial class FootballRenderer
 {
-    private static void DrawKicker(CanvasDrawingSession ds, FootballKickerStyle style,
+    private void DrawKicker(CanvasDrawingSession ds, FootballKickerStyle style,
         Vector2 position, float heading, Color team, bool present, bool human = true)
     {
         var before = ds.Transform;
@@ -18,11 +18,12 @@ internal sealed partial class FootballRenderer
         try
         {
             using var opacity = ds.CreateLayer(present ? 1 : .30f);
-            // The identical contact silhouette remains readable for every cosmetic.
-            ds.DrawCircle(Vector2.Zero, FootballGame.KickerRadius * 1000, Ink(team.R, team.G, team.B, 78), 1.5f);
+            // Keep the cropped car's rear clear of artwork that could reach the ink.
+            if (style != FootballKickerStyle.Car)
+                ds.DrawCircle(Vector2.Zero, FootballGame.KickerRadius * 1000, Ink(team.R, team.G, team.B, 78), 1.5f);
             switch (style)
             {
-                case FootballKickerStyle.Car: DrawCar(ds, team); break;
+                case FootballKickerStyle.Car: DrawCar(ds); break;
                 case FootballKickerStyle.Glove: DrawGlove(ds, team); break;
                 case FootballKickerStyle.Pan: DrawPan(ds, team); break;
                 case FootballKickerStyle.Boot: DrawBoot(ds, team); break;
@@ -62,60 +63,52 @@ internal sealed partial class FootballRenderer
         new() { Position = 1, Color = Ink((byte)(team.R * .40f), (byte)(team.G * .38f), (byte)(team.B * .37f)) }
     ]) { StartPoint = new(-38, -53), EndPoint = new(48, 64) };
 
-    private static void DrawCar(CanvasDrawingSession ds, Color team)
+    // Tight alpha bounds exclude the extraction padding. The image faces down;
+    // one quarter turn maps its nose onto the shared collider's forward edge.
+    private static readonly Rect CarSourceBounds = new(88, 61, 1172, 1057);
+    private static Rect CarDestinationBounds => new(-62,
+        FootballGame.KickerRadius * 1000 - 124 * CarSourceBounds.Height / CarSourceBounds.Width,
+        124, 124 * CarSourceBounds.Height / CarSourceBounds.Width);
+    // Preserve the identical source-to-pitch mapping while giving the soft
+    // silhouette room outside the body crop, without a clipped shadow edge.
+    private static readonly Rect CarShadowSourceBounds = new(46, 19, 1256, 1141);
+    private static Rect CarShadowDestinationBounds
     {
-        var rubber = Ink(25, 31, 31);
-        ds.FillRoundedRectangle(new Rect(-33, -57, 40, 13), 5, 5, rubber);
-        ds.FillRoundedRectangle(new Rect(-33, 44, 40, 13), 5, 5, rubber);
-        for (int y = -55; y <= 55; y += 108)
-            for (int x = -28; x <= 0; x += 6) ds.DrawLine(x, y, x + 2, y + 5, Ink(85, 88, 80), 1);
-
-        using var bodyPath = new CanvasPathBuilder(ds.Device);
-        bodyPath.BeginFigure(new Vector2(-49, -37));
-        bodyPath.AddCubicBezier(new(-43, -49), new(-4, -53), new(40, -45));
-        bodyPath.AddCubicBezier(new(59, -41), new(63, -24), new(65, -9));
-        bodyPath.AddCubicBezier(new(67, 7), new(62, 35), new(48, 43));
-        bodyPath.AddCubicBezier(new(11, 53), new(-34, 49), new(-48, 38));
-        bodyPath.AddCubicBezier(new(-54, 13), new(-54, -15), new(-49, -37));
-        bodyPath.EndFigure(CanvasFigureLoop.Closed);
-        using var body = CanvasGeometry.CreatePath(bodyPath);
-        using var paint = BodyPaint(ds, team);
-        ds.FillGeometry(body, paint);
-        ds.DrawGeometry(body, Ink(38, 46, 43), 2.3f);
-
-        // Curved glass, with a quiet dashboard and sunlit reflection.
-        using var glass = Polygon(ds, new(-38, -32), new(-12, -37), new(-8, 36), new(-38, 31));
-        using var glassPaint = new CanvasLinearGradientBrush(ds.Device, Ink(179, 212, 211), Ink(19, 53, 66))
-            { StartPoint = new(-38, -32), EndPoint = new(-9, 39) };
-        ds.FillGeometry(glass, glassPaint);
-        ds.DrawGeometry(glass, Ink(29, 47, 46), 2.6f);
-        ds.DrawLine(-32, -26, -13, -30, Ink(240, 255, 248, 155), 2);
-        ds.DrawLine(-17, -33, -13, 32, Ink(219, 238, 223, 85), 1);
-        ds.DrawLine(-32, 22, -17, 26, Ink(29, 44, 45), 2);
-
-        // A pair of bonnet stripes gives the front a recognisable, humorous race-car look.
-        using (ds.CreateLayer(1, body))
+        get
         {
-            ds.FillRectangle(new Rect(-6, -9, 63, 7), Ink(255, 243, 211, 225));
-            ds.FillRectangle(new Rect(-6, 3, 63, 7), Ink(255, 243, 211, 225));
+            var body = CarDestinationBounds;
+            double margin = 42 * 124 / CarSourceBounds.Width;
+            return new(body.X - margin, body.Y - margin, body.Width + 2 * margin, body.Height + 2 * margin);
         }
-        ds.DrawLine(-2, -30, 39, -28, Ink(255, 255, 239, 65), 1.3f);
-        ds.DrawLine(-2, 31, 39, 29, Ink(67, 47, 36, 85), 1.1f);
-        ds.FillRoundedRectangle(new Rect(43, -28, 19, 57), 6, 6, Ink(39, 45, 44));
-        for (int y = -19; y <= 20; y += 6)
-            ds.DrawLine(47, y, 59, y, Ink(163, 182, 178), 1.3f);
-        ds.FillRoundedRectangle(new Rect(54, -25, 10, 50), 3, 3, Ink(206, 215, 203));
-        ds.DrawLine(58, -23, 59, 23, Ink(250, 252, 231), 1.7f);
-        foreach (float y in new[] { -35f, 35f })
+    }
+
+    private void DrawKickerShadow(CanvasDrawingSession ds, FootballKickerStyle style,
+        Vector2 position, float heading, byte opacity)
+    {
+        if (style != FootballKickerStyle.Car)
         {
-            ds.FillEllipse(new(43, y), 12, 7.5f, Ink(38, 47, 45));
-            using var lamp = new CanvasRadialGradientBrush(ds.Device, Ink(255, 255, 223), Ink(230, 183, 65))
-                { Center = new(42, y - 1), RadiusX = 10, RadiusY = 6 };
-            ds.FillEllipse(new(43, y), 9.7f, 5.8f, lamp);
-            ds.DrawEllipse(new(43, y), 9.7f, 5.8f, Ink(243, 245, 220), .8f);
+            DrawSoftShadow(ds, position + new Vector2(17, 23), 68, 47, opacity);
+            return;
         }
-        ds.FillRoundedRectangle(new Rect(-35, -52, 14, 6), 3, 3, paint);
-        ds.FillRoundedRectangle(new Rect(-35, 46, 14, 6), 3, 3, paint);
+
+        if (_carShadow is not { } shadow) return;
+        var before = ds.Transform;
+        ds.Transform = Matrix3x2.CreateRotation(heading - MathF.PI / 2) *
+            Matrix3x2.CreateTranslation(position + new Vector2(10, 14)) * before;
+        try
+        {
+            ds.DrawImage(shadow, CarShadowDestinationBounds, CarShadowSourceBounds, opacity / 255f);
+        }
+        finally { ds.Transform = before; }
+    }
+
+    private void DrawCar(CanvasDrawingSession ds)
+    {
+        if (_kickerImages?.Image("car-front.png") is not { } car) return;
+        var before = ds.Transform;
+        ds.Transform = Matrix3x2.CreateRotation(-MathF.PI / 2) * before;
+        try { ds.DrawImage(car, CarDestinationBounds, CarSourceBounds); }
+        finally { ds.Transform = before; }
     }
 
     private static void DrawGlove(CanvasDrawingSession ds, Color team)

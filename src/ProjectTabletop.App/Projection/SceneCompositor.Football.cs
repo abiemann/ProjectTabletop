@@ -254,14 +254,22 @@ public sealed partial class SceneCompositor
     /// <summary>Maps the whole physical bar through the calibrated plane before deriving
     /// its angle. Camera angles alone are wrong on rotated or oblique projections.</summary>
     public bool SetFootballPlayerBar(int player, ColorTipObservation observation, DateTimeOffset frameTime)
+        => SetFootballPlayerBar(player, observation, frameTime, out _);
+
+    // A frame rejected at publication (including one that aged while waiting for
+    // the scene lock) must not be mistaken for an invalid physical marker.
+    public bool SetFootballPlayerBar(int player, ColorTipObservation observation, DateTimeOffset frameTime,
+        out bool ignoredFrame)
     {
         if (player is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(player));
+        ignoredFrame = true;
         lock (_gate)
         {
             SyncFootballSession();
             var now = _footballClock();
             if (!_footballActive || frameTime <= _footballResetThrough || frameTime <= _footballSourceTimes[player] ||
                 frameTime > now || now - frameTime > FootballGame.InputFreshness) return false;
+            ignoredFrame = false;
             float? previous = frameTime - _footballSourceTimes[player] <= FootballGame.TrackingRecoveryTimeout
                 ? _footballBarHeadings[player] : null;
             _footballSourceTimes[player] = frameTime;

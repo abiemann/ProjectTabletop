@@ -8,6 +8,8 @@ public sealed partial class MainWindow
     private readonly CameraLatencyMeasurement _cameraLatency = new();
     private readonly HashSet<int> _latencyObservedSpots = [];
     private bool _measuringCameraLatency, _cameraLatencyCompleted;
+    // Published on the UI thread; detector workers must not enumerate the mutable scan.
+    private long _projectionReferenceMinimumAgeTicks;
 
     private void ProjectorLatency_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
@@ -26,6 +28,7 @@ public sealed partial class MainWindow
     {
         _camera.CaptureEveryFrame = false;
         _cameraLatency.Reset();
+        Volatile.Write(ref _projectionReferenceMinimumAgeTicks, 0);
         _latencyObservedSpots.Clear();
         _measuringCameraLatency = _cameraLatencyCompleted = false;
         if (!_closing)
@@ -35,6 +38,7 @@ public sealed partial class MainWindow
     private void BeginCameraLatency()
     {
         _cameraLatency.Reset();
+        Volatile.Write(ref _projectionReferenceMinimumAgeTicks, 0);
         _latencyObservedSpots.Clear();
         _cameraLatencyCompleted = false;
         _measuringCameraLatency = true;
@@ -47,6 +51,8 @@ public sealed partial class MainWindow
         _camera.CaptureEveryFrame = false;
         _measuringCameraLatency = false;
         _cameraLatencyCompleted = true;
+        Volatile.Write(ref _projectionReferenceMinimumAgeTicks,
+            _cameraLatency.ProjectionReferenceMinimumAge(_camera.NegotiatedFormat?.FramesPerSecond ?? 0).Ticks);
         UpdateCameraLatencyStatus();
     }
 
@@ -76,6 +82,8 @@ public sealed partial class MainWindow
         minimumMilliseconds = _cameraLatency.MinimumMilliseconds,
         maximumMilliseconds = _cameraLatency.MaximumMilliseconds,
         projectorMilliseconds = _cameraLatency.ProjectorMilliseconds,
+        projectionReferenceMinimumAgeMilliseconds = TimeSpan.FromTicks(
+            Volatile.Read(ref _projectionReferenceMinimumAgeTicks)).TotalMilliseconds,
         samples = _cameraLatency.Samples,
         status = CameraLatencyText.Text
     };

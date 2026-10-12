@@ -195,7 +195,7 @@ public sealed partial class MainWindow
             try
             {
                 return EyeTipDetector.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-                    new(PreferredCenter: new(x, y), ProjectionFrames: StickTipProjectionReference(),
+                    new(PreferredCenter: new(x, y), ProjectionFrames: StickTipProjectionReference(frame, learning: true),
                         FrameTime: frame.Timestamp));
             }
             finally { _eyeTipDetectorGate.Release(); }
@@ -280,7 +280,7 @@ public sealed partial class MainWindow
                         try
                         {
                             colorDetection = ColorTipDetector.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-                                colorProfile, new(colorCenter, StickTipProjectionReference(), frame.Timestamp));
+                                colorProfile, new(colorCenter, StickTipProjectionReference(frame), frame.Timestamp));
                         }
                         finally { _eyeTipDetectorGate.Release(); }
                         PublishColorTipDetection(frame, colorDetection, Stopwatch.GetElapsedTime(colorStarted).TotalMilliseconds, generation);
@@ -291,7 +291,7 @@ public sealed partial class MainWindow
                     try
                     {
                         detected = EyeTipDetector.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-                            new(expectedRadius, preferredCenter, StickTipProjectionReference(), frame.Timestamp));
+                            new(expectedRadius, preferredCenter, StickTipProjectionReference(frame), frame.Timestamp));
                     }
                     finally { _eyeTipDetectorGate.Release(); }
                     double elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
@@ -480,9 +480,24 @@ public sealed partial class MainWindow
 
     // No board clip means stand-alone detection. A board whose reference is
     // not ready yet returns an empty history, so the detector waits for it.
-    private IReadOnlyList<EyeTipProjectionFrame>? StickTipProjectionReference() =>
-        _scene.HasBoardMediaClip && _scene.CurrentBoardScreen != BoardScreen.Media
-            ? _scene.GetEyeTipProjectionFrames() : null;
+    private IReadOnlyList<EyeTipProjectionFrame>? StickTipProjectionReference(CameraFrame frame, bool learning = false)
+    {
+        if (!_scene.HasBoardMediaClip || _scene.CurrentBoardScreen == BoardScreen.Media) return null;
+        var references = _scene.GetEyeTipProjectionFrames();
+        long minimumAge = Volatile.Read(ref _projectionReferenceMinimumAgeTicks);
+        // First-time learning may create the very first reference: retain its
+        // conservative artwork veto. Continuous tracking builds a history and
+        // can align that history with the camera's measured delivery delay.
+        if (learning || minimumAge <= 0) return references;
+        // The scene retains three references spaced at least 150 ms apart.
+        // Bound this conservative correction so a slower camera cannot exclude
+        // the entire rolling history forever once it has filled.
+        minimumAge = Math.Min(minimumAge, TimeSpan.FromMilliseconds(250).Ticks);
+        // Compare against artwork that could have reached this exposure. Newer
+        // graphics can overlap real ink in the delayed image and falsely veto it.
+        var latestVisible = (frame.ArrivedAt ?? frame.Timestamp).Subtract(TimeSpan.FromTicks(minimumAge));
+        return references.Where(reference => reference.RenderedAt <= latestVisible).ToArray();
+    }
 
     // The candidate a learning click identifies, or null when none is within
     // reach or a second candidate is nearly as close.

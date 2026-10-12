@@ -149,12 +149,12 @@ public sealed partial class MainWindow
                         ToCamera(center - forward * .008f), ToCamera(center + forward * .008f));
                     now += TimeSpan.FromMilliseconds(33);
                     Check(anchored.SetFootballPlayerBar(0, new(ToCamera(center), 12, 300, 1) { Bar = geometry }, now),
-                        "A calibrated physical bar could not drive the car.");
+                        "A calibrated physical bar could not drive the car front.");
                     Draw(anchored, target);
                     var car = anchored.FootballState.Kickers[0];
                     Check(car.MarkerAnchored && Math.Abs(car.Heading - angle) < .001 &&
                         Vector2.Distance(car.Position, center + forward * (.008f + FootballGame.KickerRadius + FootballBarPose.Clearance)) < .001,
-                        "The car did not stay in front of the rotated bar.");
+                        "The car front did not stay in front of the rotated bar.");
                     PixelPoint ToCamera(Vector2 point) => Camera(pitch.X + (point.X / FootballGame.Width + .5) * pitch.Width,
                         pitch.Y + (point.Y + .5) * pitch.Height, anchorInset, turnBoard);
                 }
@@ -214,7 +214,7 @@ public sealed partial class MainWindow
         Check(shadowPixels > 350, "Airborne ball lacked a visible, separated directional shadow on the turf.");
         await Save(raw, "football-airborne-shadow");
         RenderRaw(snapshot);
-        await Save(raw, "football-car-and-glove");
+        await Save(raw, "football-car-front-and-glove");
         using (var thumbnail = new CanvasRenderTarget(device, 1200, 600, 96))
         {
             using (var drawing = thumbnail.CreateDrawingSession()) renderer.DrawThumbnail(drawing, new Rect(0, 0, 1200, 600));
@@ -299,7 +299,7 @@ public sealed partial class MainWindow
                     now += TimeSpan.FromMilliseconds(33);
                     Check(FootballTipAssignment.Update(tracker, player, detection, MarkerField, now, now).Action == FootballTipAction.Publish,
                         "A behind-goal marker was lost during player-half assignment.");
-                    Check(!current.SetFootballPlayerBar(1 - player, observation, now),
+                    Check(!current.SetFootballPlayerBar(1 - player, observation, now, out bool ignoredInvalid) && !ignoredInvalid,
                         "A behind-goal marker drove the opposing player's car.");
                     Check(current.SetFootballPlayerBar(player, observation, now),
                         "A marker on the grass behind a goal could not drive its car.");
@@ -312,9 +312,13 @@ public sealed partial class MainWindow
                     Check(car.Present && car.MarkerAnchored && Vector2.Distance(car.Position, expected) < .001 &&
                         Vector2.Dot(new(MathF.Cos(car.Heading), MathF.Sin(car.Heading)), forward) > .999,
                         "The behind-goal car lost its measured offset, inward facing or pitch boundary clamp.");
-                    Check(!current.SetFootballPlayerBar(player, observation, now.AddSeconds(-1)) &&
-                        !current.SetFootballPlayerBar(player, observation, now.AddSeconds(1)),
+                    Check(!current.SetFootballPlayerBar(player, observation, now.AddSeconds(-1), out bool ignoredOld) && ignoredOld &&
+                        !current.SetFootballPlayerBar(player, observation, now.AddSeconds(1), out bool ignoredFuture) && ignoredFuture,
                         "The expanded grass area admitted stale or future marker input.");
+                    var acceptedAt = now;
+                    now += TimeSpan.FromMilliseconds(300);
+                    Check(!current.SetFootballPlayerBar(player, observation, acceptedAt.AddMilliseconds(10), out bool ignoredLate) && ignoredLate,
+                        "A newer sample that aged before publication was mistaken for an invalid marker.");
                 }
             }
         }

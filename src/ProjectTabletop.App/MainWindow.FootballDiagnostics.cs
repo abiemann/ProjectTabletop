@@ -38,10 +38,11 @@ public sealed partial class MainWindow
                 decisions, inputAgeMilliseconds, searchArea);
             _currentFootballDiagnostic = observation;
             // A full-pair miss bridged by one strip is still successful tracking.
-            // Preserve a sustained measured-input miss, not that benign recovery.
+            // Preserve a sustained measured-input miss or an immediate ambiguity
+            // disarm, not that benign recovery. Clearing input also clears its age.
             if (_missedFootballDiagnostic is null && decisions.Where((decision, index) =>
-                    hints[index] is not null && inputAgeMilliseconds[index] >= 100 &&
-                    decision is "missing" or "confirming").Any())
+                    decision == "ambiguous" || hints[index] is not null && inputAgeMilliseconds[index] >= 100 &&
+                    decision is "missing" or "confirming" or "uncertain-strips" or "stale-frame" or "publication-frame-rejected" or "waiting-reference").Any())
                 _missedFootballDiagnostic = observation;
         }
     }

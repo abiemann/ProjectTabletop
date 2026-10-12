@@ -216,4 +216,97 @@ public class CameraLatencyTests
         measurement.ProjectorMilliseconds = 0;
         Assert.Equal([57d, 77d], samples.Select(sample => sample.Milliseconds));
     }
+
+    [Fact]
+    public void ProjectionReferenceAgeRequiresThreeValidDistinctObservations()
+    {
+        var measurement = new CameraLatencyMeasurement();
+        Assert.Equal(TimeSpan.Zero, measurement.ProjectionReferenceMinimumAge(60));
+        Assert.True(measurement.Record(0, Start, Start.AddMilliseconds(100)));
+        Assert.Equal(TimeSpan.Zero, measurement.ProjectionReferenceMinimumAge(60));
+        Assert.True(measurement.Record(1, Start, Start.AddMilliseconds(120)));
+        Assert.False(measurement.Record(1, Start, Start.AddMilliseconds(150)));
+        Assert.False(measurement.Record(2, Start, Start.AddMilliseconds(-1)));
+        Assert.False(measurement.Record(2, Start, Start.AddMilliseconds(2001)));
+        Assert.Equal(TimeSpan.Zero, measurement.ProjectionReferenceMinimumAge(60));
+        Assert.True(measurement.Record(2, Start, Start.AddMilliseconds(110)));
+        Assert.True(measurement.ProjectionReferenceMinimumAge(60) > TimeSpan.Zero);
+    }
+
+    [Theory]
+    [InlineData(60, 66.6666667)]
+    [InlineData(30, 33.3333333)]
+    [InlineData(100, 80)]
+    public void ProjectionReferenceAgeUsesShortestTotalMinusTwoFramePeriods(double fps, double expectedMilliseconds)
+    {
+        var measurement = new CameraLatencyMeasurement();
+        Assert.True(measurement.Record(0, Start, Start.AddMilliseconds(130)));
+        Assert.True(measurement.Record(1, Start, Start.AddMilliseconds(100)));
+        Assert.True(measurement.Record(2, Start, Start.AddMilliseconds(170)));
+
+        Assert.InRange(measurement.ProjectionReferenceMinimumAge(fps).TotalMilliseconds,
+            expectedMilliseconds - .0001, expectedMilliseconds + .0001);
+    }
+
+    [Theory]
+    [InlineData(30)]
+    [InlineData(60)]
+    public void ProjectionReferenceAgeNeverBecomesNegative(double fps)
+    {
+        var measurement = new CameraLatencyMeasurement();
+        for (int i = 0; i < 3; i++)
+            Assert.True(measurement.Record(i, Start, Start.AddMilliseconds(20 + i)));
+
+        Assert.Equal(TimeSpan.Zero, measurement.ProjectionReferenceMinimumAge(fps));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-30)]
+    [InlineData(double.NaN)]
+    [InlineData(double.NegativeInfinity)]
+    [InlineData(double.PositiveInfinity)]
+    public void ProjectionReferenceAgeRequiresFinitePositiveFrameRate(double fps)
+    {
+        var measurement = new CameraLatencyMeasurement();
+        for (int i = 0; i < 3; i++)
+            Assert.True(measurement.Record(i, Start, Start.AddMilliseconds(100 + i)));
+
+        Assert.Equal(TimeSpan.Zero, measurement.ProjectionReferenceMinimumAge(fps));
+    }
+
+    [Fact]
+    public void ProjectionReferenceAgeUsesRawObservationsIndependentOfProjectorSetting()
+    {
+        var measurement = new CameraLatencyMeasurement { ProjectorMilliseconds = 500 };
+        for (int i = 0; i < 3; i++)
+            Assert.False(measurement.Record(i, Start, Start.AddMilliseconds(100 + i)));
+        Assert.Empty(measurement.Samples);
+        var minimumAge = measurement.ProjectionReferenceMinimumAge(60);
+        Assert.InRange(minimumAge.TotalMilliseconds, 66.6666, 66.6667);
+
+        foreach (double projectorDelay in new[] { 0d, 17, 90, 2000 })
+        {
+            measurement.ProjectorMilliseconds = projectorDelay;
+            Assert.Equal(minimumAge, measurement.ProjectionReferenceMinimumAge(60));
+        }
+    }
+
+    [Fact]
+    public void ResetClearsProjectionReferenceTimingUntilThreeNewObservations()
+    {
+        var measurement = new CameraLatencyMeasurement();
+        for (int i = 0; i < 3; i++)
+            Assert.True(measurement.Record(i, Start, Start.AddMilliseconds(100 + i)));
+        Assert.True(measurement.ProjectionReferenceMinimumAge(60) > TimeSpan.Zero);
+
+        measurement.Reset();
+
+        Assert.Equal(TimeSpan.Zero, measurement.ProjectionReferenceMinimumAge(60));
+        Assert.True(measurement.Record(0, Start, Start.AddMilliseconds(50)));
+        Assert.True(measurement.Record(1, Start, Start.AddMilliseconds(55)));
+        Assert.Equal(TimeSpan.Zero, measurement.ProjectionReferenceMinimumAge(60));
+        Assert.True(measurement.Record(2, Start, Start.AddMilliseconds(60)));
+        Assert.InRange(measurement.ProjectionReferenceMinimumAge(60).TotalMilliseconds, 16.6666, 16.6667);
+    }
 }

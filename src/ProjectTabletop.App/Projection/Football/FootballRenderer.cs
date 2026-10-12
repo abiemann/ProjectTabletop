@@ -1,6 +1,7 @@
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Brushes;
+using Microsoft.Graphics.Canvas.Effects;
 using Microsoft.Graphics.Canvas.Geometry;
 using ProjectTabletop.Interaction;
 using Windows.Foundation;
@@ -17,18 +18,23 @@ internal sealed partial class FootballRenderer : IDisposable
     private readonly object _pitchGate = new();
     private Task? _pitchTask;
     private CanvasRenderTarget? _pitch;
+    private BitmapAssetSet? _kickerImages;
+    private ShadowEffect? _carShadow;
     private bool _disposed;
 
     internal FootballRenderer(CanvasDevice device) => _device = device;
 
-    internal bool PitchReady => Pitch is not null;
+    internal bool PitchReady
+    {
+        get { lock (_pitchGate) return _pitch is not null && _carShadow is not null; }
+    }
     internal bool PitchCompleted { get { lock (_pitchGate) return _pitchTask is { IsCompleted: true }; } }
     internal string? PitchError { get { lock (_pitchGate) return _pitchTask?.Exception?.GetBaseException().Message; } }
     private CanvasRenderTarget? Pitch { get { lock (_pitchGate) return _pitch; } }
 
     // About 300k antialiased grass strokes are far too slow for a render pass
-    // under the compositor lock. Build the cached pitch once on a worker; draw
-    // callers show their loading state until it is published.
+    // under the compositor lock. Build the pitch and decode the car once on
+    // workers; draw callers show their loading state until both are ready.
     internal Task EnsurePitchAsync()
     {
         lock (_pitchGate)
@@ -36,11 +42,29 @@ internal sealed partial class FootballRenderer : IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_pitchTask is null)
             {
-                _pitchTask = Task.Run(BuildPitch);
+                _kickerImages = new(_device, Path.Combine(AppContext.BaseDirectory, "Assets", "Football"),
+                    ["car-front.png"]);
+                _pitchTask = BuildResourcesAsync(_kickerImages);
                 _ = _pitchTask.ContinueWith(task => _ = task.Exception, CancellationToken.None,
                     TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
             }
             return _pitchTask;
+        }
+    }
+
+    private async Task BuildResourcesAsync(BitmapAssetSet images)
+    {
+        await Task.WhenAll(Task.Run(BuildPitch), images.EnsureLoadedAsync()).ConfigureAwait(false);
+        lock (_pitchGate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var car = images.Image("car-front.png") ?? throw new InvalidDataException(
+                "Football car artwork: " + images.Errors.GetValueOrDefault("car-front.png", "not loaded"));
+            _carShadow = new ShadowEffect
+            {
+                Source = car, BlurAmount = 14,
+                ShadowColor = Ink(16, 27, 18)
+            };
         }
     }
 
@@ -62,8 +86,8 @@ internal sealed partial class FootballRenderer : IDisposable
             ds.DrawImage(pitch, new Rect(0, 0, width, 400), crop);
             var center = new Vector2(width * .80f, 178);
             DrawSoftShadow(ds, center + new Vector2(47, 89), 127, 93, 165);
-            DrawSoftShadow(ds, new(width * .66f + 12, 320), 68, 42, 115);
-            DrawKicker(ds, FootballKickerStyle.Car, new(width * .66f, 300), -.47f, Ink(239, 91, 53), true);
+            DrawKickerShadow(ds, FootballKickerStyle.Car, new(width * .66f, 300), -.47f, 115);
+            DrawKicker(ds, FootballKickerStyle.Car, new(width * .66f, 300), -.47f, Ink(239, 91, 53), true, false);
             _ball.Draw(ds, center, 112, Quaternion.CreateFromYawPitchRoll(.47f, -.35f, .28f));
         }
         finally { ds.Transform = before; }
@@ -87,7 +111,7 @@ internal sealed partial class FootballRenderer : IDisposable
             foreach (var kicker in snapshot.Kickers)
             {
                 var position = FieldPoint(kicker.Position);
-                DrawSoftShadow(ds, position + new Vector2(17, 23), 68, 47,
+                DrawKickerShadow(ds, kicker.Style, position, kicker.Heading,
                     kicker.Present || snapshot.RecoveringInput ? (byte)132 : (byte)28);
             }
             float lift = Math.Max(0, snapshot.BallHeight - FootballGame.BallRadius) * 1000;
@@ -333,6 +357,10 @@ internal sealed partial class FootballRenderer : IDisposable
         lock (_pitchGate)
         {
             _disposed = true;
+            _carShadow?.Dispose();
+            _carShadow = null;
+            _kickerImages?.Dispose();
+            _kickerImages = null;
             _pitch?.Dispose();
             _pitch = null;
         }

@@ -13,7 +13,7 @@ public sealed record CameraFrame(
     byte[] Bgra,
     DateTimeOffset Timestamp)
 {
-    /// <summary>Host callback arrival, before conversion/copy. Used only for the
-    /// optical latency estimate; Timestamp keeps its existing post-copy meaning.</summary>
+    /// <summary>Host callback arrival, before conversion/copy. Used for optical
+    /// latency and reference alignment; Timestamp keeps its post-copy meaning.</summary>
     public DateTimeOffset? ArrivedAt { get; init; }
 }

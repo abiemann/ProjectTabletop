@@ -5,7 +5,9 @@ namespace ProjectTabletop.Interaction;
 /// <summary>Fits a kicker just ahead of a measured bar in physical pitch units.</summary>
 public static class FootballBarPose
 {
-    public const float Clearance = .006f;
+    // Leave a visible turf gap so a forward stroke has more room before the
+    // delayed projection reaches the physical ink. All bar cosmetics share it.
+    public const float Clearance = .03f;
 
     public static bool TryResolve(int player, Vector2 center, Vector2 end1, Vector2 end2,
         Vector2 side1, Vector2 side2, float? previousHeading, out Vector2 position, out float heading)

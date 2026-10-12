@@ -64,6 +64,20 @@ public sealed class CameraLatencyMeasurement
     }
 
     /// <summary>
+    /// A conservative age for projected artwork that could already be visible in
+    /// a camera frame. Three raw dot observations establish the shortest total
+    /// delivery delay; two camera periods allow for exposure and detection timing.
+    /// The configured projector subtraction does not change this end-to-end delay.
+    /// </summary>
+    public TimeSpan ProjectionReferenceMinimumAge(double framesPerSecond)
+    {
+        if (_observations.Count < 3 || !double.IsFinite(framesPerSecond) || framesPerSecond <= 0)
+            return TimeSpan.Zero;
+        double minimum = _observations.Min(observation => (observation.ArrivedAt - observation.ShownAt).TotalMilliseconds);
+        return TimeSpan.FromMilliseconds(Math.Max(0, minimum - 2000 / framesPerSecond));
+    }
+
+    /// <summary>
     /// Retains only the first nonnegative, non-stale arrival per dot. Returns true
     /// when that observation also produces a nonnegative camera delay under the
     /// current projector setting. Shorter intervals are retained for recalculation,

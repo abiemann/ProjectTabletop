@@ -87,15 +87,22 @@ public sealed class FootballMarkerTracker
                 .Where(strip => toField(strip.Center) is not null)
                 .Select(strip => ContinuePair(strip, profile, frameTime))
                 .Where(item => item is not null && InHalf(item.Center)).Cast<ColorTipObservation>().ToArray();
-            if (inferred.Length > 1)
+            // Threshold passes can retain both physical strips without forming a
+            // complete pair. If each independently reconstructs the same pose,
+            // they are supporting evidence for one controller, not two players.
+            // Keep the original full-pair deadline: agreement is not reacquisition.
+            if (inferred.Length > 1 && (inferred.Length != 2 || !SamePartialPose(inferred[0], inferred[1])))
             {
-                Reset();
-                return new(FootballTipAction.Clear, null, null, "The partially visible black marker is ambiguous.")
-                    { Source = "ambiguous" };
+                // Different reconstructions of partial strips do not establish
+                // multiple complete controllers. Projection can change a strip's
+                // measured width for just one frame. Publish no uncertain pose,
+                // but preserve the last measured identity and its original expiry
+                // so the next complete pair can continue without a new countdown.
+                return Hold("Waiting for a clear view of both black bars.", "uncertain-strips");
             }
-            if (inferred.Length == 1)
+            if (inferred.Length >= 1)
             {
-                var selected = inferred[0];
+                var selected = inferred.MaxBy(item => item.Score)!;
                 Remember(selected, frameTime, fullPair: false, resetVelocity: false);
                 return new(FootballTipAction.Publish, selected, toField(selected.Center),
                     "Tracking one visible strip briefly; show both bars.") { Source = "single-strip" };
@@ -106,6 +113,22 @@ public sealed class FootballMarkerTracker
 
     private static FootballTipDecision Hold(string reason, string source) =>
         new(FootballTipAction.Hold, null, null, reason) { Source = source };
+
+    private static bool SamePartialPose(ColorTipObservation first, ColorTipObservation second)
+    {
+        var a = first.Bar!;
+        var b = second.Bar!;
+        double aLength = Length(first), bLength = Length(second);
+        double aWidth = ColorTipDetector.Distance(a.Side1, a.Side2);
+        double bWidth = ColorTipDetector.Distance(b.Side1, b.Side2);
+        double axisDot = ((a.End2.X - a.End1.X) * (b.End2.X - b.End1.X) +
+            (a.End2.Y - a.End1.Y) * (b.End2.Y - b.End1.Y)) / (aLength * bLength);
+        return ColorTipDetector.Distance(first.Center, second.Center) <= Math.Max(2, Math.Min(aLength, bLength) * .06) &&
+            Math.Abs(axisDot) >= .99 && // Within about eight degrees, with either endpoint order.
+            Math.Min(aLength, bLength) >= Math.Max(aLength, bLength) * .90 &&
+            Math.Min(aWidth, bWidth) >= Math.Max(aWidth, bWidth) * .85 &&
+            Math.Min(first.AreaPixels, second.AreaPixels) >= Math.Max(first.AreaPixels, second.AreaPixels) * .80;
+    }
 
     private bool Associated(ColorTipObservation item, DateTimeOffset frameTime)
     {

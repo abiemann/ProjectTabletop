@@ -107,7 +107,7 @@ public sealed class FootballMarkerTrackerTests
             Partial(100, 100), // Equidistant between the two possible sides.
             Partial(100, 92, 60),
             new ColorTipDetectionResult([], "no-black-bar-pair")
-                { SupportingBars = [Strip(100, 92), Strip(100, 108)] },
+                { SupportingBars = [Strip(94, 92), Strip(106, 92)] },
             Partial(100, 55)
         })
         {
@@ -121,6 +121,122 @@ public sealed class FootballMarkerTrackerTests
             Epoch.AddMilliseconds(66), Epoch.AddMilliseconds(66));
         Assert.Equal(FootballTipAction.Hold, result.Action);
         Assert.Null(result.Tip);
+    }
+
+    [Theory]
+    [InlineData(false, 0, 0)]
+    [InlineData(true, 0, 0)]
+    [InlineData(false, 1, 3)]
+    [InlineData(true, 1, 3)]
+    public void SupportingStripsAgreeingOnOnePoseDoNotClearTracking(bool reverse, double offset, double angle)
+    {
+        var tracker = Confirmed();
+        ColorTipObservation[] strips = [Strip(100, 92), Strip(100 + offset, 108, angle)];
+        if (reverse) Array.Reverse(strips);
+        var detection = Empty() with { SupportingBars = strips };
+        var measured = Update(tracker, detection, 66);
+        Assert.Equal(FootballTipAction.Publish, measured.Action);
+        Assert.Equal("single-strip", measured.Source);
+        Assert.InRange(measured.Tip!.Center.X, 99, 103);
+        Assert.InRange(measured.Tip.Center.Y, 99, 101);
+        Assert.NotNull(tracker.GetSearchHint(Epoch.AddMilliseconds(70)));
+        Assert.Equal(FootballTipAction.Publish, Update(tracker, detection, 383).Action);
+        // Agreeing partial strips are still not a new complete-pair measurement.
+        Assert.Equal(FootballTipAction.Hold, Update(tracker, detection, 384).Action);
+        Assert.Null(tracker.GetSearchHint(Epoch.AddMilliseconds(384)));
+        Assert.Equal(FootballTipAction.Publish, Update(tracker, Full(100, 100), 450).Action);
+    }
+
+    [Theory]
+    [InlineData(108, 108, 0)]
+    [InlineData(100, 108, 15)]
+    [InlineData(106, 92, 0)]
+    public void ConflictingPartialPosesHoldWithoutForcingFullMarkerReacquisition(double x, double y, double angle)
+    {
+        var tracker = Confirmed();
+        var detection = Empty() with { SupportingBars = [Strip(100, 92), Strip(x, y, angle)] };
+        var result = Update(tracker, detection, 66);
+        Assert.Equal(FootballTipAction.Hold, result.Action);
+        Assert.Equal("uncertain-strips", result.Source);
+        Assert.Null(result.Tip);
+        Assert.NotNull(tracker.GetSearchHint(Epoch.AddMilliseconds(70)));
+        Assert.Equal(FootballTipAction.Publish, Update(tracker, Full(100, 100), 100).Action);
+    }
+
+    [Fact]
+    public void PartialPoseAgreementDoesNotHideExtraStripsOrIncompatibleSizes()
+    {
+        ColorTipObservation[][] supporting =
+        [
+            [Strip(100, 92), Strip(100, 108), Strip(101, 108)],
+            [Strip(100, 92), Shape(100, 108, 46, 9.8, 450.8, 0)],
+            [Strip(100, 92), Shape(100, 109.6, 55.2, 6, 331.2, 0)]
+        ];
+        foreach (var strips in supporting)
+        {
+            var tracker = Confirmed();
+            var result = Update(tracker, Empty() with { SupportingBars = strips }, 66);
+            Assert.Equal(FootballTipAction.Hold, result.Action);
+            Assert.Equal("uncertain-strips", result.Source);
+            Assert.Null(result.Tip);
+            Assert.NotNull(tracker.GetSearchHint(Epoch.AddMilliseconds(70)));
+            // Repeated uncertain reconstructions cannot extend the last complete
+            // pair's deadline or publish a controller position.
+            Assert.Equal(FootballTipAction.Hold, Update(tracker, Empty() with { SupportingBars = strips }, 383).Action);
+            Assert.Equal("missing", Update(tracker, Empty() with { SupportingBars = strips }, 384).Source);
+            Assert.Null(tracker.GetSearchHint(Epoch.AddMilliseconds(384)));
+        }
+    }
+
+    [Fact]
+    public void ProjectorDistortedPairFromCapturedFrameDoesNotDisarmAnAcquiredPlayer()
+    {
+        // Exact measured geometry from the 2026-10-12 01:35:00.969Z failure.
+        // Both strips belong to one wide pair; projection reduced one contour's
+        // width and area enough that their partial reconstructions disagreed.
+        var profile = new BlackTipProfile(1, .1450980392156863, .596078431372549,
+            .0007806471836419753, 3.3998357117836475, 2, .45576511276587967);
+        var previous = new ColorTipObservation(new(1473.7963385953954, 439.91643928449474),
+            33.65332933072042, 3558, .9110018317345157)
+        {
+            Bar = new(new(1474.1113730073787, 480.24131363437886),
+                new(1473.4813041834122, 399.59156493461063),
+                new(1442.2828790950327, 440.1626353196544),
+                new(1505.309798095758, 439.67024324933516))
+        };
+        var distorted = Empty() with
+        {
+            SupportingBars =
+            [
+                new(new(1456.129547553093, 435.3634349030471), 23.96975895919152, 1805, .9055692970341418)
+                {
+                    Bar = new(new(1454.6690673828125, 395.7400207519531),
+                        new(1457.4019775390625, 476.3592224121094),
+                        new(1443.761474609375, 436.4656982421875),
+                        new(1468.3095703125, 435.633544921875))
+                },
+                new(new(1488.400234741784, 432.7585513078471), 17.787636910694122, 994, .6323561302998125)
+                {
+                    Bar = new(new(1488.5, 476), new(1488.5, 395), new(1481, 435.5), new(1496, 435.5))
+                }
+            ]
+        };
+        PixelPoint? RotatedField(PixelPoint point) => new(1 - point.X / 1920, point.Y / 1080);
+        var full = new ColorTipDetectionResult([previous], "black-bar-pair-candidate");
+        var tracker = new FootballMarkerTracker();
+        FootballTipDecision Observe(ColorTipDetectionResult result, int ms) => tracker.Update(0, profile,
+            result, RotatedField, Epoch.AddMilliseconds(ms), Epoch.AddMilliseconds(ms));
+        Assert.Equal(FootballTipAction.Hold, Observe(full, 0).Action);
+        Assert.Equal(FootballTipAction.Publish, Observe(full, 33).Action);
+        var uncertain = Observe(distorted, 80);
+        Assert.Equal(FootballTipAction.Hold, uncertain.Action);
+        Assert.Equal("uncertain-strips", uncertain.Source);
+        Assert.Null(uncertain.Tip);
+        Assert.NotNull(tracker.GetSearchHint(Epoch.AddMilliseconds(81)));
+        var recovered = Observe(full, 100);
+        Assert.Equal(FootballTipAction.Publish, recovered.Action);
+        Assert.Equal("full-marker", recovered.Source);
+        Assert.Equal(previous, recovered.Tip);
     }
 
     [Fact]
