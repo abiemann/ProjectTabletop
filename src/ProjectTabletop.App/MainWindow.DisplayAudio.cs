@@ -121,8 +121,13 @@ public sealed partial class MainWindow
             _displayAudioDevice, available && _displayAudioRequested);
         _footballCrowdSound.ConfigureOutput(SelectedDisplay?.PhysicalMode?.FriendlyName,
             _displayAudioDevice, available && _displayAudioRequested);
+        _footballGoalSounds.ConfigureOutput(SelectedDisplay?.PhysicalMode?.FriendlyName,
+            _displayAudioDevice, available && _displayAudioRequested);
         _footballMatchSound.ConfigureOutput(SelectedDisplay?.PhysicalMode?.FriendlyName,
             _displayAudioDevice, available && _displayAudioRequested);
+        _footballAmbienceSound.ConfigureOutput(SelectedDisplay?.PhysicalMode?.FriendlyName,
+            _displayAudioDevice, available && _displayAudioRequested);
+        UpdateFootballAmbience();
     }
 
     private void EnableDisplayAudio_Changed(object sender, RoutedEventArgs args)

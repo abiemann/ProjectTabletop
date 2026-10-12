@@ -30,14 +30,14 @@ public sealed partial class MainWindow
         await scene.EnsureBoardArtworkResourcesAsync(device, BoardScreen.Football);
         using var target = new CanvasRenderTarget(device, 1600, 900, 96);
         Draw(scene, target);
-        Check(scene.FootballState.Phase == FootballPhase.WaitingForPlayers, "Football started without a player.");
+        Check(scene.FootballState.Phase == FootballPhase.Ready, "Football did not open in its PLAY lobby.");
         Check(scene.FootballState.Kickers.All(k => k.Style == FootballKickerStyle.Car),
             "Both teams did not start with car-front artwork.");
         VerifyPitchLayout(scene);
         VerifyVisibleControls(scene);
         VerifyGrassStatus(scene);
         var idleControls = Session(scene).Buttons.ToArray();
-        await Save(target, "football-waiting-overlay-controls");
+        await Save(target, "football-ready-overlay-controls");
         var field = scene.FootballFieldBounds();
         var playerCamera = Camera(field.X + field.Width * .22, field.Y + field.Height * .5, inset);
         Check(scene.TryMapFootballCameraPoint(playerCamera, out var uv) && Math.Abs(uv.X - .22) < .0001 &&
@@ -53,6 +53,36 @@ public sealed partial class MainWindow
                 (field.X + field.Width, field.Y + field.Height) }.All(corner => InTurfBounds(Camera(corner.Item1, corner.Item2, inset))) &&
             !InTurfBounds(Camera(.5, .04, inset)) && !InTurfBounds(Camera(.5, .995, inset)),
             "The camera search outline did not match the calibrated grass.");
+        var lobbyCenter = new Vector2(-.42f, .04f);
+        PixelPoint LobbyCamera(Vector2 point) => Camera(field.X + (point.X / FootballGame.Width + .5) * field.Width,
+            field.Y + (point.Y / FootballGame.Height + .5) * field.Height, inset);
+        var lobbyMarker = new ColorTipObservation(LobbyCamera(lobbyCenter), 12, 300, 1)
+        {
+            Bar = new(LobbyCamera(lobbyCenter - new Vector2(0, .055f)), LobbyCamera(lobbyCenter + new Vector2(0, .055f)),
+                LobbyCamera(lobbyCenter - new Vector2(.008f, 0)), LobbyCamera(lobbyCenter + new Vector2(.008f, 0)))
+        };
+        for (int frame = 0; frame < 120; frame++)
+        {
+            now += TimeSpan.FromMilliseconds(16);
+            Check(scene.FootballInputActive && scene.SetFootballPlayerBar(0, lobbyMarker, now),
+                "The PLAY lobby stopped acquiring its physical marker.");
+            Draw(scene, target);
+        }
+        Check(scene.FootballState.Phase == FootballPhase.Ready &&
+            scene.FootballState.Kickers[0] is { Present: true, MarkerAnchored: true } &&
+            scene.FootballState.BallPosition == Vector2.Zero && scene.FootballState.BallVelocity == Vector2.Zero &&
+            audioCues.All(cue => (cue.Cues & FootballAudioCue.StartWhistle) == 0),
+            "A visible lobby marker started the countdown, moved the ball or sounded a kickoff without PLAY.");
+        VerifyVisibleControls(scene);
+        await Save(target, "football-ready-marker-preview");
+        var lobbyFrame = now;
+        Check(!scene.ActivateFootballButton("football-reset") && scene.ActivateFootballButton("football-play") &&
+            scene.FootballState.Phase == FootballPhase.WaitingForPlayers && !scene.FootballState.Kickers[0].Present,
+            "PLAY did not begin a fresh match requiring a new player observation.");
+        Check(!scene.SetFootballPlayerBar(0, lobbyMarker, lobbyFrame, out bool ignoredLobbyFrame) && ignoredLobbyFrame,
+            "PLAY accepted a marker frame from the previous lobby.");
+        Draw(scene, target);
+        VerifyVisibleControls(scene);
         for (int frame = 0; frame < 155; frame++)
         {
             now += TimeSpan.FromMilliseconds(16);
@@ -121,8 +151,13 @@ public sealed partial class MainWindow
         VerifyHiddenControls(scene);
         scene.ResetFootball();
         Draw(scene, target);
-        Check(scene.ActivateFootballButton("football-mode") && scene.FootballState.Mode == FootballMode.TwoHumans,
+        Check(scene.ActivateFootballButton("football-mode") && scene.FootballState.Mode == FootballMode.TwoHumans &&
+            scene.FootballState.Phase == FootballPhase.Ready,
             "The inactive projected two-player control failed.");
+        Draw(scene, target);
+        VerifyVisibleControls(scene);
+        Check(scene.ActivateFootballButton("football-play") && scene.FootballState.Phase == FootballPhase.WaitingForPlayers,
+            "The changed mode did not require PLAY to begin its next match.");
         for (int frame = 0; frame < 120; frame++)
         {
             now += TimeSpan.FromMilliseconds(16);
@@ -353,7 +388,7 @@ public sealed partial class MainWindow
             confettiPixels, confettiOnCarPixels, victoryClock = true, winnerHalfOnly = true,
             victorySettles = true, ordinaryGoalsWithoutConfetti = true, finishedInputSuspended = true,
             controlsWaitForConfetti = true, victoryControlsSlide = true, movingControlsDisarmed = true,
-            teamCarArtwork = true, calibratedInput = true,
+            teamCarArtwork = true, calibratedInput = true, readyMarkerPreview = true, explicitPlayRequired = true,
             staleAndFutureRejected = true, shortLossRecoversQuietly = true, lossPausesPlay = true, twoPlayers = true,
             quarterTurnMapping = true, barPositionAndRotationAnchored = true, markersUseSurroundingGrass = true,
             captionControls = true, activeControlsHidden = true, inactiveControlsOverlayPitch = true,
@@ -367,6 +402,9 @@ public sealed partial class MainWindow
                 await current.EnsureBoardArtworkResourcesAsync(device, BoardScreen.Football);
                 current.SetFootballMode(FootballMode.TwoHumans);
                 Draw(current, target);
+                var restingControls = Session(current).Buttons.ToArray();
+                Check(current.ActivateFootballButton("football-play") && current.FootballState.Phase == FootballPhase.WaitingForPlayers,
+                    "The victory fixture could not explicitly start its match from the lobby.");
                 var pitch = current.FootballFieldBounds();
                 PixelPoint ToCamera(Vector2 point) => Camera(pitch.X + (point.X / FootballGame.Width + .5) * pitch.Width,
                     pitch.Y + (point.Y / FootballGame.Height + .5) * pitch.Height, padding);
@@ -394,7 +432,6 @@ public sealed partial class MainWindow
                 const BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
                 var session = (BoardSession)typeof(SceneCompositor).GetField("_boardSession", fields)!.GetValue(current)!;
                 var game = (FootballGame)typeof(BoardSession).GetField("_football", fields)!.GetValue(session)!;
-                var restingControls = session.Buttons.ToArray();
                 Finish();
                 var final = current.FootballState;
                 Check(!current.FootballInputActive && current.FootballInputRevision == playingEpoch + 1 &&
@@ -441,9 +478,10 @@ public sealed partial class MainWindow
                 await Save(target, winner == 0 ? "football-red-wins-overlay-controls" : "football-blue-wins-overlay-controls");
 
                 var oldFrame = now;
-                Check(current.ActivateFootballButton("football-reset") && current.FootballInputActive &&
+                Check(!current.ActivateFootballButton("football-reset") &&
+                    current.ActivateFootballButton("football-play") && current.FootballInputActive &&
                     current.FootballState.Phase == FootballPhase.WaitingForPlayers && current.FootballVictorySeconds < 0,
-                    "The reset caption did not restore recognition for a fresh match.");
+                    "The post-win PLAY caption did not restore recognition for a fresh match.");
                 now += TimeSpan.FromMilliseconds(16);
                 Check(!current.SetFootballPlayerBar(winner, observation, oldFrame, out bool ignoredOld) && ignoredOld &&
                     current.SetFootballPlayerBar(winner, observation, now),
@@ -570,8 +608,11 @@ public sealed partial class MainWindow
             var pitch = current.FootballFieldBounds();
             var grass = TurfBounds(pitch);
             var buttons = Session(current).Buttons;
+            bool play = current.FootballState.Phase is FootballPhase.Ready or FootballPhase.Finished;
+            string action = play ? "football-play" : "football-reset";
             Check(current.GetHoldButtonContext(now) is { } controls &&
-                controls.EnabledHoldIds.SetEquals(["football-exit", "football-reset", "football-mode"]) &&
+                controls.EnabledHoldIds.SetEquals(["football-exit", action, "football-mode"]) &&
+                buttons.Single(button => button.Id == action).Label == (play ? "PLAY" : "RESET") &&
                 buttons.Count == 3 && buttons.All(button => button.Bounds.Y < pitch.Bottom &&
                     button.Bounds.Y + button.Bounds.Height > grass.Bottom &&
                     button.Bounds.Y + button.Bounds.Height <= 1),
@@ -581,6 +622,7 @@ public sealed partial class MainWindow
         void VerifyHiddenControls(SceneCompositor current)
         {
             Check(Session(current).Buttons.Count == 0 && current.GetHoldButtonContext(now) is null &&
+                !current.ActivateFootballButton("football-reset") && !current.ActivateFootballButton("football-play") &&
                 idleControls.All(button => !current.ActivateFootballButton(button.Id) &&
                     !current.ActivateFootballAt(button.Bounds.X + button.Bounds.Width / 2,
                         button.Bounds.Y + button.Bounds.Height / 2)),

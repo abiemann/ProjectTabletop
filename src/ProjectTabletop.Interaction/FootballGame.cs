@@ -4,7 +4,7 @@ namespace ProjectTabletop.Interaction;
 
 public enum FootballMode { HumanVsAi, TwoHumans }
 public enum FootballKickerStyle { Car, Glove, Pan, Boot }
-public enum FootballPhase { WaitingForPlayers, Countdown, Playing, Goal, Finished }
+public enum FootballPhase { WaitingForPlayers, Countdown, Playing, Goal, Finished, Ready }
 
 /// <summary>Heading is the facing in radians: measured for a bar, otherwise turned at a fixed simulated rate.</summary>
 public sealed record FootballKickerSnapshot(int Index, Vector2 Position, Vector2 Velocity,
@@ -56,7 +56,7 @@ public sealed class FootballGame
     ];
     private readonly Kicker[] _kickers = [new(0), new(1)];
     private FootballMode _mode = FootballMode.HumanVsAi;
-    private FootballPhase _phase = FootballPhase.WaitingForPlayers;
+    private FootballPhase _phase = FootballPhase.Ready;
     private bool _recoveringInput;
     private Vector2 _ballPosition;
     private Vector2 _ballVelocity;
@@ -88,7 +88,7 @@ public sealed class FootballGame
     /// reacquire without sweeping a bumper through the pitch, so a changed hand identity cannot
     /// produce a phantom kick. A measured heading rigidly anchors the visible kicker to this pose;
     /// its collision movement still uses bounded velocity derived from observation timestamps.
-    /// Finished matches ignore input until Reset starts the next match.
+    /// Finished matches ignore input until Start begins the next match or Reset returns to the preview.
     /// </summary>
     public void SetPlayerInput(int index, Vector2? position, DateTimeOffset observedAt, float? heading = null)
     {
@@ -179,12 +179,17 @@ public sealed class FootballGame
         Reset(now);
     }
 
-    /// <summary>Start a new match, preserving selected mode and appearances. Requires fresh input.</summary>
-    public void Reset(DateTimeOffset now)
+    /// <summary>Return to the idle preview, preserving selected mode and appearances. Requires Start to play.</summary>
+    public void Reset(DateTimeOffset now) => ResetMatch(now, FootballPhase.Ready);
+
+    /// <summary>Explicitly start a new match, preserving selected mode and appearances. Requires fresh input.</summary>
+    public void Start(DateTimeOffset now) => ResetMatch(now, FootballPhase.WaitingForPlayers);
+
+    private void ResetMatch(DateTimeOffset now, FootballPhase phase)
     {
         if (_lastAdvance is { } last && now < last) return;
         _score1 = _score2 = _lastScorer = 0;
-        _phase = FootballPhase.WaitingForPlayers;
+        _phase = phase;
         _recoveringInput = false;
         _phaseRemaining = 0;
         _servePending = true;
@@ -261,7 +266,7 @@ public sealed class FootballGame
             _accumulator = 0;
         }
         changed |= _phase != phase;
-        if (_phase == FootballPhase.WaitingForPlayers)
+        if (_phase is FootballPhase.Ready or FootballPhase.WaitingForPlayers)
         {
             // Play is paused: a present player's kicker follows its input directly,
             // without moving the ball or banking velocity for a later kick.
@@ -648,6 +653,7 @@ public sealed class FootballGame
         string player2 = _mode == FootballMode.HumanVsAi ? "Computer" : "Player 2";
         string banner = _phase switch
         {
+            FootballPhase.Ready => "Hold PLAY to start",
             FootballPhase.WaitingForPlayers when !_kickers[0].Present && (_mode == FootballMode.HumanVsAi || _kickers[1].Present)
                 => "Player 1 · bring your stick or fingertip onto the pitch",
             FootballPhase.WaitingForPlayers when !_kickers[1].Present && _kickers[0].Present

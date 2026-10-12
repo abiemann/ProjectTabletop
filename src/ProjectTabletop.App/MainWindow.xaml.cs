@@ -248,7 +248,9 @@ public sealed partial class MainWindow : Window
         _photocopierSound.Dispose();
         _scene.FootballAudioRequested -= FootballAudioRequested;
         _footballCrowdSound.Dispose();
+        _footballGoalSounds.Dispose();
         _footballMatchSound.Dispose();
+        _footballAmbienceSound.Dispose();
         _statusTimer.Stop();
         await DisposeEyeTipTrackingAsync();
         await DisposeFootballInputAsync();

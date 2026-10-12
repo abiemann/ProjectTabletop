@@ -90,7 +90,7 @@ static async Task RunMcpAsync()
             new McpServerToolCreateOptions
             {
                 Name = "football_action",
-                Description = "Activate Football controls: football-exit, football-reset, or football-mode to switch between AI and two human players."
+                Description = "Activate visible Football controls: football-exit, football-play to start, football-reset for a fresh match while waiting for missing players, or football-mode to switch between AI and two human players."
             });
     static McpServerTool LearnFootballBarTool() =>
         McpServerTool.Create((Func<int, double, double, Task<string>>)LearnFootballBarAsync,

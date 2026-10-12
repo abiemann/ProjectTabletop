@@ -265,7 +265,7 @@ public sealed partial class BoardSession
         Revision++;
         NavigationRevision++;
         if (screen == BoardScreen.WaterGarden) RequestWaterGardenReset();
-        if (screen == BoardScreen.Football) ResetFootball(now);
+        if (screen == BoardScreen.Football) InitializeFootball(now, startMatch: false);
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

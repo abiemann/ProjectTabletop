@@ -8,10 +8,14 @@ public enum FootballAudioCue
     StartWhistle = 2,
     GoalCheer = 4,
     CrowdChant = 8,
-    MatchEnd = 16
+    MatchEnd = 16,
+    AmbienceChanged = 32
 }
 
-public readonly record struct FootballAudioUpdate(long Generation, FootballAudioCue Cues);
+/// <summary>Captures board ambience visibility and the scoring player at cue creation:
+/// 1 or 2 for a goal, otherwise 0. Waiting and finished matches retain their ambience.</summary>
+public readonly record struct FootballAudioUpdate(long Generation, FootballAudioCue Cues, int ScoringPlayer = 0,
+    bool AmbienceActive = false);
 
 /// <summary>Produces sound cues from match changes, independently of render frequency and
 /// tracking pauses. Playback belongs to the UI audio service, never the simulation thread.</summary>
@@ -28,7 +32,7 @@ public sealed class FootballAudioTimeline
     public FootballAudioUpdate Update(FootballSnapshot state, DateTimeOffset now,
         long navigationRevision, long matchRevision, bool visible)
     {
-        var cues = FootballAudioCue.None;
+        var cues = _visible != visible ? FootballAudioCue.AmbienceChanged : FootballAudioCue.None;
         if (_navigationRevision != navigationRevision || _matchRevision != matchRevision)
         {
             _navigationRevision = navigationRevision;
@@ -55,11 +59,12 @@ public sealed class FootballAudioTimeline
             // Hiding the projector must not replay an old kickoff or win later.
             _started |= state.Phase is FootballPhase.Playing or FootballPhase.Goal or FootballPhase.Finished;
             _finished |= state.Phase == FootballPhase.Finished;
-            return new(Generation, cues);
+            return new(Generation, cues, AmbienceActive: false);
         }
         _visible = true;
 
-        if (state.Score1 > _score1 || state.Score2 > _score2)
+        int scoringPlayer = state.Score1 > _score1 ? 1 : state.Score2 > _score2 ? 2 : 0;
+        if (scoringPlayer != 0)
         {
             cues |= FootballAudioCue.GoalCheer;
             _nextChantAt = now + ChantInterval;
@@ -72,7 +77,7 @@ public sealed class FootballAudioTimeline
             if (!_finished) cues |= FootballAudioCue.MatchEnd;
             _finished = true;
             _nextChantAt = null;
-            return new(Generation, cues);
+            return new(Generation, cues, scoringPlayer, AmbienceActive: true);
         }
 
         if (state.Phase == FootballPhase.Playing && !state.RecoveringInput)
@@ -90,6 +95,6 @@ public sealed class FootballAudioTimeline
                 _nextChantAt = now + ChantInterval;
             }
         }
-        return new(Generation, cues);
+        return new(Generation, cues, scoringPlayer, AmbienceActive: true);
     }
 }

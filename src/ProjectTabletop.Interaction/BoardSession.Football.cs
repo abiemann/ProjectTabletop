@@ -11,7 +11,7 @@ public sealed partial class BoardSession
     private double _footballVictoryControlsProgress;
     public FootballSnapshot FootballState => _football.Snapshot;
     public long FootballInputRevision { get; private set; }
-    public bool FootballControlsVisible => _football.Phase == FootballPhase.WaitingForPlayers ||
+    public bool FootballControlsVisible => _football.Phase is FootballPhase.Ready or FootballPhase.WaitingForPlayers ||
         _football.Phase == FootballPhase.Finished && _footballVictoryControlsProgress > 0;
     public bool FootballControlsAnimating => _football.Phase == FootballPhase.Finished &&
         _footballVictoryControlsProgress is > 0 and < 1;
@@ -39,13 +39,19 @@ public sealed partial class BoardSession
         SetFootballInput(1, null, now);
     }
 
-    public void ResetFootball(DateTimeOffset now)
+    public void ResetFootball(DateTimeOffset now) => InitializeFootball(now, startMatch: true);
+
+    private void InitializeFootball(DateTimeOffset now, bool startMatch)
     {
-        bool controlsWereVisible = FootballControlsVisible;
-        _football.Reset(now);
+        if (startMatch) _football.Start(now);
+        else _football.Reset(now);
         _footballVictoryControlsProgress = 0;
         ClearFootballInput(now);
-        UpdateFootballControlVisibility(controlsWereVisible, now);
+        // PLAY becomes RESET in the same place. The new lettering must be seen
+        // clear before it can arm, even though the controls stayed visible.
+        ResetHoldCaptionEvidence();
+        _holdCaptionObservedAt = Later(_holdCaptionObservedAt, now);
+        BottomDrawerGestureBarrier(now);
         FootballInputRevision++;
         Revision++;
     }
@@ -113,13 +119,15 @@ public sealed partial class BoardSession
     {
         if (!FootballControlsVisible) return [];
         bool enabled = !FootballControlsAnimating;
+        bool showPlay = _football.Phase is FootballPhase.Ready or FootballPhase.Finished;
         double progress = _footballVictoryControlsProgress;
         double top = enabled ? _footballControlTop :
             1.02 + (_footballControlTop - 1.02) * progress * progress * (3 - 2 * progress);
         return
         [
             new("football-exit", "EXIT", new(.06, top, .20, .095), BoardScreen.Menu, Enabled: enabled, Hold: BoardButtonHold.Once),
-            new("football-reset", "RESET", new(.28, top, .20, .095), BoardScreen.Football, Enabled: enabled, Hold: BoardButtonHold.Once),
+            new(showPlay ? "football-play" : "football-reset", showPlay ? "PLAY" : "RESET",
+                new(.28, top, .20, .095), BoardScreen.Football, Enabled: enabled, Hold: BoardButtonHold.Once),
             new("football-mode", FootballState.Mode == FootballMode.HumanVsAi ? "2 PLAYERS" : "VS AI",
                 new(.68, top, .26, .095), BoardScreen.Football, Enabled: enabled, Hold: BoardButtonHold.Once)
         ];
@@ -134,6 +142,7 @@ public sealed partial class BoardSession
                 ClearFootballInput(now);
                 Show(BoardScreen.Menu, now);
                 return true;
+            case "football-play":
             case "football-reset":
                 ResetFootball(now);
                 break;

@@ -8,6 +8,7 @@ internal static class FootballGameRegression
 
     public static void Run()
     {
+        CheckReadyRequiresExplicitStart();
         CheckCountdownPauseAndReset();
         CheckQuietTrackingRecovery();
         CheckRecoveryCountdownAndHitches();
@@ -22,24 +23,73 @@ internal static class FootballGameRegression
         CheckWaitingKickersIdleFramesAndHeading();
         CheckMeasuredBarPose();
         CheckMeasuredBarCollisionSafety();
-        Console.WriteLine("Football verification passed: fresh-input countdown/pause/reset, swept bumper impacts, " +
+        Console.WriteLine("Football verification passed: idle preview and explicit start, fresh-input countdown/pause/reset, swept bumper impacts, " +
             "speed caps, lively boundary/floor rebounds, height and quaternion rotation, exact-once goals, " +
             "posts/high balls, first-to-five, invalid/stale/jumping input, equal kicker styles, bounded physical AI, " +
             "kickers following input while paused, stable idle revisions, simulation-timed headings, " +
             "rigid measured bar poses, bounded observation-speed collision movement, quiet short tracking recovery " +
-            "and finished-match input dormancy with fresh-input restart.");
+            "and finished-match input dormancy with explicit fresh-input restart.");
+    }
+
+    private static void CheckReadyRequiresExplicitStart()
+    {
+        foreach (var mode in new[] { FootballMode.HumanVsAi, FootballMode.TwoHumans })
+        {
+            var game = new FootballGame();
+            game.SetMode(mode, Epoch);
+            game.Advance(Epoch);
+            var initial = game.Snapshot;
+            Require(initial.Phase == FootballPhase.Ready && initial.Score1 == 0 && initial.Score2 == 0,
+                "A new game must remain ready until PLAY is explicitly selected.");
+            var rig = new Rig(game, Epoch) { H1 = .6f };
+            for (int frame = 0; frame < 360; frame++)
+            {
+                rig.P1 = new(-.52f + frame * .0002f, .2f);
+                rig.Step();
+            }
+            var preview = game.Snapshot;
+            Require(preview.Phase == FootballPhase.Ready && preview.Kickers.All(kicker => kicker.Present) &&
+                preview.Kickers[0].Position == rig.P1 && preview.Kickers[0].Heading == .6f &&
+                preview.Kickers[0].MarkerAnchored && preview.Kickers.All(kicker => kicker.Velocity == Vector2.Zero) &&
+                preview.BallPosition == initial.BallPosition && preview.BallVelocity == Vector2.Zero &&
+                preview.BallHeight == initial.BallHeight && preview.BallVerticalVelocity == 0 &&
+                preview.BallRotation == initial.BallRotation && preview.CountdownSeconds == 0 &&
+                (mode != FootballMode.HumanVsAi || preview.Kickers[1].Position == initial.Kickers[1].Position),
+                "Fresh players must preview their poses without starting a countdown, moving the AI, or simulating the ball.");
+            game.Advance(rig.Now.AddMilliseconds(10));
+            Require(ReferenceEquals(preview, game.Snapshot), "An unchanged ready preview must reuse its snapshot.");
+
+            rig.Now = rig.Now.AddMilliseconds(20);
+            game.Start(rig.Now);
+            Require(game.Phase == FootballPhase.WaitingForPlayers && game.Snapshot.Kickers.All(kicker => !kicker.Present),
+                "Explicit start must discard preview observations and wait for fresh player input.");
+            rig.Step(210);
+            Require(game.Phase == FootballPhase.Playing, "Fresh input after explicit start must begin a match.");
+            game.Reset(rig.Now);
+            rig.Step(240);
+            Require(game.Phase == FootballPhase.Ready && game.Snapshot.BallPosition == Vector2.Zero &&
+                game.Snapshot.BallVelocity == Vector2.Zero && game.Snapshot.Score1 == 0 && game.Snapshot.Score2 == 0,
+                "Reset must return to PLAY and fresh observations must not restart the match.");
+
+            game.Start(rig.Now);
+            rig.Step(210);
+            game.SetMode(mode == FootballMode.HumanVsAi ? FootballMode.TwoHumans : FootballMode.HumanVsAi, rig.Now);
+            rig.Step(240);
+            Require(game.Phase == FootballPhase.Ready && game.Snapshot.BallPosition == Vector2.Zero,
+                "Changing match mode must return to the idle preview and require a new explicit start.");
+        }
     }
 
     private static void CheckCountdownPauseAndReset()
     {
         var game = new FootballGame();
-        Require(game.Snapshot.Phase == FootballPhase.WaitingForPlayers && game.Snapshot.Score1 == 0,
-            "A new game must wait for its human player.");
-        game.Advance(Epoch);
+        Require(game.Snapshot.Phase == FootballPhase.Ready && game.Snapshot.Score1 == 0,
+            "A new game must wait for PLAY.");
+        game.Start(Epoch);
         game.SetPlayerInput(0, new(-.4f, .3f), Epoch.AddMilliseconds(1));
         game.Advance(Epoch.AddMilliseconds(1));
         Require(game.Snapshot.Phase == FootballPhase.Countdown && game.Snapshot.Kickers[1].IsAi,
-            "One human must start a countdown against AI.");
+            "One fresh human must start a countdown against AI after PLAY.");
         var rig = new Rig(game, Epoch.AddMilliseconds(1));
         rig.P1 = new(-.4f, .3f);
         rig.Step(210);
@@ -58,10 +108,11 @@ internal static class FootballGameRegression
         Require(game.Snapshot.Phase == FootballPhase.Countdown, "Reacquiring a human must give a fresh countdown.");
         game.SetStyle(0, FootballKickerStyle.Boot);
         game.Reset(rig.Now.AddMilliseconds(1));
-        Require(game.Snapshot.Phase == FootballPhase.WaitingForPlayers && !game.Snapshot.Kickers[0].Present &&
+        Require(game.Snapshot.Phase == FootballPhase.Ready && !game.Snapshot.Kickers[0].Present &&
             game.Snapshot.BallPosition == Vector2.Zero && game.Snapshot.Score1 == 0 &&
             game.Snapshot.Kickers[0].Style == FootballKickerStyle.Boot, "Reset must clear observations/scores but preserve style.");
         game.SetMode(FootballMode.TwoHumans, rig.Now.AddMilliseconds(2));
+        game.Start(rig.Now.AddMilliseconds(2));
         game.SetPlayerInput(0, rig.P1, rig.Now.AddMilliseconds(3));
         game.Advance(rig.Now.AddMilliseconds(3));
         Require(game.Snapshot.Phase == FootballPhase.WaitingForPlayers && !game.Snapshot.Kickers[1].IsAi,
@@ -145,7 +196,7 @@ internal static class FootballGameRegression
     private static void CheckRecoveryCountdownAndHitches()
     {
         var countdown = new FootballGame();
-        countdown.Advance(Epoch);
+        countdown.Start(Epoch);
         countdown.SetPlayerInput(0, new(-.4f, .3f), Epoch.AddMilliseconds(1), 0);
         countdown.Advance(Epoch.AddMilliseconds(1));
         countdown.SetPlayerInput(0, new(-.4f, .3f), Epoch.AddMilliseconds(101), 0);
@@ -292,6 +343,7 @@ internal static class FootballGameRegression
 
             var waiting = new FootballGame();
             waiting.SetMode(FootballMode.TwoHumans, Epoch);
+            waiting.Start(Epoch);
             var inside = new Vector2(-.4f, sign * .51f);
             waiting.SetPlayerInput(0, inside, Epoch.AddMilliseconds(1), 0);
             waiting.Advance(Epoch.AddMilliseconds(1));
@@ -386,21 +438,26 @@ internal static class FootballGameRegression
                 "Finished matches must ignore marker/fingertip updates, loss and aging without changing the final pose or revision.");
 
             rig.Now = rig.Now.AddSeconds(21);
-            rig.Game.Reset(rig.Now);
+            rig.Game.Start(rig.Now);
             Require(rig.Game.Snapshot.Phase == FootballPhase.WaitingForPlayers &&
-                rig.Game.Snapshot.Kickers.All(kicker => !kicker.Present),
-                "Reset must require new observations rather than reusing ignored post-match input.");
+                rig.Game.Snapshot.Kickers.All(kicker => !kicker.Present) &&
+                rig.Game.Snapshot.Score1 == 0 && rig.Game.Snapshot.Score2 == 0 && rig.Game.Snapshot.BallPosition == Vector2.Zero,
+                "PLAY after a win must clear scores and require new observations rather than reusing ignored post-match input.");
             rig.Game.SetPlayerInput(0, new(-.4f, .2f), rig.Now.AddMilliseconds(1), -.25f);
             rig.Game.Advance(rig.Now.AddMilliseconds(1));
             Require(rig.Game.Snapshot.Phase == FootballPhase.WaitingForPlayers &&
                 rig.Game.Snapshot.Kickers[0].Position == new Vector2(-.4f, .2f) &&
                 rig.Game.Snapshot.Kickers[0].Heading == -.25f && rig.Game.Snapshot.Kickers[0].MarkerAnchored,
-                "Fresh marker input must resume after Reset while waiting for the other player.");
+                "Fresh marker input must resume after PLAY while waiting for the other player.");
             rig.Game.SetPlayerInput(1, new(.4f, -.2f), rig.Now.AddMilliseconds(2));
             rig.Game.Advance(rig.Now.AddMilliseconds(2));
             Require(rig.Game.Snapshot.Phase == FootballPhase.Countdown &&
                 rig.Game.Snapshot.Kickers.All(kicker => kicker.Present),
-                "Fresh observations from both players must restart the match after input dormancy.");
+                "Fresh observations from both players must begin the rematch after explicit PLAY.");
+            rig.Now = rig.Now.AddMilliseconds(2);
+            rig.Step(210);
+            Require(rig.Game.Phase == FootballPhase.Playing && rig.Game.Snapshot.Score1 == 0 && rig.Game.Snapshot.Score2 == 0,
+                "The explicit rematch must complete its countdown with the previous win cleared.");
         }
     }
 
@@ -523,7 +580,7 @@ internal static class FootballGameRegression
     {
         var game = new FootballGame();
         game.SetMode(FootballMode.TwoHumans, Epoch);
-        game.Advance(Epoch);
+        game.Start(Epoch);
         var now = Epoch;
         foreach (var target in new Vector2[] { new(-.5f, .1f), new(-.45f, .08f), new(-.41f, .05f) })
         {
@@ -553,6 +610,7 @@ internal static class FootballGameRegression
     {
         var waiting = new FootballGame();
         waiting.SetMode(FootballMode.TwoHumans, Epoch);
+        waiting.Start(Epoch);
         var point = new Vector2(-.45f, .15f);
         waiting.SetPlayerInput(0, point, Epoch.AddMilliseconds(1), .3f);
         waiting.Advance(Epoch.AddMilliseconds(1));
@@ -691,7 +749,7 @@ internal static class FootballGameRegression
     {
         var game = new FootballGame();
         game.SetMode(mode, Epoch);
-        game.Advance(Epoch);
+        game.Start(Epoch);
         var rig = new Rig(game, Epoch);
         rig.Step(210);
         Require(game.Snapshot.Phase == FootballPhase.Playing, "Fixture did not enter live play.");

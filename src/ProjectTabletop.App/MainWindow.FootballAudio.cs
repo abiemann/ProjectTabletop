@@ -6,17 +6,20 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     private readonly DisplaySoundPlayer _footballCrowdSound = new("Football crowd", .55);
+    private readonly DisplaySoundVoices _footballGoalSounds = new("Football goal", .55);
     private readonly DisplaySoundPlayer _footballMatchSound = new("Football match", .78);
+    private readonly DisplaySoundPlayer _footballAmbienceSound = new("Football stadium ambience", .45);
+    private bool _footballAmbienceActive;
     private int _footballChantIndex;
-    private int _footballGoalCheerIndex;
     private static DisplaySoundClip FootballClip(string name) => new(name,
         Path.Combine(AppContext.BaseDirectory, "Assets", "Football", "Audio", name + ".mp3"));
     private static readonly DisplaySoundClip[] FootballKickoffSound = [FootballClip("start-whistle")];
+    private static readonly DisplaySoundClip[] FootballAmbienceSound =
+        [new("stadium-ambience", Path.Combine(AppContext.BaseDirectory, "Assets", "Football", "Audio", "stadium-ambience.wav"))];
     private static readonly DisplaySoundClip[][] FootballGoalSounds =
     [
-        [FootballClip("goal-cheer")],
-        [FootballClip("goal-cheer-2")],
-        [FootballClip("goal-cheer-3")]
+        [FootballClip("goal-red")],
+        [FootballClip("goal-blue")]
     ];
     private static readonly DisplaySoundClip[][] FootballChants =
     [
@@ -31,8 +34,18 @@ public sealed partial class MainWindow
     private object FootballAudioDiagnostics => new
     {
         crowd = _footballCrowdSound.Status,
-        match = _footballMatchSound.Status
+        goals = _footballGoalSounds.Status,
+        match = _footballMatchSound.Status,
+        ambience = _footballAmbienceSound.Status
     };
+
+    private void UpdateFootballAmbience()
+    {
+        if (!_closing && _footballAmbienceActive && _scene.CurrentBoardScreen == BoardScreen.Football)
+            _footballAmbienceSound.EnsureLooping(FootballAmbienceSound);
+        else
+            _footballAmbienceSound.Stop();
+    }
 
     private void FootballAudioRequested(FootballAudioUpdate update)
     {
@@ -44,18 +57,21 @@ public sealed partial class MainWindow
             if ((update.Cues & FootballAudioCue.Stop) != 0)
             {
                 _footballCrowdSound.Stop();
+                _footballGoalSounds.Stop();
                 _footballMatchSound.Stop();
                 _footballChantIndex = 0;
             }
+            _footballAmbienceActive = update.AmbienceActive;
+            UpdateFootballAmbience();
             if (_scene.CurrentBoardScreen != BoardScreen.Football) return;
             if ((update.Cues & FootballAudioCue.StartWhistle) != 0)
                 _footballMatchSound.Play(FootballKickoffSound);
-            if ((update.Cues & FootballAudioCue.GoalCheer) != 0)
+            if ((update.Cues & FootballAudioCue.GoalCheer) != 0 && update.ScoringPlayer is 1 or 2)
             {
-                _footballCrowdSound.Play(FootballGoalSounds[_footballGoalCheerIndex]);
-                // Keep the rotation across resets so a new match cannot repeat
-                // the previous match's final cheer as its first goal sound.
-                _footballGoalCheerIndex = (_footballGoalCheerIndex + 1) % FootballGoalSounds.Length;
+                // The scorer travels with the cue, so queued playback cannot
+                // accidentally use a newer score or a freshly reset match.
+                _footballCrowdSound.Stop();
+                _footballGoalSounds.Play(FootballGoalSounds[update.ScoringPlayer - 1]);
             }
             else if ((update.Cues & FootballAudioCue.CrowdChant) != 0)
                 _footballCrowdSound.Play(FootballChants[_footballChantIndex++ % FootballChants.Length]);

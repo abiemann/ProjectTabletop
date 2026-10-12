@@ -171,7 +171,7 @@ public sealed partial class BoardSession
             Revision++;
             NavigationRevision++;
             if (Screen == BoardScreen.WaterGarden) RequestWaterGardenReset();
-            if (Screen == BoardScreen.Football) ResetFootball(now);
+            if (Screen == BoardScreen.Football) InitializeFootball(now, startMatch: false);
             openedBoard = true;
         }
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

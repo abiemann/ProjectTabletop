@@ -18,12 +18,17 @@ internal sealed class DisplaySoundPlayer(string name, double volume) : IDisposab
     private MediaPlaybackList? _playlist;
     private IReadOnlyList<DisplaySoundClip>? _clips;
     private DeviceInformation? _device;
-    private bool _enabled, _disposed, _playing;
+    private bool _enabled, _disposed, _playing, _looping;
+
+    // Opening already occupies a voice. These managed flags avoid native state
+    // reads and diagnostic allocations when choosing an idle playback channel.
+    internal bool IsActive { get { lock (_gate) return _playing; } }
+    internal bool IsEnabled { get { lock (_gate) return _enabled; } }
 
     internal sealed record AudioStatus(string? RequestedDisplay, string OutputDevice,
         bool UsesProjectorSpeakers, DateTimeOffset? PlayRequestedAt, string? Error,
         string PlaybackState = "None", bool Enabled = false, string? ActiveClip = null,
-        string? Sequence = null);
+        string? Sequence = null, bool IsLooping = false);
     private AudioStatus _status = new(null, "Unavailable", false, null, null);
     internal AudioStatus Status
     {
@@ -41,7 +46,7 @@ internal sealed class DisplaySoundPlayer(string name, double volume) : IDisposab
                         activeClip = clips[(int)playlist.CurrentItemIndex].Name;
                 }
                 catch (Exception) { state = "Unavailable"; }
-                return _status with { PlaybackState = state, ActiveClip = activeClip };
+                return _status with { PlaybackState = state, ActiveClip = activeClip, IsLooping = _looping };
             }
         }
     }
@@ -68,16 +73,24 @@ internal sealed class DisplaySoundPlayer(string name, double volume) : IDisposab
     }
 
     // Callers keep immutable clip arrays so repeated cues reuse their prepared
-    // player and sources. A sequence runs once; no delayed task can revive it.
-    internal void Play(IReadOnlyList<DisplaySoundClip> clips)
+    // player and sources. One-shot sequences restart only on an explicit request.
+    internal void Play(IReadOnlyList<DisplaySoundClip> clips) => Start(clips, looping: false);
+
+    // Native repeat keeps the background continuous. Repeated requests with the
+    // same immutable array must not seek, recreate sources, or restart opening.
+    internal void EnsureLooping(IReadOnlyList<DisplaySoundClip> clips) => Start(clips, looping: true);
+
+    private void Start(IReadOnlyList<DisplaySoundClip> clips, bool looping)
     {
         lock (_gate)
         {
             if (_disposed || !_enabled || _device is null || clips.Count == 0) return;
+            if (looping && _looping && _playing && _player is not null &&
+                _status.Error is null && ReferenceEquals(_clips, clips)) return;
             try
             {
-                if (_status.Error is not null || !ReferenceEquals(_clips, clips)) ReleasePlayer();
-                if (_player is null) Prepare(clips);
+                if (_status.Error is not null || _looping != looping || !ReferenceEquals(_clips, clips)) ReleasePlayer();
+                if (_player is null) Prepare(clips, looping);
                 else if (_playlist!.CurrentItemIndex < clips.Count &&
                     _player.PlaybackSession.PlaybackState is MediaPlaybackState.Playing or MediaPlaybackState.Paused)
                 {
@@ -110,10 +123,11 @@ internal sealed class DisplaySoundPlayer(string name, double volume) : IDisposab
         }
     }
 
-    private void Prepare(IReadOnlyList<DisplaySoundClip> clips)
+    private void Prepare(IReadOnlyList<DisplaySoundClip> clips, bool looping)
     {
         _clips = clips;
-        _playlist = new MediaPlaybackList { AutoRepeatEnabled = false, ShuffleEnabled = false };
+        _looping = looping;
+        _playlist = new MediaPlaybackList { AutoRepeatEnabled = looping, ShuffleEnabled = false };
         _playlist.ItemFailed += OnItemFailed;
         foreach (var clip in clips)
         {
@@ -165,7 +179,7 @@ internal sealed class DisplaySoundPlayer(string name, double volume) : IDisposab
         lock (_gate)
         {
             if (_disposed || !ReferenceEquals(sender, _player)) return;
-            _playing = false;
+            if (!_looping) _playing = false;
         }
     }
 
@@ -186,6 +200,7 @@ internal sealed class DisplaySoundPlayer(string name, double volume) : IDisposab
         _playlist = null;
         _clips = null;
         _playing = false;
+        _looping = false;
         if (playlist is not null) playlist.ItemFailed -= OnItemFailed;
         if (player is not null)
         {
