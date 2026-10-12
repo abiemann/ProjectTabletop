@@ -7,7 +7,7 @@ namespace ProjectTabletop.App.Projection.Football;
 
 internal sealed partial class FootballRenderer
 {
-    internal const double VictoryDurationSeconds = 10;
+    internal const double VictoryDurationSeconds = BoardSession.FootballVictoryDurationSeconds;
     private const int ConfettiCount = 2400;
     private static readonly ConfettiPiece[] Confetti = MakeConfetti();
     private static readonly Vector4[] ConfettiColors =
@@ -34,19 +34,20 @@ internal sealed partial class FootballRenderer
             return;
         }
         seconds = Math.Min(seconds, VictoryDurationSeconds);
-        float left = winner * 800;
+        float halfWidth = PitchWidth / 2;
+        float left = winner * halfWidth;
         if (_confettiWinner != winner || seconds < _confettiLastSeconds)
         {
             _confettiWinner = winner;
             _confettiCar = FieldPoint(state.Kickers[winner].Position);
-            _confettiCar = Vector2.Clamp(_confettiCar, new(left + 80, 85), new(left + 720, 915));
+            _confettiCar = Vector2.Clamp(_confettiCar, new(left + 80, 85), new(left + halfWidth - 80, PitchHeight - 85));
         }
         _confettiLastSeconds = seconds;
         EnsureConfettiPaper();
 
         // These are physical half-pitch bounds, not a decorative opacity fade.
         // Both launch trajectories and their final pile belong to the winner.
-        using var half = ds.CreateLayer(1, new Rect(left + 3, 3, 794, 994));
+        using var half = ds.CreateLayer(1, new Rect(left + 3, 3, halfWidth - 6, PitchHeight - 6));
 
         // One immutable particle set and two GPU sprite batches. No per-piece
         // paths, brushes, images or frame-history allocations in the draw loop.
@@ -62,11 +63,12 @@ internal sealed partial class FootballRenderer
                 float flightAge = Math.Min(age, piece.Flight);
                 float loft = 4 * piece.Height * p * (1 - p);
                 // Opposing jets enter from beyond the turf; only the paper is visible.
-                var launch = new Vector2(left + (piece.Cannon == 0 ? 390 : 410), piece.Cannon == 0 ? -95 : 1095);
+                var launch = new Vector2(left + halfWidth / 2 + (piece.Cannon == 0 ? -10 : 10),
+                    piece.Cannon == 0 ? -95 : PitchHeight + 95);
                 var landing = piece.AtCar
                     ? _confettiCar + piece.Landing * new Vector2(58, 50)
-                    : new Vector2(left + 30 + piece.Landing.X * 740, 36 + piece.Landing.Y * 928);
-                landing = Vector2.Clamp(landing, new(left + 24, 28), new(left + 776, 972));
+                    : new Vector2(left + 30 + piece.Landing.X * (halfWidth - 60), 36 + piece.Landing.Y * (PitchHeight - 72));
+                landing = Vector2.Clamp(landing, new(left + 24, 28), new(left + halfWidth - 24, PitchHeight - 28));
                 // Drag slows the sideways jet; a parabolic rise and fall plus
                 // irregular flutter gives each scrap a different landing path.
                 float travel = (1 - MathF.Exp(-2.1f * p)) / (1 - MathF.Exp(-2.1f));

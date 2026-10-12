@@ -23,6 +23,8 @@ public sealed partial class SceneCompositor
     private DateTimeOffset _footballResetThrough;
     private DateTimeOffset? _footballVictoryStarted;
     private int _footballVictoryFrame = -1;
+    private const double FootballPresentationSeconds = BoardSession.FootballVictoryDurationSeconds +
+        BoardSession.FootballVictoryControlsSlideSeconds;
     private readonly DateTimeOffset[] _footballSourceTimes = new DateTimeOffset[2];
     private readonly bool[] _footballFingerPlayers = new bool[2];
     private readonly float?[] _footballBarHeadings = new float?[2];
@@ -32,9 +34,14 @@ public sealed partial class SceneCompositor
     // The pitch is searched for arriving hands only while a human player
     // actually uses fingertip input; black bars need no palm inference.
     private bool FootballFingerSearch => _boardSession.Screen == BoardScreen.Football &&
+        _boardSession.FootballState.Phase != FootballPhase.Finished &&
         (_footballFingerPlayers[0] || _footballFingerPlayers[1] && _boardSession.FootballState.Mode == FootballMode.TwoHumans);
 
     public FootballSnapshot FootballState { get { lock (_gate) return _boardSession.FootballState; } }
+    public bool FootballInputActive
+    {
+        get { lock (_gate) { SyncFootballSession(); return _footballActive; } }
+    }
     public long FootballInputRevision
     {
         get { lock (_gate) { SyncFootballSession(); return _footballInputEpoch; } }
@@ -151,8 +158,16 @@ public sealed partial class SceneCompositor
 
     private void SyncFootballSession()
     {
+        if (_boardSession.Screen == BoardScreen.Football)
+        {
+            var field = FootballFieldBounds();
+            double turfBottom = field.Y + field.Height *
+                (FootballFieldGeometry.TurfTop + FootballFieldGeometry.TurfHeight) / FootballFieldGeometry.Height;
+            _boardSession.SetFootballControlTop(Math.Min(.885, turfBottom - .075), _footballClock());
+        }
         if (_footballNavigation != _boardSession.NavigationRevision) ResetFootballVictory();
         bool active = !_disposed && _boardSession.Screen == BoardScreen.Football &&
+            _boardSession.FootballState.Phase != FootballPhase.Finished &&
             !_blackOutput && !_boardSetup && _calibrationTarget < 0 && !IsBoardRevealActive &&
             _boardCameraMap is not null && _boardSurfaceMap is not null;
         if (active == _footballActive && _footballNavigation == _boardSession.NavigationRevision &&
@@ -165,14 +180,22 @@ public sealed partial class SceneCompositor
         ClearFootballObservations();
     }
 
-    // Fit a regulation-shaped field to the physical board. The inverse input
-    // mapping uses this exact rectangle, including its letterboxed margins.
+    // Use the space below the scoreboard for the whole turf. Inactive controls
+    // overlap its lower edge instead of reserving a separate row. The camera
+    // inverse uses this same rectangle, keeping the ball round and aiming aligned.
     internal Rect FootballFieldBounds()
     {
         double aspect = PaintBoardAspect();
-        double width = Math.Min(.84, .69 * FootballGame.Width / aspect);
-        double height = width * aspect / FootballGame.Width;
-        return new((1 - width) / 2, .15 + (.69 - height) / 2, width, height);
+        const double availableWidth = .976, availableHeight = .9, top = .075;
+        double turfWidthRatio = FootballFieldGeometry.TurfWidth / FootballFieldGeometry.Width;
+        double turfHeightRatio = FootballFieldGeometry.TurfHeight / FootballFieldGeometry.Height;
+        double fieldAspect = FootballFieldGeometry.Width / FootballFieldGeometry.Height;
+        double width = Math.Min(availableWidth / turfWidthRatio,
+            availableHeight / turfHeightRatio * fieldAspect / aspect);
+        double height = width * aspect / fieldAspect;
+        return new((1 - width) / 2,
+            top + (availableHeight - height * turfHeightRatio) / 2 -
+                height * FootballFieldGeometry.TurfTop / FootballFieldGeometry.Height, width, height);
     }
 
     /// <summary>The whole grass surface, where a marker centre may lie, as a raw-camera
@@ -254,7 +277,7 @@ public sealed partial class SceneCompositor
             _footballBarHeadings[player] = null;
             Vector2? point = _footballActive && fieldPoint is { } uv && double.IsFinite(uv.X) && double.IsFinite(uv.Y) &&
                 uv.X is >= 0 and <= 1 && uv.Y is >= 0 and <= 1
-                ? new((float)(uv.X - .5) * FootballGame.Width, (float)(uv.Y - .5)) : null;
+                ? new((float)(uv.X - .5) * FootballGame.Width, (float)(uv.Y - .5) * FootballGame.Height) : null;
             _boardSession.SetFootballInput(player, point, frameTime);
         }
     }
@@ -298,13 +321,14 @@ public sealed partial class SceneCompositor
             // Keep the complete game object on the pitch when a physical bar
             // reaches a sideline; do not report a visible bar as a lost player.
             position = Vector2.Clamp(position,
-                new(-FootballGame.Width / 2 + FootballGame.KickerRadius, -.5f + FootballGame.KickerRadius),
-                new(FootballGame.Width / 2 - FootballGame.KickerRadius, .5f - FootballGame.KickerRadius));
+                new(-FootballGame.Width / 2 + FootballGame.KickerRadius, -FootballGame.Height / 2 + FootballGame.KickerRadius),
+                new(FootballGame.Width / 2 - FootballGame.KickerRadius, FootballGame.Height / 2 - FootballGame.KickerRadius));
             _boardSession.SetFootballInput(player, position, frameTime, heading);
             return true;
         }
 
-        static Vector2 World(PixelPoint point) => new((float)(point.X - .5) * FootballGame.Width, (float)(point.Y - .5));
+        static Vector2 World(PixelPoint point) => new((float)(point.X - .5) * FootballGame.Width,
+            (float)(point.Y - .5) * FootballGame.Height);
     }
 
     private long FootballVisualRevision()
@@ -315,8 +339,9 @@ public sealed partial class SceneCompositor
         var state = _boardSession.FootballState;
         UpdateFootballVictory(state, now);
         // The game deliberately stops advancing after a win. Keep its visual
-        // celebration moving at 60 Hz, then reuse the settled confetti image.
-        return unchecked(state.Revision * ((long)(FootballRenderer.VictoryDurationSeconds * 60) + 2) +
+        // celebration and the following control entrance moving at 60 Hz, then
+        // reuse the fully settled image.
+        return unchecked(state.Revision * ((long)(FootballPresentationSeconds * 60) + 2) +
             _footballVictoryFrame + 1);
     }
 
@@ -331,14 +356,16 @@ public sealed partial class SceneCompositor
         // previews and appearance changes must never fire the cannons again.
         _footballVictoryStarted ??= now;
         double elapsed = Math.Clamp((now - _footballVictoryStarted.Value).TotalSeconds,
-            0, FootballRenderer.VictoryDurationSeconds);
+            0, FootballPresentationSeconds);
         _footballVictoryFrame = Math.Max(_footballVictoryFrame, (int)Math.Floor(elapsed * 60));
+        _boardSession.SetFootballVictoryPresentation(_footballVictoryFrame / 60.0, now);
     }
 
     private void ResetFootballVictory()
     {
         _footballVictoryStarted = null;
         _footballVictoryFrame = -1;
+        _boardSession.SetFootballVictoryPresentation(0, _footballClock());
     }
 
     private FootballRenderer GetFootballRenderer(CanvasDevice device)
@@ -411,12 +438,19 @@ public sealed partial class SceneCompositor
         DrawBoardAspectText(ds, "PLAYER 1", new Rect(60, 20, 260, 40), Color.FromArgb(255, 255, 186, 121), caption);
         DrawBoardAspectText(ds, state.Mode == FootballMode.HumanVsAi ? "COMPUTER" : "PLAYER 2", new Rect(680, 20, 260, 40),
             Color.FromArgb(255, 116, 206, 239), caption);
-        // Keep every phase message off the playing surface. A dark countdown
-        // plaque over a real bar merges with its ink and repeatedly loses it.
+        // Put status on the upper grass margin, between its edge and the painted
+        // touchline. Text alone leaves the marker-visible turf unobstructed.
+        double designScaleY = field.Height * BoardSurfaceSize / FootballFieldGeometry.Height;
+        double statusHeight = designScaleY * 52;
+        // DrawBoardAspectText already scales portrait lettering. Account for
+        // that once so tall boards do not shrink the message a second time.
+        double textAspectScale = Math.Min(1, aspect);
+        caption.FontSize = (float)Math.Min(19, statusHeight * .65 / textAspectScale);
         if (state.Phase is FootballPhase.Countdown or FootballPhase.Goal or FootballPhase.Finished)
-        { caption.FontFamily = "Bahnschrift"; caption.FontSize = 28; }
+        { caption.FontFamily = "Bahnschrift"; caption.FontSize = (float)Math.Min(28, statusHeight * .8 / textAspectScale); }
         DrawBoardAspectText(ds, state.Phase == FootballPhase.Playing ? "FIRST TO FIVE  ·  DEFEND YOUR GOAL" : state.Banner,
-            new Rect(40, 76, 920, 39), Color.FromArgb(255, 221, 230, 210), caption);
+            new Rect(field.X * BoardSurfaceSize, field.Y * BoardSurfaceSize - designScaleY * 58,
+                field.Width * BoardSurfaceSize, statusHeight), Color.FromArgb(255, 241, 244, 227), caption);
     }
 
     private static Rect FootballButtonTextRect(BoardButton button) => new(button.Bounds.X * BoardSurfaceSize + 12,

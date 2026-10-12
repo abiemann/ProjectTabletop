@@ -18,7 +18,7 @@ public sealed partial class MainWindow
         ResetFootballInput();
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
-        SetStatus("Football: learn a black bar or double-bar marker, or choose index finger under Football input. Keep one controller in each player's half; your object follows in front of the marker facing the opposing half. First to five wins. Cover EXIT, RESET or the player-mode caption for one second to select it.");
+        SetStatus("Football: learn a black bar or double-bar marker, or choose index finger under Football input. Keep one controller in each player's half; your object follows in front of the marker facing the opposing half. First to five wins. Cover EXIT, RESET or the player-mode caption for one second to select it. These buttons hide during play and slide back in after the victory confetti settles.");
     }
 
     private void OnFootballModeChanged(object sender, SelectionChangedEventArgs e)

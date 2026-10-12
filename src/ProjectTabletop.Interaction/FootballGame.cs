@@ -28,7 +28,7 @@ public sealed record FootballSnapshot(Vector2 BallPosition, Vector2 BallVelocity
 public sealed class FootballGame
 {
     public const float Width = 1.6f;
-    public const float Height = 1f;
+    public const float Height = 1.18f;
     public const float BallRadius = .027f;
     public const float KickerRadius = .068f;
     public const float GoalHalfWidth = .17f;
@@ -77,6 +77,7 @@ public sealed class FootballGame
     private FootballSnapshot? _snapshot;
 
     public long Revision { get; private set; }
+    public FootballPhase Phase => _phase;
     public FootballSnapshot Snapshot => _snapshot ??= CreateSnapshot();
 
     /// <summary>
@@ -87,11 +88,12 @@ public sealed class FootballGame
     /// reacquire without sweeping a bumper through the pitch, so a changed hand identity cannot
     /// produce a phantom kick. A measured heading rigidly anchors the visible kicker to this pose;
     /// its collision movement still uses bounded velocity derived from observation timestamps.
+    /// Finished matches ignore input until Reset starts the next match.
     /// </summary>
     public void SetPlayerInput(int index, Vector2? position, DateTimeOffset observedAt, float? heading = null)
     {
         ValidateIndex(index);
-        if (index == 1 && _mode == FootballMode.HumanVsAi) return;
+        if (_phase == FootballPhase.Finished || index == 1 && _mode == FootballMode.HumanVsAi) return;
         var kicker = _kickers[index];
         if (kicker.ObservedAt is { } last && (observedAt < last || observedAt == last && position is not null)) return;
         var previousAt = kicker.ObservedAt;
@@ -211,6 +213,7 @@ public sealed class FootballGame
         if (_lastAdvance is { } previous && now <= previous) return;
         double elapsed = _lastAdvance is { } last ? (now - last).TotalSeconds : 0;
         _lastAdvance = now;
+        if (_phase == FootballPhase.Finished) return;
         var phase = _phase;
         bool wasRecovering = _recoveringInput;
         bool changed = UpdatePresence(now, out bool ready);
@@ -258,7 +261,7 @@ public sealed class FootballGame
             _accumulator = 0;
         }
         changed |= _phase != phase;
-        if (_phase is FootballPhase.WaitingForPlayers or FootballPhase.Finished)
+        if (_phase == FootballPhase.WaitingForPlayers)
         {
             // Play is paused: a present player's kicker follows its input directly,
             // without moving the ball or banking velocity for a later kick.

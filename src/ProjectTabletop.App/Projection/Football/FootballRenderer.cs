@@ -10,9 +10,13 @@ using Windows.UI;
 namespace ProjectTabletop.App.Projection.Football;
 
 /// <summary>A device-owned, overhead football pitch. All coordinates are mapped
-/// from the same 1.6 × 1 metre simulation rectangle used for input.</summary>
+/// from the same physical simulation rectangle used for input.</summary>
 internal sealed partial class FootballRenderer : IDisposable
 {
+    private const float PitchWidth = (float)FootballFieldGeometry.Width;
+    private const float PitchHeight = (float)FootballFieldGeometry.Height;
+    private const float PitchBitmapWidth = PitchWidth + 224;
+    private const float PitchBitmapHeight = PitchHeight + 132;
     private readonly CanvasDevice _device;
     private readonly SoccerBallRenderer _ball = new();
     private readonly object _pitchGate = new();
@@ -88,9 +92,9 @@ internal sealed partial class FootballRenderer : IDisposable
         try
         {
             using var clip = ds.CreateLayer(1, new Rect(0, 0, width, 400));
-            double cropWidth = 1824, cropHeight = cropWidth * 400 / width;
-            if (cropHeight > 1132) { cropHeight = 1132; cropWidth = cropHeight * width / 400; }
-            var crop = new Rect((1824 - cropWidth) / 2, (1132 - cropHeight) / 2, cropWidth, cropHeight);
+            double cropWidth = PitchBitmapWidth, cropHeight = cropWidth * 400 / width;
+            if (cropHeight > PitchBitmapHeight) { cropHeight = PitchBitmapHeight; cropWidth = cropHeight * width / 400; }
+            var crop = new Rect((PitchBitmapWidth - cropWidth) / 2, (PitchBitmapHeight - cropHeight) / 2, cropWidth, cropHeight);
             ds.DrawImage(pitch, new Rect(0, 0, width, 400), crop);
             var center = new Vector2(width * .80f, 178);
             DrawSoftShadow(ds, center + new Vector2(47, 89), 127, 93, 165);
@@ -107,12 +111,12 @@ internal sealed partial class FootballRenderer : IDisposable
         if (fieldBounds.Width <= 0 || fieldBounds.Height <= 0) return;
         var pitch = Pitch;
         var previous = ds.Transform;
-        ds.Transform = Matrix3x2.CreateScale((float)fieldBounds.Width / 1600, (float)fieldBounds.Height / 1000) *
+        ds.Transform = Matrix3x2.CreateScale((float)fieldBounds.Width / PitchWidth, (float)fieldBounds.Height / PitchHeight) *
             Matrix3x2.CreateTranslation((float)fieldBounds.X, (float)fieldBounds.Y) * previous;
         try
         {
             if (pitch is not null) ds.DrawImage(pitch, -112, -66);
-            else ds.FillRectangle(new Rect(0, 0, 1600, 1000), Ink(66, 105, 39));
+            else ds.FillRectangle(new Rect(0, 0, PitchWidth, PitchHeight), Ink(66, 105, 39));
             // Goal shadows belong to the turf and remain under the moving ball.
             DrawGoal(ds, false, false);
             DrawGoal(ds, true, false);
@@ -149,11 +153,12 @@ internal sealed partial class FootballRenderer : IDisposable
         finally { ds.Transform = previous; }
     }
 
-    private static Vector2 FieldPoint(Vector2 point) => new((point.X + .8f) * 1000, (point.Y + .5f) * 1000);
+    private static Vector2 FieldPoint(Vector2 point) =>
+        new((point.X + FootballGame.Width / 2) * 1000, (point.Y + FootballGame.Height / 2) * 1000);
 
     private void BuildPitch()
     {
-        var target = new CanvasRenderTarget(_device, 1824, 1132, 96);
+        var target = new CanvasRenderTarget(_device, PitchBitmapWidth, PitchBitmapHeight, 96);
         bool published = false;
         try
         {
@@ -167,15 +172,15 @@ internal sealed partial class FootballRenderer : IDisposable
                 using var shape = CanvasGeometry.CreateRoundedRectangle(_device, turf, corner, corner);
                 using (ds.CreateLayer(1, shape))
                 {
-                    ds.FillRectangle(new Rect(-112, -66, 1824, 1132), Ink(55, 87, 36));
+                    ds.FillRectangle(new Rect(-112, -66, PitchBitmapWidth, PitchBitmapHeight), Ink(55, 87, 36));
                     DrawGrass(ds);
                     using var sun = new CanvasLinearGradientBrush(_device,
                     [
                         new() { Position = 0, Color = Ink(228, 219, 114, 38) },
                         new() { Position = .52f, Color = Ink(180, 198, 112, 0) },
                         new() { Position = 1, Color = Ink(5, 24, 19, 35) }
-                    ]) { StartPoint = new(0, 0), EndPoint = new(1500, 1050) };
-                    ds.FillRectangle(new Rect(-112, -66, 1824, 1132), sun);
+                    ]) { StartPoint = new(0, 0), EndPoint = new(PitchWidth - 100, PitchHeight + 50) };
+                    ds.FillRectangle(new Rect(-112, -66, PitchBitmapWidth, PitchBitmapHeight), sun);
                     DrawMarkings(ds);
                 }
                 ds.DrawRoundedRectangle(turf, corner, corner, Ink(17, 37, 22, 180), 3);
@@ -197,29 +202,29 @@ internal sealed partial class FootballRenderer : IDisposable
         var random = new Random(74183);
         for (int stripe = -1; stripe <= 12; stripe++)
         {
-            float x = stripe * (1600f / 12);
+            float x = stripe * (PitchWidth / 12);
             bool towardSun = (stripe & 1) == 0;
-            ds.FillRectangle(new Rect(x, -66, 1600f / 12 + .5f, 1132),
+            ds.FillRectangle(new Rect(x, -66, PitchWidth / 12 + .5f, PitchBitmapHeight),
                 towardSun ? Ink(91, 124, 44) : Ink(66, 105, 39));
         }
         // Very low-frequency variations keep the closely cut turf organic.
-        for (int i = 0; i < 2400; i++)
+        for (int i = 0; i < (int)(2400 * FootballGame.Height); i++)
         {
-            float x = -110 + (float)random.NextDouble() * 1820;
-            float y = -65 + (float)random.NextDouble() * 1130;
+            float x = -110 + (float)random.NextDouble() * (PitchWidth + 220);
+            float y = -65 + (float)random.NextDouble() * (PitchHeight + 130);
             float size = 4 + (float)random.NextDouble() * 17;
             ds.FillEllipse(new(x, y), size * 1.5f, size,
                 i % 2 == 0 ? Ink(18, 66, 31, 9) : Ink(199, 192, 86, 8));
         }
-        for (int i = 0; i < 235000; i++)
+        for (int i = 0; i < (int)(235000 * FootballGame.Height); i++)
         {
-            float x = -110 + (float)random.NextDouble() * 1820;
-            float y = -65 + (float)random.NextDouble() * 1130;
+            float x = -110 + (float)random.NextDouble() * (PitchWidth + 220);
+            float y = -65 + (float)random.NextDouble() * (PitchHeight + 130);
             float variety = (float)random.NextDouble();
             float length = .8f + (float)random.NextDouble() * 3.2f;
             float dx = ((float)random.NextDouble() - .55f) * 1.5f;
             float dy = -length;
-            int stripe = (int)MathF.Floor(x / (1600f / 12));
+            int stripe = (int)MathF.Floor(x / (PitchWidth / 12));
             if ((stripe & 1) != 0) { dx += .65f; dy *= -.67f; }
             Color blade = variety switch
             {
@@ -234,55 +239,55 @@ internal sealed partial class FootballRenderer : IDisposable
                 ds.DrawLine(new(x + .8f, y), new(x + dx + 1.2f, y + dy * .76f), Ink(21, 61, 27, 58), .55f);
         }
         // Narrow darker grass gutters distinguish the two physical rebounding sidelines.
-        ds.FillRectangle(new Rect(-108, -64, 1816, 34), Ink(10, 36, 20, 32));
-        ds.FillRectangle(new Rect(-108, 1030, 1816, 34), Ink(10, 36, 20, 44));
+        ds.FillRectangle(new Rect(-108, -64, PitchWidth + 216, 34), Ink(10, 36, 20, 32));
+        ds.FillRectangle(new Rect(-108, PitchHeight + 30, PitchWidth + 216, 34), Ink(10, 36, 20, 44));
     }
 
     private static void DrawMarkings(CanvasDrawingSession ds)
     {
         var chalk = Ink(244, 245, 218, 230);
         var chalkShadow = Ink(33, 62, 26, 100);
-        ds.DrawRectangle(new Rect(.8, .8, 1598.4, 998.4), chalkShadow, 5.5f);
-        ds.DrawRectangle(new Rect(1.5, 1.5, 1597, 997), chalk, 3.6f);
-        ds.DrawLine(800, 2, 800, 998, chalk, 3.3f);
-        ds.DrawCircle(new(800, 500), 139, chalk, 3.2f);
-        ds.FillCircle(new(800, 500), 4.5f, chalk);
+        ds.DrawRectangle(new Rect(.8, .8, PitchWidth - 1.6, PitchHeight - 1.6), chalkShadow, 5.5f);
+        ds.DrawRectangle(new Rect(1.5, 1.5, PitchWidth - 3, PitchHeight - 3), chalk, 3.6f);
+        ds.DrawLine(PitchWidth / 2, 2, PitchWidth / 2, PitchHeight - 2, chalk, 3.3f);
+        ds.DrawCircle(new(PitchWidth / 2, PitchHeight / 2), 139, chalk, 3.2f);
+        ds.FillCircle(new(PitchWidth / 2, PitchHeight / 2), 4.5f, chalk);
         for (int side = 0; side < 2; side++)
         {
-            float x = side == 0 ? 0 : 1600;
+            float x = side == 0 ? 0 : PitchWidth;
             float direction = side == 0 ? 1 : -1;
-            ds.DrawRectangle(new Rect(side == 0 ? 1.5 : 1350, 206, 248.5, 588), chalk, 3.2f);
-            ds.DrawRectangle(new Rect(side == 0 ? 1.5 : 1496, 300, 102.5, 400), chalk, 3.2f);
-            ds.FillCircle(new(x + direction * 176, 500), 4.5f, chalk);
-            using var arcClip = ds.CreateLayer(1, new Rect(side == 0 ? 251 : 1170, 344, 179, 312));
-            ds.DrawCircle(new(x + direction * 176, 500), 139, chalk, 3.2f);
+            ds.DrawRectangle(new Rect(side == 0 ? 1.5 : PitchWidth - 250, PitchHeight / 2 - 294, 248.5, 588), chalk, 3.2f);
+            ds.DrawRectangle(new Rect(side == 0 ? 1.5 : PitchWidth - 104, PitchHeight / 2 - 200, 102.5, 400), chalk, 3.2f);
+            ds.FillCircle(new(x + direction * 176, PitchHeight / 2), 4.5f, chalk);
+            using var arcClip = ds.CreateLayer(1, new Rect(side == 0 ? 251 : PitchWidth - 430, PitchHeight / 2 - 156, 179, 312));
+            ds.DrawCircle(new(x + direction * 176, PitchHeight / 2), 139, chalk, 3.2f);
         }
-        using (ds.CreateLayer(1, new Rect(2, 2, 1596, 996)))
+        using (ds.CreateLayer(1, new Rect(2, 2, PitchWidth - 4, PitchHeight - 4)))
         {
             ds.DrawCircle(new(0, 0), 27, chalk, 2.8f);
-            ds.DrawCircle(new(1600, 0), 27, chalk, 2.8f);
-            ds.DrawCircle(new(0, 1000), 27, chalk, 2.8f);
-            ds.DrawCircle(new(1600, 1000), 27, chalk, 2.8f);
+            ds.DrawCircle(new(PitchWidth, 0), 27, chalk, 2.8f);
+            ds.DrawCircle(new(0, PitchHeight), 27, chalk, 2.8f);
+            ds.DrawCircle(new(PitchWidth, PitchHeight), 27, chalk, 2.8f);
         }
         // Individual paint flecks soften perfectly mathematical line edges.
         var random = new Random(8901);
         for (int i = 0; i < 1900; i++)
         {
-            float x = (float)random.NextDouble() * 1600;
-            float y = (float)random.NextDouble() * 1000;
-            float nearestLine = Math.Min(Math.Min(x, 1600 - x), Math.Min(y, 1000 - y));
-            if (nearestLine > 5 && Math.Abs(x - 800) > 3) continue;
+            float x = (float)random.NextDouble() * PitchWidth;
+            float y = (float)random.NextDouble() * PitchHeight;
+            float nearestLine = Math.Min(Math.Min(x, PitchWidth - x), Math.Min(y, PitchHeight - y));
+            if (nearestLine > 5 && Math.Abs(x - PitchWidth / 2) > 3) continue;
             ds.FillCircle(new(x, y), .75f, Ink(222, 225, 191, 135));
         }
     }
 
     private static void DrawGoal(CanvasDrawingSession ds, bool right, bool foreground)
     {
-        float x = right ? 1600 : 0;
+        float x = right ? PitchWidth : 0;
         float sign = right ? 1 : -1;
         float depth = FootballGame.GoalDepth * 1000;
-        float top = 500 - FootballGame.GoalHalfWidth * 1000;
-        float bottom = 500 + FootballGame.GoalHalfWidth * 1000;
+        float top = PitchHeight / 2 - FootballGame.GoalHalfWidth * 1000;
+        float bottom = PitchHeight / 2 + FootballGame.GoalHalfWidth * 1000;
         var frontTop = new Vector2(x, top);
         var frontBottom = new Vector2(x, bottom);
         var backTop = new Vector2(x + sign * depth, top + 18);

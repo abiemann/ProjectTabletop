@@ -13,7 +13,9 @@ internal static class FootballGameRegression
         CheckRecoveryCountdownAndHitches();
         CheckFastSweptKickAndSpeedCap();
         CheckBouncesAndRotation();
+        CheckExpandedSidelines();
         CheckGoalsPostsAndHighBalls();
+        CheckFinishedInputDormancy();
         CheckInputSafetyAndAppearances();
         CheckAiAndDeterminism();
         CheckAiGetsBehindTheBall();
@@ -24,7 +26,8 @@ internal static class FootballGameRegression
             "speed caps, lively boundary/floor rebounds, height and quaternion rotation, exact-once goals, " +
             "posts/high balls, first-to-five, invalid/stale/jumping input, equal kicker styles, bounded physical AI, " +
             "kickers following input while paused, stable idle revisions, simulation-timed headings, " +
-            "rigid measured bar poses, bounded observation-speed collision movement and quiet short tracking recovery.");
+            "rigid measured bar poses, bounded observation-speed collision movement, quiet short tracking recovery " +
+            "and finished-match input dormancy with fresh-input restart.");
     }
 
     private static void CheckCountdownPauseAndReset()
@@ -244,7 +247,8 @@ internal static class FootballGameRegression
     private static void CheckBouncesAndRotation()
     {
         var rig = Playing();
-        SeedBall(rig.Game, new(0, .465f), new(.5f, 1.6f));
+        float nearSide = FootballGame.Height / 2 - .035f;
+        SeedBall(rig.Game, new(0, nearSide), new(.5f, 1.6f));
         var before = rig.Game.Snapshot;
         rig.Step(3);
         var rebound = rig.Game.Snapshot;
@@ -253,7 +257,7 @@ internal static class FootballGameRegression
         Require(rebound.BallRotation != Quaternion.Identity &&
             MathF.Abs(rebound.BallRotation.Length() - 1) < .0001f,
             "Panel rotation must follow travel and remain a normalized quaternion.");
-        Require(before.BallPosition == new Vector2(0, .465f), "Simulation updates must not mutate old ball snapshots.");
+        Require(before.BallPosition == new Vector2(0, nearSide), "Simulation updates must not mutate old ball snapshots.");
         SeedBall(rig.Game, Vector2.Zero, new(.2f, 0), .10f, -.9f);
         bool sawBounce = false;
         float lowest = 1;
@@ -267,6 +271,42 @@ internal static class FootballGameRegression
                 "The height-aware shadow must never place the ball below the turf.");
         }
         Require(sawBounce && lowest < .04f, "The rubber football should bounce high after landing.");
+    }
+
+    private static void CheckExpandedSidelines()
+    {
+        foreach (int sign in new[] { -1, 1 })
+        {
+            var rig = Playing();
+            SeedBall(rig.Game, new(0, sign * .50f), new(0, sign * .8f));
+            rig.Step(4);
+            Require(rig.Game.Snapshot.BallPosition.Y * sign > .52f &&
+                rig.Game.Snapshot.BallVelocity.Y * sign > .7f,
+                "The added space towards both sidelines must be playable, without the old invisible rebound wall.");
+
+            SeedBall(rig.Game, new(0, sign * (FootballGame.Height / 2 - .035f)), new(0, sign * 1.6f));
+            rig.Step(3);
+            Require(rig.Game.Snapshot.BallVelocity.Y * sign < -1.45f &&
+                MathF.Abs(rig.Game.Snapshot.BallPosition.Y) < FootballGame.Height / 2 - FootballGame.BallRadius,
+                "The football must rebound from each new sideline while retaining its existing radius and bounce.");
+
+            var waiting = new FootballGame();
+            waiting.SetMode(FootballMode.TwoHumans, Epoch);
+            var inside = new Vector2(-.4f, sign * .51f);
+            waiting.SetPlayerInput(0, inside, Epoch.AddMilliseconds(1), 0);
+            waiting.Advance(Epoch.AddMilliseconds(1));
+            Require(waiting.Snapshot.Kickers[0].Present && waiting.Snapshot.Kickers[0].Position == inside,
+                "Marker-anchored cars must reach the added sideline space without clamping to the old field.");
+            waiting.SetPlayerInput(0, new(-.4f, sign * FootballGame.Height / 2), Epoch.AddMilliseconds(2), 0);
+            waiting.Advance(Epoch.AddMilliseconds(2));
+            Require(MathF.Abs(waiting.Snapshot.Kickers[0].Position.Y -
+                sign * (FootballGame.Height / 2 - FootballGame.KickerRadius)) < .000001f,
+                "The unchanged car footprint must remain fully inside the expanded pitch.");
+            waiting.SetPlayerInput(0, new(-.4f, sign * (FootballGame.Height / 2 + .01f)), Epoch.AddMilliseconds(3), 0);
+            waiting.Advance(Epoch.AddMilliseconds(3));
+            Require(!waiting.Snapshot.Kickers[0].Present,
+                "Points beyond the expanded field must still disarm the player.");
+        }
     }
 
     private static void CheckGoalsPostsAndHighBalls()
@@ -315,6 +355,53 @@ internal static class FootballGameRegression
         SeedBall(left.Game, new(-.76f, 0), new(-1.4f, 0));
         left.Step(9);
         Require(left.Game.Snapshot.Score2 == 1, "The left goal must award Player 2.");
+    }
+
+    private static void CheckFinishedInputDormancy()
+    {
+        foreach (int winner in new[] { 1, 2 })
+        {
+            var rig = Playing();
+            rig.H1 = .35f;
+            rig.Step();
+            float direction = winner == 1 ? 1 : -1;
+            for (int score = 0; score < FootballGame.WinningScore; score++)
+            {
+                SeedBall(rig.Game, new(direction * .76f, 0), new(direction * 1.4f, 0));
+                rig.Step(9);
+            }
+            var finished = rig.Game.Snapshot;
+            Require(finished.Phase == FootballPhase.Finished && finished.Kickers[0].MarkerAnchored &&
+                !finished.Kickers[1].MarkerAnchored, "Finished-input fixture must include marker and fingertip poses.");
+
+            for (int player = 0; player < 2; player++)
+            {
+                rig.Game.SetPlayerInput(player, new(-.1f, .2f), rig.Now.AddMilliseconds(10), -.7f);
+                rig.Game.SetPlayerInput(player, new(.1f, -.2f), rig.Now.AddMilliseconds(20));
+                rig.Game.SetPlayerInput(player, null, rig.Now.AddMilliseconds(30));
+            }
+            rig.Game.Advance(rig.Now.AddMilliseconds(100));
+            rig.Game.Advance(rig.Now.AddSeconds(20));
+            Require(ReferenceEquals(rig.Game.Snapshot, finished) && rig.Game.Revision == finished.Revision,
+                "Finished matches must ignore marker/fingertip updates, loss and aging without changing the final pose or revision.");
+
+            rig.Now = rig.Now.AddSeconds(21);
+            rig.Game.Reset(rig.Now);
+            Require(rig.Game.Snapshot.Phase == FootballPhase.WaitingForPlayers &&
+                rig.Game.Snapshot.Kickers.All(kicker => !kicker.Present),
+                "Reset must require new observations rather than reusing ignored post-match input.");
+            rig.Game.SetPlayerInput(0, new(-.4f, .2f), rig.Now.AddMilliseconds(1), -.25f);
+            rig.Game.Advance(rig.Now.AddMilliseconds(1));
+            Require(rig.Game.Snapshot.Phase == FootballPhase.WaitingForPlayers &&
+                rig.Game.Snapshot.Kickers[0].Position == new Vector2(-.4f, .2f) &&
+                rig.Game.Snapshot.Kickers[0].Heading == -.25f && rig.Game.Snapshot.Kickers[0].MarkerAnchored,
+                "Fresh marker input must resume after Reset while waiting for the other player.");
+            rig.Game.SetPlayerInput(1, new(.4f, -.2f), rig.Now.AddMilliseconds(2));
+            rig.Game.Advance(rig.Now.AddMilliseconds(2));
+            Require(rig.Game.Snapshot.Phase == FootballPhase.Countdown &&
+                rig.Game.Snapshot.Kickers.All(kicker => kicker.Present),
+                "Fresh observations from both players must restart the match after input dormancy.");
+        }
     }
 
     private static void CheckInputSafetyAndAppearances()

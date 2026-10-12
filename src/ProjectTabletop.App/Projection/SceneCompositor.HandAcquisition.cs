@@ -159,14 +159,18 @@ public sealed partial class SceneCompositor
                 _acquisitionQuietUntil = _acquisitionLightUntil + AcquisitionLightOffSettle;
                 ClearAcquisitionLight();
             }
-            bool ready = now >= _acquisitionQuietUntil && frameTime >= _acquisitionQuietUntil &&
+            bool ready = buttons.Count > 0 && now >= _acquisitionQuietUntil && frameTime >= _acquisitionQuietUntil &&
                 frameTime <= now && now - frameTime <= TimeSpan.FromMilliseconds(350);
             _acquisitionReason = ready ? "watching-button-area" : "settling-rendered-scene";
             return Context(ready, null);
         }
     }
 
-    private bool AcquisitionBoardReady => !_disposed && CurrentBoardArtworkReady && !_boardSession.MenuScrolling && _boardSession.Buttons.Count > 0 &&
+    // Keep Football acquisition restricted even when every control is hidden:
+    // fingertips search the calibrated pitch; marker-only play searches no regions.
+    // A null context would instead permit the normal full-camera hand search.
+    private bool AcquisitionBoardReady => !_disposed && CurrentBoardArtworkReady && !_boardSession.MenuScrolling &&
+        (_boardSession.Buttons.Count > 0 || _boardSession.Screen == BoardScreen.Football) &&
         (_boardSession.Screen is not (BoardScreen.Menu or BoardScreen.Settings) || _menuPreviewReady) &&
         !_blackOutput && !_boardSetup && !IsBoardRevealActive && _calibrationTarget < 0 &&
         _boardMediaClip is not null && _boardCameraMap is not null && _boardSurfaceMap is not null;
