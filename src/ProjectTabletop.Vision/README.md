@@ -97,6 +97,22 @@ camera timestamps describe CPU arrival rather than physical exposure.
 Run `-- --hand-acquisition` for motion, stationary foreground, own-light feedback,
 focused-search and colour-correction regressions.
 
+Local caption damage is also checked with overlapping horizontal sections at
+the same registered optical geometry. This lets compact grouped fingers qualify
+when their obstruction straddles the original section boundaries. The additional
+check still requires two adjacent severely damaged sections, intact lettering
+elsewhere, and measured local damage; both 7% coverage floors and fresh-frame
+confirmation remain in place. It does not lower the hand-model confidence
+thresholds or turn intact colour/brightness changes into caption holds. The
+generated-menu grouped-finger regression (`-- --hand-grouped-caption`, also
+included in the acquisition suite) isolates this trigger. A physical main-menu
+check on October 12, 2026 used Android Webcam at 1920 × 1080 / 30 fps and the JMGO
+projector. The user confirmed palm-down grouped entry; the log recorded fresh
+recognition from a focused acquisition search with all four fingers extended
+and together. Withdrawal returned to zero hands and eight intact menu captions,
+without a selection event. Other hardware and lighting conditions remain to be
+checked.
+
 DEBUG local control `capture_hand_acquisition` saves the immutable native camera
 and rendered-reference BGRA buffers with dimensions, mapping, source UTC and
 diagnostics under the app's `HandAcquisitionSnapshots` directory. These private

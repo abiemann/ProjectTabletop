@@ -49,6 +49,7 @@ public sealed partial class MainWindow
         scene.SetBoardSetup(false);
         var tested = new List<string>();
         scene.ShowBoardMenu(); VerifyButtons("Menu");
+        if (selectedBoard is null or BoardScreen.Menu) CheckGroupedMenuArrival();
         scene.ShowHandTrackingTest(); VerifyButtons("Hand-Tracking");
         scene.ShowSettings(); VerifyButtons("Settings");
         scene.ShowSlots(); VerifyButtons("Dragon Slots");
@@ -141,6 +142,7 @@ public sealed partial class MainWindow
             photoCopyClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Photo Copy", StringComparison.Ordinal)) == 5,
             rouletteBetsChipsAndHoldsCovered = selectedBoard is null or BoardScreen.Roulette,
             menuScrollArrowUsesSharedCaptionEvidence = selectedBoard is null or BoardScreen.Menu,
+            groupedMenuArrivalAndIntactCaptionRecovery = selectedBoard is null or BoardScreen.Menu,
             intactReflectiveSpinCaptionChecked = selectedBoard is null or BoardScreen.Slots,
             waterGardenCaptionCorruptionAndIntactReflectanceChecked =
                 tested.Count(label => label.StartsWith("Water Garden/", StringComparison.Ordinal)) == 5,
@@ -455,6 +457,73 @@ public sealed partial class MainWindow
                 scene.CompleteHandAcquisition(lit, presence.Hints, [], now, illuminatedPresence: false);
                 now += TimeSpan.FromMilliseconds(1000);
             }
+        }
+        void CheckGroupedMenuArrival()
+        {
+            Draw();
+            var context = scene.GetHandAcquisitionContext(now)!;
+            int index = scene.CurrentBoardButtons.ToList().FindIndex(button => button.Id == "crown-deed");
+            Require(index >= 0 && context is { ObserveMotion: true, ExpectedScene: not null },
+                "Grouped-finger menu fixture has no stationary Crown & Deed caption.");
+            var caption = context.ExpectedScene!.BoardTriggerRegions![index];
+            var tip = CameraPoint(caption.X + caption.Width / 2, caption.Y - caption.Height * .75);
+            var empty = Draw();
+            // Fixed native size, independent of card width: grouping changes only
+            // the spacing, never the size of each finger or its caption target.
+            // These generated coverage shapes exercise lettering, not hand inference.
+            foreach (bool spread in new[] { false, true })
+            {
+                using var image = new OpenCvSharp.Mat(size, size, OpenCvSharp.MatType.CV_8UC4);
+                System.Runtime.InteropServices.Marshal.Copy(empty, 0, image.Data, empty.Length);
+                const int fingerWidth = 18, fingerLength = 95;
+                int middleX = (int)Math.Round(tip.X), middleY = (int)Math.Round(tip.Y);
+                int step = spread ? 36 : 20;
+                var colour = new OpenCvSharp.Scalar(75, 95, 185, 255);
+                for (int finger = 0; finger < 4; finger++)
+                {
+                    int x = middleX + (finger - 1) * step;
+                    int y = middleY + new[] { 8, 0, 7, 20 }[finger];
+                    OpenCvSharp.Cv2.Rectangle(image, new OpenCvSharp.Rect(x - 9, y + 9,
+                        fingerWidth, fingerLength - 9), colour, -1);
+                    OpenCvSharp.Cv2.Circle(image, new OpenCvSharp.Point(x, y + 9), 9, colour, -1);
+                }
+                OpenCvSharp.Cv2.Ellipse(image, new OpenCvSharp.Point(middleX + 9, middleY + 117),
+                    new OpenCvSharp.Size(39, 40), 0, 0, 360, colour, -1);
+                var occupied = new byte[empty.Length];
+                System.Runtime.InteropServices.Marshal.Copy(image.Data, occupied, 0, occupied.Length);
+                var tracker = new HandAcquisitionPresenceTracker();
+                HandAcquisitionQuery Feed(byte[] pixels)
+                {
+                    now += TimeSpan.FromMilliseconds(100);
+                    return CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, pixels, now),
+                        context, tracker, now);
+                }
+                Require(Feed(occupied).LightingHints.Count == 0,
+                    "A single grouped/spread menu observation bypassed confirmation.");
+                Feed(occupied);
+                var acquired = Feed(occupied);
+                var pattern = acquired.Presence!.TextPatterns!.Single(item => item.ControlRegion == index);
+                Require(pattern.ShapeCorrupted && pattern.ConfirmationFrames >= 2 &&
+                        acquired.LightingHints.Any(hint => hint.ControlCoverage is >= .07 &&
+                            hint.ControlTriggerCoverage is >= .07) && acquired.SearchRegions.Count > 0,
+                    (spread ? "Spread" : "Grouped") + " fixed-size fingers did not acquire the rendered menu caption: " +
+                    System.Text.Json.JsonSerializer.Serialize(acquired.Presence));
+                // Restoring the letters must clear confirmation immediately,
+                // including a different global camera colour/exposure response.
+                var intact = (byte[])empty.Clone();
+                for (int pixel = 0; pixel < intact.Length; pixel += 4)
+                    for (int channel = 0; channel < 3; channel++)
+                        intact[pixel + channel] = (byte)(empty[pixel + channel] * (.78 + channel * .04) + 12);
+                var cleared = Feed(intact);
+                Require(cleared.LightingHints.Count == 0 && cleared.SearchRegions.Count == 0 &&
+                        cleared.Presence!.TextPatterns!.Single(item => item.ControlRegion == index) is
+                            { LabelIntact: true, ShapeCorrupted: false, ConfirmationFrames: 0 },
+                    "Intact recoloured menu lettering retained grouped-finger evidence.");
+                Require(scene.CurrentBoardScreen == BoardScreen.Menu && scene.HoveredBoardButtons.Count == 0 &&
+                        scene.ActiveHandSpotlightCount == 0,
+                    "Caption-only grouped evidence manufactured a hand or menu selection.");
+            }
+            tested.Add("Menu/grouped fixed-size Crown & Deed caption");
         }
         PixelPoint CameraPoint(double u, double v) => new(size * (.035 + .93 * (inset / 2 + u * (1 - inset))),
             size * (.035 + .93 * (inset / 2 + v * (1 - inset))));

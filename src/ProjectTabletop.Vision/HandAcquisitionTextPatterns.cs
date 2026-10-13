@@ -333,15 +333,13 @@ internal sealed class HandAcquisitionTextPatterns
             var sectorEvidence = new int[6][];
             int glyphLeft = template.Evidence.Min(index => index % template.Width);
             int glyphRight = template.Evidence.Max(index => index % template.Width) + 1;
-            for (int sector = 0; sector < sectors.Length; sector++)
+            double SectorCorrelation(int start, int end, out int[] indices, out bool hasContrast)
             {
-                int start = glyphLeft + (glyphRight - glyphLeft) * sector / sectors.Length;
-                int end = glyphLeft + (glyphRight - glyphLeft) * (sector + 1) / sectors.Length;
                 // Evidence positions, so the evidence-ordered pattern can be read directly.
-                int[] indices = Enumerable.Range(0, template.Evidence.Length).Where(k =>
+                indices = Enumerable.Range(0, template.Evidence.Length).Where(k =>
                     template.Evidence[k] % template.Width >= start && template.Evidence[k] % template.Width < end).ToArray();
-                sectorEvidence[sector] = indices;
-                if (indices.Length < 24) { sectors[sector] = 1; continue; }
+                hasContrast = false;
+                if (indices.Length < 24) return 1;
                 double sumA = 0, sumB = 0, sumAA = 0, sumBB = 0, sumAB = 0;
                 foreach (int k in indices)
                 {
@@ -354,9 +352,15 @@ internal sealed class HandAcquisitionTextPatterns
                 double aa = sumAA - sumA * sumA / indices.Length;
                 double bb = sumBB - sumB * sumB / indices.Length;
                 double ab = sumAB - sumA * sumB / indices.Length;
-                if (aa / indices.Length < 9) { sectors[sector] = 1; continue; }
-                informative[sector] = true;
-                sectors[sector] = bb > 1e-8 ? ab / Math.Sqrt(aa * bb) : 0;
+                if (aa / indices.Length < 9) return 1;
+                hasContrast = true;
+                return bb > 1e-8 ? ab / Math.Sqrt(aa * bb) : 0;
+            }
+            for (int sector = 0; sector < sectors.Length; sector++)
+            {
+                int start = glyphLeft + (glyphRight - glyphLeft) * sector / sectors.Length;
+                int end = glyphLeft + (glyphRight - glyphLeft) * (sector + 1) / sectors.Length;
+                sectors[sector] = SectorCorrelation(start, end, out sectorEvidence[sector], out informative[sector]);
                 severe[sector] = sectors[sector] < .40;
             }
             var locallyChanged = new HashSet<int>();
@@ -364,8 +368,42 @@ internal sealed class HandAcquisitionTextPatterns
                 if (severe[sector] && severe[sector + 1])
                     foreach (int k in sectorEvidence[sector].Concat(sectorEvidence[sector + 1]))
                         if (changedIndices.Contains(template.Evidence[k])) locallyChanged.Add(template.Evidence[k]);
-            double localCoverage = locallyChanged.Count / 1_000_000.0 /
-                (_scene.BoardTriggerRegions![template.Region].Width * _scene.BoardTriggerRegions[template.Region].Height);
+            // A compact group of fingers can straddle the fixed sector grid:
+            // intact letters at each edge then dilute both damaged sectors.
+            // Overlap the windows, never shift the registered pixels or change
+            // the correlation cutoff. Two full-width windows a half-sector
+            // apart must lose their shape, with independently intact letters
+            // elsewhere in this same caption and the same actual residual floor.
+            double triggerArea = _scene.BoardTriggerRegions![template.Region].Width *
+                _scene.BoardTriggerRegions[template.Region].Height;
+            if (locallyChanged.Count < HandAcquisitionPresenceTracker.MinimumControlCoverage * triggerArea * 1_000_000 &&
+                severe.Any(value => value) && Enumerable.Range(0, sectors.Length).Count(index => informative[index] && sectors[index] >= .82) >= 2)
+            {
+                int[] previousIndices = sectorEvidence[0];
+                bool previousSevere = severe[0];
+                for (int window = 1; window < sectors.Length * 2 - 1; window++)
+                {
+                    int[] indices;
+                    bool currentSevere;
+                    if (window % 2 == 0)
+                    {
+                        indices = sectorEvidence[window / 2];
+                        currentSevere = severe[window / 2];
+                    }
+                    else
+                    {
+                        int start = glyphLeft + (glyphRight - glyphLeft) * window / (sectors.Length * 2);
+                        int end = glyphLeft + (glyphRight - glyphLeft) * (window + 2) / (sectors.Length * 2);
+                        currentSevere = SectorCorrelation(start, end, out indices, out _) < .40;
+                    }
+                    if (previousSevere && currentSevere)
+                        foreach (int k in previousIndices.Concat(indices))
+                            if (changedIndices.Contains(template.Evidence[k])) locallyChanged.Add(template.Evidence[k]);
+                    previousIndices = indices;
+                    previousSevere = currentSevere;
+                }
+            }
+            double localCoverage = locallyChanged.Count / 1_000_000.0 / triggerArea;
             if (localCoverage >= HandAcquisitionPresenceTracker.MinimumControlCoverage)
             {
                 clean = false;

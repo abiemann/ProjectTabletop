@@ -75,6 +75,12 @@ if (args is ["--hand-reflectance-fit"])
     return;
 }
 
+if (args is ["--hand-grouped-caption"])
+{
+    HandAcquisitionGroupedMenuRegression.Run();
+    return;
+}
+
 if (args is ["--hand-acquisition-exposure"])
 {
     HandAcquisitionExposureSearchRegression.Run();
