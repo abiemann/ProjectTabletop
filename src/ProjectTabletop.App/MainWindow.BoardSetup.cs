@@ -27,8 +27,8 @@ public sealed partial class MainWindow
     private long _boardAnimationUpdated;
     private int _boardSetupPhase;
     private long _boardPhaseStartedTick;
-    private CameraFrame? _lastAnalyzedBoardFrame;
-    private CameraFrame? _whiteBoardReference;
+    private readonly CameraFrameSlot _lastAnalyzedBoardFrames = new();
+    private readonly CameraFrameSlot _whiteBoardFrames = new();
     private WhiteSpotReference? _whiteSpotReference;
     private const int MaximumPendingSpotChecks = 2;
     private readonly object _spotCheckGate = new();
@@ -66,8 +66,13 @@ public sealed partial class MainWindow
 
     private enum BoardSetupPhase { Inactive, Switching, ScanAmbient, ScanWhite, ShowCorners, MeasureSpots, GridReady, Failed }
 
-    private sealed record CalibrationSpotCheck(CameraFrame Frame, CameraFrame White, int SpotIndex,
-        long Generation, SceneCompositor.BoardSpotPresentation Presentation);
+    private sealed record CalibrationSpotCheck(CameraFrameLease FrameLease, CameraFrameLease WhiteLease, int SpotIndex,
+        long Generation, SceneCompositor.BoardSpotPresentation Presentation) : IDisposable
+    {
+        public CameraFrame Frame => FrameLease.Frame;
+        public CameraFrame White => WhiteLease.Frame;
+        public void Dispose() { FrameLease.Dispose(); WhiteLease.Dispose(); }
+    }
     private sealed record WhiteSpotReference(CameraFrame Frame, CalibrationSpotReference Reduced);
 
     private sealed record BoardPreviewState(BoardDetection Detection, int Width, int Height,
@@ -209,6 +214,15 @@ public sealed partial class MainWindow
 
     internal string BoardSetupControlStatus => BoardSetupStatusText.Text;
 
+    private void ClearBoardFrameReferences()
+    {
+        _lastAnalyzedBoardFrames.Clear();
+        _whiteBoardFrames.Clear();
+        Volatile.Write(ref _whiteSpotReference, null);
+        lock (_spotCheckGate)
+            while (_pendingSpotChecks.TryDequeue(out var pending)) pending.Dispose();
+    }
+
     private void ClearBoardPreview()
     {
         ResetCameraLatency();
@@ -223,10 +237,7 @@ public sealed partial class MainWindow
         _animatedBoardCorners = null;
         _boardAnimationStarted = 0;
         _boardAnimationUpdated = 0;
-        Interlocked.Exchange(ref _lastAnalyzedBoardFrame, null);
-        _whiteBoardReference = null;
-        Volatile.Write(ref _whiteSpotReference, null);
-        lock (_spotCheckGate) _pendingSpotChecks.Clear();
+        ClearBoardFrameReferences();
         _physicalBoard = null;
         _ambientBoard = null;
         _projectorField = null;
@@ -293,7 +304,9 @@ public sealed partial class MainWindow
             return;
         if (Interlocked.CompareExchange(ref _detecting, 1, 0) != 0) return;
         Interlocked.Exchange(ref _lastBoardDetectTick, tick);
-        var priorFrame = Interlocked.Exchange(ref _lastAnalyzedBoardFrame, frame);
+        using var priorLease = _lastAnalyzedBoardFrames.Acquire();
+        _lastAnalyzedBoardFrames.Set(frame);
+        var priorFrame = priorLease?.Frame;
         if (priorFrame is not null && priorFrame.Width == frame.Width && priorFrame.Height == frame.Height &&
             priorFrame.Stride == frame.Stride && priorFrame.Bgra.AsSpan().SequenceEqual(frame.Bgra))
         {
@@ -301,7 +314,7 @@ public sealed partial class MainWindow
             return;
         }
         var generation = Interlocked.Read(ref _boardSetupGeneration);
-        _ = Task.Run(() =>
+        _ = RunCameraFrameWork(frame, () =>
         {
             try
             {
@@ -316,7 +329,7 @@ public sealed partial class MainWindow
                             frame.Stride, frame.Bgra, trusted.Detection);
                         recovered = board is not null;
                     }
-                    DispatcherQueue.TryEnqueue(() => ProcessAmbientScan(frame, board, recovered, generation));
+                    TryPostCameraFrame(frame, () => ProcessAmbientScan(frame, board, recovered, generation));
                 }
                 else if (phase == BoardSetupPhase.ScanWhite)
                 {
@@ -324,10 +337,10 @@ public sealed partial class MainWindow
                         frame.Bgra);
                     var board = BoardDetector.DetectUniformIllumination(frame.Width, frame.Height, frame.Stride,
                         frame.Bgra);
-                    DispatcherQueue.TryEnqueue(() => ProcessWhiteScan(frame, board, field, generation));
+                    TryPostCameraFrame(frame, () => ProcessWhiteScan(frame, board, field, generation));
                 }
                 else if (phase == BoardSetupPhase.ShowCorners)
-                    DispatcherQueue.TryEnqueue(() => ProcessSetupCornersShown(frame, generation));
+                    TryPostCameraFrame(frame, () => ProcessSetupCornersShown(frame, generation));
                 _visionError = null;
             }
             catch (Exception ex)
@@ -344,15 +357,17 @@ public sealed partial class MainWindow
     // are dropped rather than queued. Alignment still waits for its settle time.
     private void QueueCalibrationSpotCheck(CameraFrame frame, SceneCompositor.BoardSpotPresentation presentation)
     {
-        var white = Volatile.Read(ref _whiteBoardReference);
+        using var whiteLease = _whiteBoardFrames.Acquire();
+        var white = whiteLease?.Frame;
         if (white is null || white.Width != frame.Width || white.Height != frame.Height) return;
-        var check = new CalibrationSpotCheck(frame, white, Volatile.Read(ref _spotIndex),
+        var check = new CalibrationSpotCheck(frame.Retain(), white.Retain(), Volatile.Read(ref _spotIndex),
             Interlocked.Read(ref _boardSetupGeneration), presentation);
         lock (_spotCheckGate)
         {
             if (_spotCheckRunning)
             {
                 if (_pendingSpotChecks.Count < MaximumPendingSpotChecks) _pendingSpotChecks.Enqueue(check);
+                else check.Dispose();
                 return;
             }
             _spotCheckRunning = true;
@@ -363,6 +378,7 @@ public sealed partial class MainWindow
             {
                 try { RunCalibrationSpotCheck(check); }
                 catch (Exception ex) { _visionError = "Cardboard scan failed: " + ex.Message; }
+                finally { check.Dispose(); }
                 lock (_spotCheckGate)
                 {
                     if (!_pendingSpotChecks.TryDequeue(out var next))
@@ -383,7 +399,9 @@ public sealed partial class MainWindow
         // Early latency observations must not consume the first post-settle
         // registration frame when the camera delivers identical pixels twice.
         bool earlyDot = (frame.ArrivedAt ?? frame.Timestamp) - check.Presentation.DrawnAt < RegistrationSpotSettle;
-        var priorFrame = earlyDot ? null : Interlocked.Exchange(ref _lastAnalyzedBoardFrame, frame);
+        using var priorLease = earlyDot ? null : _lastAnalyzedBoardFrames.Acquire();
+        if (!earlyDot) _lastAnalyzedBoardFrames.Set(frame);
+        var priorFrame = priorLease?.Frame;
         if (priorFrame is not null && priorFrame.Width == frame.Width && priorFrame.Height == frame.Height &&
             priorFrame.Stride == frame.Stride && priorFrame.Bgra.AsSpan().SequenceEqual(frame.Bgra)) return;
         // The white field is reduced once per scan, not once per checked frame.
@@ -396,7 +414,7 @@ public sealed partial class MainWindow
         }
         var spot = BoardDetector.DetectDarkCalibrationSpot(white.Reduced, frame.Width, frame.Height,
             frame.Stride, frame.Bgra);
-        DispatcherQueue.TryEnqueue(() => ProcessCalibrationSpot(frame, spot, check.SpotIndex, check.Generation,
+        TryPostCameraFrame(frame, () => ProcessCalibrationSpot(frame, spot, check.SpotIndex, check.Generation,
             check.Presentation));
         _visionError = null;
     }
@@ -468,7 +486,7 @@ public sealed partial class MainWindow
         _whiteEdgeUnavailable = false;
         _candidateWhiteBoardPresent = false;
         Interlocked.Exchange(ref _lastBoardDetectTick, 0);
-        Interlocked.Exchange(ref _lastAnalyzedBoardFrame, null);
+        _lastAnalyzedBoardFrames.Clear();
         Interlocked.Exchange(ref _boardPhaseStartedTick, Stopwatch.GetTimestamp());
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.ScanWhite);
         _boardSetupDiagnostic = whiteOnlyFallback
@@ -572,12 +590,12 @@ public sealed partial class MainWindow
     private void BeginRegistrationSpots(CameraFrame frame)
     {
         BeginCameraLatency();
-        Volatile.Write(ref _whiteBoardReference, frame);
+        _whiteBoardFrames.Set(frame);
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.Switching);
         _scene.ShowBoardCalibrationSpot(0);
         Interlocked.Exchange(ref _boardPhaseStartedTick, Stopwatch.GetTimestamp());
         Interlocked.Exchange(ref _lastBoardDetectTick, 0);
-        Interlocked.Exchange(ref _lastAnalyzedBoardFrame, null);
+        _lastAnalyzedBoardFrames.Clear();
         Volatile.Write(ref _spotIndex, 0);
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.MeasureSpots);
         _boardSetupDiagnostic = null;
@@ -676,6 +694,7 @@ public sealed partial class MainWindow
             // Keep the final clip/map and diagnostics, then reveal the selected board app.
             // EndBoardSetup clears scan history, which is still useful for a later rescan.
             Volatile.Write(ref _boardSetupActive, false);
+            ClearBoardFrameReferences();
             BoardSetupButton.Content = "Start board setup";
             RescanBoardButton.IsEnabled = true;
             UpdateBoardAppStatus();
@@ -699,7 +718,7 @@ public sealed partial class MainWindow
         _scene.ShowBoardCalibrationSpot(index);
         Interlocked.Exchange(ref _boardPhaseStartedTick, Stopwatch.GetTimestamp());
         Interlocked.Exchange(ref _lastBoardDetectTick, 0);
-        Interlocked.Exchange(ref _lastAnalyzedBoardFrame, null);
+        _lastAnalyzedBoardFrames.Clear();
         Volatile.Write(ref _spotIndex, index);
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.MeasureSpots);
         BoardSetupStatusText.Text = $"Cardboard found. {RegistrationStage(index)} spot " +

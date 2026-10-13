@@ -158,6 +158,11 @@ public sealed partial class MainWindow
             _handLatencyWarning = null;
             _lastHandDetection = null;
             _lastHandAcquisitionDetection = null;
+            ClearPhotoCopyFrames();
+#if DEBUG
+            ClearHandAcquisitionSnapshots();
+            ClearPaintDiagnostics();
+#endif
             _handWorker.ResetCadence();
             _scene.ClearHandTips();
             _scene.InvalidatePhotoCopyCapture();
@@ -197,7 +202,7 @@ public sealed partial class MainWindow
             var generation = _handGeneration;
             var requestedInTester = IsHandTrackingTester;
             var sequence = Interlocked.Increment(ref _handDetectionSequence);
-            bool queued = _handWorker.TryRun(tick, interval, work =>
+            bool queued = _handWorker.TryRun(tick, interval, frame, work =>
             {
                 try
                 {

@@ -5,7 +5,8 @@ namespace ProjectTabletop.App.Projection.StrykersRun;
 
 internal sealed partial class StrykersRunRenderer
 {
-    private static void FindSpriteCells(CanvasBitmap bitmap, int rows, Rect[] cells)
+    private static void FindSpriteCells(CanvasBitmap bitmap, int rows, Rect[] cells, int columns = 4,
+        bool sharedVerticalBounds = true)
     {
         int width = (int)bitmap.SizeInPixels.Width, height = (int)bitmap.SizeInPixels.Height;
         byte[] pixels = bitmap.GetPixelBytes();
@@ -29,10 +30,11 @@ internal sealed partial class StrykersRunRenderer
             for (int y = top; y < bottom; y++)
             for (int x = 0; x < width; x++)
                 if (pixels[(y * width + x) * 4 + 3] >= 32) columnInk[x]++;
-            int[] cuts = new int[5];
-            cuts[4] = width;
-            for (int column = 1; column < 4; column++) cuts[column] = FindCut(columnInk, column * width / 4, width / 12);
-            for (int column = 0; column < 4; column++)
+            int[] cuts = new int[columns + 1];
+            cuts[columns] = width;
+            for (int column = 1; column < columns; column++)
+                cuts[column] = FindCut(columnInk, column * width / columns, width / columns / 3);
+            for (int column = 0; column < columns; column++)
             {
                 int left = cuts[column], right = cuts[column + 1];
                 while (left < right && columnInk[left] == 0) left++;
@@ -40,9 +42,23 @@ internal sealed partial class StrykersRunRenderer
                 if (right <= left) throw new InvalidDataException("Stryker's Run sprite atlas has an empty animation frame.");
                 left = Math.Max(cuts[column], left - 3);
                 right = Math.Min(cuts[column + 1], right + 3);
-                // Every frame in a row shares the same vertical bounds, keeping
-                // the head/foot scale stable through its original running poses.
-                cells[row * 4 + column] = new Rect(left, top, right - left, bottom - top);
+                int frameTop = top, frameBottom = bottom;
+                if (!sharedVerticalBounds)
+                {
+                    bool HasInk(int y)
+                    {
+                        for (int x = left; x < right; x++)
+                            if (pixels[(y * width + x) * 4 + 3] >= 32) return true;
+                        return false;
+                    }
+                    while (frameTop < frameBottom && !HasInk(frameTop)) frameTop++;
+                    while (frameBottom > frameTop && !HasInk(frameBottom - 1)) frameBottom--;
+                    frameTop = Math.Max(top, frameTop - 3);
+                    frameBottom = Math.Min(bottom, frameBottom + 3);
+                }
+                // Animation poses share a baseline. Independent boss forms use
+                // their own alpha bounds so every pair of feet meets the road.
+                cells[row * columns + column] = new Rect(left, frameTop, right - left, frameBottom - frameTop);
             }
         }
     }

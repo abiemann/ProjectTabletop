@@ -117,7 +117,9 @@ public sealed partial class MainWindow
                 var now = MonotonicClock.UtcNow;
                 _handInputNotBefore = now;
                 var old = new CameraFrame(1, 1, 4, [0, 0, 0, 255], now.AddTicks(-1));
-                foreach (var frame in new[] { old, old with { Timestamp = now }, old with { Timestamp = now.AddTicks(1) } })
+                foreach (var frame in new[] { old,
+                    new CameraFrame(old.Width, old.Height, old.Stride, old.Bgra, now),
+                    new CameraFrame(old.Width, old.Height, old.Stride, old.Bgra, now.AddTicks(1)) })
                 {
                     var expected = frame == old ? InputFrameQueueResult.PredatesReset : InputFrameQueueResult.Skipped;
                     if (QueueHandDetection(frame, System.Diagnostics.Stopwatch.GetTimestamp()) != expected ||

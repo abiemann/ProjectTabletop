@@ -130,13 +130,12 @@ internal sealed partial class StrykersRunRenderer
         float left = point.X - width / 2, top = point.Y - height;
         bool harmful = gate.Kind == StrykersRunGateKind.Subtract;
         var color = harmful ? Ink(255, 83, 70) : Ink(65, 221, 255);
+        // Draw the supports behind one closed frame so they cannot erase its corners.
+        ds.FillRectangle(new Rect(left - 5 * depth, top - 5 * depth, 11 * depth, height + 10 * depth), Ink(42, 48, 54));
+        ds.FillRectangle(new Rect(left + width - 6 * depth, top - 5 * depth, 11 * depth, height + 10 * depth), Ink(42, 48, 54));
         ds.FillRoundedRectangle(new Rect(left, top, width, height), 8 * depth, 8 * depth,
             harmful ? Ink(67, 20, 23, 231) : Ink(13, 56, 74, 233));
         ds.DrawRoundedRectangle(new Rect(left, top, width, height), 8 * depth, 8 * depth, color, 3 * depth);
-        ds.FillRectangle(new Rect(left - 5 * depth, top - 5 * depth, 11 * depth, height + 10 * depth), Ink(42, 48, 54));
-        ds.FillRectangle(new Rect(left + width - 6 * depth, top - 5 * depth, 11 * depth, height + 10 * depth), Ink(42, 48, 54));
-        ds.DrawLine(left - 1, top, left - 1, point.Y, color, 3 * depth);
-        ds.DrawLine(left + width, top, left + width, point.Y, color, 3 * depth);
         var key = (gate.Kind, gate.Value);
         if (!_gateLabels.TryGetValue(key, out string? label))
         {

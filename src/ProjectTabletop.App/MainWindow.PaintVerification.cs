@@ -834,7 +834,8 @@ public sealed partial class MainWindow
                 var expected = idle.GetPaintDisturbanceContext();
                 if (submitted.Count < 3 || expected is null) return;
                 var rendered = submitted[^3];
-                var frame = rendered with { Timestamp = now };
+                var frame = new CameraFrame(rendered.Width, rendered.Height, rendered.Stride, rendered.Bgra, now)
+                    { ArrivedAt = rendered.ArrivedAt };
                 var result = delayedDetector.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
                     expected, frame.Timestamp, now);
                 int accepted = idle.CompletePaintDisturbance(expected, result, frame.Timestamp);

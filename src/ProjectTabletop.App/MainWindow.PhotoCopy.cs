@@ -14,7 +14,23 @@ public sealed partial class MainWindow
     private PhotoCopyObservation? _latestPhotoCopyFrame;
     private string? _lastSavedPhotoPath;
     private readonly PhotocopierSound _photocopierSound = new();
-    private sealed record PhotoCopyObservation(CameraFrame Frame, HandDetection[] Hands, long Generation);
+    private sealed record PhotoCopyObservation(CameraFrame Frame, HandDetection[] Hands, long Generation)
+    {
+        public CameraFrameLease FrameLease { get; } = Frame.Retain();
+    }
+
+    private void ClearPhotoCopyFrames()
+    {
+        lock (_handGate)
+        {
+            _latestPhotoCopyFrame?.FrameLease.Dispose();
+            _latestPhotoCopyFrame = null;
+#if DEBUG
+            _lastPhotoCopyFailure?.FrameLease.Dispose();
+            _lastPhotoCopyFailure = null;
+#endif
+        }
+    }
 
     private sealed record PhotoCopyCaptureDiagnostics(DateTimeOffset FrameTime, int Width, int Height,
         int TransparentPixels, int PartialAlphaPixels, bool TransparentBorder, bool NativeCameraPixels);
@@ -24,7 +40,12 @@ public sealed partial class MainWindow
     private void QueuePhotoCopyCapture(CameraFrame frame, IReadOnlyList<HandDetection> hands,
         IReadOnlyList<HandCursor> cursors)
     {
-        _latestPhotoCopyFrame = new(frame, hands.ToArray(), _handGeneration);
+        lock (_handGate)
+        {
+            var previous = _latestPhotoCopyFrame;
+            _latestPhotoCopyFrame = new(frame, hands.ToArray(), _handGeneration);
+            previous?.FrameLease.Dispose();
+        }
         var previousEvent = _photoCopyConsumedEventId;
         foreach (var cursor in cursors)
             _photoCopyConsumedEventId = Math.Max(_photoCopyConsumedEventId, cursor.ExecuteEventId);
@@ -161,14 +182,22 @@ public sealed partial class MainWindow
             while (!_closing && generation == _handGeneration && _scene.IsPhotoCopyCaptureCurrent(context))
             {
                 var now = MonotonicClock.UtcNow;
-                if (_latestPhotoCopyFrame is { } observation && observation.Generation == generation &&
-                    TimedPhotoFrameReady(observation.Frame.Timestamp, due, now))
+                PhotoCopyObservation? observation;
+                CameraFrameLease? retainedFrame;
+                lock (_handGate)
                 {
-                    _scene.EndPhotoCopyCountdown(context.Revision);
-                    _scene.BeginPhotoCopyCapture(context);
-                    await CapturePhotoCopyAsync(observation.Frame, null, observation.Hands, context, PhotoCopyAction.Copy);
-                    return;
+                    observation = _latestPhotoCopyFrame;
+                    retainedFrame = observation is not null && observation.Generation == generation &&
+                        TimedPhotoFrameReady(observation.Frame.Timestamp, due, now) ? observation.Frame.Retain() : null;
                 }
+                using (retainedFrame)
+                    if (retainedFrame is not null && observation is not null)
+                    {
+                        _scene.EndPhotoCopyCountdown(context.Revision);
+                        _scene.BeginPhotoCopyCapture(context);
+                        await CapturePhotoCopyAsync(retainedFrame.Frame, null, observation.Hands, context, PhotoCopyAction.Copy);
+                        return;
+                    }
                 if (now >= due.AddSeconds(2))
                 {
                     _scene.SetPhotoCopyStatus("No fresh camera image. Check the webcam and select Copy again.", context.Revision);
@@ -187,6 +216,7 @@ public sealed partial class MainWindow
         IReadOnlyList<HandDetection> otherHands,
         SceneCompositor.PhotoCopyCaptureContext context, PhotoCopyAction action = PhotoCopyAction.Swirl)
     {
+        using var frameLease = frame.Retain();
         if (action == PhotoCopyAction.Copy)
             _photocopierSound.Play();
         try

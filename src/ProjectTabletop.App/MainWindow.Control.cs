@@ -45,7 +45,7 @@ public sealed partial class MainWindow
 #if DEBUG
                 if (!_boardHandDiagnosticLogging)
                 {
-                    lock (_handGate) Volatile.Write(ref _lastHoldButtonSnapshot, null);
+                    ClearHoldButtonSnapshot();
                     ClearStrykersRunDiagnosticSnapshot();
                 }
 #endif
@@ -57,6 +57,30 @@ public sealed partial class MainWindow
                     lastDetection = _lastHoldButtonDetection, lastActivation = _lastHoldButtonActivation,
                     progress = _scene.CurrentHoldProgress };
 #if DEBUG
+            case "set_render_pacing":
+                if (!parameters.TryGetProperty("fixedTimeStep", out var fixedTimeStepValue) ||
+                    fixedTimeStepValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    throw new ArgumentException("Provide fixedTimeStep as a JSON boolean.");
+                bool hasPreviewPaused = parameters.TryGetProperty("gamePreviewPaused", out var previewPausedValue);
+                if (hasPreviewPaused && previewPausedValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    throw new ArgumentException("Provide gamePreviewPaused as a JSON boolean when specified.");
+                bool fixedTimeStep = fixedTimeStepValue.GetBoolean();
+                bool? projectorFixedTimeStep = _output?.SetRenderPacing(fixedTimeStep);
+                BlackjackPreview.IsFixedTimeStep = fixedTimeStep;
+                ProjectionPreview.IsFixedTimeStep = fixedTimeStep;
+                if (hasPreviewPaused) BlackjackPreview.Paused = previewPausedValue.GetBoolean();
+                return new
+                {
+                    projectorFixedTimeStep,
+                    gamePreviewFixedTimeStep = BlackjackPreview.IsFixedTimeStep,
+                    projectionPreviewFixedTimeStep = ProjectionPreview.IsFixedTimeStep,
+                    gamePreviewPaused = BlackjackPreview.Paused
+                };
+            case "get_strykers_run_timing":
+                return _scene.GetStrykersRunTiming();
+            case "clear_strykers_run_timing":
+                _scene.ClearStrykersRunTiming();
+                return new { cleared = true };
             case "capture_strykers_run_input":
                 return await CaptureStrykersRunInputAsync();
             case "verify_football_audio":

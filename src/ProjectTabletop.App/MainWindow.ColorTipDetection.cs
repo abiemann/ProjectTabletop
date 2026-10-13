@@ -16,7 +16,7 @@ public sealed partial class MainWindow
             var now = MonotonicClock.UtcNow;
             if (!EyeTipFrameFresh(frame, now))
             {
-                _colorTipPreview = null;
+                SetColorTipPreviewLocked(null);
                 _colorTipTracker.Reset();
                 _eyeTipReason = "waiting-for-fresh-camera-frame";
                 PublishWaterStickTipLocked();
@@ -34,8 +34,8 @@ public sealed partial class MainWindow
                 track = new(null, false, detection.Reason);
             }
             else track = _colorTipTracker.Update(detection, frame.Timestamp, now);
-            _colorTipPreview = new(frame, detection, track, milliseconds);
-            _eyeTipPreview = null;
+            SetColorTipPreviewLocked(new(frame, detection, track, milliseconds));
+            SetEyeTipPreviewLocked(null);
             _eyeTipReason = track.Reason;
             PublishWaterStickTipLocked();
         }

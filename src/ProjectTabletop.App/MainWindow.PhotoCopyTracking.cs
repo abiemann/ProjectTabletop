@@ -48,6 +48,7 @@ public sealed partial class MainWindow
     private async Task ObservePhotoCopyObjectAsync(CameraFrame frame, HandDetection[] hands,
         Projection.SceneCompositor.PhotoCopyCaptureContext context, long generation)
     {
+        using var frameLease = frame.Retain();
         var captureAtStart = _photoCopyTask;
         try
         {
@@ -69,7 +70,15 @@ public sealed partial class MainWindow
                 !ReferenceEquals(current.Target, context.Target)) return;
 #if DEBUG
             if (context.Target is not null && observation.State == PhotoObjectTargetState.MissingOrMoved)
-                _lastPhotoCopyFailure = new(frame, hands, context, observation.Failure);
+            {
+                lock (_handGate)
+                {
+                    if (_closing || generation != _handGeneration) return;
+                    var previous = _lastPhotoCopyFailure;
+                    _lastPhotoCopyFailure = new(frame, hands, context, observation.Failure);
+                    previous?.FrameLease.Dispose();
+                }
+            }
 #endif
             if (context.Target is { } locked)
             {

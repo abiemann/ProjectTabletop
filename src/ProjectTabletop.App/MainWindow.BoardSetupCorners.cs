@@ -24,7 +24,7 @@ public sealed partial class MainWindow
         _scene.ShowSetupCorners(corners);
         Interlocked.Exchange(ref _boardPhaseStartedTick, Stopwatch.GetTimestamp());
         Interlocked.Exchange(ref _lastBoardDetectTick, 0);
-        Interlocked.Exchange(ref _lastAnalyzedBoardFrame, null);
+        _lastAnalyzedBoardFrames.Clear();
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.ShowCorners);
         BoardSetupStatusText.Text = "Cardboard corners found. Marking them before alignment. Keep the cardboard still.";
         return true;

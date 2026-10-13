@@ -26,6 +26,15 @@ public sealed partial class ProjectionWindow : Window
         float Dpi, int PixelWidth, int PixelHeight);
     internal OutputRenderResolution? RenderResolution => Volatile.Read(ref _renderResolution);
 
+#if DEBUG
+    internal bool SetRenderPacing(bool fixedTimeStep)
+    {
+        ThrowIfClosed();
+        OutputCanvas.IsFixedTimeStep = fixedTimeStep;
+        return OutputCanvas.IsFixedTimeStep;
+    }
+#endif
+
     public ProjectionWindow(SceneCompositor scene)
     {
         _scene = scene;
@@ -219,6 +228,10 @@ public sealed partial class ProjectionWindow : Window
             Volatile.Write(ref _renderResolution, new(size.Width, size.Height, dpi,
                 (int)Math.Round(size.Width * dpi / 96), (int)Math.Round(size.Height * dpi / 96)));
         _scene.Draw(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height,
-            preview: false, runningSlowly: args.Timing.IsRunningSlowly);
+            preview: false, runningSlowly: args.Timing.IsRunningSlowly
+#if DEBUG
+            , presentationTotalTime: args.Timing.TotalTime, presentationElapsedTime: args.Timing.ElapsedTime
+#endif
+            );
     }
 }

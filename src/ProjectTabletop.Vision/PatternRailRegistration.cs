@@ -49,7 +49,7 @@ internal sealed class PatternRailRegistration
         for (int mark = 0; mark < Marks; mark++)
             if (!TryCentre(bgra, width, height, stride, expected[mark], patchRadius, bound, out _found[mark])) return false;
 
-        // All 96 correspondences participate. No RANSAC subset, independently moved marks, or learned background.
+        // Every mark participates. No RANSAC subset, independently moved marks, or learned background.
         using var fit = Cv2.FindHomography(_known, _found, HomographyMethods.None);
         if (fit.Empty()) return false;
         var fittedMarks = Cv2.PerspectiveTransform(_known, fit);

@@ -198,7 +198,8 @@ internal static class HandTrackingVideoRecorderVerification
         {
             for (int index = 0; index < 60; index++)
             {
-                var frame = fullHdPixels with { Timestamp = DateTimeOffset.UtcNow };
+                var frame = new CameraFrame(fullHdPixels.Width, fullHdPixels.Height, fullHdPixels.Stride,
+                    fullHdPixels.Bgra, DateTimeOffset.UtcNow);
                 fullHdSources.Add(frame);
                 throughput.ObserveFrame(frame);
                 if (index % 15 == 0) throughput.HandDetected(frame);

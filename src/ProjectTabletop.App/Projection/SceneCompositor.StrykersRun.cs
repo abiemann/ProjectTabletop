@@ -226,7 +226,8 @@ public sealed partial class SceneCompositor
             GetStrykersRunRenderer(drawing.Device).Draw(drawing,
                 new Rect(field.X * BoardSurfaceSize * aspect, field.Y * BoardSurfaceSize,
                     field.Width * BoardSurfaceSize * aspect, field.Height * BoardSurfaceSize),
-                _boardSession.StrykersRunState, Math.Max(0, (_strykersRunClock() - _strykersRunAnimationOrigin).TotalSeconds));
+                _boardSession.StrykersRunState, Math.Max(0, (_strykersRunClock() - _strykersRunAnimationOrigin).TotalSeconds),
+                _boardSession.StrykersRunRoadPresentationDistance);
         }
         finally { drawing.Transform = previous; }
         DrawStrykersRunRail(drawing);
@@ -246,8 +247,8 @@ public sealed partial class SceneCompositor
         float radiusY = (float)rectangle.Height * PatternRailGeometry.DotRadius / PatternRailGeometry.ReferenceHeight;
         for (int column = 0; column < PatternRailGeometry.Columns; column++)
         {
-            float x = (float)(rectangle.X + rectangle.Width * (column * PatternRailGeometry.CellWidth +
-                PatternRailGeometry.CellWidth / 2d) / PatternRailGeometry.ReferenceWidth);
+            float x = (float)(rectangle.X + rectangle.Width * PatternRailGeometry.ColumnCenter(column) /
+                PatternRailGeometry.ReferenceWidth);
             drawing.FillEllipse(new(x, (float)(rectangle.Y + rectangle.Height * PatternRailGeometry.DotY1ForColumn(column) /
                 PatternRailGeometry.ReferenceHeight)), radiusX, radiusY, Color.FromArgb(255, 255, 255, 255));
             drawing.FillEllipse(new(x, (float)(rectangle.Y + rectangle.Height * PatternRailGeometry.DotY2ForColumn(column) /

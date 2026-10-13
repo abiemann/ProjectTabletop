@@ -4,28 +4,52 @@ using ProjectTabletop.Vision;
 
 internal static class PatternRailRegression
 {
+    private const int Width = PatternRailGeometry.ReferenceWidth, Height = PatternRailGeometry.ReferenceHeight;
+    private const int Columns = PatternRailGeometry.Columns, Marks = Columns * 2;
     private static readonly DateTimeOffset Epoch = new(2026, 10, 13, 12, 0, 0, TimeSpan.Zero);
     private static readonly PixelPoint[] Straight = [new(20, 20), new(980, 20), new(980, 84), new(20, 84)];
 
     public static void Run()
     {
+        CheckSymmetricPattern();
         CheckColdStationaryAndRemoval();
         CheckOpticsAndAmbiguity();
+        CheckIsolatedMarkNoise();
         CheckExpandedProjection();
         CheckBloomRecovery();
         CheckBloomDuringContact();
+        CheckPartialContactBoundaries();
         CheckBoundedGeometryRefinement();
+        CheckRepeatedBoundedRefinement();
         CheckPeriodicPhaseWitnesses();
         CheckPerspectiveRotationAndOutsideAnimation();
         CheckFrameAndGeometryBarriers();
-        Console.WriteLine("Stryker's Run pattern rail passed: cold and stationary shape loss, end/centre positions, " +
+        Console.WriteLine("Stryker's Run pattern rail passed: symmetric marks, cold and stationary shape loss, end/centre positions, " +
             "brightness/colour/blur invariance, radius-eight clear and held-contact recovery, perspective/rotation, protected animation, ambiguity, " +
-            "bounded all-clear geometry refinement, fixed periodic-pattern registration, removal and frame/geometry barriers.");
+            "partial contact boundaries, isolated-mark noise, repeated bounded all-clear geometry refinement, fixed periodic-pattern registration, " +
+            "removal and frame/geometry barriers.");
+    }
+
+    private static void CheckSymmetricPattern()
+    {
+        Require(Columns == 49, "The rail must include the additional leading colon.");
+        for (int column = 0; column < Columns; column++)
+        {
+            int opposite = Columns - column - 1;
+            Require(PatternRailGeometry.ColumnCenter(column) + PatternRailGeometry.ColumnCenter(opposite) == Width &&
+                PatternRailGeometry.DotY1ForColumn(column) == PatternRailGeometry.DotY1ForColumn(opposite) &&
+                PatternRailGeometry.DotY2ForColumn(column) == PatternRailGeometry.DotY2ForColumn(opposite),
+                "The rail's dots or wider spacing witnesses are not mirror-symmetric.");
+        }
+        using var clear = Rail();
+        var observation = Observe(new(), Camera(clear, Straight, 1000, 120), new(12, Straight), 0);
+        Require(observation.Reliable && observation.Position is null && observation.IntactCount == Marks &&
+            observation.DamageCount == 0, "The symmetric rail did not register every clear mark: " + observation);
     }
 
     private static void CheckColdStationaryAndRemoval()
     {
-        foreach (var (first, count) in new[] { (0, 1), (22, 4), (47, 1) })
+        foreach (var (first, count) in new[] { (0, 1), (22, 4), (Columns - 1, 1) })
         {
             var detector = new PatternRailDetector();
             using var covered = Rail((first, count));
@@ -125,14 +149,107 @@ internal static class PatternRailRegression
         }
         Require(Observe(tracked, covered, geometry, 231).Position is null,
             "Clipping retained old acquisition confirmation.");
-        using var white = new Mat(64, 960, MatType.CV_8UC4, Scalar.All(255));
-        using var black = new Mat(64, 960, MatType.CV_8UC4, new Scalar(0, 0, 0, 255));
+        using var white = new Mat(Height, Width, MatType.CV_8UC4, Scalar.All(255));
+        using var black = new Mat(Height, Width, MatType.CV_8UC4, new Scalar(0, 0, 0, 255));
         foreach (var unavailable in new[] { white, black })
         {
             var detector = new PatternRailDetector();
             var observation = Observe(detector, Camera(unavailable, Straight, 1000, 120), geometry, 0);
             Require(!observation.Reliable && observation.Position is null,
                 "Global clipping or absent contrast was interpreted as an object.");
+        }
+    }
+
+    private static void CheckIsolatedMarkNoise()
+    {
+        var geometry = new PatternRailGeometry(15, Straight);
+        var main = Render(true);
+        foreach (int column in new[] { 0, 20, 24, Columns - 1 })
+        foreach (bool alreadyHeld in new[] { false, true })
+        {
+            var detector = new PatternRailDetector();
+            Observe(detector, Render(false), geometry, 0);
+            var baseline = new PatternRailDetector();
+            Observe(baseline, main, geometry, 0);
+            var expected = Observe(baseline, main, geometry, 33).Position;
+            Require(expected is not null, "The isolated-mark fixture did not acquire its main contact.");
+            if (alreadyHeld)
+            {
+                Observe(detector, main, geometry, 33);
+                Require(Observe(detector, main, geometry, 66).Position is not null,
+                    "The isolated-mark fixture did not establish held input.");
+            }
+            var noisy = Render(true, (column, column % 2, "erase"));
+            var initial = Observe(detector, noisy, geometry, 99);
+            Require(initial.Reliable && !initial.Ambiguous && (alreadyHeld
+                ? initial.Position is { } firstX && Math.Abs(firstX - expected.GetValueOrDefault()) < .00001
+                : initial.Position is null),
+                "One stray mark interrupted contact or bypassed fresh confirmation: " + initial);
+            for (int frame = 4; frame <= 6; frame++)
+            {
+                var held = Observe(detector, noisy, geometry, frame * 33);
+                Require(held.Reliable && !held.Ambiguous && held.Position is { } x && Math.Abs(x - expected.GetValueOrDefault()) < .00001,
+                    "One stray mark paused or biased the valid contact: " + held);
+            }
+            var diagnostics = detector.GetDiagnostics();
+            Require(diagnostics.Correlations.Count(value => value < .60) == 3,
+                "The isolated-mark fixture must damage exactly two contact dots and one separate dot.");
+            var lonePixels = Render(false, (column, column % 2, "erase"));
+            var lone = new PatternRailDetector();
+            Require(Observe(lone, lonePixels, geometry, 0).Position is null &&
+                Observe(lone, lonePixels, geometry, 33).Reason == "insufficient-shape-damage",
+                "A lone stray mark acquired input without a valid contact.");
+            var remaining = Observe(detector, lonePixels, geometry, 231);
+            Require(!remaining.Reliable && remaining.Position is null && !remaining.Ambiguous &&
+                remaining.Reason == "insufficient-shape-damage",
+                "Lifting the main contact left stale input on a stray dot: " + remaining);
+            Require(Observe(detector, noisy, geometry, 264).Position is null &&
+                Observe(detector, noisy, geometry, 297).Position is not null,
+                "A lone stray dot retained old contact confirmation.");
+        }
+        foreach (var marks in new (int Column, int Dot, string Kind)[][]
+        {
+            [(4, 0, "erase"), (4, 1, "erase")], // Two independently valid contact spans.
+            [(4, 0, "erase"), (39, 1, "erase")], // Two separate singletons cannot both be ignored.
+            [(4, 0, "clip")],
+            [(4, 0, "dim")]
+        })
+        {
+            var detector = new PatternRailDetector();
+            Observe(detector, main, geometry, 0);
+            Require(Observe(detector, main, geometry, 33).Position is not null, "Guard fixture did not acquire contact.");
+            var rejected = Observe(detector, Render(true, marks), geometry, 66);
+            string expectedReason = marks[0].Kind switch
+            {
+                "clip" => "rail-exposure-clipped", "dim" => "rail-contrast-uncertain", _ => "multiple-occlusions"
+            };
+            Require(!rejected.Reliable && rejected.Position is null &&
+                rejected.Reason == expectedReason && (marks.Length == 1 || rejected.Ambiguous),
+                "Isolated-mark filtering accepted multiple obstructions or unavailable optical evidence: " + rejected);
+            Require(Observe(detector, main, geometry, 99).Position is null,
+                "Rejected isolated-mark evidence retained old contact confirmation.");
+        }
+
+        static Raster Render(bool contact, params (int Column, int Dot, string Kind)[] marks)
+        {
+            using var rail = contact ? Rail((22, 1)) : Rail();
+            foreach (var (column, dot, kind) in marks)
+            {
+                int x = PatternRailGeometry.ColumnCenter(column);
+                int y = dot == 0 ? PatternRailGeometry.DotY1ForColumn(column) : PatternRailGeometry.DotY2ForColumn(column);
+                if (kind == "dim")
+                {
+                    using var patch = new Mat(rail, new Rect(x - 8, y - 8, 17, 17));
+                    patch.ConvertTo(patch, MatType.CV_8UC4, .015);
+                }
+                else
+                {
+                    int radius = kind == "clip" ? 9 : 7;
+                    Cv2.Rectangle(rail, new Rect(x - radius, y - radius, radius * 2 + 1, radius * 2 + 1),
+                        kind == "clip" ? Scalar.All(255) : new Scalar(0, 0, 0, 255), -1);
+                }
+            }
+            return Camera(rail, Straight, 1000, 120);
         }
     }
 
@@ -158,7 +275,7 @@ internal static class PatternRailRegression
             var covered = Camera(hidden, corners, width, height);
             Observe(detector, covered, geometry, 33);
             var result = Observe(detector, covered, geometry, 66);
-            Require(result.Position is { } x && Math.Abs(x - 13.5 / 48) < .025,
+            Require(result.Position is { } x && Math.Abs(x - 13.5 / Columns) < .025,
                 "Perspective or portrait rotation changed the measured along-rail coordinate: " + result);
             // This animated patch is deliberately outside both supplied rail quadrilaterals.
             for (int y = 0; y < Math.Min(50, height); y++)
@@ -244,14 +361,14 @@ internal static class PatternRailRegression
         var initialCamera = Camera(initial, Straight, 1000, 120);
         var clearCamera = BloomCamera(expanded);
         var fresh = Observe(new(), clearCamera, geometry, 0);
-        Require(fresh.Reliable && fresh.IntactCount == 96 && fresh.Position is null && fresh.DamageCount == 0,
+        Require(fresh.Reliable && fresh.IntactCount == Marks && fresh.Position is null && fresh.DamageCount == 0,
             "The expanded clear rail failed cold registration: " + fresh);
         var recovered = new PatternRailDetector();
         var original = Observe(recovered, initialCamera, geometry, 0);
-        Require(original.Reliable && original.IntactCount == 96 && original.OpticalRadius == 7,
+        Require(original.Reliable && original.IntactCount == Marks && original.OpticalRadius == 7,
             "The bloom-recovery fixture did not establish the original radius-seven profile: " + original);
         var cleared = Observe(recovered, clearCamera, geometry, 33);
-        Require(cleared.Reliable && cleared.IntactCount == 96 && cleared.Position is null && cleared.DamageCount == 0 &&
+        Require(cleared.Reliable && cleared.IntactCount == Marks && cleared.Position is null && cleared.DamageCount == 0 &&
             cleared.OpticalRadius == 8 && !cleared.GeometryRefined,
             "A coherent bloom change failed all-clear recovery on the frozen map: " + cleared);
         foreach (var (gain, tint) in new[] { (.35, new[] { 10, 10, 10 }), (.8, new[] { 30, 4, 18 }) })
@@ -259,10 +376,10 @@ internal static class PatternRailRegression
             using var changed = expanded.Clone();
             Transform(changed, gain, tint, false);
             var intact = Observe(new(), BloomCamera(changed), geometry, 0);
-            Require(intact.Reliable && intact.IntactCount == 96 && intact.Position is null && intact.DamageCount == 0,
+            Require(intact.Reliable && intact.IntactCount == Marks && intact.Position is null && intact.DamageCount == 0,
                 "Global brightness or tint of expanded dots became contact: " + intact);
         }
-        foreach (var (first, count) in new[] { (0, 1), (22, 4), (47, 1) })
+        foreach (var (first, count) in new[] { (0, 1), (22, 4), (Columns - 1, 1) })
         {
             using var hidden = RailWithRadius(8, (first, count));
             Cv2.GaussianBlur(hidden, hidden, new Size(0, 0), 1.6);
@@ -276,7 +393,7 @@ internal static class PatternRailRegression
                     "Expanded contact bypassed fresh confirmation or could not acquire: " + pending);
                 var confirmed = Observe(detector, covered, geometry, 66);
                 Require(confirmed.Reliable && confirmed.Position is { } x &&
-                    Math.Abs(x - (first + count / 2d) / 48) < .025 && confirmed.DamageCount >= 2,
+                    Math.Abs(x - (first + count / 2d) / Columns) < .025 && confirmed.DamageCount >= 2,
                     "Expanded left/centre/right contact lost its location: " + confirmed);
                 using var restored = expanded.Clone();
                 Transform(restored, .55, [35, 8, 22], true, 4);
@@ -300,7 +417,7 @@ internal static class PatternRailRegression
         using var initial = BlurredRail(7);
         using var expanded = BlurredRail(8);
         var initialCamera = Camera(initial, Straight, 1000, 120);
-        foreach (var (first, count) in new[] { (0, 3), (22, 4), (45, 3) })
+        foreach (var (first, count) in new[] { (0, 3), (22, 4), (Columns - 3, 3) })
         {
             using var initialContact = BlurredRail(7, (first, count));
             using var expandedContact = BlurredRail(8, (first, count));
@@ -319,7 +436,7 @@ internal static class PatternRailRegression
             for (int frame = 4; frame <= 12; frame++)
             {
                 var held = Observe(detector, newPixels, geometry, frame * 33);
-                Require(held.Reliable && held.Position is { } x && Math.Abs(x - (first + count / 2d) / 48) < .025 &&
+                Require(held.Reliable && held.Position is { } x && Math.Abs(x - (first + count / 2d) / Columns) < .025 &&
                     held.OpticalRadius == 8 && held.DamageCount >= 2 && !held.GeometryRefined,
                     "Held contact required a lift after a common optical change: " + held);
             }
@@ -328,7 +445,7 @@ internal static class PatternRailRegression
             var cold = new PatternRailDetector();
             Require(Observe(cold, newPixels, geometry, 99).Position is null &&
                 Observe(cold, newPixels, geometry, 132).Position is { } coldX &&
-                Math.Abs(coldX - (first + count / 2d) / 48) < .025,
+                Math.Abs(coldX - (first + count / 2d) / Columns) < .025,
                 "The same covered pixels disagreed between cold acquisition and optical recovery.");
         }
 
@@ -392,12 +509,90 @@ internal static class PatternRailRegression
         }
     }
 
+    private static void CheckPartialContactBoundaries()
+    {
+        var geometry = new PatternRailGeometry(13, Straight);
+        using var initial = RailWithRadius(7);
+        Cv2.GaussianBlur(initial, initial, new Size(0, 0), 1.6);
+        var initialCamera = Camera(initial, Straight, 1000, 120);
+        foreach (int first in new[] { 0, 22, Columns - 3 })
+        {
+            int boundary = first == 0 ? 3 : first - 1;
+            using var partial = RailWithRadius(8, (first, 3));
+            ClipBoundary(partial, boundary, first == 0);
+            Cv2.GaussianBlur(partial, partial, new Size(0, 0), 1.6);
+            var pixels = BloomCamera(partial);
+            var detector = Warm();
+            var originalCorners = detector.GetDiagnostics().EffectiveCameraCorners.ToArray();
+            var pending = Observe(detector, pixels, geometry, 33);
+            var diagnostics = detector.GetDiagnostics();
+            Require(diagnostics.Correlations.Skip(boundary * 2).Take(2).Any(value => value is >= .60 and < .82) &&
+                diagnostics.Correlations.Skip(boundary * 2).Take(2).All(value => value >= .60) &&
+                diagnostics.Contrasts.Skip(boundary * 2).Take(2).All(value => value >= 2.5),
+                "The partial-boundary fixture did not retain recognizable but incomplete adjacent dots.");
+            Require(pending.Reliable && pending.Position is null && pending.Reason == "confirming-occlusion",
+                "An adjacent partial dot blocked optical recovery or reused old confirmation: " + pending);
+            for (int frame = 2; frame <= 6; frame++)
+            {
+                var held = Observe(detector, pixels, geometry, frame * 33);
+                Require(held.Reliable && held.Position is { } x && Math.Abs(x - (first + 1.5) / Columns) < .025 &&
+                    held.DamageCount >= 2 && held.OpticalRadius == 8 && !held.GeometryRefined,
+                    "A partially covered contact boundary stalled or changed steering: " + held);
+            }
+            Require(detector.GetDiagnostics().EffectiveCameraCorners.SequenceEqual(originalCorners),
+                "Partial boundary recovery changed the camera mapping while a finger was present.");
+        }
+
+        using var valid = RailWithRadius(8, (22, 3));
+        ClipBoundary(valid, 21, false);
+        Cv2.GaussianBlur(valid, valid, new Size(0, 0), 1.6);
+        var validPixels = BloomCamera(valid);
+        foreach (int failure in new[] { 0, 1, 2 })
+        {
+            using var rejectedRail = RailWithRadius(8, (22, 3));
+            ClipBoundary(rejectedRail, 21, false);
+            if (failure == 0) ClipBoundary(rejectedRail, 6, false);
+            if (failure == 1)
+                Cv2.Rectangle(rejectedRail, new Rect(7 * 20, 10, 2 * 20, 44), new Scalar(55, 85, 120, 255), -1);
+            Cv2.GaussianBlur(rejectedRail, rejectedRail, new Size(0, 0), 1.6);
+            if (failure == 2) Transform(rejectedRail, .07, [0, 0, 0], false);
+            var pixels = BloomCamera(rejectedRail);
+            var detector = Warm();
+            var originalCorners = detector.GetDiagnostics().EffectiveCameraCorners.ToArray();
+            var rejected = Observe(detector, pixels, geometry, 33);
+            Require(!rejected.Reliable && rejected.Position is null &&
+                Observe(detector, pixels, geometry, 66).Position is null &&
+                detector.GetDiagnostics().OpticalRadius == 7 &&
+                detector.GetDiagnostics().EffectiveCameraCorners.SequenceEqual(originalCorners),
+                "Boundary recovery accepted remote marginal damage, separated contacts, or a dim boundary: " + rejected);
+            Require(Observe(detector, validPixels, geometry, 99).Position is null &&
+                Observe(detector, validPixels, geometry, 132).Position is not null,
+                "A rejected boundary candidate prevented fresh valid contact acquisition.");
+        }
+
+        PatternRailDetector Warm()
+        {
+            var detector = new PatternRailDetector();
+            var clear = Observe(detector, initialCamera, geometry, 0);
+            Require(clear.Reliable && clear.OpticalRadius == 7 && clear.IntactCount == Marks,
+                "The boundary fixture did not establish the original optics.");
+            return detector;
+        }
+        static void ClipBoundary(Mat rail, int column, bool left)
+        {
+            // A fingertip erases only the outer edge of the adjacent colon, preserving most of each dot.
+            int width = left ? 6 : 5;
+            Cv2.Rectangle(rail, new Rect(column * 20 + (left ? 0 : 20 - width), 10, width, 44),
+                new Scalar(55, 85, 120, 255), -1);
+        }
+    }
+
     private static Raster BloomCamera(Mat rail, int horizontalShift = 0)
     {
         // The physical clear failure combined expanded dots with a small coherent centroid drift.
         using var shifted = new Mat();
         using var translation = Mat.FromArray(new double[,] { { 1, 0, horizontalShift }, { 0, 1, 1 } });
-        Cv2.WarpAffine(rail, shifted, translation, new Size(960, 64), InterpolationFlags.Linear,
+        Cv2.WarpAffine(rail, shifted, translation, new Size(Width, Height), InterpolationFlags.Linear,
             BorderTypes.Constant, new Scalar(0, 0, 0, 255));
         return Camera(shifted, Straight, 1000, 120);
     }
@@ -414,10 +609,10 @@ internal static class PatternRailRegression
         var detector = new PatternRailDetector();
         var initial = Observe(detector, clear, geometry, 0);
         Require(initial.Reliable && initial.Position is null && initial.DamageCount == 0 &&
-            initial.IntactCount == 96 && initial.GeometryRefined,
+            initial.IntactCount == Marks && initial.GeometryRefined,
             "A bounded coherent projective error did not recover all clear marks: " + initial);
 
-        foreach (var (first, count) in new[] { (0, 1), (22, 4), (47, 1) })
+        foreach (var (first, count) in new[] { (0, 1), (22, 4), (Columns - 1, 1) })
         {
             var covered = Render((first, count));
             var cold = new PatternRailDetector();
@@ -432,7 +627,7 @@ internal static class PatternRailRegression
             for (int frame = 2; frame < 8; frame++)
             {
                 var held = Observe(warmed, covered, geometry, frame * 33);
-                Require(held.Position is { } x && Math.Abs(x - (first + count / 2d) / 48) < .025 &&
+                Require(held.Position is { } x && Math.Abs(x - (first + count / 2d) / Columns) < .025 &&
                     held.GeometryRefined && held.RegistrationX == initial.RegistrationX &&
                     held.RegistrationY == initial.RegistrationY && held.OpticalRadius == initial.OpticalRadius,
                     "A cached global correction absorbed contact or changed its location: " + held);
@@ -467,7 +662,7 @@ internal static class PatternRailRegression
             using var rail = RailWithRadius(7);
             using var shifted = new Mat();
             using var translation = Mat.FromArray(new double[,] { { 1, 0, shift }, { 0, 1, 0 } });
-            Cv2.WarpAffine(rail, shifted, translation, new Size(960, 64), InterpolationFlags.Linear,
+            Cv2.WarpAffine(rail, shifted, translation, new Size(Width, Height), InterpolationFlags.Linear,
                 BorderTypes.Constant, new Scalar(0, 0, 0, 255));
             var periodic = Observe(new(), Camera(shifted, projected, 1920, 1080), geometry, 0);
             Require(!periodic.Reliable && !periodic.GeometryRefined && periodic.Position is null,
@@ -480,6 +675,56 @@ internal static class PatternRailRegression
             Cv2.GaussianBlur(rail, rail, new Size(0, 0), 1.6);
             return Camera(rail, projected, 1920, 1080);
         }
+    }
+
+    private static void CheckRepeatedBoundedRefinement()
+    {
+        PixelPoint[] calibration = [new(1590.602, 811.949), new(1589.374, 277.419),
+            new(1634.856, 276.990), new(1635.900, 811.646)];
+        PixelPoint[] projected = [new(1587.729, 810.946), new(1590.047, 277.388),
+            new(1634.917, 276.984), new(1632.193, 810.558)];
+        var geometry = new PatternRailGeometry(14, calibration);
+        var detector = new PatternRailDetector();
+        var initial = Observe(detector, Render(0), geometry, 0);
+        Require(initial.Reliable && initial.IntactCount == Marks && initial.GeometryRefined,
+            "The drift fixture did not establish an initial corrected map: " + initial);
+        var firstCorners = detector.GetDiagnostics().EffectiveCameraCorners.ToArray();
+        // A later coherent movement exceeds the old profile's tolerance. All dots must be clear
+        // before fitting again; a covered frame must preserve the previous map even after refinement.
+        Observe(detector, Render(3.2, (22, 3)), geometry, 33);
+        Require(detector.GetDiagnostics().EffectiveCameraCorners.SequenceEqual(firstCorners),
+            "A previously refined map learned new geometry from an obscured rail.");
+        var recovered = Observe(detector, Render(3.2), geometry, 66);
+        var after = detector.GetDiagnostics().EffectiveCameraCorners;
+        Require(recovered.Reliable && recovered.Position is null && recovered.DamageCount == 0 &&
+            recovered.IntactCount == Marks && recovered.GeometryRefined && !after.SequenceEqual(firstCorners) &&
+            after.Select((point, i) => Distance(point, calibration[i])).All(value => value <= 4),
+            "A clear rail failed repeated refinement inside the original calibration bound: " + recovered);
+        var contact = Render(3.2, (22, 3));
+        Require(Observe(detector, contact, geometry, 99).Position is null &&
+            Observe(detector, contact, geometry, 132).Position is { } x && Math.Abs(x - 23.5 / Columns) < .025 &&
+            detector.GetDiagnostics().EffectiveCameraCorners.SequenceEqual(after),
+            "Refinement reused contact confirmation, displaced steering, or moved geometry under contact.");
+        var bounded = detector.GetDiagnostics().EffectiveCameraCorners.ToArray();
+        foreach (int frame in new[] { 0, 1, 2 })
+        {
+            // Another 3.2 pixels is locally small but must not accumulate beyond the original four-pixel bound.
+            var rejected = Observe(detector, Render(6.4), geometry, 165 + frame * 33);
+            Require(!rejected.Reliable && rejected.Position is null &&
+                detector.GetDiagnostics().EffectiveCameraCorners.SequenceEqual(bounded),
+                "Repeated refinement accumulated movement beyond the original calibration bound: " + rejected);
+        }
+        var restored = Observe(detector, Render(3.2), geometry, 264);
+        Require(restored.Reliable && restored.Position is null && restored.IntactCount == Marks,
+            "A rejected distant candidate damaged the previously valid map.");
+
+        Raster Render(double shift, params (int First, int Count)[] occlusions)
+        {
+            using var rail = RailWithRadius(7, occlusions);
+            Cv2.GaussianBlur(rail, rail, new Size(0, 0), 1.6);
+            return Camera(rail, projected.Select(point => new PixelPoint(point.X + shift, point.Y)).ToArray(), 1920, 1080);
+        }
+        static double Distance(PixelPoint a, PixelPoint b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
     }
 
     private static void CheckFrameAndGeometryBarriers()
@@ -528,7 +773,7 @@ internal static class PatternRailRegression
 
     private static Raster Camera(Mat rail, IReadOnlyList<PixelPoint> corners, int width, int height)
     {
-        using var transform = Cv2.GetPerspectiveTransform(new Point2f[] { new(0, 0), new(960, 0), new(960, 64), new(0, 64) },
+        using var transform = Cv2.GetPerspectiveTransform(new Point2f[] { new(0, 0), new(Width, 0), new(Width, Height), new(0, Height) },
             corners.Select(point => new Point2f((float)point.X, (float)point.Y)).ToArray());
         using var image = new Mat();
         Cv2.WarpPerspective(rail, image, transform, new Size(width, height), InterpolationFlags.Linear,

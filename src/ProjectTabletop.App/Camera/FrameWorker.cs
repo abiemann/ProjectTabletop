@@ -37,7 +37,7 @@ internal sealed class FrameWorker
     public bool TryRun(long tick, TimeSpan interval, Action<FrameWork> work)
     {
         ArgumentNullException.ThrowIfNull(work);
-        return TryStart(tick, interval, work, static (callback, lease) => Task.Run(() =>
+        return TryStart(tick, interval, null, work, static (callback, lease) => Task.Run(() =>
         {
             try { callback(lease); }
             finally { lease.Complete(); }
@@ -47,21 +47,45 @@ internal sealed class FrameWorker
     public bool TryRun(long tick, TimeSpan interval, Func<FrameWork, Task> work)
     {
         ArgumentNullException.ThrowIfNull(work);
-        return TryStart(tick, interval, work, static (callback, lease) => Task.Run(async () =>
+        return TryStart(tick, interval, null, work, static (callback, lease) => Task.Run(async () =>
         {
             try { await callback(lease).ConfigureAwait(false); }
             finally { lease.Complete(); }
         }));
     }
 
-    private bool TryStart<TWork>(long tick, TimeSpan interval, TWork work, Func<TWork, FrameWork, Task> start)
+    public bool TryRun(long tick, TimeSpan interval, CameraFrame frame, Action<FrameWork> work)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        ArgumentNullException.ThrowIfNull(work);
+        return TryStart(tick, interval, frame, work, static (callback, lease) => Task.Run(() =>
+        {
+            try { callback(lease); }
+            finally { lease.Complete(); }
+        }));
+    }
+
+    public bool TryRun(long tick, TimeSpan interval, CameraFrame frame, Func<FrameWork, Task> work)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        ArgumentNullException.ThrowIfNull(work);
+        return TryStart(tick, interval, frame, work, static (callback, lease) => Task.Run(async () =>
+        {
+            try { await callback(lease).ConfigureAwait(false); }
+            finally { lease.Complete(); }
+        }));
+    }
+
+    private bool TryStart<TWork>(long tick, TimeSpan interval, CameraFrame? frame, TWork work, Func<TWork, FrameWork, Task> start)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(interval, TimeSpan.Zero);
         if (IsBusy) return false;
         lock (_gate)
         {
             if (!ReadyLocked(tick, interval)) return false;
-            var lease = new FrameWork(this);
+            var frameLease = frame?.TryRetain();
+            if (frame is not null && frameLease is null) return false;
+            var lease = new FrameWork(this, frameLease);
             Volatile.Write(ref _busy, 1);
             try
             {
@@ -72,7 +96,7 @@ internal sealed class FrameWorker
             }
             catch
             {
-                Volatile.Write(ref _busy, 0);
+                lease.Complete();
                 throw;
             }
         }
@@ -88,7 +112,7 @@ internal sealed class FrameWorker
 }
 
 /// <summary>Retains the slot through any dispatched result publications.</summary>
-internal sealed class FrameWork(FrameWorker owner)
+internal sealed class FrameWork(FrameWorker owner, CameraFrameLease? frame = null)
 {
     private int _owners = 1;
 
@@ -137,6 +161,10 @@ internal sealed class FrameWork(FrameWorker owner)
 
     internal void Complete()
     {
-        if (Interlocked.Decrement(ref _owners) == 0) owner.Release();
+        if (Interlocked.Decrement(ref _owners) == 0)
+        {
+            try { frame?.Dispose(); }
+            finally { owner.Release(); }
+        }
     }
 }

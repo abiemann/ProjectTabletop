@@ -13,11 +13,34 @@ public sealed partial class MainWindow
     private long _handAcquisitionGeneration = -1;
     private object? _lastHandAcquisitionDetection;
 #if DEBUG
-    private CameraFrame? _lastHandAcquisitionFrame;
+    private readonly CameraFrameSlot _lastHandAcquisitionFrame = new();
     private SceneCompositor.HandAcquisitionContext? _lastHandAcquisitionContext;
     private sealed record HoldButtonSnapshot(CameraFrame Frame, SceneCompositor.HoldButtonContext Context,
-        HoldButtonQuery Query, long Generation, DateTimeOffset ProcessedAt);
+        HoldButtonQuery Query, long Generation, DateTimeOffset ProcessedAt)
+    {
+        public CameraFrameLease FrameLease { get; } = Frame.Retain();
+    }
     private HoldButtonSnapshot? _lastHoldButtonSnapshot;
+
+    private void ClearHoldButtonSnapshot()
+    {
+        lock (_handGate)
+        {
+            var previous = _lastHoldButtonSnapshot;
+            _lastHoldButtonSnapshot = null;
+            previous?.FrameLease.Dispose();
+        }
+    }
+
+    private void ClearHandAcquisitionSnapshots()
+    {
+        lock (_handGate)
+        {
+            ClearHoldButtonSnapshot();
+            _lastHandAcquisitionFrame.Clear();
+            _lastHandAcquisitionContext = null;
+        }
+    }
 #endif
 
     private sealed record HandAcquisitionQuery(IReadOnlyList<HandAcquisitionHint> Hints,
@@ -64,8 +87,12 @@ public sealed partial class MainWindow
         // Retain one immutable camera/context/result tuple only during explicit
         // board diagnostics. The saver must never pair a newer image with this fit.
         lock (_handGate)
-            Volatile.Write(ref _lastHoldButtonSnapshot, _boardHandDiagnosticLogging
-                ? new(frame, context, query, generation, MonotonicClock.UtcNow) : null);
+        {
+            var previous = _lastHoldButtonSnapshot;
+            _lastHoldButtonSnapshot = _boardHandDiagnosticLogging && !_closing && generation == _handGeneration
+                ? new(frame, context, query, generation, MonotonicClock.UtcNow) : null;
+            previous?.FrameLease.Dispose();
+        }
 #endif
         return query;
     }
@@ -172,7 +199,7 @@ public sealed partial class MainWindow
 #if DEBUG
         // Keep the exact inference input paired with its decision. The latest
         // camera frame may already show a different phase of our search light.
-        _lastHandAcquisitionFrame = frame;
+        _lastHandAcquisitionFrame.Set(frame);
         _lastHandAcquisitionContext = context;
 #endif
         _lastHandAcquisitionDetection = context is null ? null : new

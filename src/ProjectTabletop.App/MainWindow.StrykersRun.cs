@@ -20,7 +20,10 @@ public sealed partial class MainWindow
     private double _strykersRunProcessingMilliseconds;
 #if DEBUG
     private sealed record StrykersRunDiagnosticSnapshot(CameraFrame Frame, PatternRailObservation Observation,
-        PatternRailGeometry Geometry, PatternRailDiagnostics Diagnostics, long Generation, DateTimeOffset ProcessedAt);
+        PatternRailGeometry Geometry, PatternRailDiagnostics Diagnostics, long Generation, DateTimeOffset ProcessedAt)
+    {
+        public CameraFrameLease FrameLease { get; } = Frame.Retain();
+    }
     private StrykersRunDiagnosticSnapshot? _strykersRunDiagnosticSnapshot;
 #endif
 
@@ -36,7 +39,8 @@ public sealed partial class MainWindow
         UpdateBoardAppStatus();
         SetStatus("Stryker's Run: hold PLAY, then cover the white dots along the bottom edge and slide left or right. " +
             "Stryker shoots automatically. Shoot open Bulwark's pod for a monster defender, break supply caches for recruits, " +
-            "and choose gates to grow the squad. Bulwark has his own HP; Stryker is the last soldier to fall.");
+            "and choose gates to grow the squad. Survive five one-minute stages and defeat their bosses; " +
+            "the road stops for each boss fight. Survivors continue to the next level.");
     }
 
     private void ResetStrykersRunInput()
@@ -63,7 +67,7 @@ public sealed partial class MainWindow
         var geometry = _scene.GetStrykersRunRailGeometry(frame.Timestamp, visibleThrough);
         if (geometry is null) return;
         long generation = Interlocked.Read(ref _strykersRunGeneration);
-        _strykersRunWorker.TryRun(tick, TimeSpan.Zero, _ =>
+        _strykersRunWorker.TryRun(tick, TimeSpan.Zero, frame, _ =>
         {
             try
             {
@@ -85,10 +89,12 @@ public sealed partial class MainWindow
                     observation = _strykersRunDetector.Observe(frame.Bgra, frame.Width, frame.Height, frame.Stride,
                         geometry, frame.Timestamp);
 #if DEBUG
+                    var previous = _strykersRunDiagnosticSnapshot;
                     _strykersRunDiagnosticSnapshot = _boardHandDiagnosticLogging && !_closing &&
                         generation == Interlocked.Read(ref _strykersRunGeneration)
                         ? new(frame, observation, geometry, _strykersRunDetector.GetDiagnostics(), generation, MonotonicClock.UtcNow)
                         : null;
+                    previous?.FrameLease.Dispose();
 #endif
                 }
                 double milliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
@@ -118,7 +124,8 @@ public sealed partial class MainWindow
             phase = state.Phase.ToString(), state.Banner, state.SquadX, state.SoldierCount, state.TroopCount,
             state.HeroAlive, state.Score, state.Wave, state.Distance, state.RunSeconds, state.GameOverSeconds,
             state.RecoveringInput, enemies = state.Enemies.Count, gates = state.Gates.Count, bullets = state.Bullets.Count,
-            state.Ally, state.Objectives,
+            state.Level, state.LevelSeconds, stage = state.Stage.ToString(), state.StageSeconds,
+            state.Boss, state.Hazards, state.Ally, state.Objectives,
             input = Volatile.Read(ref _strykersRunLastObservation),
             processingMilliseconds = Volatile.Read(ref _strykersRunProcessingMilliseconds),
             railCameraCorners = _scene.GetStrykersRunRailGeometry()?.CameraCorners,
@@ -141,12 +148,18 @@ public sealed partial class MainWindow
 #if DEBUG
     private void ClearStrykersRunDiagnosticSnapshot()
     {
-        lock (_strykersRunInputGate) _strykersRunDiagnosticSnapshot = null;
+        lock (_strykersRunInputGate)
+        {
+            var previous = _strykersRunDiagnosticSnapshot;
+            _strykersRunDiagnosticSnapshot = null;
+            previous?.FrameLease.Dispose();
+        }
     }
 
     private async Task<object> CaptureStrykersRunInputAsync()
     {
         StrykersRunDiagnosticSnapshot snapshot;
+        CameraFrameLease retainedFrame;
         lock (_strykersRunInputGate)
         {
             if (!_boardHandDiagnosticLogging)
@@ -155,7 +168,9 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException("No processed Stryker's Run rail frame is available yet.");
             if (snapshot.Generation != Interlocked.Read(ref _strykersRunGeneration))
                 throw new InvalidOperationException("The retained rail frame belongs to a reset input session.");
+            retainedFrame = snapshot.Frame.Retain();
         }
+        using var frameLease = retainedFrame;
         var frame = snapshot.Frame;
         string directory = Path.Combine(_appDataDirectory, "StrykersRunInputSnapshots",
             $"{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fff}-{Guid.NewGuid():N}");

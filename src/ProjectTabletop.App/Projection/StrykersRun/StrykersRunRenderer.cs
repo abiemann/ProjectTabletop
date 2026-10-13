@@ -22,6 +22,11 @@ internal sealed partial class StrykersRunRenderer : IDisposable
     private readonly Rect[] _actorCells = new Rect[16];
     private readonly Rect[] _heroCells = new Rect[4];
     private readonly Rect[] _allyCells = new Rect[4];
+    private readonly Rect[] _bossCells = new Rect[6];
+    private readonly Rect[] _bossWalkCells = new Rect[16];
+    private readonly Rect[] _barrelCells = new Rect[4];
+    private readonly Rect[] _explosionCells = new Rect[8];
+    private float _barrelFrameHeight;
     private readonly Dictionary<(StrykersRunGateKind, int), string> _gateLabels = new();
     private readonly CanvasTextFormat _title = TextFormat(51);
     private readonly CanvasTextFormat _hud = TextFormat(27);
@@ -32,8 +37,8 @@ internal sealed partial class StrykersRunRenderer : IDisposable
     private Task? _loading;
     private volatile bool _ready;
     private bool _disposed;
-    private int _score = -1, _wave = -1, _count = -1;
-    private string _scoreLabel = string.Empty, _waveLabel = string.Empty, _squadLabel = string.Empty;
+    private int _score = -1, _level = -1, _remaining = -1, _count = -1;
+    private string _scoreLabel = string.Empty, _levelLabel = string.Empty, _squadLabel = string.Empty;
 
     internal StrykersRunRenderer(CanvasDevice device) => _device = device;
     internal bool Ready => _ready;
@@ -47,7 +52,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             if (_loading is null)
             {
                 _images = new(_device, Path.Combine(AppContext.BaseDirectory, "Assets", "StrykersRun"),
-                    ["actors.png", "hero.png", "ally.png", "road.png", "game-over-wall.png"]);
+                    ["actors.png", "hero.png", "ally.png", "bosses.png", "boss-walk.png", "barrels.png", "explosion.png", "road.png", "game-over-wall.png"]);
                 _loading = LoadAsync(_images);
                 _ = _loading.ContinueWith(task => _ = task.Exception, CancellationToken.None,
                     TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
@@ -62,7 +67,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
         lock (_resourceGate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            foreach (string file in new[] { "actors.png", "hero.png", "ally.png", "road.png", "game-over-wall.png" })
+            foreach (string file in new[] { "actors.png", "hero.png", "ally.png", "bosses.png", "boss-walk.png", "barrels.png", "explosion.png", "road.png", "game-over-wall.png" })
                 if (images.Image(file) is null)
                     throw new InvalidDataException("Stryker's Run artwork: " + file + ": " +
                         images.Errors.GetValueOrDefault(file, "not loaded"));
@@ -73,13 +78,30 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             FindSpriteCells(actors, 4, _actorCells);
             FindSpriteCells(hero, 1, _heroCells);
             FindSpriteCells(images.Image("ally.png")!, 1, _allyCells);
+            FindSpriteCells(images.Image("bosses.png")!, 2, _bossCells, 3, sharedVerticalBounds: false);
+            FindSpriteCells(images.Image("boss-walk.png")!, 4, _bossWalkCells);
+            FindSpriteCells(images.Image("barrels.png")!, 2, _barrelCells, 2);
+            foreach (var cell in _barrelCells)
+                _barrelFrameHeight = Math.Max(_barrelFrameHeight, (float)cell.Height);
+            // Keep full cells and a common pivot: cropping each blast phase to
+            // its ink would enlarge ignition and make the fireball jump around.
+            var explosionSize = images.Image("explosion.png")!.SizeInPixels;
+            for (int frame = 0; frame < _explosionCells.Length; frame++)
+            {
+                int column = frame % 4, row = frame / 4;
+                int left = column * (int)explosionSize.Width / 4, top = row * (int)explosionSize.Height / 2;
+                _explosionCells[frame] = new(left, top,
+                    (column + 1) * (int)explosionSize.Width / 4 - left,
+                    (row + 1) * (int)explosionSize.Height / 2 - top);
+            }
             _road.Sources[0] = images.Image("road.png")!;
             _particles = CreateParticles();
             _ready = true;
         }
     }
 
-    internal void Draw(CanvasDrawingSession ds, Rect fieldBounds, StrykersRunSnapshot state, double elapsedSeconds)
+    internal void Draw(CanvasDrawingSession ds, Rect fieldBounds, StrykersRunSnapshot state, double elapsedSeconds,
+        float? roadPresentationDistance = null)
     {
         if (fieldBounds.Width <= 0 || fieldBounds.Height <= 0) return;
         var before = ds.Transform;
@@ -110,12 +132,15 @@ internal sealed partial class StrykersRunRenderer : IDisposable
                 }
                 try
                 {
-                    DrawStreet(ds, state.Distance, clock, ambient);
+                    DrawStreet(ds, roadPresentationDistance ?? state.Distance, clock, ambient);
+                    DrawBossGround(ds, state);
                     DrawWorldObjects(ds, state, clock);
                     DrawBullets(ds, state);
+                    DrawBossHazards(ds, state);
                     DrawEffects(ds, state);
                     DrawAllyStatus(ds, state);
                     if (state.Phase == StrykersRunPhase.GameOver) DrawGameOver(ds, state.GameOverSeconds);
+                    if (state.Phase == StrykersRunPhase.Victory) DrawVictory(ds, state);
                 }
                 finally { ds.Transform = world; }
                 DrawHud(ds, state);
@@ -128,7 +153,8 @@ internal sealed partial class StrykersRunRenderer : IDisposable
 
     private enum ActorAtlas { TroopAndEnemy, Hero, Ally }
     private readonly record struct Actor(int Cell, ActorAtlas Atlas, float X, float Y, float Size, float Squash, float Health = -1);
-    private readonly record struct WorldProp(int Index, bool Objective, float Y);
+    private enum PropKind { Gate, Objective, Boss }
+    private readonly record struct WorldProp(int Index, PropKind Kind, float Y);
 
     private void DrawWorldObjects(CanvasDrawingSession ds, StrykersRunSnapshot state, float clock)
     {
@@ -178,20 +204,22 @@ internal sealed partial class StrykersRunRenderer : IDisposable
         }
         // Gates and shootable objectives share the bounded depth merge, keeping
         // nearby actors in front of distant props without allocating a draw list.
-        Span<WorldProp> props = stackalloc WorldProp[8 + StrykersRunGame.MaximumObjectives];
+        Span<WorldProp> props = stackalloc WorldProp[9 + StrykersRunGame.MaximumObjectives];
         int propCount = 0;
         for (int i = 0; i < state.Gates.Count && propCount < 8; i++)
         {
             var gate = state.Gates[i];
             if (gate.Y < -.1f || gate.Y > .92f || ForegroundSquash(state, gate.Y) <= 0) continue;
-            props[propCount++] = new(i, false, gate.Y);
+            props[propCount++] = new(i, PropKind.Gate, gate.Y);
         }
         for (int i = 0; i < state.Objectives.Count && propCount < props.Length; i++)
         {
             var objective = state.Objectives[i];
             if (objective.Y < -.1f || objective.Y > .92f || ForegroundSquash(state, objective.Y) <= 0) continue;
-            props[propCount++] = new(i, true, objective.Y);
+            props[propCount++] = new(i, PropKind.Objective, objective.Y);
         }
+        if (state.Boss is { } boss && propCount < props.Length)
+            props[propCount++] = new(0, PropKind.Boss, boss.Y);
         for (int i = 1; i < propCount; i++)
         {
             var prop = props[i];
@@ -208,8 +236,9 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             foreach (ref readonly var actor in actors[..count])
                 DrawActor(shadows, actor, Bitmap(actor.Atlas), shadow: true);
         foreach (ref readonly var prop in props[..propCount])
-            if (prop.Objective) DrawObjectiveShadow(ds, state.Objectives[prop.Index]);
-            else DrawGateShadow(ds, state.Gates[prop.Index]);
+            if (prop.Kind == PropKind.Objective) DrawObjectiveShadow(ds, state.Objectives[prop.Index]);
+            else if (prop.Kind == PropKind.Gate) DrawGateShadow(ds, state.Gates[prop.Index]);
+            else if (state.Boss is { } shadowBoss) DrawBossShadow(ds, shadowBoss);
 
         int nextActor = 0;
         for (int i = 0; i <= propCount; i++)
@@ -226,8 +255,9 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             }
             if (i >= propCount) continue;
             ref readonly var current = ref props[i];
-            if (current.Objective) DrawObjective(ds, state.Objectives[current.Index], ForegroundSquash(state, propY));
-            else DrawGate(ds, state.Gates[current.Index], ForegroundSquash(state, propY));
+            if (current.Kind == PropKind.Objective) DrawObjective(ds, state.Objectives[current.Index], ForegroundSquash(state, propY));
+            else if (current.Kind == PropKind.Gate) DrawGate(ds, state.Gates[current.Index], ForegroundSquash(state, propY));
+            else DrawBoss(ds, state);
         }
     }
 
@@ -262,14 +292,21 @@ internal sealed partial class StrykersRunRenderer : IDisposable
     private void DrawHud(CanvasDrawingSession ds, StrykersRunSnapshot state)
     {
         if (_score != state.Score) { _score = state.Score; _scoreLabel = $"SCORE  {_score:N0}"; }
-        if (_wave != state.Wave) { _wave = state.Wave; _waveLabel = $"WAVE  {_wave:00}"; }
+        int remaining = Math.Clamp((int)MathF.Ceiling(StrykersRunGame.LevelDurationSeconds - state.LevelSeconds),
+            0, (int)StrykersRunGame.LevelDurationSeconds);
+        if (_level != state.Level || _remaining != remaining)
+        {
+            _level = state.Level; _remaining = remaining;
+            _levelLabel = $"{_level}/{StrykersRunGame.LevelCount}  ·  {_remaining / 60}:{_remaining % 60:00}";
+        }
         if (_count != state.SoldierCount) { _count = state.SoldierCount; _squadLabel = $"SQUAD  {_count:00}"; }
         ds.FillRectangle(new Rect(0, 0, Width, 125), Ink(10, 17, 24, 238));
         ds.DrawLine(36, 123, Width - 36, 123, Ink(213, 97, 47), 2);
         Text(ds, "STRYKER'S RUN", new Rect(35, 9, Width - 70, 64), Ink(250, 220, 158), _title);
         Text(ds, _scoreLabel, new Rect(28, 80, 310, 34), Ink(227, 240, 241), _hud);
-        Text(ds, _waveLabel, new Rect(347, 80, 207, 34), Ink(112, 210, 240), _hud);
+        Text(ds, _levelLabel, new Rect(347, 80, 207, 34), Ink(112, 210, 240), _hud);
         Text(ds, _squadLabel, new Rect(590, 80, 282, 34), Ink(251, 198, 101), _hud);
+        DrawCampaignHud(ds, state);
         if (state.Phase is StrykersRunPhase.Ready or StrykersRunPhase.Starting or StrykersRunPhase.WaitingForInput)
             Text(ds, state.Banner, new Rect(35, state.Phase == StrykersRunPhase.WaitingForInput ? 1356 : 1020,
                 Width - 70, 60), Ink(250, 235, 205), _message);
@@ -349,6 +386,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             _road.Dispose();
             _title.Dispose(); _hud.Dispose(); _gateText.Dispose(); _message.Dispose();
             _objectiveTitle.Dispose(); _objectiveCount.Dispose(); _allyStatus.Dispose();
+            _bossTitle.Dispose(); _bossHint.Dispose(); _victoryTitle.Dispose();
         }
     }
 }

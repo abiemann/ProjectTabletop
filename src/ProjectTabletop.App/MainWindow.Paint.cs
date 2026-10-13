@@ -45,7 +45,7 @@ public sealed partial class MainWindow
             var context = _scene.GetPaintDisturbanceContext();
             if (context is null) return InputFrameQueueResult.Skipped;
             long generation = _handGeneration;
-            bool queued = _paintWorker.TryRun(tick, PaintDetectionInterval, work =>
+            bool queued = _paintWorker.TryRun(tick, PaintDetectionInterval, frame, work =>
             {
                 var started = Stopwatch.GetTimestamp();
                 try
@@ -58,9 +58,7 @@ public sealed partial class MainWindow
                     var result = _paintDisturbances.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
                         context, frame.Timestamp, MonotonicClock.UtcNow);
 #if DEBUG
-                    var diagnostic = new PaintDiagnosticObservation(frame, context, result);
-                    Volatile.Write(ref _lastPaintDiagnostic, diagnostic);
-                    if (result.ConfirmedCandidateCount > 0) Volatile.Write(ref _lastConfirmedPaintDiagnostic, diagnostic);
+                    RecordPaintDiagnostic(frame, context, result, generation);
 #endif
                     var milliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                     work.TryPost(_dispatchInputResult, () =>

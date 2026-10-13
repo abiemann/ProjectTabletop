@@ -9,7 +9,10 @@ public sealed partial class MainWindow
     private sealed record FootballDiagnosticObservation(CameraFrame Frame,
         IReadOnlyList<EyeTipProjectionFrame>? References, int[] Players, BlackTipProfile[] Profiles,
         BlackTipSearchHint?[] Hints, IReadOnlyList<ColorTipDetectionResult> Results,
-        string[] Decisions, double?[] InputAgeMilliseconds, PixelPoint[]? SearchArea);
+        string[] Decisions, double?[] InputAgeMilliseconds, PixelPoint[]? SearchArea)
+    {
+        public CameraFrameLease FrameLease { get; } = Frame.Retain();
+    }
     private readonly object _footballDiagnosticGate = new();
     private bool _footballDiagnosticCapture;
     private FootballDiagnosticObservation? _currentFootballDiagnostic, _missedFootballDiagnostic;
@@ -19,9 +22,19 @@ public sealed partial class MainWindow
         lock (_footballDiagnosticGate)
         {
             _footballDiagnosticCapture = enabled;
-            _currentFootballDiagnostic = _missedFootballDiagnostic = null;
+            ClearFootballDiagnosticFrames();
         }
         return new { enabled };
+    }
+
+    private void ClearFootballDiagnosticFrames()
+    {
+        lock (_footballDiagnosticGate)
+        {
+            _currentFootballDiagnostic?.FrameLease.Dispose();
+            _missedFootballDiagnostic?.FrameLease.Dispose();
+            _currentFootballDiagnostic = _missedFootballDiagnostic = null;
+        }
     }
 
     private void RecordFootballDetection(CameraFrame frame, IReadOnlyList<EyeTipProjectionFrame>? references,
@@ -32,18 +45,21 @@ public sealed partial class MainWindow
         lock (_footballDiagnosticGate)
         {
             if (!_footballDiagnosticCapture) return;
-            // Frames and scene references are immutable owned buffers. Retain only two
+            // Frame leases keep the pooled pixels immutable. Retain only two
             // observations, and write nothing unless the local diagnostic client requests it.
             var observation = new FootballDiagnosticObservation(frame, references, players, profiles, hints, results,
                 decisions, inputAgeMilliseconds, searchArea);
+            var previous = _currentFootballDiagnostic;
             _currentFootballDiagnostic = observation;
+            previous?.FrameLease.Dispose();
             // A full-pair miss bridged by one strip is still successful tracking.
             // Preserve a sustained measured-input miss or an immediate ambiguity
             // disarm, not that benign recovery. Clearing input also clears its age.
             if (_missedFootballDiagnostic is null && decisions.Where((decision, index) =>
                     decision == "ambiguous" || hints[index] is not null && inputAgeMilliseconds[index] >= 100 &&
                     decision is "missing" or "confirming" or "uncertain-strips" or "stale-frame" or "publication-frame-rejected" or "waiting-reference").Any())
-                _missedFootballDiagnostic = observation;
+                _missedFootballDiagnostic = new(frame, references, players, profiles, hints, results,
+                    decisions, inputAgeMilliseconds, searchArea);
         }
     }
 
@@ -51,12 +67,18 @@ public sealed partial class MainWindow
     {
         FootballDiagnosticObservation current;
         FootballDiagnosticObservation? missed;
+        CameraFrameLease currentFrame;
+        CameraFrameLease? missedFrame;
         lock (_footballDiagnosticGate)
         {
             current = _currentFootballDiagnostic ?? throw new InvalidOperationException(
                 "Enable Football diagnostic capture and wait for a marker comparison first.");
             missed = _missedFootballDiagnostic;
+            currentFrame = current.Frame.Retain();
+            missedFrame = missed?.Frame.Retain();
         }
+        using var currentLease = currentFrame;
+        using var missedLease = missedFrame;
         string directory = Path.Combine(_appDataDirectory, "FootballDiagnostics",
             $"{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);

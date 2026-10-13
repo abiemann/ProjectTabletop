@@ -13,6 +13,7 @@ internal static class StrykersRunGameRegression
         CheckStartAndInput();
         CheckInputPausesAndClock();
         CheckFrameRateIndependence();
+        CheckRoadPresentation();
         CheckGateChoicesAndHero();
         CheckWideFormationContacts();
         CheckSweptBullets();
@@ -20,11 +21,11 @@ internal static class StrykersRunGameRegression
         CheckDefenderCombatAndLoss();
         CheckNaturalReinforcements();
         CheckRushAndObjectiveBounds();
-        CheckBoundsAndBosses();
+        CheckBounds();
         CheckGameOverAndReset();
         Console.WriteLine("Stryker's Run simulation passed: lone persistent hero, recruits and gate arithmetic, " +
             "shootable rescues and supplies, mortal defending ally, runner rushes, fresh horizontal control, complete input pauses, " +
-            "hitch discard, swept nearest contacts, bounded entities, bosses and game-over reset.");
+            "smooth road presentation, hitch discard, swept nearest contacts, bounded entities and game-over reset.");
     }
 
     private static void CheckStartAndInput()
@@ -136,6 +137,77 @@ internal static class StrykersRunGameRegression
         sparse.SetInput(.5f, At(8000)); sparse.Advance(At(8000));
         Require(SameRun(frequent.Snapshot, sparse.Snapshot),
             "Different presentation frame rates changed fixed-step movement, firing, contacts or random waves.");
+    }
+
+    private static void CheckRoadPresentation()
+    {
+        var game = Playing(quiet: true);
+        var initial = game.Snapshot;
+        float start = game.RoadPresentationDistance;
+        game.Advance(Epoch.AddMilliseconds(500.5));
+        Require(Near(game.RoadPresentationDistance, start + .004f) && SameRun(initial, game.Snapshot) &&
+            initial.Revision == game.Snapshot.Revision,
+            "The road must move between fixed ticks without advancing simulation state.");
+        foreach (double milliseconds in new[] { 501.75, 506.25, 517, 533.75, 549, 550 })
+        {
+            game.Advance(Epoch.AddMilliseconds(milliseconds));
+            Require(Near(game.RoadPresentationDistance, start + (float)(milliseconds - 500) * .008f),
+                "Jittered presentation intervals changed the road's eight-unit-per-second speed.");
+        }
+        var coarse = Playing(quiet: true);
+        coarse.Advance(At(550));
+        Require(SameRun(game.Snapshot, coarse.Snapshot) && Near(game.RoadPresentationDistance, coarse.RoadPresentationDistance),
+            "Fractional road presentation changed fixed-step gameplay or accumulated distance.");
+
+        foreach (string reason in new[] { "clear", "null", "stale" })
+        {
+            var paused = Playing(quiet: true);
+            paused.SetInput(.5f, At(506)); // Refresh the quiet fixture's snapshot before freezing it.
+            paused.Advance(At(507)); // Leave a visible fractional step ahead of the simulation.
+            if (reason == "stale") paused.Advance(At(650));
+            float frozenRoad = paused.RoadPresentationDistance;
+            var frozenRun = paused.Snapshot;
+            if (reason == "clear") paused.ClearInput(At(508));
+            if (reason == "null") paused.SetInput(null, At(508));
+            Require(paused.RoadPresentationDistance == frozenRoad, "Removing input moved the presentation road backwards.");
+            paused.Advance(At(757));
+            Require(paused.Phase == StrykersRunPhase.WaitingForInput && paused.RoadPresentationDistance == frozenRoad &&
+                SameRun(frozenRun, paused.Snapshot), "Input loss (" + reason + ") advanced the road or paused simulation.");
+            paused.SetInput(.5f, At(1200)); paused.Advance(At(1200));
+            Require(paused.RoadPresentationDistance == frozenRoad && SameRun(frozenRun, paused.Snapshot),
+                "Resuming input moved the road backwards or replayed paused time.");
+            paused.Advance(At(1210));
+            Require(paused.RoadPresentationDistance >= frozenRoad && paused.RoadPresentationDistance <= frozenRoad + .0801f &&
+                paused.Snapshot.Distance > frozenRun.Distance, "Resumed scrolling replayed time debt or failed to continue.");
+            float beforeHitch = paused.RoadPresentationDistance;
+            var beforeHitchRun = paused.Snapshot;
+            paused.SetInput(.5f, At(1600)); paused.Advance(At(1600));
+            Require(paused.RoadPresentationDistance == beforeHitch && SameRun(beforeHitchRun, paused.Snapshot),
+                "Discarding a render hitch rewound the road or replayed missed time.");
+            paused.Advance(At(1603));
+            Require(paused.RoadPresentationDistance >= beforeHitch && paused.RoadPresentationDistance <= beforeHitch + .0241f,
+                "The next fractional frame after a discarded hitch jumped or reversed the road.");
+            paused.Reset(At(1700));
+            Require(paused.RoadPresentationDistance == 0 && paused.Snapshot.Distance == 0,
+                "Reset retained the road's presentation offset.");
+        }
+
+        var boss = Playing(quiet: true);
+        Put(boss, "_levelTicks", 60 * 120 - 1);
+        Put(boss, "_distance", (60 * 120 - 1) * 8 / 120f);
+        boss.Advance(At(507));
+        Require(boss.RoadPresentationDistance < 480, "Fractional scrolling crossed the end of the level early.");
+        Tick(boss, 510);
+        Require(boss.Snapshot.Stage == StrykersRunStage.BossEntrance && Near(boss.RoadPresentationDistance, 480),
+            "The road did not settle at the boss boundary.");
+        for (int ms = 520; ms <= 1000; ms += 10)
+        {
+            Tick(boss, ms);
+            Require(Near(boss.RoadPresentationDistance, 480) && Near(boss.Snapshot.Distance, 480),
+                "The presentation road kept scrolling during the boss fight.");
+        }
+        boss.Start(At(1010));
+        Require(boss.RoadPresentationDistance == 0, "PLAY retained the previous run's presentation distance.");
     }
 
     private static void CheckObjectivesAndDefender()
@@ -397,17 +469,9 @@ internal static class StrykersRunGameRegression
         }
     }
 
-    private static void CheckBoundsAndBosses()
+    private static void CheckBounds()
     {
         var game = Playing(quiet: true);
-        Put(game, "_runSeconds", 54f); Put(game, "_enemyRemaining", 0f);
-        Tick(game, 510);
-        Require(game.Snapshot.Wave == 4 && game.Snapshot.Enemies.Count(enemy => enemy.Kind == StrykersRunEnemyKind.Boss) == 1,
-            "The fourth wave must introduce one boss.");
-        Tick(game, 520);
-        Require(game.Snapshot.Enemies.Count(enemy => enemy.Kind == StrykersRunEnemyKind.Boss) == 1,
-            "A boss repeated on each frame of its wave.");
-        game = Playing(quiet: true);
         for (int i = 0; i < StrykersRunGame.MaximumEnemies; i++) Enemy(game, 1000 + i, .1f, -2, StrykersRunEnemyKind.Runner, 10);
         for (int i = 0; i < StrykersRunGame.MaximumBullets; i++) Add(game, "_bullets", "Bullet", 2000 + i, .9f, .5f);
         for (int i = 0; i < StrykersRunGame.MaximumEffects + 20; i++)
@@ -481,7 +545,9 @@ internal static class StrykersRunGameRegression
     private static bool SameRun(StrykersRunSnapshot a, StrykersRunSnapshot b) => a.SquadX == b.SquadX && a.RunSeconds == b.RunSeconds &&
         a.Distance == b.Distance && a.SoldierCount == b.SoldierCount && a.Score == b.Score && a.Wave == b.Wave &&
         a.Enemies.SequenceEqual(b.Enemies) && a.Gates.SequenceEqual(b.Gates) && a.Bullets.SequenceEqual(b.Bullets) && a.Effects.SequenceEqual(b.Effects) &&
-        a.Objectives.SequenceEqual(b.Objectives) && a.Ally == b.Ally;
+        a.Objectives.SequenceEqual(b.Objectives) && a.Ally == b.Ally && a.Level == b.Level &&
+        a.LevelSeconds == b.LevelSeconds && a.Stage == b.Stage && a.StageSeconds == b.StageSeconds &&
+        a.Boss == b.Boss && a.Hazards.SequenceEqual(b.Hazards);
     private static bool Near(float a, float b) => Math.Abs(a - b) < .0001f;
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 }

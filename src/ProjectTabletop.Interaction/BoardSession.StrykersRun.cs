@@ -4,17 +4,19 @@ public sealed partial class BoardSession
 {
     private readonly StrykersRunGame _strykersRun = new();
     public StrykersRunSnapshot StrykersRunState => _strykersRun.Snapshot;
+    public float StrykersRunRoadPresentationDistance => _strykersRun.RoadPresentationDistance;
     public StrykersRunPhase StrykersRunPhase => _strykersRun.Phase;
     public long StrykersRunInputRevision { get; private set; }
+    private bool StrykersRunEnded => _strykersRun.Phase is StrykersRunPhase.GameOver or StrykersRunPhase.Victory;
     public bool StrykersRunControlsVisible => StrykersRunControlsProgress > 0;
     public bool StrykersRunControlsAnimating => _strykersRun.Phase == StrykersRunPhase.Starting ||
-        _strykersRun.Phase == StrykersRunPhase.GameOver &&
-        _strykersRun.GameOverSeconds > StrykersRunGame.GameOverWallSeconds &&
-        _strykersRun.GameOverSeconds < StrykersRunGame.GameOverPresentationSeconds;
+        StrykersRunEnded &&
+        _strykersRun.PhaseSeconds > StrykersRunGame.GameOverWallSeconds &&
+        _strykersRun.PhaseSeconds < StrykersRunGame.GameOverPresentationSeconds;
     public bool StrykersRunRailVisible => StrykersRunRailProgress > 0;
     public bool StrykersRunRailAnimating => _strykersRun.Phase == StrykersRunPhase.Starting ||
-        _strykersRun.Phase == StrykersRunPhase.GameOver &&
-        _strykersRun.GameOverSeconds < StrykersRunGame.ControlTransitionSeconds;
+        StrykersRunEnded &&
+        _strykersRun.PhaseSeconds < StrykersRunGame.ControlTransitionSeconds;
 
     public double StrykersRunRailProgress
     {
@@ -25,7 +27,7 @@ public sealed partial class BoardSession
             {
                 StrykersRunPhase.Starting => state.PhaseSeconds / StrykersRunGame.ControlTransitionSeconds,
                 StrykersRunPhase.WaitingForInput or StrykersRunPhase.Playing => 1,
-                StrykersRunPhase.GameOver => 1 - state.GameOverSeconds / StrykersRunGame.ControlTransitionSeconds,
+                StrykersRunPhase.GameOver or StrykersRunPhase.Victory => 1 - state.PhaseSeconds / StrykersRunGame.ControlTransitionSeconds,
                 _ => 0
             };
             progress = Math.Clamp(progress, 0, 1);
@@ -42,7 +44,7 @@ public sealed partial class BoardSession
             {
                 StrykersRunPhase.Ready => 1,
                 StrykersRunPhase.Starting => 1 - state.PhaseSeconds / StrykersRunGame.ControlTransitionSeconds,
-                StrykersRunPhase.GameOver => (state.GameOverSeconds - StrykersRunGame.GameOverWallSeconds) /
+                StrykersRunPhase.GameOver or StrykersRunPhase.Victory => (state.PhaseSeconds - StrykersRunGame.GameOverWallSeconds) /
                     StrykersRunGame.ControlTransitionSeconds,
                 _ => 0
             };

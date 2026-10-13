@@ -28,7 +28,7 @@ public sealed partial class MainWindow
     private int _cameraStartingRate;
     private long _cameraStartingVersion;
     private readonly AsyncResultGate _pieceDetectionResults = new();
-    private CameraFrame? _cameraHealthSample;
+    private readonly CameraFrameSlot _cameraHealthFrames = new();
     private DateTimeOffset _cameraStartedAtUtc;
     private DateTimeOffset _cameraImageChangedAtUtc;
     private string? _cameraLiveStatus;
@@ -39,9 +39,46 @@ public sealed partial class MainWindow
     private volatile bool _cameraManualRestartRequired;
     private volatile bool _boardScanSuspendedForCameraOutage;
 
+    private CameraFrameLease? AcquireLatestCameraFrame() => _latestCameraFrames.Acquire();
+
+    private static Task RunCameraFrameWork(CameraFrame frame, Action work)
+    {
+        var lease = frame.Retain();
+        try
+        {
+            return Task.Run(() =>
+            {
+                try { work(); }
+                finally { lease.Dispose(); }
+            });
+        }
+        catch { lease.Dispose(); throw; }
+    }
+
+    private bool TryPostCameraFrame(CameraFrame frame, Action publication)
+    {
+        var lease = frame.Retain();
+        bool accepted = false;
+        try
+        {
+            return accepted = DispatcherQueue.TryEnqueue(() =>
+            {
+                try { publication(); }
+                finally { lease.Dispose(); }
+            });
+        }
+        finally { if (!accepted) lease.Dispose(); }
+    }
+
+    private void ClearLatestCameraFrame()
+    {
+        Volatile.Write(ref _latestCameraFrame, null);
+        _latestCameraFrames.Clear();
+    }
+
     private void ResetCameraHealth(bool preserveBoardScanSuspension = false)
     {
-        _cameraHealthSample = null;
+        _cameraHealthFrames.Clear();
         _cameraStartedAtUtc = DateTimeOffset.MinValue;
         _cameraImageChangedAtUtc = DateTimeOffset.MinValue;
         _cameraLiveStatus = null;
@@ -78,7 +115,8 @@ public sealed partial class MainWindow
             return;
         }
 
-        var frame = Volatile.Read(ref _latestCameraFrame);
+        using var frameLease = AcquireLatestCameraFrame();
+        var frame = frameLease?.Frame;
         var lastFrameAt = frame?.Timestamp ?? _cameraStartedAtUtc;
         if (now - lastFrameAt >= NoCameraFrameWarning)
         {
@@ -99,14 +137,15 @@ public sealed partial class MainWindow
         }
 
         if (frame is null) return;
-        var previousSample = _cameraHealthSample;
+        using var previousLease = _cameraHealthFrames.Acquire();
+        var previousSample = previousLease?.Frame;
         var changed = previousSample is null ||
             previousSample.Width != frame.Width || previousSample.Height != frame.Height ||
             previousSample.Stride != frame.Stride ||
             !previousSample.Bgra.AsSpan().SequenceEqual(frame.Bgra);
         if (changed)
             _cameraImageChangedAtUtc = now;
-        _cameraHealthSample = frame;
+        _cameraHealthFrames.Set(frame);
 
         if (now - _cameraImageChangedAtUtc >= UnchangedCameraImageWarning)
         {
@@ -220,7 +259,7 @@ public sealed partial class MainWindow
             InvalidateCalibration("Camera restarted. Recalibrate both physical planes.");
             ClearBoardPreview();
             _frozenFrame = null;
-            Volatile.Write(ref _latestCameraFrame, null);
+            ClearLatestCameraFrame();
             CameraCanvas.Invalidate();
             await _camera.StartAsync(choice.Device.Id, requestedRate);
             if (version != _cameraOperationVersion || !_cameraWanted || _closing)
@@ -280,7 +319,7 @@ public sealed partial class MainWindow
             ResetCameraHealth();
             ClearBoardPreview();
             _frozenFrame = null;
-            Volatile.Write(ref _latestCameraFrame, null);
+            ClearLatestCameraFrame();
             CameraCanvas.Invalidate();
             CameraStatusText.Text = "Camera stopped.";
             UpdateCameraFrameRateStatus();
@@ -297,7 +336,7 @@ public sealed partial class MainWindow
         ClearHandTracking();
         ResetEyeTipTracking("camera-stopped");
         _scene.ClearBoardMediaClip();
-        Volatile.Write(ref _latestCameraFrame, null);
+        ClearLatestCameraFrame();
         DispatcherQueue.TryEnqueue(() =>
         {
             if (_closing || !_cameraWanted || _camera.IsRunning ||
@@ -306,6 +345,8 @@ public sealed partial class MainWindow
             ClearBoardPreview();
             _frozenFrame = null;
             _bitmapFrame = null;
+            _bitmapFrameLease?.Dispose();
+            _bitmapFrameLease = null;
             _cameraBitmap?.Dispose();
             _cameraBitmap = null;
             _cameraBitmapDevice = null;
@@ -319,6 +360,7 @@ public sealed partial class MainWindow
         var pieceGeneration = _pieceDetectionResults.Capture();
         if (_closing || !_cameraWanted || _cameraOperation.CurrentCount == 0 ||
             _camera.ActiveDeviceId != _cameraWantedDeviceId) return;
+        _latestCameraFrames.Set(frame);
         Volatile.Write(ref _latestCameraFrame, frame);
         var now = Stopwatch.GetTimestamp();
         RequestCameraPreviewRedraw();
@@ -395,7 +437,7 @@ public sealed partial class MainWindow
             ReferenceEquals(vision, Volatile.Read(ref _vision));
         if (!_pieceDetectionResults.TryApply(generation, () =>
             Current() && Interlocked.CompareExchange(ref _detecting, 1, 0) == 0)) return;
-        _ = Task.Run(() =>
+        _ = RunCameraFrameWork(frame, () =>
         {
             try
             {
@@ -489,7 +531,9 @@ public sealed partial class MainWindow
     {
         // Learning must inspect the pupil the user actually saw, even when a
         // newer camera frame arrived after the last preview draw.
-        var frame = IsLearningEyeTip || IsLearningFootballTip ? _bitmapFrame : _frozenFrame ?? Volatile.Read(ref _latestCameraFrame);
+        using var frameLease = IsLearningEyeTip || IsLearningFootballTip
+            ? _bitmapFrame?.TryRetain() : _frozenFrame?.Retain() ?? AcquireLatestCameraFrame();
+        var frame = frameLease?.Frame;
         if (frame is null) return;
         var point = e.GetCurrentPoint(CameraCanvas).Position;
         var rect = CameraImageRect(frame, (float)CameraCanvas.ActualWidth, (float)CameraCanvas.ActualHeight);
@@ -542,13 +586,17 @@ public sealed partial class MainWindow
     {
         var ds = args.DrawingSession;
         ds.Clear(Colors.Black);
-        var frame = _frozenFrame ?? Volatile.Read(ref _latestCameraFrame);
+        using var frameLease = _frozenFrame?.Retain() ?? AcquireLatestCameraFrame();
+        var frame = frameLease?.Frame;
         if (frame is null) return;
         if (!ReferenceEquals(frame, _bitmapFrame) || !Equals(_cameraBitmapDevice, sender.Device))
         {
             _cameraBitmap?.Dispose();
             _cameraBitmap = CanvasBitmap.CreateFromBytes(sender, frame.Bgra, frame.Width, frame.Height,
                 DirectXPixelFormat.B8G8R8A8UIntNormalized, 96, CanvasAlphaMode.Ignore);
+            var bitmapLease = frame.Retain();
+            _bitmapFrameLease?.Dispose();
+            _bitmapFrameLease = bitmapLease;
             _bitmapFrame = frame;
             _cameraBitmapDevice = sender.Device;
         }

@@ -13,9 +13,10 @@ internal static class StrykersRunBoardRegression
         CheckRailPresentation();
         CheckCaptionHolds();
         CheckInputResetAndExit();
-        CheckReturningControls();
+        CheckReturningControls(victory: false);
+        CheckReturningControls(victory: true);
         Console.WriteLine("Stryker's Run board passed: first-page launch and second-page Blackjack, lone-hero ready state, " +
-            "EXIT/PLAY caption holds, stationary control fades, delayed rail entry, rail reset barriers and fresh holds after the falling wall.");
+            "EXIT/PLAY caption holds, stationary control fades, delayed rail entry, rail reset barriers and fresh holds after defeat or campaign victory.");
     }
 
     private static void CheckRailPresentation()
@@ -145,31 +146,44 @@ internal static class StrykersRunBoardRegression
             board.StrykersRunState.RunSeconds == stopped, "Navigation retained active off-screen rail input.");
     }
 
-    private static void CheckReturningControls()
+    private static void CheckReturningControls(bool victory)
     {
         var board = Running();
         var game = (StrykersRunGame)typeof(BoardSession).GetField("_strykersRun", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(board)!;
-        var enemyType = typeof(StrykersRunGame).GetNestedType("Enemy", BindingFlags.NonPublic)!;
-        var enemies = (IList)typeof(StrykersRunGame).GetField("_enemies", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(game)!;
-        enemies.Add(Activator.CreateInstance(enemyType, 100, .5f, StrykersRunGame.SquadY - .0001f, StrykersRunEnemyKind.Boss, 100)!);
+        if (victory)
+        {
+            // The gameplay suite verifies earning victory. This fixture isolates
+            // the terminal presentation and shared caption rearming policy.
+            typeof(StrykersRunGame).GetField("_phase", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(game, StrykersRunPhase.Victory);
+            typeof(StrykersRunGame).GetField("_phaseSeconds", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(game, 0f);
+            typeof(StrykersRunGame).GetMethod("Change", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(game, null);
+        }
+        else
+        {
+            var enemyType = typeof(StrykersRunGame).GetNestedType("Enemy", BindingFlags.NonPublic)!;
+            var enemies = (IList)typeof(StrykersRunGame).GetField("_enemies", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(game)!;
+            enemies.Add(Activator.CreateInstance(enemyType, 100, .5f, StrykersRunGame.SquadY - .0001f, StrykersRunEnemyKind.Boss, 100)!);
+        }
         board.SetStrykersRunInput(.5f, At(510));
         board.TickStrykersRun(At(510));
-        Require(board.StrykersRunState.Phase == StrykersRunPhase.GameOver && !board.StrykersRunControlsVisible,
-            "The hero's death must begin the wall animation with controls hidden.");
+        Require(board.StrykersRunState.Phase == (victory ? StrykersRunPhase.Victory : StrykersRunPhase.GameOver) &&
+            board.StrykersRunState.HeroAlive == victory && !board.StrykersRunControlsVisible,
+            "Defeat or victory must begin its presentation with controls hidden.");
         for (int ms = 520; ms <= 3710; ms += 10)
         {
             board.TickStrykersRun(At(ms));
             if (ms % 100 == 0) Require(Hold(board, "strykers-run-play", ms).Count == 0,
-                "A caption carried through game over automatically restarted the level.");
-            if (ms == 3110) Require(!board.StrykersRunControlsVisible, "Controls appeared before the falling wall settled.");
+                "A caption carried through the ending automatically restarted the campaign.");
+            if (ms == 3110) Require(!board.StrykersRunControlsVisible, "Controls appeared before the ending presentation settled.");
             if (ms == 1010) Require(!board.StrykersRunRailVisible && !board.StrykersRunRailAnimating,
-                "The input rail remained visible after its game-over withdrawal.");
+                "The input rail remained visible after its ending withdrawal.");
             if (ms == 3310) Require(board.StrykersRunControlsAnimating && board.Buttons.All(button => !button.Enabled),
                 "The returning control row must fade in while disabled.");
         }
         Require(board.StrykersRunControlsProgress == 1 && !board.StrykersRunControlsAnimating &&
             board.Buttons.Count == 2 && board.Buttons.All(button => button.Enabled),
-            "The settled wall did not return exactly EXIT and PLAY.");
+            "The settled ending did not return exactly EXIT and PLAY.");
         for (int ms = 3800; ms <= 4900; ms += 100)
             Require(Hold(board, "strykers-run-play", ms).Count == 0,
                 "A returning caption must first be observed intact before it can arm.");
@@ -177,7 +191,7 @@ internal static class StrykersRunBoardRegression
         for (int ms = 5000; ms < 6000; ms += 100)
             Require(Hold(board, "strykers-run-play", ms).Count == 0, "The returned PLAY acted before its fresh full hold.");
         Require(Hold(board, "strykers-run-play", 6000).SequenceEqual(["strykers-run-play"]) &&
-            board.StrykersRunState is { Phase: StrykersRunPhase.Starting, HeroAlive: true, TroopCount: 0 },
+            board.StrykersRunState is { Phase: StrykersRunPhase.Starting, HeroAlive: true, TroopCount: 0, Level: 1, LevelSeconds: 0 },
             "A fresh returned PLAY did not restart with the lone protagonist.");
     }
 

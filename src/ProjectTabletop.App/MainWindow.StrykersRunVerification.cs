@@ -185,6 +185,9 @@ public sealed partial class MainWindow
         RenderRaw(busy);
         await Save(portrait, "squad-sixty-four-monsters-and-gates");
         object allyRendering = await CheckAllies();
+        var campaignRendering = await StrykersRunCampaignVerification.RunAsync(device, directory);
+        images.AddRange(campaignRendering.Images);
+        renderedFrames += campaignRendering.RenderedFrames;
         var wallFrames = new List<object>();
         object? settledWallComparison = null, sameTimeWallComparison = null;
         var wallFace = new Rect(180, 960, 540, 330);
@@ -216,9 +219,12 @@ public sealed partial class MainWindow
                     sameTimeWallFaceChangedPixels + wallFaceQuantizationFloor);
             wallFrames.Add(new { seconds, changedPixels = changed });
         }
-        CheckReturningControls();
+        CheckReturningControls(victory: false);
         DrawPreview(scene, portrait);
         await Save(portrait, "game-over-returned-controls");
+        CheckReturningControls(victory: true);
+        DrawPreview(scene, portrait);
+        await Save(portrait, "victory-returned-controls");
         using (var wide = MakeScene(16d / 9, out _))
         using (var landscape = new CanvasRenderTarget(device, 1600, 900, 96))
         {
@@ -232,7 +238,7 @@ public sealed partial class MainWindow
         object timing = MeasureRendering();
         Check(_scene.CurrentBoardScreen == liveScreen && Session(_scene).NavigationRevision == liveNavigation &&
             !_camera.IsRunning && !_cameraWanted, "The isolated verifier changed the live board or camera state.");
-        return new { passed = true, directory, images, renderedFrames, captionEvidence, controlExposure, allyRendering, wallFrames, settledWallComparison, sameTimeWallComparison, timing,
+        return new { passed = true, directory, images, renderedFrames, captionEvidence, controlExposure, allyRendering, campaignRendering, wallFrames, settledWallComparison, sameTimeWallComparison, timing,
             loneHero = true, perspective = true, railPixelsProtected = true, normalizedRailEdges = true,
             geometryEpochs = true, cameraTimeBarriers = true, inputFreeze = true, returningCaptionBarrier = true,
             playerEdgeOrientation = true, savedFacingRestoredOnExit = true,
@@ -517,21 +523,22 @@ public sealed partial class MainWindow
             }
         }
 
-        void CheckReturningControls()
+        void CheckReturningControls(bool victory)
         {
             var game = (StrykersRunGame)typeof(BoardSession).GetField("_strykersRun", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .GetValue(Session(scene))!;
-            Put(game, "_phase", StrykersRunPhase.GameOver); Put(game, "_soldiers", 0);
+            Put(game, "_phase", victory ? StrykersRunPhase.Victory : StrykersRunPhase.GameOver);
+            Put(game, "_soldiers", victory ? 7 : 0);
             Put(game, "_phaseSeconds", 0f); Put(game, "_lastAdvance", now); Put(game, "_snapshot", null);
             Draw(scene, camera);
-            Check(!scene.HandDetectionRequired, "The falling wall enabled unnecessary caption processing.");
+            Check(!scene.HandDetectionRequired, "The terminal presentation enabled unnecessary caption processing.");
             var endedAt = now;
             for (int frame = 1; frame <= 320; frame++)
             {
                 now = endedAt.AddMilliseconds(frame * 10);
                 Session(scene).TickStrykersRun(now);
                 if (frame == 260) Check(Session(scene).Buttons.Count == 0 && !scene.HandDetectionRequired,
-                    "Controls or caption processing returned before wall settlement.");
+                    "Controls or caption processing returned before the ending settled.");
                 if (frame == 280) Check(Session(scene).StrykersRunControlsAnimating &&
                     Session(scene).Buttons.All(button => !button.Enabled) && scene.GetHoldButtonContext(now) is null &&
                     !scene.HandDetectionRequired,
@@ -551,7 +558,7 @@ public sealed partial class MainWindow
             now += TimeSpan.FromMilliseconds(10);
             scene.ObserveHoldButtons(returned, [], now, ["strykers-run-play"]);
             Check(scene.ObserveHoldButtons(hold, ["strykers-run-play"], now, []).Count == 0,
-                "A pre-run hold reference remained valid after game over.");
+                "A pre-run hold reference remained valid after the ending.");
             now += TimeSpan.FromMilliseconds(100);
             Check(scene.ObserveHoldButtons(returned, ["strykers-run-play"], now, []).Count == 0,
                 "A freshly cleared returned PLAY activated immediately.");
@@ -722,7 +729,9 @@ public sealed partial class MainWindow
         static bool SameRun(StrykersRunSnapshot a, StrykersRunSnapshot b) => a.SquadX == b.SquadX && a.RunSeconds == b.RunSeconds &&
             a.Distance == b.Distance && a.Score == b.Score && a.SoldierCount == b.SoldierCount && a.Enemies.SequenceEqual(b.Enemies) &&
             a.Gates.SequenceEqual(b.Gates) && a.Bullets.SequenceEqual(b.Bullets) && a.Effects.SequenceEqual(b.Effects) &&
-            a.Ally == b.Ally && a.Objectives.SequenceEqual(b.Objectives);
+            a.Ally == b.Ally && a.Objectives.SequenceEqual(b.Objectives) && a.Level == b.Level &&
+            a.LevelSeconds == b.LevelSeconds && a.Stage == b.Stage && a.StageSeconds == b.StageSeconds &&
+            a.Boss == b.Boss && a.Hazards.SequenceEqual(b.Hazards);
         static void CheckPerspective()
         {
             Check(StrykersRunRenderer.DepthScale(.10f) < StrykersRunRenderer.DepthScale(.6f) &&

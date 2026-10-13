@@ -130,6 +130,7 @@ public sealed partial class MainWindow
             _footballLastDetection = null;
             _footballLearningPlayer = -1;
             _footballFrameWidth = _footballFrameHeight = 0;
+            ClearFootballDiagnosticFrames();
             string reason = _scene.FootballState.Phase == FootballPhase.Finished
                 ? "Match finished. Tracking resumes with the next match."
                 : "Waiting for a fresh view of the tip.";
@@ -235,7 +236,8 @@ public sealed partial class MainWindow
     private async Task<object> LearnFootballBarForControlAsync(int player, double x, double y)
     {
         if (player is < 1 or > 2) throw new ArgumentOutOfRangeException(nameof(player), "Use player 1 or 2.");
-        var frame = Volatile.Read(ref _latestCameraFrame);
+        using var frameLease = AcquireLatestCameraFrame();
+        var frame = frameLease?.Frame;
         if (_closing || frame is null || !_cameraWanted || !_camera.IsRunning || _cameraHealthWarning ||
             _camera.ActiveDeviceId != _selectedCameraId || !EyeTipFrameFresh(frame, MonotonicClock.UtcNow))
             throw new InvalidOperationException("Start the selected webcam and wait for a fresh frame.");
@@ -259,6 +261,7 @@ public sealed partial class MainWindow
         bool learnedSuccessfully = false;
         try
         {
+            using var frameLease = frame.Retain();
             string? cameraId = _camera.ActiveDeviceId;
             long generation;
             lock (_footballInputGate) generation = _footballInputGeneration;
@@ -368,7 +371,7 @@ public sealed partial class MainWindow
             long generation = _footballInputGeneration;
             var searchHints = selected.Select(player => _footballTipTrackers[player].GetSearchHint(frame.Timestamp)).ToArray();
             var turf = _scene.GetFootballCameraTurfPolygon();
-            _footballInputWorker.TryRun(Stopwatch.GetTimestamp(), TimeSpan.Zero, _ =>
+            _footballInputWorker.TryRun(Stopwatch.GetTimestamp(), TimeSpan.Zero, frame, _ =>
             {
                 long started = Stopwatch.GetTimestamp();
                 try

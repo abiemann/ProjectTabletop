@@ -389,6 +389,9 @@ public sealed partial class SceneCompositor
                 }
             }
             _renderedBoardState = state;
+#if DEBUG
+            if (strykersRun) CaptureStrykersRunTextureTiming();
+#endif
         }
 
         if (paint && !preview) CapturePaintExpectedFrame(ds.Device, paintNow);

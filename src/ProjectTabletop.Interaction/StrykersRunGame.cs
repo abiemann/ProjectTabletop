@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace ProjectTabletop.Interaction;
 
-public enum StrykersRunPhase { Ready, Starting, WaitingForInput, Playing, GameOver }
+public enum StrykersRunPhase { Ready, Starting, WaitingForInput, Playing, GameOver, Victory }
 public enum StrykersRunEnemyKind { Runner, Brute, Boss }
 public enum StrykersRunGateKind { Add, Subtract, Multiply }
 public enum StrykersRunObjectiveKind { Rescue, Reinforcements }
@@ -27,6 +27,12 @@ public sealed record StrykersRunSnapshot(StrykersRunPhase Phase, float SquadX, i
     public float PhaseSeconds { get; init; }
     public IReadOnlyList<StrykersRunObjectiveSnapshot> Objectives { get; init; } = [];
     public StrykersRunAllySnapshot? Ally { get; init; }
+    public int Level { get; init; } = 1;
+    public float LevelSeconds { get; init; }
+    public StrykersRunStage Stage { get; init; }
+    public float StageSeconds { get; init; }
+    public StrykersRunBossSnapshot? Boss { get; init; }
+    public IReadOnlyList<StrykersRunHazardSnapshot> Hazards { get; init; } = [];
     public bool HeroAlive => SoldierCount > 0;
     public int TroopCount => Math.Max(0, SoldierCount - 1);
 }
@@ -36,7 +42,7 @@ public sealed record StrykersRunSnapshot(StrykersRunPhase Phase, float SquadX, i
 /// position; a fixed simulation clock owns movement, firing, contacts and presentation.
 /// Call from one thread. Missing input pauses the complete run without saving time debt.
 /// </summary>
-public sealed class StrykersRunGame
+public sealed partial class StrykersRunGame
 {
     public const float RoadLeft = .08f, RoadRight = .92f, SquadY = .78f;
     public const int InitialSoldiers = 1, MaximumSoldiers = 64;
@@ -45,6 +51,7 @@ public sealed class StrykersRunGame
     public const float ObjectiveHalfWidth = 110f / 900;
     public const float ObjectiveShootableY = .20f;
     public const float ControlTransitionSeconds = .45f;
+    private const float RoadSpeed = 8;
     public const float GameOverWallSeconds = 2.7f;
     public const float GameOverPresentationSeconds = GameOverWallSeconds + ControlTransitionSeconds;
     public static readonly TimeSpan InputFreshness = TimeSpan.FromMilliseconds(250);
@@ -60,7 +67,7 @@ public sealed class StrykersRunGame
     private StrykersRunPhase _phase;
     private float _squadX = .5f, _targetX = .5f;
     private int _soldiers = InitialSoldiers, _score, _wave = 1;
-    private float _distance, _runSeconds, _phaseSeconds;
+    private float _distance, _roadPresentationDistance, _runSeconds, _phaseSeconds;
     private bool _hasInput, _hasPlayed;
     private DateTimeOffset? _inputAt, _lastAdvance;
     private DateTimeOffset _inputResetThrough = DateTimeOffset.MinValue;
@@ -68,7 +75,7 @@ public sealed class StrykersRunGame
     private float _fireRemaining, _enemyRemaining = .45f, _gateRemaining = 4;
     private float _objectiveRemaining = 2, _rushRemaining = 12;
     private int _objectiveCount, _rushCount;
-    private int _nextId = 1, _nextGateRow, _bossWave;
+    private int _nextId = 1, _nextGateRow;
     private uint _random = 0x53545259;
     private StrykersRunSnapshot? _snapshot;
 
@@ -76,6 +83,7 @@ public sealed class StrykersRunGame
     public StrykersRunSnapshot Snapshot => _snapshot ??= CreateSnapshot();
     // Control and rail transitions need only these values; reading them never builds a snapshot.
     public StrykersRunPhase Phase => _phase;
+    public float RoadPresentationDistance => _roadPresentationDistance;
     public float PhaseSeconds => _phaseSeconds;
     public float GameOverSeconds => _phase == StrykersRunPhase.GameOver ? _phaseSeconds : 0;
 
@@ -90,7 +98,7 @@ public sealed class StrykersRunGame
         _soldiers = InitialSoldiers;
         _score = 0;
         _wave = 1;
-        _distance = _runSeconds = _phaseSeconds = 0;
+        _distance = _roadPresentationDistance = _runSeconds = _phaseSeconds = 0;
         _hasInput = _hasPlayed = false;
         _inputAt = null;
         _inputResetThrough = now;
@@ -104,7 +112,8 @@ public sealed class StrykersRunGame
         _objectiveCount = _rushCount = 0;
         _ally = null;
         _nextId = 1;
-        _nextGateRow = _bossWave = 0;
+        _nextGateRow = 0;
+        ResetCampaign();
         _random = 0x53545259;
         _enemies.Clear();
         _gates.Clear();
@@ -116,7 +125,7 @@ public sealed class StrykersRunGame
 
     public void SetInput(float? normalizedX, DateTimeOffset frameTime)
     {
-        if (_phase is StrykersRunPhase.Ready or StrykersRunPhase.GameOver ||
+        if (_phase is StrykersRunPhase.Ready or StrykersRunPhase.GameOver or StrykersRunPhase.Victory ||
             frameTime <= _inputResetThrough || _inputAt is { } previous && frameTime <= previous) return;
         _inputAt = frameTime;
         _hasInput = normalizedX is { } x && float.IsFinite(x) && x is >= 0 and <= 1;
@@ -169,7 +178,7 @@ public sealed class StrykersRunGame
             Change();
             return;
         }
-        if (_phase == StrykersRunPhase.GameOver && _phaseSeconds >= GameOverPresentationSeconds) return;
+        if (_phase is StrykersRunPhase.GameOver or StrykersRunPhase.Victory && _phaseSeconds >= GameOverPresentationSeconds) return;
         _accumulator += elapsed;
         bool changed = false;
         while (_accumulator + 1e-9 >= StepDuration)
@@ -185,19 +194,25 @@ public sealed class StrykersRunGame
                     _hasPlayed |= fresh;
                 }
             }
-            else if (_phase == StrykersRunPhase.GameOver)
+            else if (_phase is StrykersRunPhase.GameOver or StrykersRunPhase.Victory)
                 _phaseSeconds = Math.Min(GameOverPresentationSeconds, _phaseSeconds + StepSeconds);
             else if (_phase == StrykersRunPhase.Playing) Step();
             changed = true;
         }
+        // Keep the road continuous between fixed physics steps. Preserve its last drawn
+        // progress through input pauses and discarded hitches instead of moving backward
+        // when the accumulator resets. Bosses and level transitions remain stationary.
+        float roadDistance = _distance;
+        if (_phase == StrykersRunPhase.Playing && _stage == StrykersRunStage.Running)
+            roadDistance = Math.Min(_level * LevelDurationSeconds * RoadSpeed,
+                _distance + (float)_accumulator * RoadSpeed);
+        _roadPresentationDistance = Math.Max(_roadPresentationDistance, roadDistance);
         if (changed) Change();
     }
 
     private void Step()
     {
         _runSeconds += StepSeconds;
-        _distance += StepSeconds * 8;
-        _wave = 1 + (int)(_runSeconds / 18);
         _squadX += Math.Clamp(_targetX - _squadX, -2.2f * StepSeconds, 2.2f * StepSeconds);
         for (int i = _effects.Count - 1; i >= 0; i--)
         {
@@ -213,35 +228,8 @@ public sealed class StrykersRunGame
             if (_effects[i].Age > lifetime)
                 _effects.RemoveAt(i);
         }
-        _enemyRemaining -= StepSeconds;
-        if (_enemyRemaining <= 0)
-        {
-            SpawnEnemy();
-            _enemyRemaining += Math.Max(.20f, 1.05f - _wave * .055f);
-        }
-        if (_wave % 4 == 0 && _bossWave != _wave && _enemies.Count < MaximumEnemies)
-        {
-            _bossWave = _wave;
-            AddEnemy(StrykersRunEnemyKind.Boss, .5f);
-        }
-        _rushRemaining -= StepSeconds;
-        if (_rushRemaining <= 0)
-        {
-            SpawnRush();
-            _rushRemaining += Math.Max(10, 15 - _wave * .35f);
-        }
-        _objectiveRemaining -= StepSeconds;
-        if (_objectiveRemaining <= 0)
-        {
-            SpawnObjective();
-            _objectiveRemaining += 9;
-        }
-        _gateRemaining -= StepSeconds;
-        if (_gateRemaining <= 0)
-        {
-            SpawnGates();
-            _gateRemaining += 7;
-        }
+        if (!StepCampaign()) return;
+        if (_stage == StrykersRunStage.Running) ScheduleRoadEncounters();
         foreach (var enemy in _enemies)
         {
             enemy.Previous = new(enemy.X, enemy.Y);
@@ -266,6 +254,7 @@ public sealed class StrykersRunGame
             _fireRemaining += .18f;
         }
         MoveBullets();
+        if (_stage is StrykersRunStage.Intermission or StrykersRunStage.Complete) return;
         _objectives.RemoveAll(objective => objective.Y > SquadY + .06f);
         StepAlly();
         MoveGates();
@@ -288,6 +277,34 @@ public sealed class StrykersRunGame
                 squad = StrykersRunFormation.HorizontalBounds(_squadX, _soldiers);
             }
             else if (enemy.Y > 1.06f) _enemies.RemoveAt(i);
+        }
+    }
+
+    private void ScheduleRoadEncounters()
+    {
+        _enemyRemaining -= StepSeconds;
+        if (_enemyRemaining <= 0)
+        {
+            SpawnEnemy();
+            _enemyRemaining += Math.Max(.20f, 1.05f - _wave * .055f);
+        }
+        _rushRemaining -= StepSeconds;
+        if (_rushRemaining <= 0)
+        {
+            SpawnRush();
+            _rushRemaining += Math.Max(10, 15 - _wave * .35f);
+        }
+        _objectiveRemaining -= StepSeconds;
+        if (_objectiveRemaining <= 0)
+        {
+            SpawnObjective();
+            _objectiveRemaining += 9;
+        }
+        _gateRemaining -= StepSeconds;
+        if (_gateRemaining <= 0)
+        {
+            SpawnGates();
+            _gateRemaining += 7;
         }
     }
 
@@ -315,6 +332,7 @@ public sealed class StrykersRunGame
             var end = start - new Vector2(0, BulletSpeed * StepSeconds);
             Enemy? hit = null;
             Objective? objectiveHit = null;
+            int bossPart = -1;
             float nearest = float.PositiveInfinity;
             foreach (var enemy in _enemies)
             {
@@ -334,7 +352,16 @@ public sealed class StrykersRunGame
                 if (Sweep(relative, motion, ObjectiveHalfWidth + .004f, out float contact) && contact < nearest)
                 { nearest = contact; objectiveHit = objective; hit = null; }
             }
-            if (hit is not null)
+            if (FindBossContact(start, end - start, ref nearest, out bossPart))
+            { hit = null; objectiveHit = null; }
+            if (bossPart >= 0)
+            {
+                _bullets.RemoveAt(i);
+                DamageBoss(bossPart);
+                // A defeated boss clears every remaining projectile atomically.
+                if (_stage != StrykersRunStage.Boss) return;
+            }
+            else if (hit is not null)
             {
                 DamageEnemy(hit, 1);
                 _bullets.RemoveAt(i);
@@ -548,7 +575,8 @@ public sealed class StrykersRunGame
             StrykersRunPhase.Starting => "Move along the control rail",
             StrykersRunPhase.WaitingForInput => _hasPlayed ? "Paused · return to the control rail" : "Touch the control rail to run",
             StrykersRunPhase.GameOver => "GAME OVER",
-            _ => "Stryker's Run"
+            StrykersRunPhase.Victory => "CAMPAIGN COMPLETE",
+            _ => CampaignBanner()
         }, Revision,
         Array.AsReadOnly(_enemies.Where(enemy => enemy.Health > 0).Select(enemy => new StrykersRunEnemySnapshot(
             enemy.Id, enemy.X, enemy.Y, enemy.Kind, enemy.Health, enemy.MaxHealth,
@@ -558,6 +586,15 @@ public sealed class StrykersRunGame
         Array.AsReadOnly(_effects.Select(effect => new StrykersRunEffectSnapshot(effect.Kind, effect.X, effect.Y, effect.Age, effect.Seed)).ToArray()))
         {
             PhaseSeconds = _phaseSeconds,
+            Level = _level,
+            LevelSeconds = _levelTicks / 120f,
+            Stage = _stage,
+            StageSeconds = _stageTicks / 120f,
+            Boss = CreateBossSnapshot(),
+            Hazards = Array.AsReadOnly(_hazards.Select(hazard => new StrykersRunHazardSnapshot(
+                hazard.Id, hazard.Kind, hazard.X, hazard.Y, hazard.TargetX, hazard.TargetY,
+                hazard.Ticks / 120f, hazard.WarningTicks / 120f,
+                hazard.DurationTicks / 120f, hazard.Radius)).ToArray()),
             Objectives = Array.AsReadOnly(_objectives.Select(objective => new StrykersRunObjectiveSnapshot(
                 objective.Id, objective.X, objective.Y, objective.Kind, objective.Health, objective.MaxHealth)).ToArray()),
             Ally = _ally is { } ally ? new StrykersRunAllySnapshot(

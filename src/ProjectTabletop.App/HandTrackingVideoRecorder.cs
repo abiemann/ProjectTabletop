@@ -27,7 +27,7 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
     };
     private readonly string _directory;
     private readonly object _gate = new();
-    private readonly Queue<CameraFrame> _prebuffer = new();
+    private readonly Queue<CameraFrameLease> _prebuffer = new();
     private readonly Queue<Work> _work = new();
     private readonly SemaphoreSlim _wake = new(0);
     private readonly Task _worker;
@@ -80,10 +80,11 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
                 }
             }
             if (_finishing is not null) return;
-            if (_prebuffer.Count > 0 && frame.Timestamp <= _prebuffer.Last().Timestamp) return;
-            _prebuffer.Enqueue(frame);
-            while (_prebuffer.Count > FrameCapacity || frame.Timestamp - _prebuffer.Peek().Timestamp > PrebufferTime)
-                _prebuffer.Dequeue();
+            if (_prebuffer.Count > 0 && frame.Timestamp <= _prebuffer.Last().Frame.Timestamp) return;
+            if (frame.TryRetain() is not { } retained) return;
+            _prebuffer.Enqueue(retained);
+            while (_prebuffer.Count > FrameCapacity || frame.Timestamp - _prebuffer.Peek().Frame.Timestamp > PrebufferTime)
+                _prebuffer.Dequeue().Dispose();
         }
     }
 
@@ -91,6 +92,8 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
     public void HandDetected(CameraFrame frame)
     {
         if (frame is null) return;
+        using var trigger = frame.TryRetain();
+        if (trigger is null) return;
         lock (_gate)
         {
             if (_disposed || _faulted || !Valid(frame)) return;
@@ -100,7 +103,7 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
                 return;
             }
             if (_finishing is not null) return;
-            var frames = _prebuffer.Where(item => item.Width == frame.Width && item.Height == frame.Height &&
+            var frames = _prebuffer.Select(lease => lease.Frame).Where(item => item.Width == frame.Width && item.Height == frame.Height &&
                 item.Timestamp >= frame.Timestamp - PrebufferTime).Append(frame)
                 .DistinctBy(item => item.Timestamp).OrderBy(item => item.Timestamp).ToList();
             while (frames.Count > FrameCapacity)
@@ -110,12 +113,13 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
                 int remove = frames.FindIndex(item => item.Timestamp != frame.Timestamp);
                 frames.RemoveAt(remove);
             }
-            _prebuffer.Clear();
             var session = new Session(frame, frames[0].Timestamp);
             _active = _last = session;
             _error = null;
             Enqueue(new Start(session));
             foreach (CameraFrame buffered in frames) QueueFrame(session, buffered);
+            // Selected queue entries must retain their own references before idle ownership is released.
+            ClearPrebuffer();
         }
     }
 
@@ -145,7 +149,7 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
     {
         lock (_gate)
         {
-            _prebuffer.Clear();
+            ClearPrebuffer();
             StopLocked(reason ?? "stopped");
             // A deliberate camera/tester state transition permits a later retry.
             // A failing recorder otherwise remains latched against rapid starts.
@@ -160,7 +164,7 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
             if (!_disposed)
             {
                 StopLocked("disposed");
-                _prebuffer.Clear();
+                ClearPrebuffer();
                 _disposed = true;
                 _wake.Release();
             }
@@ -173,7 +177,7 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
         if (_active is not { } session) return;
         _active = null;
         _finishing = session;
-        _prebuffer.Clear();
+        ClearPrebuffer();
         Enqueue(new End(session, reason, requestedAt ?? MonotonicClock.UtcNow));
     }
 
@@ -186,8 +190,18 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
             DropFrame(session, frame.Timestamp, "Recording frame queue is full.");
             return;
         }
+        if (frame.TryRetain() is not { } retained)
+        {
+            DropFrame(session, frame.Timestamp, "Camera frame expired before recording.");
+            return;
+        }
         _queuedFrames++;
-        Enqueue(new Frame(session, frame));
+        Enqueue(new Frame(session, retained));
+    }
+
+    private void ClearPrebuffer()
+    {
+        while (_prebuffer.TryDequeue(out var lease)) lease.Dispose();
     }
 
     private void DropFrame(Session session, DateTimeOffset frameTime, string? error = null)
@@ -286,6 +300,7 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
                         {
                             _queuedFrames--;
                             DropFrame(work.Session, discarded.Source.Timestamp);
+                            discarded.Lease.Dispose();
                         }
                         else if (queued is Metadata)
                         {
@@ -294,7 +309,7 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
                         }
                         else _work.Enqueue(queued);
                     }
-                    _prebuffer.Clear();
+                    ClearPrebuffer();
                 }
                 if (encoder is not null)
                 {
@@ -305,6 +320,7 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
             }
             finally
             {
+                if (work is Frame frame) frame.Lease.Dispose();
                 // A failed final flush must not permanently block future starts
                 // after an explicit state transition has permitted a retry.
                 if (work is End end)
@@ -551,7 +567,10 @@ internal sealed class HandTrackingVideoRecorder : IAsyncDisposable
 
     private abstract record Work(Session Session);
     private sealed record Start(Session Session) : Work(Session);
-    private sealed record Frame(Session Session, CameraFrame Source) : Work(Session);
+    private sealed record Frame(Session Session, CameraFrameLease Lease) : Work(Session)
+    {
+        public CameraFrame Source => Lease.Frame;
+    }
     private sealed record Metadata(Session Session, object Entry) : Work(Session);
     private sealed record End(Session Session, string Reason, DateTimeOffset RequestedAtUtc) : Work(Session);
 }

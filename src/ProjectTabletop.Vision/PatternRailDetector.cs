@@ -94,7 +94,7 @@ public sealed class PatternRailDetector
             if (!HasWitnesses())
             {
                 // Recover one common optical profile on the frozen map. During contact,
-                // every mark outside one damaged span must still match; obscured cells
+                // every mark beyond one damaged span and its boundary must still match; obscured cells
                 // never train the geometry or move independently to neighbouring colons.
                 FindRegistration(out int variant, out int dx, out int dy);
                 Measure(variant, dx, dy);
@@ -134,26 +134,42 @@ public sealed class PatternRailDetector
             return Result(null, false, true, "intact-rail");
         }
 
-        int spans = 0, previous = -2;
+        int spans = 0, contacts = 0, strayMarks = 0;
         double weightedX = 0, weightSum = 0;
         for (int column = 0; column < _damagedColumns.Length; column++)
         {
             if (!_damagedColumns[column]) continue;
-            if (column != previous + 1) spans++;
-            previous = column;
-            double weight = 0;
-            for (int mark = column * 2; mark < column * 2 + 2; mark++)
-                if (_correlations[mark] < DamagedCorrelation || _contrasts[mark] < MinimumContrast)
-                    weight += Math.Clamp(1 - _correlations[mark], .1, 1);
-            weightedX += (column + .5) / PatternRailGeometry.Columns * weight;
-            weightSum += weight;
+            spans++;
+            int spanMarks = 0;
+            double spanX = 0, spanWeight = 0;
+            do
+            {
+                for (int mark = column * 2; mark < column * 2 + 2; mark++)
+                {
+                    if (_correlations[mark] >= DamagedCorrelation && _contrasts[mark] >= MinimumContrast) continue;
+                    spanMarks++;
+                    double weight = Math.Clamp(1 - _correlations[mark], .1, 1);
+                    spanX += (column + .5) / PatternRailGeometry.Columns * weight;
+                    spanWeight += weight;
+                }
+                column++;
+            } while (column < _damagedColumns.Length && _damagedColumns[column]);
+            if (spanMarks >= 2)
+            {
+                contacts++;
+                weightedX = spanX;
+                weightSum = spanWeight;
+            }
+            else strayMarks += spanMarks;
         }
-        if (spans > 1)
+        // A separate clipped dot cannot establish a second touch by itself. Permit only
+        // one such mark alongside a span with at least two damaged marks; exclude it from steering.
+        if (spans > 1 && (contacts != 1 || strayMarks > 1))
         {
             _confirmation = 0;
             return Result(null, true, false, "multiple-occlusions");
         }
-        if (damaged < 2)
+        if (contacts == 0)
         {
             _confirmation = 0;
             return Result(null, false, false, "insufficient-shape-damage");
@@ -250,9 +266,9 @@ public sealed class PatternRailDetector
 
     private bool TryRefineRegistration(byte[] bgra, ref int variant, ref int dx, ref int dy)
     {
-        // This geometry is a fixed interaction reference. A correction is accepted only on a
-        // completely intact rail, then stays frozen until the caller changes the geometry epoch.
-        if (_geometryRefined || !(_registrationHelper ??= new()).TryRefine(bgra, _cameraWidth, _cameraHeight,
+        // Refit only a completely intact rail, always bounded by the original calibration.
+        // This recovers small optical drift without accumulating corrections or learning contact.
+        if (!(_registrationHelper ??= new()).TryRefine(bgra, _cameraWidth, _cameraHeight,
                 _stride, _corners, out var corrected)) return false;
         SwapCoordinates();
         bool accepted = false;
@@ -348,8 +364,7 @@ public sealed class PatternRailDetector
     private bool CanRecoverCoveredRegistration(int dx, int dy)
     {
         if (!HasWitnesses()) return false;
-        int damaged = 0;
-        bool inSpan = false, spanEnded = false;
+        int damaged = 0, first = -1, last = -1;
         for (int column = 0; column < PatternRailGeometry.Columns; column++)
         {
             bool columnDamaged = false;
@@ -362,18 +377,19 @@ public sealed class PatternRailDetector
             }
             if (columnDamaged)
             {
-                if (spanEnded) return false;
-                inSpan = true;
-            }
-            else
-            {
-                // Intermediate correlations outside the obstruction do not establish
-                // a coherent profile change, even if enough other witnesses survived.
-                if (!IsIntact(column * 2) || !IsIntact(column * 2 + 1)) return false;
-                if (inSpan) spanEnded = true;
+                if (first < 0) first = column;
+                else if (column != last + 1) return false;
+                last = column;
             }
         }
-        return damaged >= 2;
+        if (damaged < 2) return false;
+        // A fingertip can partially cover the neighboring colon at either boundary.
+        // Those intermediate marks neither establish contact nor contribute to its position.
+        // Everywhere farther away must still establish the same intact optical profile.
+        for (int column = 0; column < PatternRailGeometry.Columns; column++)
+            if ((column < first - 1 || column > last + 1) &&
+                (!IsIntact(column * 2) || !IsIntact(column * 2 + 1))) return false;
+        return true;
     }
 
     private string? MarkUncertainty(int mark, int dx, int dy)
@@ -405,10 +421,11 @@ public sealed class PatternRailDetector
     }
     private bool HasWitnesses()
     {
+        const int endMarks = Marks / 3;
         int first = 0, last = 0, total = 0;
         for (int mark = 0; mark < Marks; mark++)
-            if (IsIntact(mark)) { total++; if (mark < 32) first++; if (mark >= 64) last++; }
-        return total >= 64 && first >= 12 && last >= 12;
+            if (IsIntact(mark)) { total++; if (mark < endMarks) first++; if (mark >= Marks - endMarks) last++; }
+        return total >= Marks - endMarks && first >= 12 && last >= 12;
     }
 
     private static int[][] MakeSupport()

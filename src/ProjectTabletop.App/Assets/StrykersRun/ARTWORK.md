@@ -1,15 +1,17 @@
 # Stryker's Run artwork
 
-These five PNGs are original artwork generated for Project Tabletop with the
+These nine PNGs are original artwork generated for Project Tabletop with the
 built-in OpenAI image-generation tool. The four initial images were generated
-on 2026-10-12; the Bulwark ally atlas was added on 2026-10-13. The character
+on 2026-10-12; the Bulwark ally, campaign boss, boss walking, thrown barrel and explosion atlases were added on
+2026-10-13. The character
 atlases and falling wall were requested with a transparent background; the
 road is an opaque material image. They are covered by the project's license.
 
 The verbatim generation and edit prompts for the initial four images were not
 retained. [PROMPTS.md](PROMPTS.md) records their clearly labeled reconstructed
-specifications and the exact generation and edit prompts for the new Bulwark
-atlas. Repeating the prompts does not guarantee reproducing these files.
+specifications and the exact generation and edit prompts for the Bulwark and
+campaign boss, boss walking, thrown barrel and explosion atlases. Repeating the prompts does not guarantee reproducing
+these files.
 
 ## Bundled files
 
@@ -18,10 +20,14 @@ atlas. Repeating the prompts does not guarantee reproducing these files.
 | `actors.png` | 1254 × 1254, RGBA | Four columns of animation poses in four rows: support soldier seen from behind, approaching runner, brute, and armored boss. |
 | `hero.png` | 2172 × 724, RGBA | Four poses of Stryker, the distinct rear-facing navy commando with a crimson scarf. The hero remains separate from the support-soldier atlas. |
 | `ally.png` | 2172 × 724, RGBA | Four rear-facing Bulwark poses: left stride, right stride, raised fists, and crouched slam. Teal stone skin and a navy/brass squad harness distinguish the allied guardian from approaching enemies. |
+| `bosses.png` | 1536 × 1024, RGBA | Three columns and two rows of distinct campaign boss forms: barrel thrower, commander, lightning zombie, ordinary skin-walker, fungal skin-walker, and the colossal zombie's separated legs. |
+| `boss-walk.png` | 1254 × 1254, RGBA | Four rows of four walking poses derived from the first four bosses, for their entrance before combat. |
+| `barrels.png` | 1536 × 1024, RGBA | Two columns and two rows of detailed rolling red steel drums, derived from the barrel held by the first campaign boss. |
+| `explosion.png` | 1774 × 887, RGBA | Four columns and two rows: ignition, expanding fireball, burning soot and dissipating smoke. |
 | `road.png` | 940 × 1672, RGB | Overhead urban asphalt, cracks, lane markings and sidewalk detail. A native shader projects the texture into the road's receding perspective and scrolls it. |
 | `game-over-wall.png` | 1434 × 1097, RGBA | Irregular battered concrete-and-brick slab with exposed metal and large GAME OVER graffiti; no rectangular backdrop. |
 
-Animation cell boundaries are measured once from alpha coverage when the
+Character and barrel animation cell boundaries are measured once from alpha coverage when the
 device-owned images load. The generated atlases do not have perfectly uniform
 cell dimensions. Each animation row shares a vertical crop to preserve scale
 through its poses; the renderer preserves every sprite's aspect ratio. This
@@ -58,6 +64,8 @@ foot baseline.
 | `actors.png` | `268135df79e27ce769137f8f665c270d5707988ea47724bf464b13e2cf54ad61` |
 | `hero.png` | `58026b001cc939eff51892475da96103de92b809467d50925965a3cf1463f907` |
 | `ally.png` | `605756268ada90c8294c25b9cae26529759605a4e78f04f4e5f86cc9266148a2` |
+| `bosses.png` | `08eb2ec7c8199cc27f153682740075141beed0d8e7d828145b9d24fbecb6db0a` |
+| `barrels.png` | `4dc58b7631323345c1e2ec3d39ea8827ec8221ccacfe08d16387460334381ed7` |
 | `road.png` | `6eafde660894d2e1042bfdeb52b452b4def08f1afb52eb09e5cf9343156026f8` |
 | `game-over-wall.png` | `9dac98688c8e344f7126321c42e03e05208efe7b45b551104770ebaaa78caa71` |
 
@@ -96,3 +104,149 @@ confirmed the transition and mark centering. Lift/resume remains tentative;
 continuing camera stalls leave physical acceptance incomplete. File checks
 and offscreen rendering do not establish real-camera reliability or a
 displayed frame rate.
+
+## Campaign boss atlas
+
+`bosses.png` contains six original painted forms, all facing the approaching
+player from the same raised camera angle as the existing enemies. Its equal
+512 × 512 cells run left to right, then top to bottom: a scorched industrial
+barrel thrower; a long-coated undead commander; an electrical worker mutated
+by lightning; an ordinary burgundy-shirted skin-walker; that creature's
+expanded fungal form; and a giant zombie's two separated lower legs. The
+last cell intentionally contains no torso or head. The renderer can animate
+each leg independently through the transparent center gap.
+
+The atlas used one built-in generation and two built-in edits. After those
+calls, the user explicitly approved a scripted cleanup on 2026-10-13: all
+30,560 alpha-1 pixels were set to alpha 0. Comparison against the selected
+third output confirms every RGB value and every alpha value 2–255 is
+unchanged, with identical dimensions, positions and silhouettes. No
+checkerboard, matte, backdrop or cast shadow was added.
+
+The saved RGBA PNG contains 1,572,864 pixels: 1,040,025 have alpha 0 and none
+have alpha 1. All outermost rows and columns, all four 32 × 32 corner squares,
+the 16-pixel strips centered on both column boundaries and the row boundary,
+and a 32-pixel strip through the giant legs' center gap have alpha 0.
+Diagnostic compositing against solid black and white confirmed clean
+silhouettes without a broad colored backdrop. Colored RGB values underneath
+fully transparent pixels do not contribute to the displayed sprites.
+
+For integration, each form is cropped independently within its own cell;
+these are different characters, not an animation row that shares a crop.
+The following bounds use alpha greater than 8 and exclusive right/bottom
+coordinates, relative to the top-left of each 512 × 512 cell:
+
+| Form | Left | Top | Right | Bottom |
+| --- | ---: | ---: | ---: | ---: |
+| Barrel thrower | 76 | 25 | 475 | 491 |
+| Commander | 123 | 51 | 367 | 496 |
+| Lightning zombie | 17 | 56 | 466 | 496 |
+| Ordinary skin-walker | 82 | 24 | 443 | 463 |
+| Fungal skin-walker | 63 | 20 | 433 | 463 |
+| Giant legs, paired | 14 | 32 | 481 | 448 |
+
+Within the complete atlas, the left leg spans x=1038–1235, y=546–959 and the
+right leg x=1297–1504, y=544–958 at that threshold. These measurements describe
+the image only; native scene validation is reported separately from pixel
+verification. Existing road and character artwork was not altered.
+
+Final campaign validation used the cleaned atlas in the Debug x64 build. An
+isolated native fixture, rerun after the barrel update, passed 28 draw frames
+and saved 22 inspection images
+covering the six boss forms, attack warnings and impacts, changing health,
+skin shedding, level clearance and victory. Pixel checks confirm distinct
+forms and preserve the black input-strip region; visual review checked
+connected giant-leg geometry through its foreground stomp. All 290 headless
+tests passed, including ten steering-only boss victories and victory/retry
+controls. No app window or camera was opened for these checks. These native
+fixtures supplement the earlier defender verification described above.
+
+## Thrown barrel atlas
+
+`barrels.png` replaces the procedural rectangle and band outlines used for
+Barrel Warden projectiles. Four painted red steel drums retain chipped enamel,
+scorched metal, dents, raised rims and curved highlights matching his held
+barrel. The built-in tool derived the atlas from `bosses.png`, then performed
+one transparency-cleanup edit. The held-barrel boss artwork was not modified.
+
+The final image uses the same alpha-only cleanup previously approved by the
+user: all 7,675 alpha-1 pixels were set to alpha 0. Every RGB value and all
+alpha values 2–255 are unchanged from the second tool output. Pixel
+comparison confirms RGBA format, 987,276 fully transparent pixels, no alpha-1
+pixels, and alpha 0 throughout the outermost edges, 32 × 32 corner squares
+and 32-pixel-wide central gutters. All remaining nontransparent pixels lie
+within eight pixels of meaningful barrel coverage; there is no broad backdrop.
+
+The renderer caches the atlas and its four source rectangles per device.
+A common scale preserves frame aspect ratios and avoids resizing each pose.
+The drum briefly tilts in flight, then cycles rolling poses at six frames per
+second, with native fire behind it and small animated embers in front. The
+existing throw path, collision rules and three-second fuse are unchanged.
+The explosion artwork was replaced in the follow-up described below.
+The larger 72-unit body height improves detail readability on the
+projected field. Road geometry and the input-strip boundary are unchanged.
+
+The barrel update passed the Debug x64 build with only the existing NU1900
+vulnerability-feed warning. The isolated native fixture passed all 28 rendered
+frames and saved 22 images, including the new airborne-barrel inspection.
+Visual review checked the foreground drum and its airborne appearance against
+the unchanged held barrel. All checks kept the app and camera unopened.
+
+## Barrel explosion animation
+
+`explosion.png` replaces the overlapping soft glow circles with eight detailed
+fire-and-smoke phases. The built-in tool generated the sequence, then edited
+its spacing and transparency. The previously approved alpha-only cleanup
+removed 10,879 residual alpha-1 pixels after the third output. Every RGB value
+and every other alpha value is unchanged. The final RGBA PNG has 1,002,690
+fully transparent pixels, no alpha-1 pixels, and alpha 0 along every outer and
+cell edge. All remaining nontransparent pixels are within eight pixels of
+meaningful flame or smoke coverage; no background film or checkerboard is used.
+
+SHA-256: `e96a35110cefd3b04bfc60ea2625668112cd2d36563c8113b78911710f643773`.
+
+The renderer caches eight full grid cells to preserve scale between phases,
+cross-fades neighboring frames at a common world anchor, and lets the final
+smoke dissipate. Bounded sparks and rotating fragments sampled from the painted
+barrel accompany the blast. The former orange damage-radius outline is removed.
+The effect still uses the existing 0.45-second hazard clock and pauses with
+gameplay. It is clipped by the existing playfield boundary above the input strip.
+Damage, fuse timing and road projection are unchanged.
+
+The isolated Debug x64 build passed with only the existing NU1900 feed warning.
+The camera-free native campaign fixture passed 37 draws and saved 31 images,
+including ignition, expanding fire, cooling smoke, both foreground edges and
+exact disappearance at expiry. Pixel assertions verify distinct visible phases
+and an untouched black input-strip region. Visual inspection checked the flame
+and smoke detail at game scale. The running app and webcam were not restarted.
+
+## Boss walking entrance
+
+`boss-walk.png` derives sixteen walking poses from the existing boss designs.
+Rows contain the barrel carrier, commander, lightning zombie and ordinary
+skin-walker. Three built-in tool calls created the poses and refined spacing
+and transparency. The final alpha-only cleanup removed 99,271 alpha-1 pixels
+and 308 isolated background pixels (289 at alpha 2, 19 at alpha 3) more than
+eight pixels from meaningful coverage. Every RGB value and all other alpha
+values remain unchanged. The final RGBA PNG contains 1,212,231 alpha-zero
+pixels, with fully transparent outer and cell edges and no checkerboard.
+
+SHA-256: `c653fae8b4784257695572d06768b6bff660eee93426dc46bac243929d865238`.
+
+Walking rows use the existing shared atlas-bound measurement and device cache.
+The barrel carrier alternates its forward strides through a neutral passing
+pose. A short blend settles each walker into its original combat artwork.
+The giant uses the existing separated-leg artwork, with alternating lifted
+steps, perspective growth and grounded shadows. All bosses enter from behind
+the HUD boundary over three active seconds. Their movement pauses with input;
+attacks and damage wait for arrival. No road artwork or geometry was changed.
+
+The final Debug x64 build passed with the existing NU1900 feed warning.
+The camera-free native campaign fixture passed 77 draws and saved 51 images,
+including four entrance positions for each boss. Pixel checks verify downward
+movement, no initial body below the HUD, stationary road pixels and an untouched
+input strip. Visual review checked the first boss's shorter HUD boundary and
+the giant's alternating foot placement. The complete headless Interaction
+verifier passed, including all five entrance regressions and ten steering-only
+boss victories. All 300 tests passed through the xUnit in-process runner.
+The running app and webcam were not restarted.

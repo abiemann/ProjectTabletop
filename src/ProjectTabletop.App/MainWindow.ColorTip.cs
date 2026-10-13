@@ -22,7 +22,18 @@ public sealed partial class MainWindow
     private sealed record ColorTipSettings(int Version, Dictionary<string, ColorTipProfile> Cameras,
         Dictionary<string, string> ActiveModes);
     private sealed record ColorTipPreview(CameraFrame Frame, ColorTipDetectionResult Detection,
-        ColorTipTrackResult Track, double InferenceMilliseconds);
+        ColorTipTrackResult Track, double InferenceMilliseconds)
+    {
+        public CameraFrameLease FrameLease { get; } = Frame.Retain();
+    }
+
+    // Caller holds the shared eye/colour tracking gate.
+    private void SetColorTipPreviewLocked(ColorTipPreview? preview)
+    {
+        var previous = _colorTipPreview;
+        _colorTipPreview = preview;
+        previous?.FrameLease.Dispose();
+    }
     private string ColorTipSettingsPath => Path.Combine(_appDataDirectory, "stick-color-tip.json");
 
     private void InitializeColorTipTracking()
@@ -62,7 +73,7 @@ public sealed partial class MainWindow
     private void ResetColorTipTrackingLocked()
     {
         _colorTipLearning = false;
-        _colorTipPreview = null;
+        SetColorTipPreviewLocked(null);
         _colorTipTracker.Reset();
     }
 
@@ -139,7 +150,8 @@ public sealed partial class MainWindow
 
     private async Task<object> LearnColorTipAsync(double x, double y, CameraFrame? selectedFrame = null)
     {
-        var frame = selectedFrame ?? Volatile.Read(ref _latestCameraFrame);
+        using var frameLease = selectedFrame is null ? AcquireLatestCameraFrame() : selectedFrame.Retain();
+        var frame = frameLease?.Frame;
         var cameraId = _camera.ActiveDeviceId;
         if (frame is null || !_cameraWanted || !_camera.IsRunning || cameraId != _selectedCameraId ||
             cameraId is null || !EyeTipFrameFresh(frame, MonotonicClock.UtcNow))
@@ -181,18 +193,18 @@ public sealed partial class MainWindow
             if (!learned.Profile.IsValid || NearestStickTipCandidate(learned.Detection.Candidates, x, y,
                 item => item.Center, item => item.RadiusPixels) is not { } chosen)
             {
-                _colorTipPreview = new(frame, learned.Detection, new(null, false, "click-the-coloured-tip"), elapsed);
+                SetColorTipPreviewLocked(new(frame, learned.Detection, new(null, false, "click-the-coloured-tip"), elapsed));
                 _eyeTipReason = "click-the-coloured-tip";
                 throw new InvalidOperationException("Click inside one clearly coloured tip, away from similarly coloured objects.");
             }
             _colorTipProfiles[cameraId] = learned.Profile;
             _colorTipModes[cameraId] = "color";
             _eyeTipGeneration++;
-            _eyeTipPreview = null;
+            SetEyeTipPreviewLocked(null);
             _eyeTipTracker.Reset();
             _colorTipTracker.Acquire(chosen, frame.Timestamp);
             _eyeTipLastAssociated = frame.Timestamp;
-            _colorTipPreview = new(frame, learned.Detection, new(chosen, false, "confirming-colour-marker"), elapsed);
+            SetColorTipPreviewLocked(new(frame, learned.Detection, new(chosen, false, "confirming-colour-marker"), elapsed));
             _colorTipLearning = false;
             _eyeTipReason = "confirming-colour-marker";
             PublishWaterStickTipLocked();

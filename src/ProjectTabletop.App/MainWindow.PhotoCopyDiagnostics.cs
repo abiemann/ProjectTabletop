@@ -9,7 +9,10 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     private sealed record PhotoCopyFailure(CameraFrame Frame, HandDetection[] Hands,
-        SceneCompositor.PhotoCopyCaptureContext Context, string? Failure);
+        SceneCompositor.PhotoCopyCaptureContext Context, string? Failure)
+    {
+        public CameraFrameLease FrameLease { get; } = Frame.Retain();
+    }
     private PhotoCopyFailure? _lastPhotoCopyFailure;
 
     // Retain only the latest failed observation in memory. A diagnostic is
@@ -17,8 +20,19 @@ public sealed partial class MainWindow
     // that disagreed, rather than a later photograph of a different lock.
     private async Task<object> SavePhotoCopyDiagnosticsAsync()
     {
-        var failed = _lastPhotoCopyFailure;
-        var observation = _latestPhotoCopyFrame ?? throw new InvalidOperationException("No Photo Copy camera frame.");
+        PhotoCopyFailure? failed;
+        PhotoCopyObservation observation;
+        CameraFrameLease currentFrame;
+        CameraFrameLease? failedFrame;
+        lock (_handGate)
+        {
+            failed = _lastPhotoCopyFailure;
+            observation = _latestPhotoCopyFrame ?? throw new InvalidOperationException("No Photo Copy camera frame.");
+            currentFrame = observation.Frame.Retain();
+            failedFrame = failed?.Frame.Retain();
+        }
+        using var currentLease = currentFrame;
+        using var failedLease = failedFrame;
         if (!_scene.TryGetPhotoCopyCaptureContext(out var current))
             throw new InvalidOperationException("Photo Copy is not ready.");
         string directory = Path.Combine(_appDataDirectory, "PhotoCopyDiagnostics",

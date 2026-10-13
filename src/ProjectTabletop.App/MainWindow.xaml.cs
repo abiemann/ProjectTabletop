@@ -26,8 +26,10 @@ public sealed partial class MainWindow : Window
     private bool _initialized;
     private bool _closing;
     private CameraFrame? _latestCameraFrame;
+    private readonly CameraFrameSlot _latestCameraFrames = new();
     private CameraFrame? _frozenFrame;
     private CameraFrame? _bitmapFrame;
+    private CameraFrameLease? _bitmapFrameLease;
     private CanvasBitmap? _cameraBitmap;
     private CanvasDevice? _cameraBitmapDevice;
     private IReadOnlyList<PieceDetection> _latestDetections = Array.Empty<PieceDetection>();
@@ -242,6 +244,9 @@ public sealed partial class MainWindow : Window
     {
         if (_closing) return;
         _closing = true;
+        Interlocked.Increment(ref _boardSetupGeneration);
+        Volatile.Write(ref _boardSetupActive, false);
+        ClearBoardFrameReferences();
         _calibrationResults.Invalidate();
         ResetPieceDetections();
         DisposeDisplayAudio();
@@ -262,6 +267,10 @@ public sealed partial class MainWindow : Window
         _camera.FrameReceived -= Camera_FrameReceived;
         _camera.CaptureFailed -= Camera_CaptureFailed;
         await _camera.DisposeAsync();
+        ClearLatestCameraFrame();
+        _bitmapFrameLease?.Dispose();
+        _bitmapFrameLease = null;
+        _cameraHealthFrames.Clear();
         _cameraBitmap?.Dispose();
         _scene.Dispose();
         lock (_visionGate) _vision.Dispose();

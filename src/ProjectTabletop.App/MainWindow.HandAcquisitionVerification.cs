@@ -1,5 +1,6 @@
 #if DEBUG
 using Microsoft.Graphics.Canvas;
+using ProjectTabletop.App.Camera;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
@@ -12,19 +13,29 @@ public sealed partial class MainWindow
     private async Task<object> SaveHandAcquisitionSnapshotAsync()
     {
         HoldButtonSnapshot? hold = null;
-        if (_scene.CurrentBoardScreen == BoardScreen.StrykersRun)
+        SceneCompositor.HandAcquisitionContext? context;
+        CameraFrameLease retainedFrame;
+        object? acquisitionDetection;
+        lock (_handGate)
         {
-            if (!_boardHandDiagnosticLogging)
-                throw new InvalidOperationException("Enable board diagnostic logging before capturing a Stryker's Run caption snapshot.");
-            hold = Volatile.Read(ref _lastHoldButtonSnapshot);
-            if (hold is null || !hold.Context.ButtonIds.Any(id => id.StartsWith("strykers-run-", StringComparison.Ordinal)))
-                throw new InvalidOperationException("No processed Stryker's Run caption frame with its generated reference yet.");
+            if (_scene.CurrentBoardScreen == BoardScreen.StrykersRun)
+            {
+                if (!_boardHandDiagnosticLogging)
+                    throw new InvalidOperationException("Enable board diagnostic logging before capturing a Stryker's Run caption snapshot.");
+                hold = _lastHoldButtonSnapshot;
+                if (hold is null || !hold.Context.ButtonIds.Any(id => id.StartsWith("strykers-run-", StringComparison.Ordinal)))
+                    throw new InvalidOperationException("No processed Stryker's Run caption frame with its generated reference yet.");
+            }
+            retainedFrame = hold?.Frame.Retain() ?? _lastHandAcquisitionFrame.Acquire() ??
+                throw new InvalidOperationException("No acquisition camera frame.");
+            context = hold is null ? _lastHandAcquisitionContext : null;
+            acquisitionDetection = _lastHandAcquisitionDetection;
         }
-        var frame = hold?.Frame ?? _lastHandAcquisitionFrame ?? throw new InvalidOperationException("No acquisition camera frame.");
-        var context = hold is null ? _lastHandAcquisitionContext : null;
+        using var frameLease = retainedFrame;
+        var frame = frameLease.Frame;
         var expected = hold?.Context.ExpectedScene ?? context?.ExpectedScene ??
             throw new InvalidOperationException("No generated acquisition reference yet.");
-        object? detection = hold is null ? _lastHandAcquisitionDetection : new
+        object? detection = hold is null ? acquisitionDetection : new
         {
             frameTime = hold.Frame.Timestamp, hold.Context.Revision, hold.Generation, hold.ProcessedAt,
             hold.Context.ButtonIds, hold.Context.EnabledHoldIds,

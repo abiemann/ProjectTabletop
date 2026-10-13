@@ -32,7 +32,18 @@ public sealed partial class MainWindow
 
     private sealed record EyeTipSettings(int Version, Dictionary<string, double> Cameras);
     private sealed record EyeTipPreview(CameraFrame Frame, EyeTipDetectionResult Detection,
-        EyeTipTrackResult Track, double InferenceMilliseconds);
+        EyeTipTrackResult Track, double InferenceMilliseconds)
+    {
+        public CameraFrameLease FrameLease { get; } = Frame.Retain();
+    }
+
+    // Caller holds the shared eye/colour tracking gate.
+    private void SetEyeTipPreviewLocked(EyeTipPreview? preview)
+    {
+        var previous = _eyeTipPreview;
+        _eyeTipPreview = preview;
+        previous?.FrameLease.Dispose();
+    }
     private string EyeTipSettingsPath => Path.Combine(_appDataDirectory, "stick-tip.json");
     private bool IsLearningEyeTip { get { lock (_eyeTipGate) return _eyeTipLearning || _colorTipLearning; } }
 
@@ -65,7 +76,7 @@ public sealed partial class MainWindow
             {
                 if (_eyeTipPreview is { } preview && !EyeTipFrameFresh(preview.Frame, MonotonicClock.UtcNow))
                 {
-                    _eyeTipPreview = null;
+                    SetEyeTipPreviewLocked(null);
                     _eyeTipReason = "waiting-for-fresh-camera-frame";
                     _eyeTipTracker.Reset();
                     _eyeTipLastAssociated = default;
@@ -74,7 +85,7 @@ public sealed partial class MainWindow
                 }
                 if (_colorTipPreview is { } colorPreview && !EyeTipFrameFresh(colorPreview.Frame, MonotonicClock.UtcNow))
                 {
-                    _colorTipPreview = null;
+                    SetColorTipPreviewLocked(null);
                     _colorTipTracker.Reset();
                     _eyeTipReason = "waiting-for-fresh-camera-frame";
                     PublishWaterStickTipLocked();
@@ -101,7 +112,7 @@ public sealed partial class MainWindow
             _eyeTipGeneration++;
             _eyeTipNotBefore = MonotonicClock.UtcNow;
             _eyeTipLastAssociated = default;
-            _eyeTipPreview = null;
+            SetEyeTipPreviewLocked(null);
             _eyeTipTracker.Reset();
             _eyeTipLearning = false;
             ResetColorTipTrackingLocked();
@@ -170,7 +181,8 @@ public sealed partial class MainWindow
 
     private async Task<object> LearnEyeTipAsync(double x, double y, CameraFrame? selectedFrame = null)
     {
-        var frame = selectedFrame ?? Volatile.Read(ref _latestCameraFrame);
+        using var frameLease = selectedFrame is null ? AcquireLatestCameraFrame() : selectedFrame.Retain();
+        var frame = frameLease?.Frame;
         var cameraId = _camera.ActiveDeviceId;
         if (frame is null || !_cameraWanted || !_camera.IsRunning || cameraId != _selectedCameraId ||
             cameraId is null || !EyeTipFrameFresh(frame, MonotonicClock.UtcNow))
@@ -210,7 +222,7 @@ public sealed partial class MainWindow
             if (NearestStickTipCandidate(detection.Candidates, x, y, item => item.Center, item => item.RadiusPixels)
                 is not { } chosen)
             {
-                _eyeTipPreview = new(frame, detection, new(null, false, "click-the-black-pupil"), elapsed);
+                SetEyeTipPreviewLocked(new(frame, detection, new(null, false, "click-the-black-pupil"), elapsed));
                 _eyeTipReason = "click-the-black-pupil";
                 throw new InvalidOperationException("No unambiguous black pupil with a white surround is near that point.");
             }
@@ -225,7 +237,7 @@ public sealed partial class MainWindow
             _eyeTipGeneration++;
             _eyeTipTracker.Acquire(chosen, frame.Timestamp);
             _eyeTipLastAssociated = frame.Timestamp;
-            _eyeTipPreview = new(frame, detection, new(chosen, false, "confirming-eye-marker"), elapsed);
+            SetEyeTipPreviewLocked(new(frame, detection, new(chosen, false, "confirming-eye-marker"), elapsed));
             _eyeTipLearning = false;
             _eyeTipReason = "confirming-eye-marker";
             PublishWaterStickTipLocked();
@@ -268,7 +280,7 @@ public sealed partial class MainWindow
             double? expectedRadius = LearnedEyeTipRadiusLocked() * frame.Width;
             PixelPoint? preferredCenter = _eyeTipPreview?.Track.Observation?.Center;
             PixelPoint? colorCenter = _colorTipPreview?.Track.Observation?.Center;
-            _eyeTipWorker.TryRun(Stopwatch.GetTimestamp(), TimeSpan.Zero, async _ =>
+            _eyeTipWorker.TryRun(Stopwatch.GetTimestamp(), TimeSpan.Zero, frame, async _ =>
             {
                 try
                 {
@@ -302,7 +314,7 @@ public sealed partial class MainWindow
                         var time = MonotonicClock.UtcNow;
                         if (!EyeTipFrameFresh(frame, time))
                         {
-                            _eyeTipPreview = null;
+                            SetEyeTipPreviewLocked(null);
                             _eyeTipTracker.Reset();
                             _eyeTipLastAssociated = default;
                             _eyeTipReason = "waiting-for-fresh-camera-frame";
@@ -337,7 +349,7 @@ public sealed partial class MainWindow
                                 track = _eyeTipTracker.Update(new(candidates, detected.Reason), frame.Timestamp, time);
                             if (track.Observation is not null) _eyeTipLastAssociated = frame.Timestamp;
                         }
-                        _eyeTipPreview = new(frame, detected, track, elapsed);
+                        SetEyeTipPreviewLocked(new(frame, detected, track, elapsed));
                         _eyeTipReason = track.Reason;
                         PublishWaterStickTipLocked();
                     }
@@ -347,9 +359,9 @@ public sealed partial class MainWindow
                     lock (_eyeTipGate)
                     {
                         if (generation != _eyeTipGeneration) return;
-                        _eyeTipPreview = null;
+                        SetEyeTipPreviewLocked(null);
                         _eyeTipTracker.Reset();
-                        _colorTipPreview = null;
+                        SetColorTipPreviewLocked(null);
                         _colorTipTracker.Reset();
                         _eyeTipLastAssociated = default;
                         _eyeTipReason = "Detection failed: " + ex.Message;
@@ -514,14 +526,20 @@ public sealed partial class MainWindow
     private async Task<object> CaptureStickTipAsync()
     {
         ColorTipPreview? colorPreview;
-        lock (_eyeTipGate) colorPreview = _eyeTipEnabled && ActiveColorTipProfileLocked() is not null &&
-            _colorTipPreview is { } colorCurrent && EyeTipFrameFresh(colorCurrent.Frame, MonotonicClock.UtcNow) ? colorCurrent : null;
         EyeTipPreview? preview;
-        lock (_eyeTipGate) preview = _eyeTipEnabled && _cameraWanted && _camera.IsRunning &&
-            !_cameraHealthWarning && _camera.ActiveDeviceId == _eyeTipCameraId &&
-            _eyeTipPreview is { } current && EyeTipFrameFresh(current.Frame, MonotonicClock.UtcNow) ? current : null;
-        var frame = colorPreview?.Frame ?? preview?.Frame ?? Volatile.Read(ref _latestCameraFrame) ??
+        CameraFrameLease? selectedLease;
+        lock (_eyeTipGate)
+        {
+            colorPreview = _eyeTipEnabled && ActiveColorTipProfileLocked() is not null &&
+                _colorTipPreview is { } colorCurrent && EyeTipFrameFresh(colorCurrent.Frame, MonotonicClock.UtcNow) ? colorCurrent : null;
+            preview = _eyeTipEnabled && _cameraWanted && _camera.IsRunning &&
+                !_cameraHealthWarning && _camera.ActiveDeviceId == _eyeTipCameraId &&
+                _eyeTipPreview is { } current && EyeTipFrameFresh(current.Frame, MonotonicClock.UtcNow) ? current : null;
+            selectedLease = (colorPreview?.Frame ?? preview?.Frame)?.Retain();
+        }
+        using var frameLease = selectedLease ?? AcquireLatestCameraFrame() ??
             throw new InvalidOperationException("Start the webcam before capturing the eye tip.");
+        var frame = frameLease.Frame;
         var status = GetStickTipStatus();
         string directory = Path.Combine(_appDataDirectory, "StickTipSnapshots");
         Directory.CreateDirectory(directory);

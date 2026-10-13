@@ -513,8 +513,17 @@ public sealed partial class SceneCompositor : IDisposable
     }
 
     public void Draw(CanvasDrawingSession ds, float canvasWidth, float canvasHeight,
-                     bool preview, bool runningSlowly)
+                     bool preview, bool runningSlowly
+#if DEBUG
+                     , TimeSpan? presentationTotalTime = null, TimeSpan? presentationElapsedTime = null
+#endif
+                     )
     {
+#if DEBUG
+        // Only ProjectionWindow supplies Win2D timing; screenshots using preview:false are excluded.
+        long strykersRunDrawStarted = !preview && presentationTotalTime.HasValue ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        DateTimeOffset strykersRunDrawUtc = strykersRunDrawStarted != 0 ? MonotonicClock.UtcNow : default;
+#endif
         ds.Clear(Colors.Black);
         if (canvasWidth <= 0 || canvasHeight <= 0) return;
         if (preview)
@@ -528,8 +537,16 @@ public sealed partial class SceneCompositor : IDisposable
             if (runningSlowly) Interlocked.Increment(ref _projectorSlowFrames);
         }
 
+#if DEBUG
+        long strykersRunLockRequested = strykersRunDrawStarted != 0 ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+#endif
         lock (_gate)
         {
+#if DEBUG
+            long strykersRunLockAcquired = strykersRunDrawStarted != 0 && _boardSession.Screen == BoardScreen.StrykersRun
+                ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+            long strykersRunPreviousTexture = _strykersRunTextureSequence;
+#endif
             if (_disposed) return;
             PrepareMenuPreviews(ds.Device);
             if (_blackOutput) return;
@@ -577,6 +594,13 @@ public sealed partial class SceneCompositor : IDisposable
 
             if (TryDrawBoardReveal(ds, output, preview)) return;
             DrawBoardScene(ds, output, preview);
+#if DEBUG
+            if (strykersRunLockAcquired != 0)
+                RecordStrykersRunTiming(strykersRunDrawStarted, strykersRunLockRequested, strykersRunLockAcquired,
+                    System.Diagnostics.Stopwatch.GetTimestamp(), strykersRunDrawUtc,
+                    presentationTotalTime.GetValueOrDefault(), presentationElapsedTime.GetValueOrDefault(),
+                    runningSlowly, strykersRunPreviousTexture);
+#endif
         }
     }
 
