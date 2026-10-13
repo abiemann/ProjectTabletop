@@ -163,6 +163,7 @@ internal sealed partial class StrykersRunRenderer
 
     private void DrawEffects(CanvasDrawingSession ds, StrykersRunSnapshot state)
     {
+        DrawAllyShockwaves(ds, state);
         using var batch = ds.CreateSpriteBatch(CanvasSpriteSortMode.None, CanvasImageInterpolation.Linear);
         foreach (var effect in state.Effects)
         {
@@ -173,27 +174,42 @@ internal sealed partial class StrykersRunRenderer
             bool penalty = effect.Kind is StrykersRunEffectKind.GatePenalty or StrykersRunEffectKind.SoldierLost;
             bool muzzle = effect.Kind == StrykersRunEffectKind.MuzzleFlash;
             bool defeat = effect.Kind == StrykersRunEffectKind.Defeat;
-            float duration = muzzle ? .10f : defeat ? .60f : .42f;
+            bool allyAttack = effect.Kind == StrykersRunEffectKind.AllyAttack;
+            bool allyLost = effect.Kind == StrykersRunEffectKind.AllyLost;
+            bool opened = effect.Kind is StrykersRunEffectKind.AllyUnlocked or StrykersRunEffectKind.SupplyOpened;
+            float duration = muzzle ? .10f : allyLost ? 1.1f : opened ? .8f : allyAttack ? .55f : defeat ? .60f : .42f;
             float progress = age / duration;
             if (progress >= 1) continue;
-            Vector4 color = boost ? new(.23f, .92f, 1, 1) : penalty ? new(1, .29f, .15f, 1) : new(1, .72f, .22f, 1);
-            float size = (muzzle ? 42 : defeat ? 125 : 72) * depth;
+            Vector4 color = allyAttack || effect.Kind == StrykersRunEffectKind.AllyUnlocked ? new(.24f, 1, .72f, 1) :
+                allyLost ? new(.47f, .68f, .64f, 1) : boost ? new(.23f, .92f, 1, 1) :
+                penalty ? new(1, .29f, .15f, 1) : new(1, .72f, .22f, 1);
+            float size = (muzzle ? 42 : opened || allyAttack ? 170 : defeat || allyLost ? 125 : 72) * depth;
             float burst = (1 - progress) * (muzzle ? 1 : .7f);
             batch.DrawFromSpriteSheet(_particles!, new Rect(center.X - size / 2, center.Y - size / 2, size, size),
                 GlowCell, color * new Vector4(1, 1, 1, burst));
-            int pieces = muzzle ? 4 : defeat ? 12 : 8;
+            int pieces = muzzle ? 4 : defeat || opened || allyLost ? 12 : 8;
             for (int i = 0; i < pieces; i++)
             {
                 float angle = Noise(effect.Seed + i * 37) * MathF.Tau;
-                float speed = 45 + Noise(effect.Seed + i * 53) * (defeat ? 180 : 90);
+                float speed = 45 + Noise(effect.Seed + i * 53) * (defeat || opened || allyAttack ? 180 : 90);
                 Vector2 travel = new(MathF.Cos(angle) * speed * age, MathF.Sin(angle) * speed * age - age * 40 + age * age * 180);
                 Vector2 point = center + travel * depth;
-                float shardSize = (muzzle ? 9 : 13) * depth * (1 - progress * .5f);
-                var transform = Matrix3x2.CreateTranslation(-16, -16) * Matrix3x2.CreateScale(shardSize / 32) *
+                float shardSize = (muzzle ? 9 : opened ? 31 : 13) * depth * (1 - progress * .5f);
+                var transform = Matrix3x2.CreateTranslation(-16, -16) * Matrix3x2.CreateScale(shardSize / 32, shardSize / 32 * (opened ? .5f : 1)) *
                     Matrix3x2.CreateRotation(angle + age * 6) * Matrix3x2.CreateTranslation(point);
-                batch.DrawFromSpriteSheet(_particles!, transform, ShardCell, color * new Vector4(1, 1, 1, 1 - progress));
+                Vector4 debris = opened && i % 2 == 0 ? new(.58f, .69f, .65f, 1) : color;
+                batch.DrawFromSpriteSheet(_particles!, transform, ShardCell, debris * new Vector4(1, 1, 1, 1 - progress));
             }
-            if (defeat)
+            if (allyLost)
+            {
+                Rect source = _allyCells[3];
+                float height = (144 - Math.Min(age * 220, 84)) * depth;
+                float width = 194 * depth;
+                batch.DrawFromSpriteSheet(_images!.Image("ally.png")!,
+                    new Rect(center.X - width / 2, center.Y - height, width, height), source,
+                    new Vector4(.55f, .65f, .62f, Math.Clamp((1.1f - age) / .35f, 0, 1)));
+            }
+            if (defeat || allyLost || opened)
             {
                 float smoke = (70 + age * 115) * depth;
                 batch.DrawFromSpriteSheet(_particles!, new Rect(center.X - smoke / 2, center.Y - smoke / 2 - age * 35,

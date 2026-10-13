@@ -21,6 +21,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
     private readonly object _resourceGate = new();
     private readonly Rect[] _actorCells = new Rect[16];
     private readonly Rect[] _heroCells = new Rect[4];
+    private readonly Rect[] _allyCells = new Rect[4];
     private readonly Dictionary<(StrykersRunGateKind, int), string> _gateLabels = new();
     private readonly CanvasTextFormat _title = TextFormat(51);
     private readonly CanvasTextFormat _hud = TextFormat(27);
@@ -46,7 +47,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             if (_loading is null)
             {
                 _images = new(_device, Path.Combine(AppContext.BaseDirectory, "Assets", "StrykersRun"),
-                    ["actors.png", "hero.png", "road.png", "game-over-wall.png"]);
+                    ["actors.png", "hero.png", "ally.png", "road.png", "game-over-wall.png"]);
                 _loading = LoadAsync(_images);
                 _ = _loading.ContinueWith(task => _ = task.Exception, CancellationToken.None,
                     TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
@@ -61,7 +62,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
         lock (_resourceGate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            foreach (string file in new[] { "actors.png", "hero.png", "road.png", "game-over-wall.png" })
+            foreach (string file in new[] { "actors.png", "hero.png", "ally.png", "road.png", "game-over-wall.png" })
                 if (images.Image(file) is null)
                     throw new InvalidDataException("Stryker's Run artwork: " + file + ": " +
                         images.Errors.GetValueOrDefault(file, "not loaded"));
@@ -71,6 +72,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
                 throw new InvalidDataException("Stryker's Run sprite atlas dimensions are invalid.");
             FindSpriteCells(actors, 4, _actorCells);
             FindSpriteCells(hero, 1, _heroCells);
+            FindSpriteCells(images.Image("ally.png")!, 1, _allyCells);
             _road.Sources[0] = images.Image("road.png")!;
             _particles = CreateParticles();
             _ready = true;
@@ -112,6 +114,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
                     DrawWorldObjects(ds, state, clock);
                     DrawBullets(ds, state);
                     DrawEffects(ds, state);
+                    DrawAllyStatus(ds, state);
                     if (state.Phase == StrykersRunPhase.GameOver) DrawGameOver(ds, state.GameOverSeconds);
                 }
                 finally { ds.Transform = world; }
@@ -123,11 +126,13 @@ internal sealed partial class StrykersRunRenderer : IDisposable
         finally { ds.Transform = before; }
     }
 
-    private readonly record struct Actor(int Cell, bool Hero, float X, float Y, float Size, float Squash, float Health = -1);
+    private enum ActorAtlas { TroopAndEnemy, Hero, Ally }
+    private readonly record struct Actor(int Cell, ActorAtlas Atlas, float X, float Y, float Size, float Squash, float Health = -1);
+    private readonly record struct WorldProp(int Index, bool Objective, float Y);
 
     private void DrawWorldObjects(CanvasDrawingSession ds, StrykersRunSnapshot state, float clock)
     {
-        Span<Actor> actors = stackalloc Actor[StrykersRunGame.MaximumEnemies + StrykersRunGame.MaximumSoldiers + 1];
+        Span<Actor> actors = stackalloc Actor[StrykersRunGame.MaximumEnemies + StrykersRunGame.MaximumSoldiers + 2];
         int count = 0;
         foreach (var enemy in state.Enemies)
         {
@@ -137,7 +142,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             float squash = ForegroundSquash(state, enemy.Y);
             if (squash <= 0) continue;
             int frame = Math.Clamp((int)(enemy.AnimationPhase * 4), 0, 3);
-            actors[count++] = new(row * 4 + frame, false, enemy.X, enemy.Y,
+            actors[count++] = new(row * 4 + frame, ActorAtlas.TroopAndEnemy, enemy.X, enemy.Y,
                 size, squash, enemy.Kind != StrykersRunEnemyKind.Runner && enemy.Health < enemy.MaxHealth
                     ? Math.Clamp(enemy.Health / (float)enemy.MaxHealth, 0, 1) : -1);
         }
@@ -146,7 +151,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
         if (soldiers > 0 || state.Phase == StrykersRunPhase.GameOver && state.GameOverSeconds < WallImpactSeconds + .12f)
         {
             int frame = (int)(clock * 10) % 4;
-            actors[count++] = new(frame, true, state.SquadX, StrykersRunGame.SquadY,
+            actors[count++] = new(frame, ActorAtlas.Hero, state.SquadX, StrykersRunGame.SquadY,
                 160, ForegroundSquash(state, StrykersRunGame.SquadY));
         }
         int troops = Math.Max(0, soldiers - 1);
@@ -154,8 +159,14 @@ internal sealed partial class StrykersRunRenderer : IDisposable
         {
             Vector2 position = StrykersRunFormation.TroopPosition(state.SquadX, soldiers, index);
             int frame = (int)(clock * 10 + index * .63f) % 4;
-            actors[count++] = new(frame, false, position.X, position.Y, 112,
+            actors[count++] = new(frame, ActorAtlas.TroopAndEnemy, position.X, position.Y, 112,
                 ForegroundSquash(state, position.Y));
+        }
+        if (state.Ally is { Health: > 0 } ally)
+        {
+            int frame = ally.AttackSeconds < .55f ? (ally.AttackSeconds < .22f ? 2 : 3) :
+                Math.Clamp((int)(ally.AnimationPhase * 2), 0, 1);
+            actors[count++] = new(frame, ActorAtlas.Ally, ally.X, ally.Y, 220, ForegroundSquash(state, ally.Y));
         }
         for (int i = 1; i < count; i++)
         {
@@ -165,47 +176,66 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             { actors[insert] = actors[insert - 1]; insert--; }
             actors[insert] = actor;
         }
-        // The simulation retains at most four two-choice gate rows. Merge their
-        // bounded index sort with actors so only a gate splits the sprite batch.
-        Span<int> gates = stackalloc int[8];
-        int gateCount = 0;
-        for (int i = 0; i < state.Gates.Count && gateCount < gates.Length; i++)
+        // Gates and shootable objectives share the bounded depth merge, keeping
+        // nearby actors in front of distant props without allocating a draw list.
+        Span<WorldProp> props = stackalloc WorldProp[8 + StrykersRunGame.MaximumObjectives];
+        int propCount = 0;
+        for (int i = 0; i < state.Gates.Count && propCount < 8; i++)
         {
             var gate = state.Gates[i];
             if (gate.Y < -.1f || gate.Y > .92f || ForegroundSquash(state, gate.Y) <= 0) continue;
-            int insert = gateCount++;
-            while (insert > 0 && state.Gates[gates[insert - 1]].Y > gate.Y)
-            { gates[insert] = gates[insert - 1]; insert--; }
-            gates[insert] = i;
+            props[propCount++] = new(i, false, gate.Y);
+        }
+        for (int i = 0; i < state.Objectives.Count && propCount < props.Length; i++)
+        {
+            var objective = state.Objectives[i];
+            if (objective.Y < -.1f || objective.Y > .92f || ForegroundSquash(state, objective.Y) <= 0) continue;
+            props[propCount++] = new(i, true, objective.Y);
+        }
+        for (int i = 1; i < propCount; i++)
+        {
+            var prop = props[i];
+            int insert = i;
+            while (insert > 0 && props[insert - 1].Y > prop.Y)
+            { props[insert] = props[insert - 1]; insert--; }
+            props[insert] = prop;
         }
         var atlas = _images!.Image("actors.png")!;
         var hero = _images.Image("hero.png")!;
+        var defender = _images.Image("ally.png")!;
+        CanvasBitmap Bitmap(ActorAtlas kind) => kind switch { ActorAtlas.Hero => hero, ActorAtlas.Ally => defender, _ => atlas };
         using (var shadows = ds.CreateSpriteBatch(CanvasSpriteSortMode.None, CanvasImageInterpolation.Linear))
             foreach (ref readonly var actor in actors[..count])
-                DrawActor(shadows, actor, actor.Hero ? hero : atlas, shadow: true);
-        foreach (int index in gates[..gateCount]) DrawGateShadow(ds, state.Gates[index]);
+                DrawActor(shadows, actor, Bitmap(actor.Atlas), shadow: true);
+        foreach (ref readonly var prop in props[..propCount])
+            if (prop.Objective) DrawObjectiveShadow(ds, state.Objectives[prop.Index]);
+            else DrawGateShadow(ds, state.Gates[prop.Index]);
 
         int nextActor = 0;
-        for (int i = 0; i <= gateCount; i++)
+        for (int i = 0; i <= propCount; i++)
         {
-            float gateY = i < gateCount ? state.Gates[gates[i]].Y : float.PositiveInfinity;
-            if (nextActor < count && actors[nextActor].Y <= gateY)
+            float propY = i < propCount ? props[i].Y : float.PositiveInfinity;
+            if (nextActor < count && actors[nextActor].Y <= propY)
             {
                 using var bodies = ds.CreateSpriteBatch(CanvasSpriteSortMode.None, CanvasImageInterpolation.Linear);
-                while (nextActor < count && actors[nextActor].Y <= gateY)
+                while (nextActor < count && actors[nextActor].Y <= propY)
                 {
                     ref readonly var actor = ref actors[nextActor++];
-                    DrawActor(bodies, actor, actor.Hero ? hero : atlas, shadow: false);
+                    DrawActor(bodies, actor, Bitmap(actor.Atlas), shadow: false);
                 }
             }
-            if (i < gateCount) DrawGate(ds, state.Gates[gates[i]], ForegroundSquash(state, gateY));
+            if (i >= propCount) continue;
+            ref readonly var current = ref props[i];
+            if (current.Objective) DrawObjective(ds, state.Objectives[current.Index], ForegroundSquash(state, propY));
+            else DrawGate(ds, state.Gates[current.Index], ForegroundSquash(state, propY));
         }
     }
 
     private void DrawActor(CanvasSpriteBatch batch, in Actor actor, CanvasBitmap bitmap, bool shadow)
     {
         if (actor.Squash <= 0) return;
-        Rect source = actor.Hero ? _heroCells[actor.Cell] : _actorCells[actor.Cell];
+        Rect source = actor.Atlas switch { ActorAtlas.Hero => _heroCells[actor.Cell],
+            ActorAtlas.Ally => _allyCells[actor.Cell], _ => _actorCells[actor.Cell] };
         Vector2 position = Point(actor.X, actor.Y);
         float depth = DepthScale(actor.Y), size = actor.Size * depth;
         float width = size * (float)(source.Width / source.Height), height = size * actor.Squash;
@@ -318,6 +348,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             _particles = null;
             _road.Dispose();
             _title.Dispose(); _hud.Dispose(); _gateText.Dispose(); _message.Dispose();
+            _objectiveTitle.Dispose(); _objectiveCount.Dispose(); _allyStatus.Dispose();
         }
     }
 }

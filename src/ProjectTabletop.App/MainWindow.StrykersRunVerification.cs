@@ -184,6 +184,7 @@ public sealed partial class MainWindow
         await Save(portrait, "squad-eight");
         RenderRaw(busy);
         await Save(portrait, "squad-sixty-four-monsters-and-gates");
+        object allyRendering = await CheckAllies();
         var wallFrames = new List<object>();
         object? settledWallComparison = null, sameTimeWallComparison = null;
         var wallFace = new Rect(180, 960, 540, 330);
@@ -231,7 +232,7 @@ public sealed partial class MainWindow
         object timing = MeasureRendering();
         Check(_scene.CurrentBoardScreen == liveScreen && Session(_scene).NavigationRevision == liveNavigation &&
             !_camera.IsRunning && !_cameraWanted, "The isolated verifier changed the live board or camera state.");
-        return new { passed = true, directory, images, renderedFrames, captionEvidence, controlExposure, wallFrames, settledWallComparison, sameTimeWallComparison, timing,
+        return new { passed = true, directory, images, renderedFrames, captionEvidence, controlExposure, allyRendering, wallFrames, settledWallComparison, sameTimeWallComparison, timing,
             loneHero = true, perspective = true, railPixelsProtected = true, normalizedRailEdges = true,
             geometryEpochs = true, cameraTimeBarriers = true, inputFreeze = true, returningCaptionBarrier = true,
             playerEdgeOrientation = true, savedFacingRestoredOnExit = true,
@@ -239,6 +240,55 @@ public sealed partial class MainWindow
             railScrollWithoutDetection = true, marksCenteredInBlackFooter = true,
             slideFramesExcludedBeforeDetection = true, queuedRailEpochRechecked = true,
             liveSceneUnchanged = true, cameraOpened = false };
+
+        async Task<object> CheckAllies()
+        {
+            var fixture = clean with { SoldierCount = 7, Objectives = [], Ally = null,
+                Enemies = [], Gates = [], Bullets = [], Effects = [] };
+            var locked = fixture with { Objectives = [new(900, .5f, .49f, StrykersRunObjectiveKind.Rescue, 8, 8)] };
+            RenderRaw(locked);
+            byte[] intact = portrait.GetPixelBytes();
+            await Save(portrait, "bulwark-locked-pod");
+            var damaged = locked with { Objectives = [new(900, .5f, .49f, StrykersRunObjectiveKind.Rescue, 3, 8)] };
+            RenderRaw(damaged);
+            byte[] broken = portrait.GetPixelBytes();
+            Check(Changed(intact, broken, 900, new(325, 565, 250, 245)) > 100,
+                "Shooting the rescue lock did not visibly crack the pod and update its remaining strength.");
+            await Save(portrait, "bulwark-damaged-pod");
+            var defender = StrykersRunFormation.DefenderPosition(fixture.SquadX);
+            var freed = fixture with { Ally = new(defender.X, defender.Y, 24, 24, .2f, 1),
+                Effects = [new(StrykersRunEffectKind.AllyUnlocked, .5f, .49f, .18f, 110)] };
+            RenderRaw(freed);
+            await Save(portrait, "bulwark-freed-full-health");
+            var steady = freed with { Effects = [] };
+            RenderRaw(steady);
+            byte[] healthy = portrait.GetPixelBytes();
+            var injured = steady with { Ally = new(defender.X, defender.Y, 7, 24, .2f, 1) };
+            RenderRaw(injured);
+            byte[] hurt = portrait.GetPixelBytes();
+            Check(Changed(healthy, hurt, 900, new(325, 780, 250, 100)) > 100,
+                "The defender's numeric HP and friendly health bar did not change after damage.");
+            await Save(portrait, "bulwark-injured-health");
+            var melee = injured with { Ally = new(defender.X, defender.Y, 7, 24, .2f, .32f),
+                Enemies = [new(901, .39f, .59f, StrykersRunEnemyKind.Brute, 3, 8, .2f),
+                    new(902, .61f, .56f, StrykersRunEnemyKind.Runner, 1, 1, .4f)],
+                Effects = [new(StrykersRunEffectKind.AllyAttack, defender.X, defender.Y, .19f, 113)] };
+            RenderRaw(melee);
+            await Save(portrait, "bulwark-melee-shockwave");
+            RenderRaw(injured with { Ally = null, Effects = [new(StrykersRunEffectKind.AllyLost, defender.X, defender.Y, .27f, 117)] });
+            await Save(portrait, "bulwark-defeated-hero-alive");
+            var cache = steady with { Objectives = [new(903, .73f, .48f, StrykersRunObjectiveKind.Reinforcements, 12, 12)] };
+            RenderRaw(cache);
+            await Save(portrait, "reinforcement-armoured-cache");
+            RenderRaw(steady with { SoldierCount = 13,
+                Effects = [new(StrykersRunEffectKind.SupplyOpened, .73f, .48f, .23f, 120)] });
+            await Save(portrait, "reinforcement-cache-opened");
+            Check(Changed(intact, portrait.GetPixelBytes(), 900, new(0, 1442, 900, 158)) == 0,
+                "The defender, rescue pod or reinforcement effects entered the protected control strip.");
+            return new { rescueLockDamageVisible = true, defenderHealthVisible = true, meleeShockwave = true,
+                defeatLeavesHero = true, reinforcementCache = true, railPixelsProtected = true,
+                additionalInspectionImages = 8, maximumObjectives = StrykersRunGame.MaximumObjectives };
+        }
 
         object CompareSettledWall(byte[] initial, byte[] pixels, string comparison, int? wallFacePixelLimit)
         {
@@ -671,7 +721,8 @@ public sealed partial class MainWindow
         }
         static bool SameRun(StrykersRunSnapshot a, StrykersRunSnapshot b) => a.SquadX == b.SquadX && a.RunSeconds == b.RunSeconds &&
             a.Distance == b.Distance && a.Score == b.Score && a.SoldierCount == b.SoldierCount && a.Enemies.SequenceEqual(b.Enemies) &&
-            a.Gates.SequenceEqual(b.Gates) && a.Bullets.SequenceEqual(b.Bullets) && a.Effects.SequenceEqual(b.Effects);
+            a.Gates.SequenceEqual(b.Gates) && a.Bullets.SequenceEqual(b.Bullets) && a.Effects.SequenceEqual(b.Effects) &&
+            a.Ally == b.Ally && a.Objectives.SequenceEqual(b.Objectives);
         static void CheckPerspective()
         {
             Check(StrykersRunRenderer.DepthScale(.10f) < StrykersRunRenderer.DepthScale(.6f) &&
@@ -691,6 +742,9 @@ public sealed partial class MainWindow
         static StrykersRunSnapshot DenseState(StrykersRunSnapshot state) => state with
         {
             SoldierCount = 64,
+            Ally = new(.5f, .66f, 17, 24, .3f, .32f),
+            Objectives = [new(900, .28f, .36f, StrykersRunObjectiveKind.Rescue, 5, 8),
+                new(901, .75f, .57f, StrykersRunObjectiveKind.Reinforcements, 7, 12)],
             Enemies = Enumerable.Range(0, 60).Select(i => new StrykersRunEnemySnapshot(i + 1,
                 .12f + i % 10 * .083f, .12f + i / 10 * .11f,
                 i % 19 == 0 ? StrykersRunEnemyKind.Boss : i % 4 == 0 ? StrykersRunEnemyKind.Brute : StrykersRunEnemyKind.Runner,

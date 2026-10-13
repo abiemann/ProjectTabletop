@@ -35,7 +35,8 @@ public sealed partial class MainWindow
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
         SetStatus("Stryker's Run: hold PLAY, then cover the white dots along the bottom edge and slide left or right. " +
-            "Stryker shoots automatically; choose gates to recruit troops. His recruits take losses first.");
+            "Stryker shoots automatically. Shoot open Bulwark's pod for a monster defender, break supply caches for recruits, " +
+            "and choose gates to grow the squad. Bulwark has his own HP; Stryker is the last soldier to fall.");
     }
 
     private void ResetStrykersRunInput()
@@ -117,6 +118,7 @@ public sealed partial class MainWindow
             phase = state.Phase.ToString(), state.Banner, state.SquadX, state.SoldierCount, state.TroopCount,
             state.HeroAlive, state.Score, state.Wave, state.Distance, state.RunSeconds, state.GameOverSeconds,
             state.RecoveringInput, enemies = state.Enemies.Count, gates = state.Gates.Count, bullets = state.Bullets.Count,
+            state.Ally, state.Objectives,
             input = Volatile.Read(ref _strykersRunLastObservation),
             processingMilliseconds = Volatile.Read(ref _strykersRunProcessingMilliseconds),
             railCameraCorners = _scene.GetStrykersRunRailGeometry()?.CameraCorners,

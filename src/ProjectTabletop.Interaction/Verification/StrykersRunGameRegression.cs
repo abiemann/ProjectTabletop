@@ -16,10 +16,15 @@ internal static class StrykersRunGameRegression
         CheckGateChoicesAndHero();
         CheckWideFormationContacts();
         CheckSweptBullets();
+        CheckObjectivesAndDefender();
+        CheckDefenderCombatAndLoss();
+        CheckNaturalReinforcements();
+        CheckRushAndObjectiveBounds();
         CheckBoundsAndBosses();
         CheckGameOverAndReset();
         Console.WriteLine("Stryker's Run simulation passed: lone persistent hero, recruits and gate arithmetic, " +
-            "fresh horizontal control, complete input pauses, hitch discard, swept nearest contacts, bounded entities, bosses and game-over reset.");
+            "shootable rescues and supplies, mortal defending ally, runner rushes, fresh horizontal control, complete input pauses, " +
+            "hitch discard, swept nearest contacts, bounded entities, bosses and game-over reset.");
     }
 
     private static void CheckStartAndInput()
@@ -126,11 +131,219 @@ internal static class StrykersRunGameRegression
         var frequent = new StrykersRunGame();
         var sparse = new StrykersRunGame();
         frequent.Start(At(0)); sparse.Start(At(0));
-        for (int ms = 10; ms <= 2000; ms += 10) { frequent.SetInput(.5f, At(ms)); frequent.Advance(At(ms)); }
-        for (int ms = 33; ms < 2000; ms += 33) { sparse.SetInput(.5f, At(ms)); sparse.Advance(At(ms)); }
-        sparse.SetInput(.5f, At(2000)); sparse.Advance(At(2000));
+        for (int ms = 10; ms <= 8000; ms += 10) { frequent.SetInput(.5f, At(ms)); frequent.Advance(At(ms)); }
+        for (int ms = 33; ms < 8000; ms += 33) { sparse.SetInput(.5f, At(ms)); sparse.Advance(At(ms)); }
+        sparse.SetInput(.5f, At(8000)); sparse.Advance(At(8000));
         Require(SameRun(frequent.Snapshot, sparse.Snapshot),
             "Different presentation frame rates changed fixed-step movement, firing, contacts or random waves.");
+    }
+
+    private static void CheckObjectivesAndDefender()
+    {
+        var game = Playing(quiet: true);
+        Objective(game, 200, .5f, .52f, StrykersRunObjectiveKind.Rescue, 2);
+        Add(game, "_bullets", "Bullet", 201, .5f, .585f);
+        Tick(game, 510);
+        var sealedPod = game.Snapshot;
+        Require(game.Snapshot.Ally is null && game.Snapshot.Objectives is [{ Health: 1 }],
+            "The rescue must count actual lock hits and stay sealed until its final hit.");
+        Add(game, "_bullets", "Bullet", 202, .5f, .585f);
+        Tick(game, 520);
+        Require(game.Snapshot.Ally is { Health: StrykersRunGame.DefenderMaximumHealth } &&
+            game.Snapshot.SoldierCount == 1 && game.Snapshot.Objectives.Count == 0 &&
+            sealedPod.Objectives is [{ Health: 1 }] && game.Snapshot.Effects.Any(effect => effect.Kind == StrykersRunEffectKind.AllyUnlocked),
+            "Breaking the last lock must free a full-health defender without replacing the hero or mutating a prior snapshot.");
+        float allyX = game.Snapshot.Ally!.Value.X;
+        Add(game, "_bullets", "Bullet", 203, allyX, game.Snapshot.Ally.Value.Y + .04f);
+        Put(game, "_soldiers", 3);
+        Gate(game, 1, .5f, StrykersRunGateKind.Subtract, 2);
+        Tick(game, 530);
+        Require(game.Snapshot.SoldierCount == 1 && game.Snapshot.Ally is { Health: StrykersRunGame.DefenderMaximumHealth },
+            "Friendly bullets and troop gates must not damage the ally or count him as a soldier.");
+        Objective(game, 204, .5f, .52f, StrykersRunObjectiveKind.Reinforcements, 1);
+        Add(game, "_bullets", "Bullet", 205, .5f, .585f);
+        Tick(game, 540);
+        Require(game.Snapshot.SoldierCount == 7 && game.Snapshot.Objectives.Count == 0 &&
+            game.Snapshot.Effects.Any(effect => effect.Kind == StrykersRunEffectKind.SupplyOpened),
+            "A destroyed supply must add exactly six recruits while leaving the defender separate.");
+        Put(game, "_soldiers", 62);
+        Objective(game, 206, .5f, .52f, StrykersRunObjectiveKind.Reinforcements, 1);
+        Add(game, "_bullets", "Bullet", 207, .5f, .585f);
+        Tick(game, 550);
+        Require(game.Snapshot.SoldierCount == StrykersRunGame.MaximumSoldiers,
+            "A supply reward must respect the existing bounded formation.");
+
+        game = Playing(quiet: true);
+        Objective(game, 300, .5f, .40f, StrykersRunObjectiveKind.Rescue, 1);
+        Enemy(game, 301, .5f, .51f, StrykersRunEnemyKind.Runner, 1);
+        Add(game, "_bullets", "Bullet", 302, .5f, .538f);
+        Tick(game, 510);
+        Require(game.Snapshot.Score == 10 && game.Snapshot.Ally is null && game.Snapshot.Objectives is [{ Health: 1 }],
+            "A nearer enemy must absorb a swept bullet before the lock behind it.");
+        game = Playing(quiet: true);
+        Objective(game, 303, .5f, .50f, StrykersRunObjectiveKind.Reinforcements, 1);
+        Enemy(game, 304, .5f, .59f, StrykersRunEnemyKind.Runner, 1);
+        Add(game, "_bullets", "Bullet", 305, .5f, .63f);
+        Tick(game, 510);
+        Require(game.Snapshot.SoldierCount == 7 && game.Snapshot.Score == 0 && game.Snapshot.Enemies is [{ Health: 1 }],
+            "A nearer supply must absorb a bullet before an enemy, without double-hitting either target.");
+
+        game = Playing(quiet: true);
+        Objective(game, 306, .5f, .52f, StrykersRunObjectiveKind.Reinforcements, 2);
+        Add(game, "_bullets", "Bullet", 307, .60f, .585f);
+        Add(game, "_bullets", "Bullet", 308, .64f, .585f);
+        Tick(game, 510);
+        Require(game.Snapshot.Objectives is [{ Health: 1 }] && game.Snapshot.Bullets is [{ Id: 308 }],
+            "Shots crossing a container's visible side must damage its lock, while shots beyond its shell must miss.");
+
+        game = Playing(quiet: true);
+        var entering = Objective(game, 309, .5f, .18f, StrykersRunObjectiveKind.Rescue, 1);
+        Add(game, "_bullets", "Bullet", 310, .5f, .24f);
+        Tick(game, 510);
+        Require(game.Snapshot.Ally is null && game.Snapshot.Objectives is [{ Health: 1 }] && game.Snapshot.Bullets.Count == 1,
+            "An objective still entering from behind the HUD must not absorb shots or unlock out of sight.");
+        entering.GetType().GetField("Y")!.SetValue(entering, StrykersRunGame.ObjectiveShootableY - .0001f);
+        Tick(game, 520);
+        Require(game.Snapshot.Ally is not null && game.Snapshot.Objectives.Count == 0 && game.Snapshot.Bullets.Count == 0,
+            "An objective must become shootable once its numbered lock is fully visible below the HUD.");
+
+        game = Playing(quiet: true);
+        Objective(game, 400, .5f, StrykersRunGame.SquadY + .061f, StrykersRunObjectiveKind.Reinforcements, 1);
+        Tick(game, 510);
+        Require(game.Snapshot.Objectives.Count == 0 && game.Snapshot.SoldierCount == 1,
+            "Passing through or missing a supply must not grant its shooting reward.");
+    }
+
+    private static void CheckDefenderCombatAndLoss()
+    {
+        var game = Playing(quiet: true);
+        Rescue(game);
+        var ally = game.Snapshot.Ally!.Value;
+        Enemy(game, 410, ally.X, ally.Y - .08f, StrykersRunEnemyKind.Brute, 5);
+        Tick(game, 530);
+        Require(game.Snapshot.Ally is { AttackSeconds: < .02f } && game.Snapshot.Enemies is [{ Health: 1 }] &&
+            game.Snapshot.Effects.Any(effect => effect.Kind == StrykersRunEffectKind.AllyAttack),
+            "The defender must strike nearby threats automatically with a visible attack pulse.");
+        Tick(game, 540);
+        Require(game.Snapshot.Enemies is [{ Health: 1 }], "A melee pulse must respect its cooldown.");
+        List(game, "_enemies").Clear();
+        Enemy(game, 411, ally.X, ally.Y - .0001f, StrykersRunEnemyKind.Boss, 100);
+        Tick(game, 550);
+        Require(game.Snapshot.Ally is { Health: 6 } && game.Snapshot.SoldierCount == 1 && game.Snapshot.Enemies.Count == 0,
+            "Intercepting a boss must consume defender HP before it reaches the squad.");
+        Enemy(game, 412, .82f, ally.Y - .0001f, StrykersRunEnemyKind.Runner, 100);
+        Tick(game, 560);
+        Require(game.Snapshot.Ally is { Health: 6 } && game.Snapshot.Enemies.Count == 1,
+            "The defender must protect only his visible footprint, not the entire road.");
+        List(game, "_enemies").Clear();
+        Enemy(game, 413, ally.X, ally.Y - .0001f, StrykersRunEnemyKind.Boss, 100);
+        Tick(game, 570);
+        Require(game.Snapshot.Ally is null && game.Snapshot is { HeroAlive: true, SoldierCount: 1, Phase: StrykersRunPhase.Playing } &&
+            game.Snapshot.Effects.Any(effect => effect.Kind == StrykersRunEffectKind.AllyLost),
+            "The defender must disappear at zero HP without ending a living hero's run.");
+        Enemy(game, 414, .5f, StrykersRunGame.SquadY - .0001f, StrykersRunEnemyKind.Runner, 100);
+        Tick(game, 580);
+        Require(game.Snapshot is { HeroAlive: false, Phase: StrykersRunPhase.GameOver },
+            "A dead defender must not keep protecting the hero, whose death still ends the run.");
+
+        game = Playing(quiet: true);
+        Rescue(game);
+        Objective(game, 420, .8f, .3f, StrykersRunObjectiveKind.Reinforcements, 12);
+        Tick(game, 530);
+        game.ClearInput(At(531));
+        var frozen = game.Snapshot;
+        for (int ms = 540; ms <= 1500; ms += 10) game.Advance(At(ms));
+        Require(SameRun(frozen, game.Snapshot), "Missing input must freeze ally animation, attack timers and moving objective HP/positions.");
+        game.SetInput(.1f, At(1510)); game.Advance(At(1510));
+        Require(SameRun(frozen, game.Snapshot), "Recovering input must not replay ally or objective time debt.");
+        for (int ms = 1520; ms <= 1800; ms += 10) { game.SetInput(0, At(ms)); game.Advance(At(ms)); }
+        var edge = game.Snapshot.Ally!.Value;
+        Require(edge.X == StrykersRunFormation.DefenderPosition(StrykersRunGame.RoadLeft).X && edge.Y < StrykersRunGame.SquadY &&
+            edge.X - StrykersRunFormation.DefenderHalfWidth >= StrykersRunGame.RoadLeft,
+            "The ally must follow ahead of the hero while staying inside the unchanged road bounds.");
+        game.Start(At(1810));
+        Require(game.Snapshot.Ally is null && game.Snapshot.Objectives.Count == 0 && game.Snapshot.SoldierCount == 1,
+            "PLAY must reset the ally and every unfinished lock instead of carrying an unlock between runs.");
+    }
+
+    private static void CheckNaturalReinforcements()
+    {
+        var game = new StrykersRunGame();
+        game.Start(At(0));
+        float unlockAt = -1;
+        bool supplyOpened = false;
+        for (int ms = 10; ms <= 26000; ms += 10)
+        {
+            var before = game.Snapshot;
+            float target = .5f;
+            var objective = before.Objectives.OrderByDescending(item => item.Y).FirstOrDefault();
+            if (objective.Id != 0) target = objective.X;
+            var goodGate = before.Gates.FirstOrDefault(gate => gate.Y > .66f && gate.Kind != StrykersRunGateKind.Subtract);
+            if (goodGate.Id != 0) target = goodGate.X;
+            game.SetInput((target - StrykersRunGame.RoadLeft) / (StrykersRunGame.RoadRight - StrykersRunGame.RoadLeft), At(ms));
+            game.Advance(At(ms));
+            var after = game.Snapshot;
+            if (unlockAt < 0 && after.Ally is not null)
+            {
+                unlockAt = after.RunSeconds;
+                Require(before.SoldierCount == 1 && after.SoldierCount == 1 && unlockAt <= 15,
+                    "The first naturally spawned rescue must be shootable by the lone initial hero within 15 active seconds.");
+            }
+            if (before.Objectives.Any(item => item.Kind == StrykersRunObjectiveKind.Reinforcements) &&
+                after.Effects.Any(effect => effect.Kind == StrykersRunEffectKind.SupplyOpened && effect.Age <= 1f / 120))
+            {
+                Require(after.SoldierCount == Math.Min(StrykersRunGame.MaximumSoldiers, before.SoldierCount + 6),
+                    "A naturally spawned shot-to-open supply did not deliver exactly six recruits.");
+                supplyOpened = true;
+                break;
+            }
+            Require(after.Phase != StrykersRunPhase.GameOver, "The natural first encounters were not attainable with visible lane choices.");
+        }
+        Require(unlockAt >= 2 && supplyOpened,
+            "The public gameplay path must spawn and unlock a first rescue, then offer a reachable supply cache.");
+        Console.WriteLine($"Natural encounters passed: lone-hero rescue at {unlockAt:F2}s; six-recruit supply at {game.Snapshot.RunSeconds:F2}s.");
+    }
+
+    private static void CheckRushAndObjectiveBounds()
+    {
+        var game = Playing(quiet: true);
+        Put(game, "_rushRemaining", 0f);
+        Tick(game, 510);
+        Require(game.Snapshot.Enemies.Count == 4 && game.Snapshot.Enemies.All(enemy => enemy.Kind == StrykersRunEnemyKind.Runner) &&
+            game.Snapshot.Enemies.Max(enemy => enemy.X) - game.Snapshot.Enemies.Min(enemy => enemy.X) < .2f,
+            "The first rush must introduce a compact readable band of four runners.");
+        for (int i = 4; i < StrykersRunGame.MaximumEnemies; i++) Enemy(game, 500 + i, .1f, -2, StrykersRunEnemyKind.Runner, 10);
+        Put(game, "_rushRemaining", 0f);
+        Tick(game, 520);
+        Require(game.Snapshot.Enemies.Count == StrykersRunGame.MaximumEnemies,
+            "A runner rush must share the existing enemy cap.");
+        for (int ms = 530; ms <= 550; ms += 10)
+        {
+            Put(game, "_objectiveRemaining", 0f);
+            Tick(game, ms);
+        }
+        Require(game.Snapshot.Objectives.Count == StrykersRunGame.MaximumObjectives &&
+            game.Snapshot.Objectives.Count(item => item.Kind == StrykersRunObjectiveKind.Rescue) == 1,
+            "Encounter scheduling must allow at most two objectives and one rescue pod.");
+        List(game, "_objectives").Clear();
+        Rescue(game, 560);
+        Put(game, "_objectiveRemaining", 0f);
+        Tick(game, 580);
+        Require(game.Snapshot.Objectives is [{ Kind: StrykersRunObjectiveKind.Reinforcements }],
+            "A living ally must replace later rescue offers with supplies, never create a second ally.");
+        Put(game, "_ally", null!);
+        Put(game, "_objectiveRemaining", 0f);
+        Tick(game, 590);
+        Require(game.Snapshot.Objectives.Any(item => item.Kind == StrykersRunObjectiveKind.Rescue),
+            "Losing a defender must allow a subsequent rescue encounter.");
+    }
+
+    private static void Rescue(StrykersRunGame game, int ms = 510)
+    {
+        Objective(game, 4000 + ms, .5f, .52f, StrykersRunObjectiveKind.Rescue, 1);
+        Add(game, "_bullets", "Bullet", 5000 + ms, .5f, .585f);
+        Tick(game, ms);
+        Require(game.Snapshot.Ally is not null, "The rescue fixture did not unlock its defender.");
     }
 
     private static void CheckSweptBullets()
@@ -241,12 +454,15 @@ internal static class StrykersRunGameRegression
         {
             List(game, "_bullets").Clear(); List(game, "_effects").Clear();
             Put(game, "_fireRemaining", 100f); Put(game, "_enemyRemaining", 100f); Put(game, "_gateRemaining", 100f);
+            Put(game, "_objectiveRemaining", 100f); Put(game, "_rushRemaining", 100f);
         }
         return game;
     }
 
     private static void Tick(StrykersRunGame game, int ms) { game.SetInput(Math.Clamp((Get<float>(game, "_targetX") - .08f) / .84f, 0, 1), At(ms)); game.Advance(At(ms)); }
     private static void Enemy(StrykersRunGame game, int id, float x, float y, StrykersRunEnemyKind kind, int health) => Add(game, "_enemies", "Enemy", id, x, y, kind, health);
+    private static object Objective(StrykersRunGame game, int id, float x, float y, StrykersRunObjectiveKind kind, int health) =>
+        Add(game, "_objectives", "Objective", id, x, y, kind, health);
     private static void Gate(StrykersRunGame game, int row, float x, StrykersRunGateKind kind, int value)
     {
         var gate = Add(game, "_gates", "Gate", row * 10 + List(game, "_gates").Count, row, x, kind, value);
@@ -264,7 +480,8 @@ internal static class StrykersRunGameRegression
     private static void Put(StrykersRunGame game, string field, object value) => typeof(StrykersRunGame).GetField(field, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(game, value);
     private static bool SameRun(StrykersRunSnapshot a, StrykersRunSnapshot b) => a.SquadX == b.SquadX && a.RunSeconds == b.RunSeconds &&
         a.Distance == b.Distance && a.SoldierCount == b.SoldierCount && a.Score == b.Score && a.Wave == b.Wave &&
-        a.Enemies.SequenceEqual(b.Enemies) && a.Gates.SequenceEqual(b.Gates) && a.Bullets.SequenceEqual(b.Bullets) && a.Effects.SequenceEqual(b.Effects);
+        a.Enemies.SequenceEqual(b.Enemies) && a.Gates.SequenceEqual(b.Gates) && a.Bullets.SequenceEqual(b.Bullets) && a.Effects.SequenceEqual(b.Effects) &&
+        a.Objectives.SequenceEqual(b.Objectives) && a.Ally == b.Ally;
     private static bool Near(float a, float b) => Math.Abs(a - b) < .0001f;
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 }

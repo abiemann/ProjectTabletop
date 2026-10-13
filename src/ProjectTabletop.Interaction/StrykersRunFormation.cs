@@ -6,6 +6,11 @@ namespace ProjectTabletop.Interaction;
 public static class StrykersRunFormation
 {
     public const float BodyHalfWidth = 24f / 900;
+    public const float DefenderHalfWidth = .072f;
+
+    public static Vector2 DefenderPosition(float heroX) => new(
+        Math.Clamp(heroX, StrykersRunGame.RoadLeft + DefenderHalfWidth,
+            StrykersRunGame.RoadRight - DefenderHalfWidth), .66f);
 
     public static Vector2 TroopPosition(float heroX, int soldierCount, int troopIndex)
     {

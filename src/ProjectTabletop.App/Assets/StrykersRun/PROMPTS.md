@@ -1,10 +1,13 @@
-# Stryker's Run reconstructed artwork specifications
+# Stryker's Run artwork prompts and specifications
 
 These are reconstructed specifications for the original assets generated on
 2026-10-12. **The verbatim image-generation tool prompts were not retained.**
 This document is a reproducible design brief, not an exact generation log.
 The final selected dimensions and SHA-256 hashes are recorded in
 [ARTWORK.md](ARTWORK.md).
+
+The Bulwark section records the exact built-in generation and edit prompts
+used for the new ally atlas on 2026-10-13.
 
 ## Support soldiers and monsters
 
@@ -75,3 +78,41 @@ the three cutouts had residual alpha-1 background pixels normalized to alpha
 0; all alpha values 2–255 were retained. This cleanup did not replace any
 artwork with a drawn background. The renderer determines atlas source bounds
 from alpha coverage at load time and scales sprites uniformly at runtime.
+
+## Bulwark ally: exact prompts, 2026-10-13
+
+All three calls used the built-in image-generation tool with
+`transparent_background: true`. The first call used no source image. The
+second edited the first result, and the third edited the second result.
+After the third output, the user approved a scripted alpha-only cleanup that
+set 14,243 residual alpha-1 pixels to alpha 0. Every RGB value and all other
+alpha values were preserved. Verification and the final checksum are recorded
+in [ARTWORK.md](ARTWORK.md).
+
+### Initial generation
+
+```text
+Use case: stylized-concept.
+Asset type: original production-ready transparent animation sprite atlas for Stryker's Run, an above-and-behind arcade road shooter.
+Create Bulwark, a powerful allied monster guardian facing AWAY from the viewer, always looking and moving toward the top of the image. Camera is elevated directly behind the creature, showing its upper back, shoulders, crown of head, forearms, legs and feet, not its face. It is a hulking muscular organic stone-skinned guardian, desaturated teal hide and overlapping natural mineral plates, enormous hunched shoulders, heavy long gauntlets, thick legs, and a simple weathered navy squad harness with restrained brass hardware. Its back and shoulder outline should make it immediately recognizable as a protective ally. Mature premium hand-painted arcade illustration, richly textured physical materials, crisp natural silhouettes, carefully shaded anatomy, cinematic but readable highlights. No cute cartoon, no low-poly rendering.
+Exactly FOUR full-body poses of THE SAME monster in ONE horizontal row, evenly spaced four-column atlas. Left to right: (1) left-foot forward heavy walking stride, (2) right-foot forward heavy walking stride, (3) both fists raised overhead ready to pound forward, (4) crouched forward with both giant fists lowered in a ground-strike follow-through. All four poses face away/up-screen. Maintain identical anatomy, armor, scale and elevated rear camera in all cells. Align feet to a common baseline. Each body stays fully contained inside its separate cell, with generous empty transparent gutters and margins, no overlap, no cut-off hands or feet. Frame 3 must leave room for raised hands. Wide 3:1 canvas.
+Background: genuine RGBA transparency with alpha exactly 0 everywhere outside each creature, including gaps between limbs. Clean antialiased edges. Never draw, render or bake a checkerboard, matte, floor or backdrop. No cast ground shadows, no dust, no impact ring, no spark effects, no glow surrounding the character, no border, no captions, no writing, no logo, no UI. The app supplies all ground shadows and attack effects at runtime.
+```
+
+### Atlas spacing edit
+
+```text
+Use case: precise-object-edit.
+Image 1 is the edit target: the four-pose Bulwark allied monster sprite atlas.
+Keep the exact creature design, rich painted arcade style, desaturated teal stone hide, navy/brass harness, all four rear-facing poses in the same order, above-and-behind camera, anatomy, colors and lighting. Change only atlas spacing and alpha cleanliness.
+Give each pose a generous clear transparent margin inside its own equal-width cell. Slightly reduce all four creatures uniformly to about 82% of their present scale, re-center each inside its quarter of the wide canvas, and align their feet on a consistent lower baseline. Preserve full raised arms and feet. Four columns, one row, no other artwork.
+Crucially, deliver actual RGBA with alpha exactly ZERO throughout all exterior background, outer edges, four corners, generous vertical cell gutters, and gaps between limbs. The source contains faint nearly transparent alpha-1 residual outside the bodies; eliminate that residue. Keep clean antialiased edges only immediately at creature silhouettes. No checkerboard pixels, no painted backdrop, no new shadow, no floor, no matte, no text, no impact effect.
+```
+
+### Transparent-background cleanup edit
+
+```text
+Use case: background-extraction.
+Image 1 is the edit target, a four-pose Bulwark sprite atlas. Make only a transparent-background cleanup. Preserve the exact artwork, all four existing rear-facing poses, every body silhouette, spacing, scale, 2172x724 canvas, materials, navy/brass harness, desaturated teal stone coloring, and lighting. Do not redraw or move the creatures.
+The actual source RGBA has faint nearly invisible alpha=1 residue in otherwise empty areas. Remove all that residue: all pixels with alpha 1 must become alpha 0. Every empty background area, vertical gutter, corner, outside border, and enclosed gap must be fully transparent alpha 0. Preserve opaque body pixels and meaningful antialiased silhouette edges. This is a technical cutout cleanup, no additional artwork. No checkerboard, backdrop, floor, ground shadow, matte, text, effect, cropping, recoloring, or pose change. Return a clean RGBA PNG with real transparency.
+```
