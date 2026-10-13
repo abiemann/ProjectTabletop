@@ -417,7 +417,7 @@ public sealed partial class SceneCompositor
             try
             {
                 DrawFootballSurface(ds);
-                DrawFootballControls(ds);
+                DrawFieldGameControls(ds);
             }
             finally { ds.Transform = previous; }
         }
@@ -470,32 +470,34 @@ public sealed partial class SceneCompositor
                 field.Width * BoardSurfaceSize, statusHeight), Color.FromArgb(255, 241, 244, 227), caption);
     }
 
-    private static Rect FootballButtonTextRect(BoardButton button) => new(button.Bounds.X * BoardSurfaceSize + 12,
+    private static Rect FieldGameButtonTextRect(BoardButton button) => new(button.Bounds.X * BoardSurfaceSize + 12,
         button.Bounds.Y * BoardSurfaceSize + 12, button.Bounds.Width * BoardSurfaceSize - 24, button.Bounds.Height * BoardSurfaceSize - 24);
 
-    private static CanvasTextFormat FootballButtonTextFormat() => new()
+    private static CanvasTextFormat FieldGameButtonTextFormat() => new()
     {
         FontFamily = "Bahnschrift", FontSize = 28, HorizontalAlignment = CanvasHorizontalAlignment.Center,
         VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap
     };
 
-    private void DrawFootballControls(CanvasDrawingSession ds)
+    private void DrawFieldGameControls(CanvasDrawingSession ds)
     {
-        using var format = FootballButtonTextFormat();
+        SyncHoldControlExposure();
+        using var format = FieldGameButtonTextFormat();
         foreach (var button in _boardSession.Buttons)
         {
             var b = button.Bounds;
             var rect = new Rect(b.X * BoardSurfaceSize, b.Y * BoardSurfaceSize, b.Width * BoardSurfaceSize, b.Height * BoardSurfaceSize);
-            ds.FillRoundedRectangle(rect, 14, 14, Color.FromArgb(255, 221, 229, 211));
+            // A light plate with dark lettering: exposure protection dims the plate.
+            ds.FillRoundedRectangle(rect, 14, 14, HoldExposure(Color.FromArgb(255, 221, 229, 211), _holdControlBrightness));
             ds.DrawRoundedRectangle(rect, 14, 14, Color.FromArgb(255, 130, 163, 133), 2);
-            DrawBoardAspectText(ds, button.Label, FootballButtonTextRect(button), Color.FromArgb(255, 21, 46, 36), format);
+            DrawBoardAspectText(ds, button.Label, FieldGameButtonTextRect(button), Color.FromArgb(255, 21, 46, 36), format);
         }
     }
 
-    private HandTrackingBounds FootballButtonTextRegion(CanvasDevice device, BoardButton button)
+    private HandTrackingBounds FieldGameButtonTextRegion(CanvasDevice device, BoardButton button)
     {
-        using var format = FootballButtonTextFormat();
-        return BoardAspectButtonTextRegion(device, button, format, FootballButtonTextRect(button));
+        using var format = FieldGameButtonTextFormat();
+        return BoardAspectButtonTextRegion(device, button, format, FieldGameButtonTextRect(button));
     }
 
     // Null until the background pitch build publishes; the menu then redraws.

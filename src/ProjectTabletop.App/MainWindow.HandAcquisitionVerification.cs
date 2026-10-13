@@ -11,20 +11,39 @@ public sealed partial class MainWindow
 {
     private async Task<object> SaveHandAcquisitionSnapshotAsync()
     {
-        var frame = _lastHandAcquisitionFrame ?? throw new InvalidOperationException("No acquisition camera frame.");
-        var context = _lastHandAcquisitionContext;
-        var expected = context?.ExpectedScene ?? throw new InvalidOperationException("No generated acquisition reference yet.");
+        HoldButtonSnapshot? hold = null;
+        if (_scene.CurrentBoardScreen == BoardScreen.StrykersRun)
+        {
+            if (!_boardHandDiagnosticLogging)
+                throw new InvalidOperationException("Enable board diagnostic logging before capturing a Stryker's Run caption snapshot.");
+            hold = Volatile.Read(ref _lastHoldButtonSnapshot);
+            if (hold is null || !hold.Context.ButtonIds.Any(id => id.StartsWith("strykers-run-", StringComparison.Ordinal)))
+                throw new InvalidOperationException("No processed Stryker's Run caption frame with its generated reference yet.");
+        }
+        var frame = hold?.Frame ?? _lastHandAcquisitionFrame ?? throw new InvalidOperationException("No acquisition camera frame.");
+        var context = hold is null ? _lastHandAcquisitionContext : null;
+        var expected = hold?.Context.ExpectedScene ?? context?.ExpectedScene ??
+            throw new InvalidOperationException("No generated acquisition reference yet.");
+        object? detection = hold is null ? _lastHandAcquisitionDetection : new
+        {
+            frameTime = hold.Frame.Timestamp, hold.Context.Revision, hold.Generation, hold.ProcessedAt,
+            hold.Context.ButtonIds, hold.Context.EnabledHoldIds,
+            held = hold.Query.Held, cleared = hold.Query.Cleared, presence = hold.Query.Presence
+        };
         string directory = Path.Combine(_appDataDirectory, "HandAcquisitionSnapshots",
             $"{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
         var metadata = System.Text.Json.JsonSerializer.Serialize(new
         {
             capturedAtUtc = DateTimeOffset.UtcNow,
+            snapshotKind = hold is null ? "hand-acquisition" : "hold-caption",
             latestCameraFrameUtc = Volatile.Read(ref _latestCameraFrame)?.Timestamp,
             frame.Timestamp, cameraWidth = frame.Width, cameraHeight = frame.Height, frame.Stride,
             expected.Width, expected.Height, expected.CameraToBoard, expected.BoardSearchRegions,
-            expected.BoardReferenceRegions, expected.BoardTriggerRegions, expected.AllowsLocalForegroundContext, context!.Revision,
-            context.SearchPolygon, context.IlluminatedHint, context.IlluminationStartedAt,
-            lighting = _scene.GetHandAcquisitionDiagnostics(), detection = _lastHandAcquisitionDetection
+            expected.BoardReferenceRegions, expected.BoardTriggerRegions, expected.BoardControlReferenceRegions,
+            expected.AllowsLocalForegroundContext, Revision = hold?.Context.Revision ?? context!.Revision,
+            SearchPolygon = hold?.Context.SearchPolygon ?? context!.SearchPolygon,
+            IlluminatedHint = context?.IlluminatedHint, IlluminationStartedAt = context?.IlluminationStartedAt,
+            lighting = _scene.GetHandAcquisitionDiagnostics(), detection
         });
         Directory.CreateDirectory(directory);
         await File.WriteAllBytesAsync(Path.Combine(directory, "expected.bgra"), expected.Bgra);

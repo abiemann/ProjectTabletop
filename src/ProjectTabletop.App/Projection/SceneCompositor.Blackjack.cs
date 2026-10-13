@@ -18,7 +18,7 @@ public sealed partial class SceneCompositor
     private static readonly Color CasinoMuted = ThemeColor(157, 188, 168);
 
     /// <summary>One perspective-correct table; card and button positions use the same board coordinates.</summary>
-    private static void DrawBlackjackTable(CanvasDrawingSession ds, BlackjackSnapshot game,
+    private void DrawBlackjackTable(CanvasDrawingSession ds, BlackjackSnapshot game,
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
         IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback,
         IReadOnlyDictionary<int, IReadOnlySet<int>>? flyingPlayerCards = null, BlackjackDealFrame? deal = null)
@@ -182,7 +182,7 @@ public sealed partial class SceneCompositor
             ThemeColor(247, 229, 187, 75), 1);
     }
 
-    private static void DrawCasinoButton(CanvasDrawingSession ds, BoardButton button, bool enabled,
+    private void DrawCasinoButton(CanvasDrawingSession ds, BoardButton button, bool enabled,
         bool hovered, decimal selectedBet, decimal bankroll)
     {
         var bounds = button.Bounds;
@@ -212,9 +212,13 @@ public sealed partial class SceneCompositor
             : hovered ? ThemeColor(51, 99, 77) : ThemeColor(28, 61, 48);
         Color bottom = !enabled ? ThemeColor(21, 40, 32) : primary ? ThemeColor(179, 140, 74)
             : hovered ? ThemeColor(28, 70, 53) : ThemeColor(14, 37, 29);
+        // Deal has dark ink on a light plate; the other hold actions have light ink.
+        bool lightPlate = primary && enabled;
+        double plate = button.IsHold && lightPlate ? _holdControlBrightness : 1;
+        double lettering = button.IsHold && !lightPlate ? _holdControlBrightness : 1;
         ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 5, rect.Width, rect.Height),
             radius, radius, ThemeColor(0, 12, 7, 120));
-        using var finish = new CanvasLinearGradientBrush(ds.Device, top, bottom)
+        using var finish = new CanvasLinearGradientBrush(ds.Device, HoldExposure(top, plate), HoldExposure(bottom, plate))
         { StartPoint = new((float)rect.X, (float)rect.Y), EndPoint = new((float)rect.X, (float)rect.Bottom) };
         ds.FillRoundedRectangle(rect, radius, radius, finish);
         Color edge = hovered || selected ? CasinoGold : enabled ? ThemeColor(136, 155, 114) : ThemeColor(62, 81, 61);
@@ -240,7 +244,7 @@ public sealed partial class SceneCompositor
         else
         {
             var text = CasinoButtonTextSpec(button);
-            CasinoText(ds, text.Caption, text.Bounds, text.Size, ink, "Bahnschrift", true);
+            CasinoText(ds, text.Caption, text.Bounds, text.Size, HoldExposure(ink, lettering), "Bahnschrift", true);
             if (primary)
                 CasinoText(ds, "NEW HAND", new Rect(rect.X + 8, rect.Bottom - 33, rect.Width - 16, 22), 13,
                     ThemeColor(63, 55, 29), "Bahnschrift", true);

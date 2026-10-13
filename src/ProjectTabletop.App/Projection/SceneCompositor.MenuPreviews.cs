@@ -28,7 +28,7 @@ public sealed partial class SceneCompositor
             ObjectDisposedException.ThrowIf(_disposed, this);
             // The Football card's thumbnail is drawn from that board's cached pitch.
             return Task.WhenAll(GetMenuPreviewImages(device).EnsureReadyAsync(),
-                GetFootballRenderer(device).EnsurePitchAsync());
+                GetFootballRenderer(device).EnsurePitchAsync(), GetStrykersRunRenderer(device).EnsureReadyAsync());
         }
     }
 
@@ -49,7 +49,9 @@ public sealed partial class SceneCompositor
         var images = GetMenuPreviewImages(device);
         var football = GetFootballRenderer(device);
         _ = football.EnsurePitchAsync();
-        bool ready = images.IsReady && football.PitchCompleted;
+        var strykersRun = GetStrykersRunRenderer(device);
+        _ = strykersRun.EnsureReadyAsync();
+        bool ready = images.IsReady && football.PitchCompleted && (strykersRun.Ready || strykersRun.Error is not null);
         if (ready == _menuPreviewReady) return;
         _menuPreviewReady = ready;
         if (ready && images.Error is { } error)
@@ -72,7 +74,8 @@ public sealed partial class SceneCompositor
     private void DrawMenuPreview(CanvasDrawingSession ds, Rect rect, Rect inside, float radius, BoardScreen screen)
     {
         if (!_menuPreviewReady) return;
-        var image = screen == BoardScreen.Football ? FootballMenuThumbnail(ds.Device) : _menuPreviewImages?.Image(screen);
+        var image = screen == BoardScreen.Football ? FootballMenuThumbnail(ds.Device) :
+            screen == BoardScreen.StrykersRun ? StrykersRunMenuThumbnail(ds.Device) : _menuPreviewImages?.Image(screen);
         if (image is null) return;
         // Keep the original diagonal sheen and rounded panel clip. Only the
         // destination artwork is baked; captions and hold rims remain live.

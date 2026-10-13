@@ -276,6 +276,7 @@ HandSpotlightRegression.Run();
 HandSpotlightSmoothingRegression.Run();
 PaintDisturbanceRegression.Run();
 PhotoCopyRegression.Run();
+PatternRailRegression.Run();
 EyeTipRegression.Run();
 ColorTipRegression.Run();
 PhotoObjectRegression.Run();

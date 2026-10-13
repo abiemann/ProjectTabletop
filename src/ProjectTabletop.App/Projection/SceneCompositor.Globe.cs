@@ -65,7 +65,8 @@ public sealed partial class SceneCompositor
                 new Rect(140, 395, 720, 80), 24, AppPalette.MutedText);
         }
 
-        DrawGlobeControls(ds, buttons, hovered, selectionFeedback, drawerOpen, drawerProgress, boardAspect);
+        DrawGlobeControls(ds, buttons, hovered, selectionFeedback, drawerOpen, drawerProgress, boardAspect,
+            _holdControlBrightness);
 
         const string credit = "NASA EARTH OBSERVATIONS";
         var zoomLabel = state.TargetZoom.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "×";
@@ -94,10 +95,11 @@ public sealed partial class SceneCompositor
 
     private static void DrawGlobeControls(CanvasDrawingSession ds, IReadOnlyList<BoardButton> buttons,
         IReadOnlyList<string> hovered, IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback,
-        bool drawerOpen = false, float drawerProgress = 1, double boardAspect = 1)
+        bool drawerOpen = false, float drawerProgress = 1, double boardAspect = 1, double holdExposure = 1)
     {
         DrawBoardTitle(ds, "GLOBE");
-        DrawBoardDrawerControls(ds, buttons, hovered, selectionFeedback, drawerOpen, drawerProgress, boardAspect);
+        DrawBoardDrawerControls(ds, buttons, hovered, selectionFeedback, drawerOpen, drawerProgress, boardAspect,
+            holdExposure);
     }
 
     private static void GlobeText(CanvasDrawingSession ds, string text, Rect rect, float size,

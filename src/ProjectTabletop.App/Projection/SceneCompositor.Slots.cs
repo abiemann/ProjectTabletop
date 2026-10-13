@@ -74,7 +74,7 @@ public sealed partial class SceneCompositor
         DrawSlotPlaque(ds, new Rect(670, 740, 270, 92), game.InFreeSpins ? "FREE SPINS WIN" : "WIN",
             SlotGame.Format(game.InFreeSpins ? game.FreeSpinsWin : game.RoundWin), a, highlight: game.RoundWin > 0);
 
-        foreach (var button in buttons) DrawSlotButton(ds, button, game, a);
+        foreach (var button in buttons) DrawSlotButton(ds, button, game, a, _holdControlBrightness);
     }
 
     private const double SlotWinMessageDuration = .65;
@@ -223,15 +223,17 @@ public sealed partial class SceneCompositor
 
     // Pale opaque buttons with dark captions: palm-down fingers over dark glass
     // gave the camera almost no contrast. Captions are the long-press evidence.
-    private static void DrawSlotButton(CanvasDrawingSession ds, BoardButton button, SlotSnapshot game, float aspect)
+    private static void DrawSlotButton(CanvasDrawingSession ds, BoardButton button, SlotSnapshot game, float aspect,
+        double holdExposure = 1)
     {
+        double plate = button.IsHold ? holdExposure : 1;
         var rect = SlotButtonRect(button);
         float radius = BoardButtonCornerRadius(button);
         bool spin = button.Id is "slot-spin" or "slot-refill";
         ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 6, rect.Width, rect.Height), radius, radius, ThemeColor(0, 0, 0, 140));
         Color top = !button.Enabled ? ThemeColor(150, 138, 124) : spin ? ThemeColor(255, 228, 150) : ThemeColor(250, 240, 218);
         Color bottom = !button.Enabled ? ThemeColor(118, 106, 96) : spin ? ThemeColor(240, 170, 80) : ThemeColor(222, 204, 164);
-        using var finish = new CanvasLinearGradientBrush(ds.Device, top, bottom)
+        using var finish = new CanvasLinearGradientBrush(ds.Device, HoldExposure(top, plate), HoldExposure(bottom, plate))
         { StartPoint = new(0, (float)rect.Y), EndPoint = new(0, (float)rect.Bottom) };
         ds.FillRoundedRectangle(rect, radius, radius, finish);
         ds.DrawRoundedRectangle(rect, radius, radius, button.Enabled ? SlotDeepGold : ThemeColor(90, 80, 70), 2);
@@ -280,7 +282,8 @@ public sealed partial class SceneCompositor
     {
         ds.Clear(Microsoft.UI.Colors.Black);
         var game = _boardSession.SlotsState;
-        foreach (var button in _boardSession.Buttons) DrawSlotButton(ds, button, game, SlotsLayout(PaintBoardAspect()).Aspect);
+        foreach (var button in _boardSession.Buttons)
+            DrawSlotButton(ds, button, game, SlotsLayout(PaintBoardAspect()).Aspect, _holdControlBrightness);
     }
 
     /// <summary>Text drawn physically unstretched: the square layout is widened by the board aspect.</summary>

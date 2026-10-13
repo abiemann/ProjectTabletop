@@ -126,6 +126,7 @@ public sealed partial class SceneCompositor : IDisposable
             _detectedBoardCorners = null;
             _boardCameraMap = null;
             _boardSurfaceMap = null;
+            ResetHoldControlExposure();
             SyncWaterGardenSession();
             SyncFootballSession();
             ResetBoardRaster();
@@ -154,7 +155,9 @@ public sealed partial class SceneCompositor : IDisposable
                 if (cancelCrownDeedEntrance) CancelCrownDeedEntrance();
                 _handVisualResetThrough = MonotonicClock.UtcNow;
                 ClearHandSpotlights();
+                ResetHoldControlExposure();
                 _boardSession.ResetInput(MonotonicClock.UtcNow);
+                ClearStrykersRunObservations();
                 CancelBlackjackDeal();
                 CancelCrownDeedDiceAnimation();
                 if (!cancelCrownDeedEntrance && _crownDeedEntranceStartedAt is { } started && !_crownDeedEntranceCompleted)
@@ -395,7 +398,7 @@ public sealed partial class SceneCompositor : IDisposable
             // The ordered calibration dots establish projector coordinates.
             // Camera corner order must not choose the interface's first facing.
             var heading = _boardFacingDegrees ?? 0;
-            var ordered = BoardOrientation.Orient(points, heading, _displayAspect);
+            var ordered = BoardOrientation.Orient(points, heading + BoardFacingOffsetDegrees, _displayAspect);
             var grid = BoardGrid.Create(ordered.Select(point => new Vector2((float)point.X, (float)point.Y)).ToArray());
             ApplyDetectedBoardGrid(grid, cameraMap);
             // Save the initial projector-facing default only after validation.
@@ -416,8 +419,11 @@ public sealed partial class SceneCompositor : IDisposable
         _boardMediaClip = mediaClip;
         _boardCameraMap = cameraMap;
         _boardSurfaceMap = surfaceMap;
+        _appliedBoardFacingOffsetDegrees = BoardFacingOffsetDegrees;
+        ResetHoldControlExposure();
         SyncWaterGardenSession();
         SyncFootballSession();
+        SyncStrykersRunSession();
         _handTips = [];
         _handVisualResetThrough = MonotonicClock.UtcNow;
         ClearHandSpotlights();
@@ -936,6 +942,7 @@ public sealed partial class SceneCompositor : IDisposable
             DisposePaintResources();
             DisposeWaterGardenResources();
             DisposeFootballResources();
+            DisposeStrykersRunResources();
             DisposeWaterGardenArtwork();
             DisposeEyeProjectionReference();
             DisposePaintReference();

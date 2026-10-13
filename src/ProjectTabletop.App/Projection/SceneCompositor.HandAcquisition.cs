@@ -90,7 +90,8 @@ public sealed partial class SceneCompositor
             var animating = blackjack && HasBlackjackCardAnimation(now) ||
                 _boardSession.Screen == BoardScreen.CrownDeed &&
                     (CrownDeedEntranceActive || HasCrownDeedDiceAnimation(_crownDeedClock()) || HasCrownDeedDrawerAnimation(_crownDeedClock())) ||
-                HasBoardControlDrawerAnimation();
+                HasBoardControlDrawerAnimation() || _boardSession.Screen == BoardScreen.StrykersRun &&
+                    _boardSession.StrykersRunControlsAnimating;
             var state = CurrentAcquisitionState();
             var buttons = _boardSession.Buttons;
             if (_acquisitionScene != state || !_acquisitionButtons.SequenceEqual(buttons))
@@ -170,7 +171,7 @@ public sealed partial class SceneCompositor
     // fingertips search the calibrated pitch; marker-only play searches no regions.
     // A null context would instead permit the normal full-camera hand search.
     private bool AcquisitionBoardReady => !_disposed && CurrentBoardArtworkReady && !_boardSession.MenuScrolling &&
-        (_boardSession.Buttons.Count > 0 || _boardSession.Screen == BoardScreen.Football) &&
+        (_boardSession.Buttons.Count > 0 || _boardSession.Screen is BoardScreen.Football or BoardScreen.StrykersRun) &&
         (_boardSession.Screen is not (BoardScreen.Menu or BoardScreen.Settings) || _menuPreviewReady) &&
         !_blackOutput && !_boardSetup && !IsBoardRevealActive && _calibrationTarget < 0 &&
         _boardMediaClip is not null && _boardCameraMap is not null && _boardSurfaceMap is not null;
@@ -350,11 +351,13 @@ public sealed partial class SceneCompositor
         var globe = _boardSession.Screen == BoardScreen.Globe;
         var water = _boardSession.Screen == BoardScreen.WaterGarden;
         var football = _boardSession.Screen == BoardScreen.Football;
+        var strykersRun = _boardSession.Screen == BoardScreen.StrykersRun;
         var slots = _boardSession.Screen == BoardScreen.Slots;
         bool roulette = _boardSession.Screen == BoardScreen.Roulette;
         if (_boardApplicationTarget is null || _renderedBoardState is not { } rendered ||
             rendered.Screen != _boardSession.Screen) return null;
-        if (!photoCopy && !globe && !roulette && !water && !football && (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
+        if (!photoCopy && !globe && !roulette && !water && !football && !strykersRun &&
+            (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
         if (_boardSession.Screen == BoardScreen.Blackjack &&
             (rendered.BlackjackRevision != _boardSession.BlackjackState.Revision ||
             rendered.BlackjackFlightRevision != _blackjackFlightRevision ||
@@ -419,7 +422,12 @@ public sealed partial class SceneCompositor
                 else if (football)
                 {
                     drawing.Clear(Colors.Black);
-                    DrawFootballControls(drawing);
+                    DrawFieldGameControls(drawing);
+                }
+                else if (strykersRun)
+                {
+                    drawing.Clear(Colors.Black);
+                    DrawStrykersRunControls(drawing);
                 }
                 else if (globe)
                 {
@@ -428,7 +436,7 @@ public sealed partial class SceneCompositor
                     drawing.Clear(Colors.Black);
                     DrawGlobeControls(drawing, _boardSession.Buttons, [], [],
                         drawerOpen: _boardSession.GlobeDrawerOpen, drawerProgress: GlobeDrawerProgress(_globeClock()),
-                        boardAspect: PaintBoardAspect());
+                        boardAspect: PaintBoardAspect(), holdExposure: _holdControlBrightness);
                 }
                 else if (photoCopy || paint)
                 {
@@ -469,6 +477,7 @@ public sealed partial class SceneCompositor
                 BoardScreen.Paint => controlReferences,
                 BoardScreen.WaterGarden => controlReferences,
                 BoardScreen.Football => controlReferences,
+                BoardScreen.StrykersRun => controlReferences,
                 BoardScreen.Globe => controlReferences,
                 BoardScreen.PhotoCopy => controlReferences,
                 BoardScreen.Slots => controlReferences,

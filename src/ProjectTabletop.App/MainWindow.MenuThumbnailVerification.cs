@@ -45,7 +45,9 @@ public sealed partial class MainWindow
             byte[] initial = await Capture(target, dimensions.Width, dimensions.Height, dimensions.Name + "-cold-first-page");
             var ready = scene.GetMenuPreviewDiagnostics();
             Require(ready.Ready && ready.LoadedCount == 9 && ready.Error is null,
-                "The menu did not load all eight board thumbnails and the Settings hand preview: " + ready.Error);
+                "The menu did not load all nine static images, including the Settings hand preview: " + ready.Error);
+            Require(board.GetMenuCards(now).Count == 10,
+                "The menu must expose ten cards, including the rendered Football and Stryker's Run thumbnails.");
             object atlas = atlasField.GetValue(scene) ?? throw new InvalidOperationException("The ready menu has no image atlas.");
             CheckResourcesAndCache();
             Require(initial.AsSpan().SequenceEqual(Draw(target, dimensions.Width, dimensions.Height)),
@@ -198,6 +200,7 @@ public sealed partial class MainWindow
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "Isolated thumbnail verification changed live hardware or navigation.");
         return new { passed = true, directory, images, timings, pagingComparisons, loadedThumbnails = 9,
+            menuCardCount = BoardSession.MenuCardCount,
             retainedCacheChecks, uninitializedGameResourceChecks, stableStationaryCameraReference = true,
             denseDpiGeometryPreserved = true, liveHardwareUnchanged = true };
 

@@ -449,7 +449,8 @@ public sealed partial class SceneCompositor
         float radius = BoardButtonCornerRadius(button);
         ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 5, rect.Width, rect.Height), radius, radius,
             Color.FromArgb(170, 9, 28, 26));
-        ds.FillRoundedRectangle(rect, radius, radius, WaterStone);
+        ds.FillRoundedRectangle(rect, radius, radius,
+            button.IsHold ? HoldExposure(WaterStone, _holdControlBrightness) : WaterStone);
         ds.DrawRoundedRectangle(new Rect(rect.X + 2, rect.Y + 2, rect.Width - 4, rect.Height - 4), radius - 2, radius - 2,
             hovered ? Color.FromArgb(255, 151, 174, 134) : Color.FromArgb(255, 239, 239, 221), hovered ? 3 : 2);
         if (IsBoardDrawerHandle(button))

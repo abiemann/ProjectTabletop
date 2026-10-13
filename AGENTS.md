@@ -1,3 +1,9 @@
+# Line endings
+
+Use LF line endings for source code and documentation in this repository.
+Normalize touched text files to LF and never mix LF and CRLF within a file.
+Check line endings before committing; leave binary files unchanged.
+
 # Single app instance and camera testing
 
 Before every app launch, check for any running Project Tabletop instance,

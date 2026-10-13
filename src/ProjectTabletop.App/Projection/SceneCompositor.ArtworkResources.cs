@@ -16,6 +16,7 @@ public sealed partial class SceneCompositor
         BoardScreen.CrownDeed => CrownDeedResourcesReady,
         BoardScreen.WaterGarden => WaterGardenArtworkReady,
         BoardScreen.Football => FootballArtworkReady,
+        BoardScreen.StrykersRun => StrykersRunArtworkReady,
         _ => true
     };
 
@@ -26,6 +27,7 @@ public sealed partial class SceneCompositor
         BoardScreen.CrownDeed => EnsureCrownDeedResourcesAsync(device),
         BoardScreen.WaterGarden => EnsureWaterGardenResourcesAsync(device),
         BoardScreen.Football => EnsureFootballResourcesAsync(device),
+        BoardScreen.StrykersRun => EnsureStrykersRunResourcesAsync(device),
         _ => Task.CompletedTask
     };
 
@@ -36,6 +38,7 @@ public sealed partial class SceneCompositor
         BoardScreen.CrownDeed => PrepareCrownDeedResources(device),
         BoardScreen.WaterGarden => PrepareWaterGardenResources(device),
         BoardScreen.Football => PrepareFootballResources(device),
+        BoardScreen.StrykersRun => PrepareStrykersRunResources(device),
         _ => true
     };
 
@@ -46,6 +49,7 @@ public sealed partial class SceneCompositor
         _acquisitionExpectedScene = null;
         _holdSceneKey = null;
         _holdExpectedScene = null;
+        _blackjackPreviewRevision = -1;
         _slotsPreviewKey = null;
         _roulettePreviewKey = null;
         _crownDeedPreviewState = null;
@@ -84,6 +88,7 @@ public sealed partial class SceneCompositor
             BoardScreen.CrownDeed => CrownDeedResourcesError,
             BoardScreen.WaterGarden => WaterGardenArtworkError,
             BoardScreen.Football => _footballRenderer?.PitchError,
+            BoardScreen.StrykersRun => _strykersRunRenderer?.Error,
             _ => null
         };
         drawing.DrawText(error is null ? "Loading…" : "Could not load board",

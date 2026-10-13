@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, CrownDeed, Globe, Media, Slots, Settings, Roulette, WaterGarden, Football }
+public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, CrownDeed, Globe, Media, Slots, Settings, Roulette, WaterGarden, Football, StrykersRun }
 
 /// <summary>A rectangle in the board's normalized, perspective-corrected coordinate system.</summary>
 public readonly record struct BoardRect(double X, double Y, double Width, double Height)
@@ -120,6 +120,7 @@ public sealed partial class BoardSession
         BoardScreen.Paint => "Paint",
         BoardScreen.WaterGarden => "Water Garden",
         BoardScreen.Football => "Football",
+        BoardScreen.StrykersRun => "Stryker's Run",
         BoardScreen.CrownDeed => "Crown & Deed",
         BoardScreen.Globe => "Globe",
         BoardScreen.Media => "Media",
@@ -135,6 +136,7 @@ public sealed partial class BoardSession
         BoardScreen.Paint => CurrentPaintButtons(),
         BoardScreen.WaterGarden => CurrentWaterGardenButtons(),
         BoardScreen.Football => CurrentFootballButtons(),
+        BoardScreen.StrykersRun => CurrentStrykersRunButtons(),
         BoardScreen.Blackjack => BlackjackButtons(),
         BoardScreen.CrownDeed => CrownDeedButtons(),
         BoardScreen.Globe => CurrentGlobeButtons(),
@@ -232,6 +234,8 @@ public sealed partial class BoardSession
     {
         ClearFootballInput(now);
         TickFootball(now);
+        ClearStrykersRunInput(now);
+        TickStrykersRun(now);
         ClearMenuScroll(now);
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
@@ -252,6 +256,7 @@ public sealed partial class BoardSession
 
     private void Show(BoardScreen screen, DateTimeOffset now)
     {
+        ClearStrykersRunInput(now);
         ClearMenuScroll(now);
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
@@ -266,6 +271,7 @@ public sealed partial class BoardSession
         NavigationRevision++;
         if (screen == BoardScreen.WaterGarden) RequestWaterGardenReset();
         if (screen == BoardScreen.Football) InitializeFootball(now, startMatch: false);
+        if (screen == BoardScreen.StrykersRun) InitializeStrykersRun(now, startRun: false);
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

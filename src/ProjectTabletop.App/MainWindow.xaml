@@ -138,6 +138,7 @@
                         <Button Content="Water Garden" Click="WaterGarden_Click" />
                         <TextBlock Text="Move a calibrated stick tip across the water to make ripples. Learn its marker and enable Stick tip tracking in Hand interaction. Open the bottom-left arrow to find EXIT, RESET, and DUCK+. Hold a projected control for one second, then uncover it before pressing again. Laptop clicks also work." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Football" Click="OnOpenFootballBoard" />
+                        <Button Content="Stryker's Run" Click="OnOpenStrykersRunBoard" />
                         <TextBlock Text="Kick a lively football with a black bar, a double-bar marker or your index finger. Play against the computer or another person, defending opposite goals. Player 1 uses the left half; player 2 uses the right." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Expander Header="Football game" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <StackPanel Spacing="10">

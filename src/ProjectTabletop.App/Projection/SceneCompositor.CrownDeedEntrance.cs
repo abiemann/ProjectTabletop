@@ -41,6 +41,7 @@ public sealed partial class SceneCompositor
 
     private void OnBoardOpened(BoardScreen screen)
     {
+        SyncBoardOrientation();
         BoardOpened?.Invoke(screen);
         CancelCrownDeedDevelopment();
         CancelCrownDeedEntrance();

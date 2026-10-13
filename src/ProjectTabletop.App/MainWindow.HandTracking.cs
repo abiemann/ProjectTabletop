@@ -31,6 +31,8 @@ public sealed partial class MainWindow
     private long _handGeneration;
     private DateTimeOffset _handInputNotBefore;
     private string? _handTrackingError;
+    // A board-local caption failure; it never disables the shared hand model.
+    private string? _captionCheckError;
     private string? _handLatencyWarning;
     private HandDetectionDiagnostics? _lastHandDetection;
 
@@ -134,7 +136,7 @@ public sealed partial class MainWindow
     {
         _handTrackingEnabled = enabled;
         if (HandTrackingToggle.IsOn != enabled) HandTrackingToggle.IsOn = enabled;
-        _handTrackingError = null;
+        _handTrackingError = _captionCheckError = null;
         ClearHandTracking();
         CameraCanvas.Invalidate();
         UpdateHandTrackingStatus();
@@ -146,6 +148,7 @@ public sealed partial class MainWindow
     {
         ResetPieceDetections();
         ResetFootballInput();
+        ResetStrykersRunInput();
         lock (_handGate)
         {
             _handGeneration++;
@@ -174,15 +177,17 @@ public sealed partial class MainWindow
             // Delivery can cross a reset before joining this gate. Do not assign
             // those earlier pixels to the generation captured below.
             if (frame.Timestamp < _handInputNotBefore) return InputFrameQueueResult.PredatesReset;
+            bool captionOnly = _scene.CurrentBoardScreen == BoardScreen.StrykersRun;
             if (_closing || !_cameraWanted || !_camera.IsRunning || _cameraOperation.CurrentCount == 0 ||
                 Volatile.Read(ref _cameraHealthWarning) ||
-                !_handTrackingEnabled || _handTrackingError is not null ||
-                IsBoardScanMeasuring || _handWorker.IsBusy) return InputFrameQueueResult.Skipped;
+                !_handTrackingEnabled || !captionOnly && _handTrackingError is not null ||
+                IsBoardScanMeasuring || !_scene.HandDetectionRequired || _handWorker.IsBusy)
+                return InputFrameQueueResult.Skipped;
             var interval = _handPreview is { Cursors.Length: > 0 } preview &&
                 frame.Timestamp - preview.Timestamp <= HandMarkerLifetime
                 ? TimeSpan.Zero : HandDetectionInterval;
             if (!_handWorker.CanRun(tick, interval)) return InputFrameQueueResult.Skipped;
-            var acquisitionContext = _scene.GetHandAcquisitionContext(frame.Timestamp);
+            var acquisitionContext = captionOnly ? null : _scene.GetHandAcquisitionContext(frame.Timestamp);
             // These frames cannot show the new search light yet and would only
             // repeat the failed unlit search, delaying the first lit frame.
             if (acquisitionContext?.IlluminatedHint is not null &&
@@ -196,19 +201,30 @@ public sealed partial class MainWindow
             {
                 try
                 {
-                    _handEngine ??= new HandTrackingEngine(Path.Combine(AppContext.BaseDirectory, "Models", "Hands"));
-                    _handEngine.CaptureDiagnostics = requestedInTester || acquisitionContext is not null;
-                    double? frameInterval = _lastHandEngineFrameTime is { } previousFrame
-                        ? (frame.Timestamp - previousFrame).TotalMilliseconds : null;
-                    var engineReset = _handEngineGeneration != generation || frameInterval is <= 0 or > 350;
-                    if (engineReset)
-                    {
-                        _handEngine.ResetTracking();
-                        _handEngineGeneration = generation;
-                    }
-                    _lastHandEngineFrameTime = frame.Timestamp;
+                    if (!_scene.HandDetectionRequired ||
+                        !captionOnly && _scene.CurrentBoardScreen == BoardScreen.StrykersRun) return;
+                    // Model loading is not inference time; create the engine before timing.
+                    if (!captionOnly)
+                        _handEngine ??= new HandTrackingEngine(Path.Combine(AppContext.BaseDirectory, "Models", "Hands"));
                     var detectionStarted = Stopwatch.GetTimestamp();
-                    var acquisitionHints = FindHandAcquisitionHints(frame, acquisitionContext, generation);
+                    double? frameInterval = null;
+                    bool engineReset = false;
+                    var acquisitionHints = new HandAcquisitionQuery([], [], null);
+                    IReadOnlyList<HandDetection> hands = [];
+                    if (!captionOnly)
+                    {
+                        _handEngine!.CaptureDiagnostics = requestedInTester || acquisitionContext is not null;
+                        frameInterval = _lastHandEngineFrameTime is { } previousFrame
+                            ? (frame.Timestamp - previousFrame).TotalMilliseconds : null;
+                        engineReset = _handEngineGeneration != generation || frameInterval is <= 0 or > 350;
+                        if (engineReset)
+                        {
+                            _handEngine.ResetTracking();
+                            _handEngineGeneration = generation;
+                        }
+                        _lastHandEngineFrameTime = frame.Timestamp;
+                        acquisitionHints = FindHandAcquisitionHints(frame, acquisitionContext, generation);
+                    }
                     var holdQuery = FindHeldButtons(frame, holdContext, generation);
                     var heldButtons = holdQuery.Held;
                     // Start a qualified search light now. The unlit crop search
@@ -226,10 +242,11 @@ public sealed partial class MainWindow
                                     _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.LightingHints,
                                         [], frame.Timestamp, projectedWhiteClipped: acquisitionHints.Presence?.ProjectedWhiteClipped);
                         });
-                    var hands = _handEngine.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-                        acquisitionHints.SearchRegions,
-                        restrictAcquisitionToSearchRegions: acquisitionContext?.RestrictAcquisitionToSearchRegions == true);
-                    var detectorTrace = _handEngine.LastDiagnostics;
+                    if (!captionOnly)
+                        hands = _handEngine!.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
+                            acquisitionHints.SearchRegions,
+                            restrictAcquisitionToSearchRegions: acquisitionContext?.RestrictAcquisitionToSearchRegions == true);
+                    var detectorTrace = captionOnly ? null : _handEngine!.LastDiagnostics;
                     var inferenceMilliseconds = Stopwatch.GetElapsedTime(detectionStarted).TotalMilliseconds;
                     var visibleHands = hands.Where(hand =>
                             double.IsFinite(hand.IndexTip.X) && double.IsFinite(hand.IndexTip.Y) &&
@@ -242,15 +259,18 @@ public sealed partial class MainWindow
                         {
                             if (_closing || generation != _handGeneration || !_handTrackingEnabled ||
                                 !_cameraWanted || !_camera.IsRunning ||
-                                Volatile.Read(ref _cameraHealthWarning) || IsBoardScanMeasuring)
+                                Volatile.Read(ref _cameraHealthWarning) || IsBoardScanMeasuring || !_scene.HandDetectionRequired ||
+                                !captionOnly && _scene.CurrentBoardScreen == BoardScreen.StrykersRun)
                             {
                                 LogHandDetection(sequence, requestedInTester, frame, generation, engineReset,
                                     inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, [],
                                     _closing ? "closing" : generation != _handGeneration ? "generation_changed" :
                                     !_handTrackingEnabled ? "tracking_disabled" : !_cameraWanted || !_camera.IsRunning ? "camera_stopped" :
-                                    Volatile.Read(ref _cameraHealthWarning) ? "camera_unhealthy" : "board_scan");
+                                    Volatile.Read(ref _cameraHealthWarning) ? "camera_unhealthy" :
+                                    IsBoardScanMeasuring ? "board_scan" : "caption_controls_hidden");
                                 return;
                             }
+                            if (captionOnly) _captionCheckError = null;
                             var age = MonotonicClock.UtcNow - frame.Timestamp;
                             _lastHandDetection = new(frame.Timestamp, inferenceMilliseconds,
                                 age.TotalMilliseconds, frameInterval, age > HandMarkerLifetime,
@@ -277,10 +297,12 @@ public sealed partial class MainWindow
                                 _scene.SetHandCursors(cursors, frame.Timestamp, _photoCopyTask is { IsCompleted: false }, visualCursors);
                                 _scene.SetHandSpotlights(visibleHands, frame.Timestamp);
                                 PublishFootballFingers(visibleHands, frame);
-                                _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.LightingHints, visibleHands, frame.Timestamp,
-                                    acquisitionHints.Presence?.IlluminatedPresence, acquisitionHints.Presence?.IlluminatedWhiteLuminance,
-                                    acquisitionHints.Presence?.ProjectedWhiteClipped);
+                                if (!captionOnly)
+                                    _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.LightingHints, visibleHands, frame.Timestamp,
+                                        acquisitionHints.Presence?.IlluminatedPresence, acquisitionHints.Presence?.IlluminatedWhiteLuminance,
+                                        acquisitionHints.Presence?.ProjectedWhiteClipped);
                                 var holdBoard = _scene.CurrentBoardScreen;
+                                _scene.ObserveHoldControlExposure(holdContext, holdQuery.Presence, frame.Timestamp);
                                 var holdActivations = _scene.ObserveHoldButtons(holdContext, heldButtons, frame.Timestamp,
                                     holdQuery.Cleared);
                                 // The hold detector's own view: whether it had its reference
@@ -326,8 +348,16 @@ public sealed partial class MainWindow
                     {
                         lock (_handGate)
                         {
-                            if (_closing || generation != _handGeneration) return;
-                            _handTrackingError = "Hand tracking unavailable: " + ex.Message;
+                            if (_closing || generation != _handGeneration || !_scene.HandDetectionRequired ||
+                                !captionOnly && _scene.CurrentBoardScreen == BoardScreen.StrykersRun) return;
+                            if (captionOnly)
+                            {
+                                // The caption check does not use the hand model. Its failure must
+                                // not disable hand tracking for the boards that still need it.
+                                if (_captionCheckError != ex.Message) AppLog.Write("Caption hold check", ex);
+                                _captionCheckError = ex.Message;
+                            }
+                            else _handTrackingError = "Hand tracking unavailable: " + ex.Message;
                             ClearHandTracking();
                         }
                         CameraCanvas.Invalidate();
@@ -356,6 +386,10 @@ public sealed partial class MainWindow
         UpdateHandDetectionLogStatus();
         var selection = _scene.CurrentFingerSelectionFeedback.FirstOrDefault();
         HandTrackingStatusText.Text = !_handTrackingEnabled ? "Hand tracking is off." :
+            _scene.CurrentBoardScreen == BoardScreen.StrykersRun && !IsBoardScanMeasuring ?
+                (!_scene.HandDetectionRequired ? "Only the dotted control strip is being checked." :
+                    _captionCheckError is { } captionError ? "Caption check failed: " + captionError :
+                    "Watching EXIT and PLAY lettering.") :
             _handTrackingError ??
             (IsBoardScanMeasuring ? "Hand tracking pauses while the board is being scanned." :
              !_cameraWanted || !_camera.IsRunning ? "Start the webcam to track your fingers." :

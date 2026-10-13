@@ -33,6 +33,84 @@ public sealed class CameraCaptureService : IAsyncDisposable
     private const int MaximumFormatFailures = 4;
     private static readonly TimeSpan FormatFailureTimeBudget = TimeSpan.FromSeconds(5);
     private volatile bool _captureEveryFrame;
+    // Lifetime diagnostics survive Stop so a stalled stream can be inspected after
+    // its explicit shutdown. Only counters/timestamps change on the callback path.
+    private enum CaptureStage { Idle, Acquire, Convert, Allocate, Copy, Publish, Dispose }
+    private readonly long[] _lastStageTicks = new long[7], _maximumStageTicks = new long[7];
+    private int _captureStage, _activeCallbacks, _activeConsumers, _maximumActiveConsumers;
+    private long _stageStarted, _arrivals, _acquired, _copied, _published, _consumerStarted, _consumerCompleted;
+    private long _busyDrops, _rateDrops, _emptyFrames, _obsoleteDrops, _captureErrors, _consumerErrors, _nativeFailures;
+    private long _readerStarts, _readerStartedUtc, _lastArrivalUtc, _lastAcquiredUtc, _lastCopiedUtc,
+        _lastPublishedUtc, _lastConsumerStartedUtc, _lastConsumerCompletedUtc, _lastConsumerStartedTick;
+    private long _lastConsumerTicks, _maximumConsumerTicks;
+    private string? _readerOutputSubtype;
+    private int _sourceBitmapPixelFormat = -1;
+
+    public sealed record CaptureStageTiming(string Stage, double LastMilliseconds, double MaximumMilliseconds);
+    public sealed record CaptureDiagnostics(long Epoch, long ReaderStarts, DateTimeOffset? LastReaderStartedUtc,
+        long Arrivals, long Acquired, long Copied, long Published, long ConsumerStarted, long ConsumerCompleted,
+        long BusyDrops, long RateDrops, long EmptyFrames, long ObsoleteDrops, long CaptureErrors, long ConsumerErrors, long NativeFailures,
+        DateTimeOffset? LastFrameArrivedUtc, DateTimeOffset? LastAcquiredUtc, DateTimeOffset? LastCopiedUtc,
+        DateTimeOffset? LastPublishedUtc, DateTimeOffset? LastConsumerStartedUtc, DateTimeOffset? LastConsumerCompletedUtc,
+        DateTimeOffset? LatestFrameUtc, int ActiveCallbacks, int ActiveConsumers, int MaximumActiveConsumers,
+        string NativeStage, double NativeStageElapsedMilliseconds, double LatestConsumerElapsedMilliseconds,
+        double LastConsumerMilliseconds, double MaximumConsumerMilliseconds, IReadOnlyList<CaptureStageTiming> NativeTimings,
+        string? ReaderOutputSubtype, string? SourceBitmapPixelFormat);
+
+    /// <summary>Nonblocking approximate snapshot; never queries the driver or takes the frame/lifecycle gates.</summary>
+    public CaptureDiagnostics GetDiagnostics()
+    {
+        long tick = Stopwatch.GetTimestamp(), stageStarted = Interlocked.Read(ref _stageStarted);
+        int stage = Volatile.Read(ref _captureStage), consumers = Volatile.Read(ref _activeConsumers);
+        int sourcePixelFormat = Volatile.Read(ref _sourceBitmapPixelFormat);
+        long consumerStarted = Interlocked.Read(ref _lastConsumerStartedTick);
+        var timings = new CaptureStageTiming[_lastStageTicks.Length - 1];
+        for (int i = 1; i < _lastStageTicks.Length; i++)
+            timings[i - 1] = new(((CaptureStage)i).ToString(), Milliseconds(Interlocked.Read(ref _lastStageTicks[i])),
+                Milliseconds(Interlocked.Read(ref _maximumStageTicks[i])));
+        return new(Interlocked.Read(ref _epoch), Interlocked.Read(ref _readerStarts), Utc(ref _readerStartedUtc),
+            Interlocked.Read(ref _arrivals), Interlocked.Read(ref _acquired), Interlocked.Read(ref _copied),
+            Interlocked.Read(ref _published), Interlocked.Read(ref _consumerStarted), Interlocked.Read(ref _consumerCompleted),
+            Interlocked.Read(ref _busyDrops), Interlocked.Read(ref _rateDrops), Interlocked.Read(ref _emptyFrames),
+            Interlocked.Read(ref _obsoleteDrops), Interlocked.Read(ref _captureErrors), Interlocked.Read(ref _consumerErrors),
+            Interlocked.Read(ref _nativeFailures), Utc(ref _lastArrivalUtc), Utc(ref _lastAcquiredUtc), Utc(ref _lastCopiedUtc),
+            Utc(ref _lastPublishedUtc), Utc(ref _lastConsumerStartedUtc), Utc(ref _lastConsumerCompletedUtc), LatestFrame?.Timestamp,
+            Volatile.Read(ref _activeCallbacks), consumers, Volatile.Read(ref _maximumActiveConsumers),
+            ((CaptureStage)stage).ToString(), stage == 0 || stageStarted == 0 ? 0 : Milliseconds(tick - stageStarted),
+            consumers == 0 || consumerStarted == 0 ? 0 : Milliseconds(tick - consumerStarted),
+            Milliseconds(Interlocked.Read(ref _lastConsumerTicks)), Milliseconds(Interlocked.Read(ref _maximumConsumerTicks)), timings,
+            Volatile.Read(ref _readerOutputSubtype), sourcePixelFormat < 0 ? null : ((BitmapPixelFormat)sourcePixelFormat).ToString());
+
+        static DateTimeOffset? Utc(ref long value) => Interlocked.Read(ref value) is var ticks && ticks != 0
+            ? new DateTimeOffset(ticks, TimeSpan.Zero) : null;
+    }
+
+    private static double Milliseconds(long ticks) => Math.Max(0, ticks) * 1000d / Stopwatch.Frequency;
+
+    private void SetCaptureStage(CaptureStage stage)
+    {
+        long now = Stopwatch.GetTimestamp();
+        int previous = _captureStage;
+        if (previous != 0)
+        {
+            long elapsed = now - _stageStarted;
+            Interlocked.Exchange(ref _lastStageTicks[previous], elapsed);
+            UpdateMaximum(ref _maximumStageTicks[previous], elapsed);
+        }
+        Interlocked.Exchange(ref _stageStarted, stage == CaptureStage.Idle ? 0 : now);
+        Volatile.Write(ref _captureStage, (int)stage);
+    }
+
+    private static void UpdateMaximum(ref long maximum, long value)
+    {
+        long observed = Interlocked.Read(ref maximum);
+        while (value > observed)
+        {
+            long previous = Interlocked.CompareExchange(ref maximum, value, observed);
+            if (previous == observed) break;
+            observed = previous;
+        }
+    }
 
     // During the brief setup-dot measurement, do not add the normal copy-rate cap
     // to a faster webcam's measured response. The latest-frame-only policy remains.
@@ -46,6 +124,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
     public bool IsRunning => _running;
     public (int Width, int Height, double FramesPerSecond)? NegotiatedFormat { get; private set; }
     public int RequestedFramesPerSecond { get; private set; } = 30;
+    public string? NegotiatedSubtype { get; private set; }
     public IReadOnlyList<int> SupportedRequestedFramesPerSecond { get; private set; } = Array.Empty<int>();
     public bool HasExclusiveFormatControl { get; private set; }
     public double NormalCopyFramesPerSecond => _copyBudget.CopiesPerSecond;
@@ -63,7 +142,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
         return devices;
     }
 
-    public async Task StartAsync(string id, int requestedFramesPerSecond = 30, bool forceRestart = false)
+    public async Task StartAsync(string id, int requestedFramesPerSecond = 30)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         if (!CameraFrameRatePolicy.IsRequestedRate(requestedFramesPerSecond))
@@ -73,7 +152,9 @@ public sealed class CameraCaptureService : IAsyncDisposable
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (!forceRestart && _running && StringComparer.OrdinalIgnoreCase.Equals(ActiveDeviceId, id) &&
+            // Stall recovery is manual (Stop, then Start), so a running camera with the
+            // same device and rate is never restarted by a repeated request.
+            if (_running && StringComparer.OrdinalIgnoreCase.Equals(ActiveDeviceId, id) &&
                 RequestedFramesPerSecond == requestedFramesPerSecond) return;
             await StopCoreAsync();
             RequestedFramesPerSecond = requestedFramesPerSecond;
@@ -221,6 +302,8 @@ public sealed class CameraCaptureService : IAsyncDisposable
             _copyBudget = new CameraCopyRateBudget(CameraFrameRatePolicy.CopyRateLimit(
                 RequestedFramesPerSecond, actual.FramesPerSecond));
             reader = await capture.CreateFrameReaderAsync(source, MediaEncodingSubtypes.Bgra8);
+            Volatile.Write(ref _readerOutputSubtype, MediaEncodingSubtypes.Bgra8);
+            Volatile.Write(ref _sourceBitmapPixelFormat, -1);
             _reader = reader;
             reader.AcquisitionMode = MediaFrameReaderAcquisitionMode.Realtime;
             reader.FrameArrived += OnFrameArrived;
@@ -234,6 +317,8 @@ public sealed class CameraCaptureService : IAsyncDisposable
                     "The webcam became unavailable. Check its connection, then press Start camera to retry.");
             if (status != MediaFrameReaderStartStatus.Success)
                 throw new InvalidOperationException($"Windows could not start the selected webcam ({status}).");
+            Interlocked.Increment(ref _readerStarts);
+            Interlocked.Exchange(ref _readerStartedUtc, MonotonicClock.UtcNow.UtcTicks);
             // Always report the native format, even when format fallback prevented
             // the requested rate. CPU copy throttling is not a negotiated camera rate.
             actual = VideoMode(source.CurrentFormat);
@@ -243,6 +328,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
                 _copyBudget = new CameraCopyRateBudget(CameraFrameRatePolicy.CopyRateLimit(
                     RequestedFramesPerSecond, actual.FramesPerSecond));
             NegotiatedFormat = (actual.Width, actual.Height, actual.FramesPerSecond);
+            NegotiatedSubtype = source.CurrentFormat.Subtype;
         }
         catch
         {
@@ -256,6 +342,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
             }
             _reader = null;
             NegotiatedFormat = null;
+            NegotiatedSubtype = null;
             Volatile.Write(ref _latestFrame, null);
             throw;
         }
@@ -271,62 +358,123 @@ public sealed class CameraCaptureService : IAsyncDisposable
     private void OnFrameArrived(MediaFrameReader sender, MediaFrameArrivedEventArgs args)
     {
         var arrivedAt = MonotonicClock.UtcNow;
-        if (!Monitor.TryEnter(_frameGate)) return;
-        CameraFrame? delivered = null;
-        string? error = null;
-        long epoch = 0;
+        Interlocked.Increment(ref _arrivals);
+        Interlocked.Exchange(ref _lastArrivalUtc, arrivedAt.UtcTicks);
+        Interlocked.Increment(ref _activeCallbacks);
         try
         {
-            if (!_running || !ReferenceEquals(sender, _reader)) return;
-            epoch = Interlocked.Read(ref _epoch);
-            using var frame = sender.TryAcquireLatestFrame();
-            using var bitmap = frame?.VideoMediaFrame?.SoftwareBitmap;
-            if (bitmap is null) return;
-
-            // A camera frame is copied to CPU memory for analysis; projector video stays on GPU.
-            // Follow the selected/negotiated rate, allowing minor delivery jitter without
-            // retaining more than two frames of credit. Calibration bypasses this budget.
-            if (!_copyBudget.TryTake(Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency, _captureEveryFrame)) return;
-
-            using var converted = bitmap.BitmapPixelFormat == BitmapPixelFormat.Bgra8
-                ? null
-                : SoftwareBitmap.Convert(bitmap, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore);
-            var bgraBitmap = converted ?? bitmap;
-            var width = bgraBitmap.PixelWidth;
-            var height = bgraBitmap.PixelHeight;
-            var stride = checked(width * 4);
-            // Copy once, straight into the owned array; an intermediate WinRT buffer
-            // doubled the large allocations and copies at 60/100 fps.
-            var bytes = new byte[checked(stride * height)];
-            bgraBitmap.CopyToBuffer(bytes.AsBuffer());
-
-            var owned = new CameraFrame(width, height, stride, bytes, MonotonicClock.UtcNow) { ArrivedAt = arrivedAt };
-            if (_running && epoch == Interlocked.Read(ref _epoch) && ReferenceEquals(sender, _reader))
+            if (!Monitor.TryEnter(_frameGate)) { Interlocked.Increment(ref _busyDrops); return; }
+            CameraFrame? delivered = null;
+            string? error = null;
+            long epoch = 0;
+            try
             {
-                Volatile.Write(ref _latestFrame, owned);
-                delivered = owned;
+                if (!_running || !ReferenceEquals(sender, _reader)) { Interlocked.Increment(ref _obsoleteDrops); return; }
+                epoch = Interlocked.Read(ref _epoch);
+                SetCaptureStage(CaptureStage.Acquire);
+                using (var frame = sender.TryAcquireLatestFrame())
+                using (var bitmap = frame?.VideoMediaFrame?.SoftwareBitmap)
+                {
+                    SetCaptureStage(CaptureStage.Idle);
+                    try
+                    {
+                        if (bitmap is null) { Interlocked.Increment(ref _emptyFrames); return; }
+                        Interlocked.Increment(ref _acquired);
+                        Interlocked.Exchange(ref _lastAcquiredUtc, MonotonicClock.UtcNow.UtcTicks);
+
+                        // Keep the existing selected/negotiated copy budget; setup bypasses it.
+                        if (!_copyBudget.TryTake(Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency, _captureEveryFrame))
+                        { Interlocked.Increment(ref _rateDrops); return; }
+
+                        SetCaptureStage(CaptureStage.Convert);
+                        var sourcePixelFormat = bitmap.BitmapPixelFormat;
+                        Volatile.Write(ref _sourceBitmapPixelFormat, (int)sourcePixelFormat);
+                        using (var converted = sourcePixelFormat == BitmapPixelFormat.Bgra8
+                            ? null : SoftwareBitmap.Convert(bitmap, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore))
+                        {
+                            try
+                            {
+                                SetCaptureStage(CaptureStage.Allocate);
+                                var bgraBitmap = converted ?? bitmap;
+                                var width = bgraBitmap.PixelWidth;
+                                var height = bgraBitmap.PixelHeight;
+                                var stride = checked(width * 4);
+                                // Copy once into the owned array, without an intermediate WinRT buffer.
+                                var bytes = new byte[checked(stride * height)];
+                                SetCaptureStage(CaptureStage.Copy);
+                                bgraBitmap.CopyToBuffer(bytes.AsBuffer());
+                                var copiedAt = MonotonicClock.UtcNow;
+                                Interlocked.Increment(ref _copied);
+                                Interlocked.Exchange(ref _lastCopiedUtc, copiedAt.UtcTicks);
+                                SetCaptureStage(CaptureStage.Publish);
+                                var owned = new CameraFrame(width, height, stride, bytes, copiedAt) { ArrivedAt = arrivedAt };
+                                if (_running && epoch == Interlocked.Read(ref _epoch) && ReferenceEquals(sender, _reader))
+                                {
+                                    Volatile.Write(ref _latestFrame, owned);
+                                    delivered = owned;
+                                    Interlocked.Increment(ref _published);
+                                    Interlocked.Exchange(ref _lastPublishedUtc, copiedAt.UtcTicks);
+                                }
+                                else Interlocked.Increment(ref _obsoleteDrops);
+                            }
+                            finally { SetCaptureStage(CaptureStage.Dispose); }
+                        }
+                    }
+                    finally
+                    {
+                        // Include converted, source-bitmap and frame-reference release.
+                        if (_captureStage != (int)CaptureStage.Dispose) SetCaptureStage(CaptureStage.Dispose);
+                    }
+                }
             }
+            catch (Exception ex)
+            {
+                Interlocked.Increment(ref _captureErrors);
+                error = "Webcam frame capture failed: " + ex.Message;
+                _running = false;
+                Interlocked.Increment(ref _epoch);
+                Volatile.Write(ref _latestFrame, null);
+            }
+            finally { SetCaptureStage(CaptureStage.Idle); Monitor.Exit(_frameGate); }
+            if (delivered is not null && _running && epoch == Interlocked.Read(ref _epoch))
+            {
+                long started = Stopwatch.GetTimestamp();
+                Interlocked.Exchange(ref _lastConsumerStartedTick, started);
+                Interlocked.Exchange(ref _lastConsumerStartedUtc, MonotonicClock.UtcNow.UtcTicks);
+                Interlocked.Increment(ref _consumerStarted);
+                int active = Interlocked.Increment(ref _activeConsumers), maximum = Volatile.Read(ref _maximumActiveConsumers);
+                while (active > maximum)
+                {
+                    int previous = Interlocked.CompareExchange(ref _maximumActiveConsumers, active, maximum);
+                    if (previous == maximum) break;
+                    maximum = previous;
+                }
+                try { FrameReceived?.Invoke(this, delivered); }
+                catch (Exception ex)
+                {
+                    Interlocked.Increment(ref _consumerErrors);
+                    RaiseFailure("Camera frame consumer failed: " + ex.Message);
+                }
+                finally
+                {
+                    long elapsed = Stopwatch.GetTimestamp() - started;
+                    Interlocked.Exchange(ref _lastConsumerTicks, elapsed);
+                    UpdateMaximum(ref _maximumConsumerTicks, elapsed);
+                    Interlocked.Exchange(ref _lastConsumerCompletedUtc, MonotonicClock.UtcNow.UtcTicks);
+                    Interlocked.Increment(ref _consumerCompleted);
+                    Interlocked.Decrement(ref _activeConsumers);
+                }
+            }
+            if (error is not null) RaiseFailure(error);
         }
-        catch (Exception ex)
-        {
-            error = "Webcam frame capture failed: " + ex.Message;
-            _running = false;
-            Interlocked.Increment(ref _epoch);
-            Volatile.Write(ref _latestFrame, null);
-        }
-        finally { Monitor.Exit(_frameGate); }
-        if (delivered is not null && _running && epoch == Interlocked.Read(ref _epoch))
-        {
-            try { FrameReceived?.Invoke(this, delivered); }
-            catch (Exception ex) { RaiseFailure("Camera frame consumer failed: " + ex.Message); }
-        }
-        if (error is not null) RaiseFailure(error);
+        finally { Interlocked.Decrement(ref _activeCallbacks); }
     }
 
     private void OnCaptureFailed(MediaCapture sender, MediaCaptureFailedEventArgs args)
     {
         if (ReferenceEquals(sender, _capture))
         {
+            Interlocked.Increment(ref _nativeFailures);
             _running = false;
             Interlocked.Increment(ref _epoch);
             Volatile.Write(ref _latestFrame, null);
@@ -347,6 +495,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
         Interlocked.Increment(ref _epoch);
         ActiveDeviceId = null;
         NegotiatedFormat = null;
+        NegotiatedSubtype = null;
         SupportedRequestedFramesPerSecond = Array.Empty<int>();
         HasExclusiveFormatControl = false;
         var reader = _reader;

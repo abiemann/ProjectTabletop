@@ -42,19 +42,31 @@ public sealed partial class MainWindow
                     diagnosticEnabled.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
                     throw new ArgumentException("Provide enabled as a JSON boolean.");
                 _boardHandDiagnosticLogging = diagnosticEnabled.GetBoolean();
+#if DEBUG
+                if (!_boardHandDiagnosticLogging)
+                {
+                    lock (_handGate) Volatile.Write(ref _lastHoldButtonSnapshot, null);
+                    ClearStrykersRunDiagnosticSnapshot();
+                }
+#endif
                 LogHandTrackingEvent("board_diagnostic_logging", new { enabled = _boardHandDiagnosticLogging }, force: true);
                 return new { enabled = _boardHandDiagnosticLogging, status = _handDetectionLog?.Status };
             case "get_hold_diagnostics":
                 return new { board = _scene.CurrentBoardScreen.ToString(),
+                    controlBrightness = _scene.HoldControlBrightness,
                     lastDetection = _lastHoldButtonDetection, lastActivation = _lastHoldButtonActivation,
                     progress = _scene.CurrentHoldProgress };
 #if DEBUG
+            case "capture_strykers_run_input":
+                return await CaptureStrykersRunInputAsync();
             case "verify_football_audio":
                 return await VerifyFootballAudioAsync();
             case "verify_camera_input_scheduling":
                 return await VerifyCameraInputSchedulingAsync();
             case "verify_camera_safety":
                 return await VerifyCameraSafetyAsync();
+            case "verify_strykers_run":
+                return await VerifyStrykersRunAsync();
             case "verify_camera_latency":
                 return VerifyCameraLatency();
             case "verify_photo_copy_memory_save":
@@ -186,6 +198,9 @@ public sealed partial class MainWindow
                     cameraFrameUtc = frame?.Timestamp,
                     cameraWidth = frame?.Width,
                     cameraHeight = frame?.Height,
+                    cameraSubtype = _camera.NegotiatedSubtype,
+                    cameraCaptureDiagnostics = _camera.GetDiagnostics(),
+                    cameraManualRestartRequired = _cameraManualRestartRequired,
                     cameraFrameRate = new
                     {
                         requested = _requestedCameraFramesPerSecond,
@@ -367,6 +382,19 @@ public sealed partial class MainWindow
                     boardClipReady = _scene.HasBoardMediaClip, status = StatusText.Text, state = FootballControlState() };
             case "get_football":
                 return new { state = FootballControlState(), input = GetFootballInputStatus() };
+            case "show_strykers_run":
+                ShowStrykersRun();
+                return new { boardApp = _scene.CurrentBoardTitle, boardClipReady = _scene.HasBoardMediaClip,
+                    state = StrykersRunControlState() };
+            case "get_strykers_run":
+                return StrykersRunControlState();
+            case "strykers_run_action":
+                if (!parameters.TryGetProperty("id", out var strykersRunAction) ||
+                    strykersRunAction.ValueKind != JsonValueKind.String)
+                    throw new ArgumentException("Provide the current Stryker's Run button id.");
+                bool strykersRunAccepted = _scene.ActivateStrykersRunButton(strykersRunAction.GetString()!);
+                if (strykersRunAccepted) { ResetStrykersRunInput(); UpdateBoardAppStatus(); }
+                return new { accepted = strykersRunAccepted, state = StrykersRunControlState() };
             case "learn_football_bar":
                 if (!parameters.TryGetProperty("player", out var footballPlayer) || footballPlayer.ValueKind != JsonValueKind.Number ||
                     !footballPlayer.TryGetInt32(out int footballPlayerNumber) ||

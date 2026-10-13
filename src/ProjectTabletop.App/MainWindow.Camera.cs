@@ -17,11 +17,9 @@ public sealed partial class MainWindow
     // Sample the owned camera image once per status tick. A driver can keep its
     // reader running while returning no new frames, or replay one old frame.
     private static readonly TimeSpan NoCameraFrameWarning = TimeSpan.FromSeconds(3);
-    private static readonly TimeSpan NoCameraFrameReconnect = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan FirstCameraFrameAllowance = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan UnchangedCameraImageWarning = TimeSpan.FromSeconds(8);
-    private static readonly TimeSpan UnchangedCameraImageReconnect = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan[] CameraReconnectBackoff =
-        [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(60)];
+    private const string ManualCameraRecoveryHint = "Press Stop, then Start camera to retry.";
     private static readonly TimeSpan CameraPreviewInterval = TimeSpan.FromMilliseconds(40);
     private int _cameraPreviewRedrawPending;
     private readonly SemaphoreSlim _cameraOperation = new(1, 1);
@@ -38,10 +36,7 @@ public sealed partial class MainWindow
     private volatile bool _cameraWanted;
     private string? _cameraWantedDeviceId;
     private long _cameraOperationVersion;
-    private int _cameraReconnectAttempts;
-    private DateTimeOffset _nextCameraReconnectAtUtc;
-    private bool _cameraReconnectInProgress;
-    private string? _cameraRecoveryReason;
+    private volatile bool _cameraManualRestartRequired;
     private volatile bool _boardScanSuspendedForCameraOutage;
 
     private void ResetCameraHealth(bool preserveBoardScanSuspension = false)
@@ -51,6 +46,7 @@ public sealed partial class MainWindow
         _cameraImageChangedAtUtc = DateTimeOffset.MinValue;
         _cameraLiveStatus = null;
         _cameraHealthWarning = false;
+        _cameraManualRestartRequired = false;
         if (!preserveBoardScanSuspension)
             _boardScanSuspendedForCameraOutage = false;
     }
@@ -66,20 +62,19 @@ public sealed partial class MainWindow
         if (!Volatile.Read(ref _boardSetupActive) || _boardScanSuspendedForCameraOutage) return;
         _boardScanSuspendedForCameraOutage = true;
         ClearBoardPreview();
-        BoardSetupStatusText.Text = "Webcam video is stale. Projector is black until a changing frame arrives.";
+        BoardSetupStatusText.Text = "Webcam video is stale. Projector is black. " + ManualCameraRecoveryHint;
     }
 
     private void UpdateCameraHealth()
     {
-        if (_closing || !_cameraWanted || _cameraReconnectInProgress ||
+        if (_closing || !_cameraWanted || _cameraManualRestartRequired ||
             _cameraOperation.CurrentCount == 0 ||
             SelectedCamera?.Device.Id != _cameraWantedDeviceId) return;
 
         var now = MonotonicClock.UtcNow;
         if (!_camera.IsRunning || _camera.ActiveDeviceId != _cameraWantedDeviceId)
         {
-            SuspendBoardScanForCameraOutage();
-            ScheduleCameraReconnect(now, _cameraRecoveryReason ?? "Webcam stopped delivering video.");
+            RequireManualCameraRecovery("Webcam stopped delivering video.");
             return;
         }
 
@@ -87,117 +82,53 @@ public sealed partial class MainWindow
         var lastFrameAt = frame?.Timestamp ?? _cameraStartedAtUtc;
         if (now - lastFrameAt >= NoCameraFrameWarning)
         {
-            SuspendBoardScanForCameraOutage();
             var gap = $"{(int)(now - lastFrameAt).TotalSeconds} s";
-            if (now - lastFrameAt >= NoCameraFrameReconnect)
+            if (frame is null && now - lastFrameAt < FirstCameraFrameAllowance)
             {
-                ScheduleCameraReconnect(now, "No fresh webcam frame for " + gap + ".");
+                // Some drivers deliver their first frame slowly. Warn and keep input
+                // paused, but do not latch a manual restart that the next attempt
+                // would hit again; the first frame clears this warning below.
+                CameraStatusText.Text = "Webcam connected, waiting for its first video frame (" + gap + ").";
+                _cameraHealthWarning = true;
                 return;
             }
-            CameraStatusText.Text = frame is null
+            RequireManualCameraRecovery(frame is null
                 ? "Webcam connected, but no video frames have arrived (" + gap + ")."
-                : "Webcam stalled: no fresh video frame for " + gap + ".";
-            _cameraHealthWarning = true;
+                : "Webcam stalled: no fresh video frame for " + gap + ".");
             return;
         }
 
         if (frame is null) return;
         var previousSample = _cameraHealthSample;
-        var hadPreviousSample = previousSample is not null;
         var changed = previousSample is null ||
             previousSample.Width != frame.Width || previousSample.Height != frame.Height ||
             previousSample.Stride != frame.Stride ||
             !previousSample.Bgra.AsSpan().SequenceEqual(frame.Bgra);
         if (changed)
             _cameraImageChangedAtUtc = now;
-        // The first frame after a restart establishes a baseline; only a later,
-        // different frame proves that a frozen driver has actually recovered.
-        if (changed && hadPreviousSample && _cameraReconnectAttempts != 0)
-        {
-            _cameraReconnectAttempts = 0;
-            _nextCameraReconnectAtUtc = DateTimeOffset.MinValue;
-            _cameraRecoveryReason = null;
-        }
         _cameraHealthSample = frame;
 
         if (now - _cameraImageChangedAtUtc >= UnchangedCameraImageWarning)
         {
-            SuspendBoardScanForCameraOutage();
             var frozenFor = $"{(int)(now - _cameraImageChangedAtUtc).TotalSeconds} s";
-            if (now - _cameraImageChangedAtUtc >= UnchangedCameraImageReconnect)
-            {
-                ScheduleCameraReconnect(now, "Webcam frames are byte-identical for " + frozenFor + ".");
-                return;
-            }
-            CameraStatusText.Text = "Webcam frames are arriving, but the image has been byte-identical for " +
-                frozenFor + (Volatile.Read(ref _boardSetupActive)
-                    ? ". Projector is black while the image is frozen."
-                    : ". Automatic reconnect will follow if the image remains frozen.");
-            _cameraHealthWarning = true;
+            RequireManualCameraRecovery("Webcam frames are arriving, but the image has been byte-identical for " + frozenFor + ".");
         }
-        else
+        else if (_cameraHealthWarning)
         {
-            if (_boardScanSuspendedForCameraOutage && changed && hadPreviousSample)
-            {
-                _boardScanSuspendedForCameraOutage = false;
-                ClearBoardPreview();
-            }
-            if (_boardScanSuspendedForCameraOutage)
-            {
-                CameraStatusText.Text = Volatile.Read(ref _boardSetupActive)
-                    ? "Webcam frames resumed, but the image has not changed. Projector remains black."
-                    : "Webcam frames resumed, but the image has not changed.";
-                _cameraHealthWarning = true;
-            }
-            else if (_cameraHealthWarning)
-            {
-                CameraStatusText.Text = _cameraLiveStatus;
-                _cameraHealthWarning = false;
-            }
+            CameraStatusText.Text = _cameraLiveStatus;
+            _cameraHealthWarning = false;
         }
     }
 
-    private void ScheduleCameraReconnect(DateTimeOffset now, string reason)
+    private void RequireManualCameraRecovery(string reason)
     {
-        _cameraRecoveryReason = reason;
+        if (_cameraManualRestartRequired) return;
+        // A stale camera must not trigger driver close/reopen loops. Latch the
+        // input pause until an explicit Stop, even if frames resume meanwhile.
+        _cameraManualRestartRequired = true;
         _cameraHealthWarning = true;
-        if (_cameraReconnectAttempts >= CameraReconnectBackoff.Length)
-        {
-            CameraStatusText.Text = reason + " Automatic reconnect attempts are exhausted. Press Start camera to try again.";
-            return;
-        }
-
-        if (_nextCameraReconnectAtUtc > now)
-        {
-            var wait = Math.Max(1, (int)Math.Ceiling((_nextCameraReconnectAtUtc - now).TotalSeconds));
-            CameraStatusText.Text = reason + $" Reconnecting in {wait} s " +
-                $"(attempt {_cameraReconnectAttempts + 1}/{CameraReconnectBackoff.Length}).";
-            return;
-        }
-
-        var attempt = ++_cameraReconnectAttempts;
-        _nextCameraReconnectAtUtc = now + CameraReconnectBackoff[attempt - 1];
-        _cameraReconnectInProgress = true;
-        CameraStatusText.Text = reason + $" Reconnecting (attempt {attempt}/{CameraReconnectBackoff.Length})…";
-        _ = ReconnectCameraAsync(_cameraOperationVersion, attempt);
-    }
-
-    private async Task ReconnectCameraAsync(long version, int attempt)
-    {
-        try
-        {
-            if (SelectedCamera is not { } choice || choice.Device.Id != _cameraWantedDeviceId) return;
-            var started = await StartCameraCoreAsync(choice, version, forceRestart: true);
-            if (version != _cameraOperationVersion || !_cameraWanted || _closing) return;
-            if (!started && attempt < CameraReconnectBackoff.Length)
-                CameraStatusText.Text += $" Retry {attempt + 1}/{CameraReconnectBackoff.Length} will follow after the backoff.";
-        }
-        catch (Exception ex)
-        {
-            if (version == _cameraOperationVersion && _cameraWanted && !_closing)
-                CameraStatusText.Text = "Webcam reconnect failed: " + ex.Message;
-        }
-        finally { _cameraReconnectInProgress = false; }
+        SuspendBoardScanForCameraOutage();
+        CameraStatusText.Text = reason + " " + ManualCameraRecoveryHint;
     }
 
     private async void RefreshCameras_Click(object sender, RoutedEventArgs e) => await RefreshCamerasAsync();
@@ -249,6 +180,11 @@ public sealed partial class MainWindow
 
     private Task<bool> StartSelectedCameraAsync()
     {
+        if (_cameraManualRestartRequired)
+        {
+            CameraStatusText.Text = "Camera input is paused. " + ManualCameraRecoveryHint;
+            return Task.FromResult(false);
+        }
         if (SelectedCamera is not { } choice)
         {
             CameraStatusText.Text = "Select a webcam first.";
@@ -259,9 +195,6 @@ public sealed partial class MainWindow
             _cameraStartingVersion == _cameraOperationVersion) return _cameraStartTask;
         _cameraWanted = true;
         _cameraWantedDeviceId = choice.Device.Id;
-        _cameraReconnectAttempts = 0;
-        _nextCameraReconnectAtUtc = DateTimeOffset.MinValue;
-        _cameraRecoveryReason = null;
         var version = Interlocked.Increment(ref _cameraOperationVersion);
         _cameraStartingDeviceId = choice.Device.Id;
         _cameraStartingRate = _requestedCameraFramesPerSecond;
@@ -269,15 +202,14 @@ public sealed partial class MainWindow
         return _cameraStartTask = StartCameraCoreAsync(choice, version, _requestedCameraFramesPerSecond);
     }
 
-    private async Task<bool> StartCameraCoreAsync(CameraChoice choice, long version, int? requestedFramesPerSecond = null,
-        bool forceRestart = false)
+    private async Task<bool> StartCameraCoreAsync(CameraChoice choice, long version, int requestedFramesPerSecond)
     {
-        int requestedRate = requestedFramesPerSecond ?? _requestedCameraFramesPerSecond;
+        int requestedRate = requestedFramesPerSecond;
         await _cameraOperation.WaitAsync();
         try
         {
-            if (_closing || !_cameraWanted || version != _cameraOperationVersion) return false;
-            if (!forceRestart && _camera.IsRunning && _camera.ActiveDeviceId == choice.Device.Id &&
+            if (_closing || !_cameraWanted || _cameraManualRestartRequired || version != _cameraOperationVersion) return false;
+            if (_camera.IsRunning && _camera.ActiveDeviceId == choice.Device.Id &&
                 _camera.RequestedFramesPerSecond == requestedRate) return true;
             ClearHandTracking();
             ResetEyeTipTracking("camera-restarted", choice.Device.Id);
@@ -290,7 +222,7 @@ public sealed partial class MainWindow
             _frozenFrame = null;
             Volatile.Write(ref _latestCameraFrame, null);
             CameraCanvas.Invalidate();
-            await _camera.StartAsync(choice.Device.Id, requestedRate, forceRestart);
+            await _camera.StartAsync(choice.Device.Id, requestedRate);
             if (version != _cameraOperationVersion || !_cameraWanted || _closing)
             {
                 // Still inside the operation gate: a superseded start must release
@@ -298,11 +230,14 @@ public sealed partial class MainWindow
                 await _camera.StopAsync();
                 return false;
             }
+            // A native failure callback can arrive while initialization is
+            // awaiting the driver. Do not overwrite its manual recovery state.
+            if (_cameraManualRestartRequired) return false;
             var format = _camera.NegotiatedFormat;
             _cameraLiveStatus = format is null
                 ? $"Live: {choice.Device.DisplayName}"
                 : $"Live: {choice.Device.DisplayName}, {format.Value.Width} × {format.Value.Height} " +
-                  $"at {format.Value.FramesPerSecond:F1} fps";
+                  $"at {format.Value.FramesPerSecond:F1} fps ({_camera.NegotiatedSubtype ?? "unknown format"})";
             _cameraStartedAtUtc = MonotonicClock.UtcNow;
             CameraStatusText.Text = Volatile.Read(ref _latestCameraFrame) is null
                 ? $"Connected: {choice.Device.DisplayName}. Waiting for video frames…"
@@ -315,16 +250,11 @@ public sealed partial class MainWindow
         {
             if (version == _cameraOperationVersion && _cameraWanted && !_closing)
             {
-                _cameraRecoveryReason = "Webcam could not start: " + ex.Message + ".";
-                if (ex is CameraAccessBlockedException)
-                {
-                    // A busy or rejected exclusive open is not a reconnect signal.
-                    // Leave the camera alone until the user explicitly retries.
-                    _cameraWanted = false;
-                    _cameraWantedDeviceId = null;
-                    _nextCameraReconnectAtUtc = DateTimeOffset.MaxValue;
-                }
-                CameraStatusText.Text = _cameraRecoveryReason;
+                // Every failed open waits for an explicit user retry. Health
+                // monitoring must not start a second attempt in the background.
+                _cameraWanted = false;
+                _cameraWantedDeviceId = null;
+                CameraStatusText.Text = "Webcam could not start: " + ex.Message;
                 _cameraHealthWarning = true;
                 UpdateCameraFrameRateStatus();
             }
@@ -342,9 +272,6 @@ public sealed partial class MainWindow
         ResetEyeTipTracking("camera-stopped");
         _cameraWantedDeviceId = null;
         Interlocked.Increment(ref _cameraOperationVersion);
-        _cameraReconnectAttempts = 0;
-        _nextCameraReconnectAtUtc = DateTimeOffset.MinValue;
-        _cameraRecoveryReason = null;
         await _cameraOperation.WaitAsync();
         try
         {
@@ -376,21 +303,14 @@ public sealed partial class MainWindow
             if (_closing || !_cameraWanted || _camera.IsRunning ||
                 version != Interlocked.Read(ref _cameraOperationVersion)) return;
             ResetCameraHealth();
-            if (Volatile.Read(ref _boardSetupActive))
-                SuspendBoardScanForCameraOutage();
-            else
-                ClearBoardPreview();
+            ClearBoardPreview();
             _frozenFrame = null;
             _bitmapFrame = null;
             _cameraBitmap?.Dispose();
             _cameraBitmap = null;
             _cameraBitmapDevice = null;
             CameraCanvas.Invalidate();
-            _cameraRecoveryReason = message;
-            var soon = MonotonicClock.UtcNow + TimeSpan.FromSeconds(2);
-            if (_nextCameraReconnectAtUtc < soon) _nextCameraReconnectAtUtc = soon;
-            _cameraHealthWarning = true;
-            CameraStatusText.Text = message + " Reconnecting shortly.";
+            RequireManualCameraRecovery(message);
         });
     }
 
@@ -400,11 +320,20 @@ public sealed partial class MainWindow
         if (_closing || !_cameraWanted || _cameraOperation.CurrentCount == 0 ||
             _camera.ActiveDeviceId != _cameraWantedDeviceId) return;
         Volatile.Write(ref _latestCameraFrame, frame);
+        var now = Stopwatch.GetTimestamp();
+        RequestCameraPreviewRedraw();
+        if (_cameraManualRestartRequired) return;
+        // This board needs only its rail and stationary captions. Do not queue
+        // unrelated full-frame detectors or the hand model behind its artwork.
+        if (!Volatile.Read(ref _boardSetupActive) && _scene.CurrentBoardScreen == BoardScreen.StrykersRun)
+        {
+            QueueStrykersRunDetection(frame);
+            QueueHandDetection(frame, now);
+            return;
+        }
         QueueEyeTipDetection(frame);
         QueueFootballDetection(frame);
         QueueHandTrackingVideoFrame(frame);
-        var now = Stopwatch.GetTimestamp();
-        RequestCameraPreviewRedraw();
 
         if (Volatile.Read(ref _boardSetupActive))
         {

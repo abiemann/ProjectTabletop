@@ -97,13 +97,13 @@ public sealed partial class SceneCompositor
     {
         foreach (var button in buttons)
         {
-            DrawRouletteButton(ds, button, game, hovered.Contains(button.Id), aspect);
+            DrawRouletteButton(ds, button, game, hovered.Contains(button.Id), aspect, _holdControlBrightness);
             if (!button.IsHold) DrawButtonFingerSelectionFeedback(ds, button, feedback, RouletteGold);
         }
     }
 
     private static void DrawRouletteButton(CanvasDrawingSession ds, BoardButton button,
-        RouletteSnapshot game, bool hovered, double aspect)
+        RouletteSnapshot game, bool hovered, double aspect, double holdExposure = 1)
     {
         var rect = Pixels(button.Bounds, 0);
         Color fill = ThemeColor(13, 65, 62), edge = ThemeColor(158, 166, 127, 180);
@@ -118,15 +118,19 @@ public sealed partial class SceneCompositor
             fill = primary ? ThemeColor(222, 189, 124) : ThemeColor(17, 37, 42);
             edge = primary ? RouletteCream : RouletteGold;
             if (!button.Enabled) { fill = ThemeColor(29, 37, 39); edge = ThemeColor(80, 87, 81); }
+            // Exposure protection dims the light caption element: the plate on
+            // primary actions, otherwise the cream lettering on the dark plate.
+            double plate = primary ? holdExposure : 1, lettering = primary ? 1 : holdExposure;
+            fill = HoldExposure(fill, plate);
             using var sheen = new CanvasLinearGradientBrush(ds.Device,
-                [new() { Position = 0, Color = primary && button.Enabled ? RouletteCream : ThemeColor(49, 67, 70) },
+                [new() { Position = 0, Color = HoldExposure(primary && button.Enabled ? RouletteCream : ThemeColor(49, 67, 70), plate) },
                  new() { Position = .35f, Color = fill }, new() { Position = 1, Color = fill }])
                 { StartPoint = new((float)rect.X, (float)rect.Y), EndPoint = new((float)rect.X, (float)rect.Bottom) };
             ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 5, rect.Width, rect.Height), 19, 19, ThemeColor(0, 5, 9));
             ds.FillRoundedRectangle(rect, 19, 19, sheen);
             ds.DrawRoundedRectangle(rect, 19, 19, edge, 1.5f);
             RouletteText(ds, button.Label.ToUpperInvariant(), RouletteButtonTextRectangle(button), 23,
-                !button.Enabled ? ThemeColor(134, 142, 139) : primary ? RouletteInk : RouletteCream, aspect);
+                HoldExposure(!button.Enabled ? ThemeColor(134, 142, 139) : primary ? RouletteInk : RouletteCream, lettering), aspect);
             return;
         }
         if (chip)

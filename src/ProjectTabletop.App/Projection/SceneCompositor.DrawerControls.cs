@@ -13,7 +13,7 @@ public sealed partial class SceneCompositor
 {
     private static void DrawBoardDrawerControls(CanvasDrawingSession ds, IReadOnlyList<BoardButton> buttons,
         IReadOnlyList<string> hovered, IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback,
-        bool drawerOpen = false, float drawerProgress = 1, double boardAspect = 1)
+        bool drawerOpen = false, float drawerProgress = 1, double boardAspect = 1, double holdExposure = 1)
     {
         var drawerButtons = buttons.Where(button => !IsBoardDrawerHandle(button)).ToArray();
         if (drawerOpen && drawerButtons.Length > 0)
@@ -30,7 +30,7 @@ public sealed partial class SceneCompositor
             {
                 foreach (var button in drawerButtons)
                 {
-                    DrawDrawerButton(ds, button, button.Enabled && hovered.Contains(button.Id));
+                    DrawDrawerButton(ds, button, button.Enabled && hovered.Contains(button.Id), holdExposure);
                     DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, ThemeColor(24, 104, 124));
                 }
             }
@@ -40,7 +40,7 @@ public sealed partial class SceneCompositor
         // The handle remains fixed while its row's actions rise beside it.
         foreach (var button in buttons.Where(IsBoardDrawerHandle))
         {
-            DrawBoardDrawerHandle(ds, button, button.Enabled && hovered.Contains(button.Id), boardAspect);
+            DrawBoardDrawerHandle(ds, button, button.Enabled && hovered.Contains(button.Id), boardAspect, holdExposure);
             DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, ThemeColor(24, 104, 124),
                 showCaption: false);
         }
@@ -76,17 +76,19 @@ public sealed partial class SceneCompositor
         return new(left, top, points.Max(point => point.X) - left, points.Max(point => point.Y) - top);
     }
 
-    private static void DrawBoardDrawerHandle(CanvasDrawingSession ds, BoardButton button, bool hovered, double aspect)
+    private static void DrawBoardDrawerHandle(CanvasDrawingSession ds, BoardButton button, bool hovered, double aspect,
+        double holdExposure = 1)
     {
+        double plate = button.IsHold ? holdExposure : 1;
         var b = button.Bounds;
         float radius = BoardButtonCornerRadius(button);
         var rectangle = new Rect(b.X * BoardSurfaceSize, b.Y * BoardSurfaceSize,
             b.Width * BoardSurfaceSize, b.Height * BoardSurfaceSize);
         using var glass = new CanvasLinearGradientBrush(ds.Device,
         [
-            new() { Position = 0, Color = ThemeColor(231, 239, 244) },
-            new() { Position = .48f, Color = ThemeColor(201, 218, 229) },
-            new() { Position = 1, Color = ThemeColor(176, 199, 214) }
+            new() { Position = 0, Color = HoldExposure(ThemeColor(231, 239, 244), plate) },
+            new() { Position = .48f, Color = HoldExposure(ThemeColor(201, 218, 229), plate) },
+            new() { Position = 1, Color = HoldExposure(ThemeColor(176, 199, 214), plate) }
         ]) { StartPoint = new((float)rectangle.X, (float)rectangle.Y),
             EndPoint = new((float)rectangle.X, (float)rectangle.Bottom) };
         ds.FillRoundedRectangle(rectangle, radius, radius, glass);
@@ -123,8 +125,9 @@ public sealed partial class SceneCompositor
         WordWrapping = CanvasWordWrapping.NoWrap
     };
 
-    private static void DrawDrawerButton(CanvasDrawingSession ds, BoardButton button, bool hovered)
+    private static void DrawDrawerButton(CanvasDrawingSession ds, BoardButton button, bool hovered, double holdExposure = 1)
     {
+        double plate = button.IsHold ? holdExposure : 1;
         var bounds = button.Bounds;
         float radius = BoardButtonCornerRadius(button);
         var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
@@ -135,9 +138,9 @@ public sealed partial class SceneCompositor
         // attempt; over this glass they are found from the unlit camera image.
         using var glass = new CanvasLinearGradientBrush(ds.Device,
         [
-            new() { Position = 0, Color = ThemeColor(234, 239, 242) },
-            new() { Position = .49f, Color = ThemeColor(226, 232, 236) },
-            new() { Position = 1, Color = ThemeColor(218, 225, 230) }
+            new() { Position = 0, Color = HoldExposure(ThemeColor(234, 239, 242), plate) },
+            new() { Position = .49f, Color = HoldExposure(ThemeColor(226, 232, 236), plate) },
+            new() { Position = 1, Color = HoldExposure(ThemeColor(218, 225, 230), plate) }
         ]) { StartPoint = new((float)rect.X, (float)rect.Y), EndPoint = new((float)rect.X, (float)rect.Bottom) };
         ds.FillRoundedRectangle(rect, radius, radius, glass);
         ds.DrawRoundedRectangle(rect, radius, radius,

@@ -1,5 +1,7 @@
 #if DEBUG
+using System.Runtime.InteropServices.WindowsRuntime;
 using ProjectTabletop.App.Camera;
+using Windows.Graphics.Imaging;
 
 namespace ProjectTabletop.App;
 
@@ -7,11 +9,16 @@ public sealed partial class MainWindow
 {
     private async Task<object> VerifyCameraSafetyAsync()
     {
-        if (_camera.IsRunning || _cameraWanted || _cameraOperation.CurrentCount == 0 || _closing)
+        if (_camera.IsRunning || _camera.ActiveDeviceId is not null || _cameraWanted || _cameraOperation.CurrentCount == 0 || _closing)
             throw new InvalidOperationException("Stop the camera before checking camera safety.");
+        // The latch check below drives the real outage path, which suspends a scan and
+        // clears the board clip. Run it only when there is no live session state to lose.
+        if (Volatile.Read(ref _boardSetupActive) || _scene.HasBoardMediaClip)
+            throw new InvalidOperationException("Stop board setup before checking camera safety.");
         if (SelectedCamera is null)
             throw new InvalidOperationException("Select a camera before checking queued camera-start cancellation.");
         var timeout = TimeSpan.FromSeconds(5);
+        object readerConversion = await VerifyCameraReaderConversionAsync();
 
         // The real app already owns this lease. Dispose a surprise acquisition even
         // when the assertion fails, without starting another app or touching USB.
@@ -38,6 +45,29 @@ public sealed partial class MainWindow
             }
             finally { await camera.DisposeAsync().AsTask().WaitAsync(timeout); }
         }
+
+        // A stopped capture must latch a manual recovery request. Health ticks
+        // and another Start cannot schedule any driver work while it is latched.
+        long healthVersion = _cameraOperationVersion;
+        try
+        {
+            _cameraWanted = true;
+            _cameraWantedDeviceId = SelectedCamera.Device.Id;
+            UpdateCameraHealth();
+            string stalledStatus = CameraStatusText.Text;
+            Require(_cameraManualRestartRequired && _cameraHealthWarning,
+                "A stopped capture did not pause input for manual recovery.");
+            for (int tick = 0; tick < 20; tick++) UpdateCameraHealth();
+            Require(_cameraOperationVersion == healthVersion && _cameraOperation.CurrentCount == 1 &&
+                CameraStatusText.Text == stalledStatus && !_camera.IsRunning,
+                "Repeated camera health checks changed the recovery request or scheduled capture work.");
+            Require(!await StartSelectedCameraAsync().WaitAsync(timeout) && _cameraOperationVersion == healthVersion &&
+                _cameraOperation.CurrentCount == 1,
+                "Start bypassed the manual Stop required after a camera outage.");
+        }
+        finally { await StopCameraAsync().WaitAsync(timeout); }
+        Require(!_cameraManualRestartRequired && !_cameraHealthWarning,
+            "Explicit Stop did not clear the manual recovery latch.");
 
         // Hold the actual UI operation gate so neither start can reach the service.
         // Stop must invalidate them before this gate is released, including on failure.
@@ -77,12 +107,45 @@ public sealed partial class MainWindow
             _camera.LatestFrame is null && Volatile.Read(ref _latestCameraFrame) is null,
             "The camera safety check left capture state or a pending operation active.");
 
-        return new { passed = true, appInstanceLeaseHeld = true, occupiedDeviceBlockedBeforeEnumeration = true,
+        return new { passed = true, readerConversion, appInstanceLeaseHeld = true, occupiedDeviceBlockedBeforeEnumeration = true,
             failedStartPreservesOtherOwner = true, duplicateStartsShareTask = true,
             duplicateStartsPreserveVersion = true, stopCancelsQueuedStarts = true,
+            stalledCaptureRequiresManualStop = true, repeatedHealthTicksDoNotReopen = true,
             cameraStopped = true, cameraStateCleared = true, liveHardwareUnchanged = true };
 
         static void Require(bool condition, string message)
+        { if (!condition) throw new InvalidOperationException(message); }
+    }
+
+    private static async Task<object> VerifyCameraReaderConversionAsync()
+    {
+        await using var capture = new CameraCaptureService();
+        const int width = 32, height = 16;
+        var native = new byte[width * height * 3 / 2];
+        Array.Fill(native, (byte)128);
+        Array.Fill(native, (byte)64, 0, width * height / 2);
+        Array.Fill(native, (byte)192, width * height / 2, width * height / 2);
+        var owned = new byte[width * height * 4];
+        using (var source = new SoftwareBitmap(BitmapPixelFormat.Nv12, width, height, BitmapAlphaMode.Ignore))
+        {
+            source.CopyFromBuffer(native.AsBuffer());
+            using var converted = SoftwareBitmap.Convert(source, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore);
+            Check(converted.PixelWidth == width && converted.PixelHeight == height && converted.BitmapPixelFormat == BitmapPixelFormat.Bgra8,
+                "Local NV12 conversion changed dimensions or pixel format.");
+            converted.CopyToBuffer(owned.AsBuffer());
+            Array.Fill(native, (byte)0);
+            source.CopyFromBuffer(native.AsBuffer());
+        }
+        for (int pixel = 0; pixel < owned.Length; pixel += 4)
+            Check(Math.Abs(owned[pixel] - owned[pixel + 1]) <= 1 && Math.Abs(owned[pixel + 1] - owned[pixel + 2]) <= 1,
+                "Neutral NV12 chroma converted to a coloured BGRA frame.");
+        Check(owned[width * (height - 1) * 4] > owned[0] + 80,
+            "The owned BGRA copy lost the source's distinct luminance bands or retained disposed storage.");
+        Check(!capture.IsRunning && capture.GetDiagnostics().ReaderStarts == 0,
+            "Synthetic conversion verification opened camera hardware.");
+        return new { ownedBgraConversion = true, cameraOpened = false };
+
+        static void Check(bool condition, string message)
         { if (!condition) throw new InvalidOperationException(message); }
     }
 }

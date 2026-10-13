@@ -8,6 +8,8 @@ internal static class BlackjackBoardRegression
         var board = new BoardSession(game);
         var pinchHits = new List<BlackjackHit>();
         board.BlackjackHitOccurred += pinchHits.Add;
+        Require(board.ActivateButton("menu-scroll-down", Time(-600)) && board.TickMenu(Time(50)),
+            "The Blackjack fixture could not settle the second menu page.");
         Select("blackjack", 1, 100);
         Require(board.Screen == BoardScreen.Blackjack && board.BlackjackState.Phase == BlackjackPhase.Betting,
             "The Blackjack menu item did not open the betting table.");
@@ -54,8 +56,13 @@ internal static class BlackjackBoardRegression
             pinchHits[0].StartedAt == Time(6300), "A long-press HIT did not emit exactly one payload for the previous active hand.");
         var saved = board.BlackjackState;
         Select("menu", 6, 6400);
-        Select("blackjack", 7, 6460);
-        Require(board.BlackjackState.Revision == saved.Revision && board.BlackjackState.Bankroll == saved.Bankroll,
+        // Re-enter through the launcher card itself. Exiting a page-two board keeps
+        // that launcher page, so the Blackjack card is directly selectable.
+        Require(board.Screen == BoardScreen.Menu && board.MenuScrolled && !board.MenuScrolling,
+            "Exiting Blackjack did not return to its settled second launcher page.");
+        Select("blackjack", 7, 7100);
+        Require(board.Screen == BoardScreen.Blackjack &&
+            board.BlackjackState.Revision == saved.Revision && board.BlackjackState.Bankroll == saved.Bankroll,
             "Returning from the menu reset an active round or refunded its stake.");
 
         // All rendered controls use these exact, nonoverlapping UV rectangles.
@@ -72,12 +79,12 @@ internal static class BlackjackBoardRegression
         }
 
         // Pointer actions must invalidate old camera gestures too.
-        board.ResetInput(Time(6500));
+        board.ResetInput(Time(7500));
         var stand = Button("bj-stand");
-        Require(board.Update([Sample(stand, 8, 6490)], Time(6510), Time(6510)) is null,
+        Require(board.Update([Sample(stand, 8, 7490)], Time(7510), Time(7510)) is null,
             "A pre-reset pinch changed a round.");
-        Require(board.ActivateButton("bj-stand", Time(6550)), "A valid laptop button failed.");
-        Require(board.Update([Sample(stand, 9, 6540)], Time(6600), Time(6600)) is null,
+        Require(board.ActivateButton("bj-stand", Time(7550)), "A valid laptop button failed.");
+        Require(board.Update([Sample(stand, 9, 7540)], Time(7600), Time(7600)) is null,
             "An in-flight pre-click pinch applied after a laptop action.");
 
         var settling = new BoardSession(new BlackjackGame(initialShoe: Cards(10, 10, 8, 7)));

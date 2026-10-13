@@ -254,6 +254,7 @@ public sealed partial class MainWindow : Window
         _statusTimer.Stop();
         await DisposeEyeTipTrackingAsync();
         await DisposeFootballInputAsync();
+        await DisposeStrykersRunInputAsync();
         await DisposeHandTrackingAsync();
         if (_crownDeedSaveTask is not null) await _crownDeedSaveTask;
         if (_controlHost is not null) await _controlHost.DisposeAsync();

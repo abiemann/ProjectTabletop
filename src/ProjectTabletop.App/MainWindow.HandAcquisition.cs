@@ -15,6 +15,9 @@ public sealed partial class MainWindow
 #if DEBUG
     private CameraFrame? _lastHandAcquisitionFrame;
     private SceneCompositor.HandAcquisitionContext? _lastHandAcquisitionContext;
+    private sealed record HoldButtonSnapshot(CameraFrame Frame, SceneCompositor.HoldButtonContext Context,
+        HoldButtonQuery Query, long Generation, DateTimeOffset ProcessedAt);
+    private HoldButtonSnapshot? _lastHoldButtonSnapshot;
 #endif
 
     private sealed record HandAcquisitionQuery(IReadOnlyList<HandAcquisitionHint> Hints,
@@ -56,7 +59,15 @@ public sealed partial class MainWindow
         _holdGeneration = generation;
         var presence = _holdPresence.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
             context.SearchPolygon, context.ExpectedScene, frame.Timestamp, MonotonicClock.UtcNow);
-        return new(context.HeldButtons(presence), context.ClearedButtons(presence), presence);
+        var query = new HoldButtonQuery(context.HeldButtons(presence), context.ClearedButtons(presence), presence);
+#if DEBUG
+        // Retain one immutable camera/context/result tuple only during explicit
+        // board diagnostics. The saver must never pair a newer image with this fit.
+        lock (_handGate)
+            Volatile.Write(ref _lastHoldButtonSnapshot, _boardHandDiagnosticLogging
+                ? new(frame, context, query, generation, MonotonicClock.UtcNow) : null);
+#endif
+        return query;
     }
 
     private static HandAcquisitionQuery CreateHandAcquisitionQuery(CameraFrame frame,

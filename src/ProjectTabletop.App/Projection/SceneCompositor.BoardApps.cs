@@ -26,15 +26,19 @@ public sealed partial class SceneCompositor
         long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long CrownDeedRevision, long CrownDeedDiceRevision,
         long CrownDeedSessionRevision, int CrownDeedDrawerFrame, long CrownDeedEntranceRevision, int CrownDeedEntranceFrame, long CrownDeedDevelopmentFrame,
         long GlobeRevision, long GlobeFrame, long GlobeSessionRevision, long SlotsRevision, double SlotsAspect, int MenuFrame,
-        long RouletteRevision, double RouletteAspect, string? RouletteHover, long WaterRevision, long FootballRevision);
+        long RouletteRevision, double RouletteAspect, string? RouletteHover, long WaterRevision, long FootballRevision,
+        long StrykersRunRevision);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
         Func<DateTimeOffset>? boardRevealClock = null, Func<DateTimeOffset>? paintClock = null,
         CrownDeedGame? crownDeed = null, Func<DateTimeOffset>? crownDeedClock = null,
         GlobeState? globe = null, Func<DateTimeOffset>? globeClock = null, SlotGame? slots = null, RouletteGame? roulette = null,
-        Func<DateTimeOffset>? waterClock = null, Func<DateTimeOffset>? footballClock = null)
+        Func<DateTimeOffset>? waterClock = null, Func<DateTimeOffset>? footballClock = null,
+        Func<DateTimeOffset>? strykersRunClock = null)
     {
         _boardSession = new BoardSession(blackjack, crownDeed, globe, slots, roulette);
+        _strykersRunClock = strykersRunClock ?? (() => MonotonicClock.UtcNow);
+        _strykersRunAnimationOrigin = _strykersRunClock();
         _blackjackClock = blackjackClock ?? (() => MonotonicClock.UtcNow);
         _boardRevealClock = boardRevealClock ?? (() => MonotonicClock.UtcNow);
         _paintClock = paintClock ?? (() => MonotonicClock.UtcNow);
@@ -143,6 +147,7 @@ public sealed partial class SceneCompositor
         SyncPaintSession();
         SyncWaterGardenSession();
         SyncFootballSession();
+        SyncHoldControlExposure();
         ReserveProjectedBoardPixels(ds, output, preview);
         if (EnsureBoardRenderTarget(ref _boardApplicationTarget, ds.Device)) _renderedBoardState = null;
 
@@ -162,6 +167,7 @@ public sealed partial class SceneCompositor
         var paint = _boardSession.Screen == BoardScreen.Paint;
         var water = _boardSession.Screen == BoardScreen.WaterGarden;
         var football = _boardSession.Screen == BoardScreen.Football;
+        var strykersRun = _boardSession.Screen == BoardScreen.StrykersRun;
         var waterNow = _waterClock();
         if (water) _boardSession.TickWaterGarden(waterNow);
         var paintNow = _paintClock();
@@ -209,7 +215,8 @@ public sealed partial class SceneCompositor
             slots ? _boardSession.SlotsState.Revision : 0, slots ? PaintBoardAspect() : 0, MenuVisualFrame(blackjackNow),
             roulette ? _boardSession.RouletteState.Revision : 0, roulette ? PaintBoardAspect() : 0,
             roulette && handsFresh ? string.Join('|', _boardSession.HoveredButtonIds) : null,
-            water ? WaterGardenVisualRevision(waterNow) : 0, football ? FootballVisualRevision() : 0);
+            water ? WaterGardenVisualRevision(waterNow) : 0, football ? FootballVisualRevision() : 0,
+            strykersRun ? StrykersRunVisualRevision() : 0);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
@@ -272,7 +279,12 @@ public sealed partial class SceneCompositor
             else if (football)
             {
                 DrawFootballSurface(surface);
-                DrawFootballControls(surface);
+                DrawFieldGameControls(surface);
+            }
+            else if (strykersRun)
+            {
+                DrawStrykersRunSurface(surface);
+                DrawStrykersRunControls(surface);
             }
             else if (slots)
                 DrawSlotsMachine(surface, _boardSession.SlotsState, _boardSession.Buttons, PaintBoardAspect());
@@ -471,6 +483,7 @@ public sealed partial class SceneCompositor
             BoardScreen.Paint => "Liquid colour & metallic ink",
             BoardScreen.WaterGarden => "Still water. Gentle ripples.",
             BoardScreen.Football => "Big kicks. Bouncy football.",
+            BoardScreen.StrykersRun => "Recruit. Advance. Survive.",
             BoardScreen.CrownDeed => "Build your fortune. Shape the city.",
             BoardScreen.Globe => "Zoom and rotate Earth",
             BoardScreen.Roulette => "Place your chips and spin",

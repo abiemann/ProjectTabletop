@@ -816,12 +816,12 @@ public sealed partial class MainWindow
         if (!Volatile.Read(ref _boardSetupActive)) return;
         if (_boardScanSuspendedForCameraOutage)
         {
-            BoardSetupStatusText.Text = "Webcam image is stale. Projector is black until a changing frame arrives.";
+            BoardSetupStatusText.Text = "Webcam input is paused. Projector is black. " + ManualCameraRecoveryHint;
             return;
         }
         if (!_camera.IsRunning)
         {
-            BoardSetupStatusText.Text = "Projector is black. Start the webcam to find the cardboard.";
+            BoardSetupStatusText.Text = "Projector is black. Press Start camera to resume the board scan.";
             return;
         }
         var phase = (BoardSetupPhase)Volatile.Read(ref _boardSetupPhase);

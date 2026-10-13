@@ -15,7 +15,7 @@ public sealed partial class SceneCompositor
     // reference follows only what changes the rendered controls, so activating
     // one (for example, zooming Earth) does not restart the hold.
     private readonly record struct HoldSceneKey(BoardScreen Screen, string Controls, double Aspect,
-        decimal ControlValue, object? CameraMap, object? SurfaceMap);
+        decimal ControlValue, double ControlBrightness, object? CameraMap, object? SurfaceMap);
     private readonly record struct HoldControlAppearance(string Label, bool Enabled, BoardRect Bounds, decimal Value);
     private HoldSceneKey? _holdSceneKey;
     private Dictionary<string, HoldControlAppearance> _holdControlAppearances = [];
@@ -52,13 +52,13 @@ public sealed partial class SceneCompositor
             RefreshWaterStickPresence();
             var now = HoldClock();
             var buttons = _boardSession.Buttons;
-            if (!AcquisitionBoardReady || !buttons.Any(button => button.IsHold && button.Enabled) ||
+            if (!AcquisitionBoardReady || HoldControlsSettling(frameTime) || !buttons.Any(button => button.IsHold && button.Enabled) ||
                 HasBoardControlDrawerAnimation() || frameTime > now ||
                 now - frameTime > TimeSpan.FromMilliseconds(350)) return null;
             var key = new HoldSceneKey(_boardSession.Screen,
                 string.Join('|', buttons.Select(button => $"{button.Id}:{button.Label}:{button.Enabled}:{button.Bounds}")),
                 PaintBoardAspect(), _boardSession.Screen == BoardScreen.Slots ? _boardSession.SlotsState.BuyCost : 0,
-                _boardCameraMap, _boardSurfaceMap);
+                _holdControlBrightness, _boardCameraMap, _boardSurfaceMap);
             if (_holdSceneKey != key || _holdExpectedScene is null)
             {
                 if (CaptureExpectedAcquisitionScene() is not { } scene) return null;
@@ -69,7 +69,7 @@ public sealed partial class SceneCompositor
                     new HoldControlAppearance(button.Label, button.Enabled, button.Bounds,
                         button.Id == "slot-buy" ? _boardSession.SlotsState.BuyCost : 0));
                 bool sameGeometry = _holdSceneKey is { } previous && previous.Screen == key.Screen &&
-                    previous.Aspect == key.Aspect && Equals(previous.CameraMap, key.CameraMap) &&
+                    previous.Aspect == key.Aspect && previous.ControlBrightness == key.ControlBrightness && Equals(previous.CameraMap, key.CameraMap) &&
                     Equals(previous.SurfaceMap, key.SurfaceMap);
                 // A sibling becoming enabled must not interrupt a continuous
                 // Globe zoom hold whose own caption and surface are unchanged.
@@ -98,7 +98,8 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             RefreshWaterStickPresence();
-            if (context is null || context.Revision != _holdRevision || !AcquisitionBoardReady) return [];
+            if (HoldControlsSettling(frameTime) || context is null || context.Revision != _holdRevision ||
+                !AcquisitionBoardReady) return [];
             var activated = _boardSession.ObserveHeldButtons(heldIds, frameTime, HoldClock(), clearedIds);
             if (activated.Count > 0)
             {
@@ -182,6 +183,7 @@ public sealed partial class SceneCompositor
     private DateTimeOffset HoldClock() => _boardSession.Screen switch
     {
         BoardScreen.Football => _footballClock(),
+        BoardScreen.StrykersRun => _strykersRunClock(),
         BoardScreen.Globe => _globeClock(),
         BoardScreen.WaterGarden => _waterClock(),
         _ => _blackjackClock()

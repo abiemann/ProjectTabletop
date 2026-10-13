@@ -7,7 +7,7 @@ internal static class BoardInteractionRegression
     {
         var session = new BoardSession();
         Require(session.Screen == BoardScreen.Menu, "The board did not start at the menu.");
-        string[] names = ["Dragon Slots", "Football", "Blackjack", "Water Garden", "Crown & Deed", "Globe", "Settings"];
+        string[] names = ["Dragon Slots", "Football", "Stryker's Run", "Water Garden", "Crown & Deed", "Globe", "Settings"];
         Require(session.Buttons.Where(button => button.Destination != BoardScreen.Menu).Select(button => button.Label).SequenceEqual(names), "Menu order or labels differ from the requested menu.");
         Require(session.Buttons.Single(button => button.Id == "settings") is { Destination: BoardScreen.Settings } &&
             session.Buttons.All(button => button.Destination != BoardScreen.HandTracking),
@@ -15,7 +15,7 @@ internal static class BoardInteractionRegression
         BoardButton[] firstPage = session.Buttons.Where(button => button.Destination != BoardScreen.Menu).ToArray();
         var photoMenu = new BoardSession();
         OpenSecondMenuPage(photoMenu, 0);
-        BoardButton[] buttons = [.. firstPage, photoMenu.Buttons.Single(button => button.Id == "photo-copy")];
+        BoardButton[] buttons = [.. firstPage, .. photoMenu.Buttons.Where(button => button.Id is "photo-copy" or "blackjack")];
         long eventId = 0;
         for (int index = 0; index < buttons.Length; index++)
         {
@@ -26,12 +26,13 @@ internal static class BoardInteractionRegression
                 "A menu target is too small for the board.");
             Require(bounds.X > 0 && bounds.Y > 0 && bounds.X + bounds.Width < 1 && bounds.Y + bounds.Height < 1,
                 "A menu target reaches outside the board.");
-            var pageButtons = button.Destination == BoardScreen.PhotoCopy ? photoMenu.Buttons : firstPage;
+            bool secondPage = button.Destination is BoardScreen.PhotoCopy or BoardScreen.Blackjack;
+            var pageButtons = secondPage ? photoMenu.Buttons : firstPage;
             Require(pageButtons.Count(other => other.Bounds.Contains(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2)) == 1,
                 "Menu targets overlap at a button's center.");
 
             int time = 100 + index * 4000;
-            if (button.Destination == BoardScreen.PhotoCopy) OpenSecondMenuPage(session, time - 1);
+            if (secondPage) OpenSecondMenuPage(session, time - 1);
             Require(Update(session, time, Over(button)) is null, "Hover alone selected an application.");
             Require(session.HoveredButtonIds.SequenceEqual([button.Id]), "Hover did not use the shared target rectangle.");
             BoardNavigation? navigation = Update(session, time + 10, Over(button, ++eventId, time + 10));
@@ -126,10 +127,11 @@ internal static class BoardInteractionRegression
                         session.Screen == BoardScreen.Menu,
                     "Water Garden's revealed long-press EXIT did not return to the launcher.");
             }
-            else if (button.Destination is BoardScreen.Slots or BoardScreen.Football)
+            else if (button.Destination is BoardScreen.Slots or BoardScreen.Football or BoardScreen.StrykersRun)
             {
-                // Both boards use a single-action hold on the viewer's edge row.
-                string exitId = button.Destination == BoardScreen.Slots ? "slot-exit" : "football-exit";
+                // These boards use a single-action hold on the viewer's edge row.
+                string exitId = button.Destination switch { BoardScreen.Slots => "slot-exit",
+                    BoardScreen.Football => "football-exit", _ => "strykers-run-exit" };
                 Require(session.Buttons.All(item => item.Hold == BoardButtonHold.Once) && session.Buttons[0].Id == exitId,
                     button.Destination + " bottom controls are not long-press buttons led by Exit.");
                 Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is null &&
@@ -526,9 +528,14 @@ internal static class BoardInteractionRegression
         throw new InvalidOperationException(message);
     }
 
-    private static void OpenSecondMenuPage(BoardSession session, int settledAt) =>
+    private static void OpenSecondMenuPage(BoardSession session, int settledAt)
+    {
+        // Returning from Photo Copy preserves its launcher page. The next
+        // second-page fixture should use that settled page, not page down again.
+        if (session.MenuScrolled && !session.MenuScrolling) return;
         Require(session.ActivateButton("menu-scroll-down", Time(settledAt - 650)) && session.TickMenu(Time(settledAt)),
-            "The Photo Copy fixture could not settle the second menu page.");
+            "The navigation fixture could not settle the second menu page.");
+    }
 
     internal static BoardHandSample Over(BoardButton button, long eventId = 0, int executeAt = 0) =>
         new(button.Bounds.X + button.Bounds.Width / 2, button.Bounds.Y + button.Bounds.Height / 2,

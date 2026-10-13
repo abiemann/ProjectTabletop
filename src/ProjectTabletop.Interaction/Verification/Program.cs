@@ -24,6 +24,8 @@ WaterGardenBoardRegression.Run();
 FootballGameRegression.Run();
 FootballMultiballRegression.Run();
 FootballBoardRegression.Run();
+StrykersRunGameRegression.Run();
+StrykersRunBoardRegression.Run();
 BoardInteractionRegression.CheckAnchoredSelection();
 BoardInteractionRegression.CheckAnchorFreshnessAndConsumption();
 BoardInteractionRegression.CheckAnchorNavigationAndReset();
