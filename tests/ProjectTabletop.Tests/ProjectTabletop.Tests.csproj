@@ -24,6 +24,8 @@
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="..\..\src\ProjectTabletop.App\ExclusiveProcessLease.cs" Link="App\ExclusiveProcessLease.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Camera\CameraAccessBlockedException.cs" Link="App\CameraAccessBlockedException.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Camera\CameraFrame.cs" Link="App\CameraFrame.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Camera\CameraFrameRatePolicy.cs" Link="App\CameraFrameRatePolicy.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Camera\FrameWorker.cs" Link="App\FrameWorker.cs" />

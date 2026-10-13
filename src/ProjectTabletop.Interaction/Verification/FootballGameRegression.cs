@@ -761,17 +761,21 @@ internal static class FootballGameRegression
     private static void SeedBall(FootballGame game, Vector2 position, Vector2 velocity,
         float height = FootballGame.BallRadius, float vertical = 0)
     {
-        Set("_ballPosition", position);
-        Set("_ballVelocity", velocity);
-        Set("_ballHeight", height);
-        Set("_ballVerticalVelocity", vertical);
-        Set("_ballRotation", Quaternion.Identity);
-        Set("_ballSpin", 0f);
+        var balls = (System.Collections.IList)typeof(FootballGame)
+            .GetField("_balls", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(game)!;
+        var ball = balls[0]!;
+        SetBall("Position", position);
+        SetBall("Velocity", velocity);
+        SetBall("Height", height);
+        SetBall("VerticalVelocity", vertical);
+        SetBall("Rotation", Quaternion.Identity);
+        SetBall("Spin", 0f);
         Set("_phase", FootballPhase.Playing);
         Set("_servePending", false);
         Set("_snapshot", null);
         void Set(string name, object? value) => typeof(FootballGame)
             .GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(game, value);
+        void SetBall(string name, object value) => ball.GetType().GetField(name)!.SetValue(ball, value);
     }
 
     private static void SeedAi(FootballGame game, Vector2 position)

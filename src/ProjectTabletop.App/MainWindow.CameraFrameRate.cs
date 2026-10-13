@@ -89,7 +89,7 @@ public sealed partial class MainWindow
             status = matches
                 ? $"Using {format.FramesPerSecond:0.##} fps. Changing the rate restarts the camera; run board setup again."
                 : $"Requested {_requestedCameraFramesPerSecond} fps; camera is using {format.FramesPerSecond:0.##} fps. " +
-                  (_camera.HasExclusiveFormatControl ? "The requested mode was unavailable or rejected." : "Another app controls the camera format.");
+                  "The requested mode was unavailable or rejected.";
         }
         else status = $"Request {_requestedCameraFramesPerSecond} fps when the camera starts. Unsupported rates use an available mode.";
         CameraFrameRateStatusText.Text = status + (_cameraFrameRatesError is null ? "" : " " + _cameraFrameRatesError);

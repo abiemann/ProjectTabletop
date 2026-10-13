@@ -70,7 +70,8 @@ public sealed partial class MainWindow
         }
         Check(scene.FootballState.Phase == FootballPhase.Ready &&
             scene.FootballState.Kickers[0] is { Present: true, MarkerAnchored: true } &&
-            scene.FootballState.BallPosition == Vector2.Zero && scene.FootballState.BallVelocity == Vector2.Zero &&
+            scene.FootballState.Balls is [{ Position: var lobbyBall, Velocity: var lobbyVelocity }] &&
+            lobbyBall == Vector2.Zero && lobbyVelocity == Vector2.Zero &&
             audioCues.All(cue => (cue.Cues & FootballAudioCue.StartWhistle) == 0),
             "A visible lobby marker started the countdown, moved the ball or sounded a kickoff without PLAY.");
         VerifyVisibleControls(scene);
@@ -115,27 +116,27 @@ public sealed partial class MainWindow
         Check(context is { ContinuousSearchPolygon.Length: 4, ObserveMotion: false, ExpectedScene: null },
             "The pitch lost finger acquisition or kept analyzing hidden button captions.");
         VerifyHiddenControls(scene);
-        var beforeDrop = scene.FootballState.BallPosition;
+        var beforeDrop = scene.FootballState.Balls[0].Position;
         var aiBeforeDrop = scene.FootballState.Kickers[1].Position;
         now += TimeSpan.FromMilliseconds(300);
         Draw(scene, target);
         Check(scene.FootballState.Phase == FootballPhase.Playing && scene.FootballState.RecoveringInput &&
-            !scene.FootballState.Kickers[0].Present && scene.FootballState.BallPosition == beforeDrop &&
+            !scene.FootballState.Kickers[0].Present && scene.FootballState.Balls[0].Position == beforeDrop &&
             scene.FootballState.Kickers[1].Position == aiBeforeDrop,
             "A short tracking interruption did not quietly freeze the ball and computer.");
         VerifyHiddenControls(scene);
-        var paused = scene.FootballState.BallPosition;
+        var paused = scene.FootballState.Balls[0].Position;
         now += TimeSpan.FromMilliseconds(40);
         scene.SetFootballPlayerCameraPoint(0, playerCamera, now.AddSeconds(-1));
         scene.SetFootballPlayerCameraPoint(0, playerCamera, now.AddSeconds(1));
         Draw(scene, target);
-        Check(scene.FootballState.RecoveringInput && scene.FootballState.BallPosition == paused,
+        Check(scene.FootballState.RecoveringInput && scene.FootballState.Balls[0].Position == paused,
             "Stale/future input restarted a paused game.");
         now += TimeSpan.FromMilliseconds(16);
         scene.SetFootballPlayerCameraPoint(0, playerCamera, now);
         Draw(scene, target);
         Check(scene.FootballState.Phase == FootballPhase.Playing && !scene.FootballState.RecoveringInput &&
-            scene.FootballState.BallPosition == paused && scene.FootballState.Kickers[1].Position == aiBeforeDrop,
+            scene.FootballState.Balls[0].Position == paused && scene.FootballState.Kickers[1].Position == aiBeforeDrop,
             "Fresh input after a short loss restarted the countdown or caught up old physics.");
         now += TimeSpan.FromMilliseconds(800);
         Draw(scene, target);
@@ -274,9 +275,10 @@ public sealed partial class MainWindow
                 new FootballKickerSnapshot(1, new(.5f, -.17f), Vector2.Zero, true, FootballKickerStyle.Glove, true)
             }
         };
-        RenderRaw(snapshot with { BallPosition = new(-.5f, -.35f) });
+        RenderRaw(snapshot with { Balls = [snapshot.Balls[0] with { Position = new(-.5f, -.35f) }] });
         byte[] background = raw.GetPixelBytes();
-        RenderRaw(snapshot with { BallHeight = .20f, BallRotation = Quaternion.CreateFromYawPitchRoll(.45f, .7f, .3f) });
+        RenderRaw(snapshot with { Balls = [snapshot.Balls[0] with
+            { Height = .20f, Rotation = Quaternion.CreateFromYawPitchRoll(.45f, .7f, .3f) }] });
         byte[] airborne = raw.GetPixelBytes();
         int shadowPixels = 0;
         for (int y = rawMidfieldY + 84; y < rawMidfieldY + 169; y++)
@@ -287,6 +289,8 @@ public sealed partial class MainWindow
         }
         Check(shadowPixels > 350, "Airborne ball lacked a visible, separated directional shadow on the turf.");
         await Save(raw, "football-airborne-shadow");
+        object? multiballRenderTiming = null;
+        var multiballPixels = await VerifyMultiballRenderingAsync();
         RenderRaw(snapshot);
         await Save(raw, "football-car-front-and-glove");
         RenderRaw(snapshot with
@@ -385,6 +389,9 @@ public sealed partial class MainWindow
             VerifyGrassMarkerBounds(fitted, fittedInset, output);
         }
         return new { passed = true, renderedFrames, shadowPixels, redCarPixels, blueCarPixels,
+            multiballPixels, multiballRenderTiming,
+            sevenBallsVisible = true, roundBallGrowth = true, independentBallPresentation = true,
+            heightOrderedBallOcclusion = true,
             confettiPixels, confettiOnCarPixels, victoryClock = true, winnerHalfOnly = true,
             victorySettles = true, ordinaryGoalsWithoutConfetti = true, finishedInputSuspended = true,
             controlsWaitForConfetti = true, victoryControlsSlide = true, movingControlsDisarmed = true,
@@ -393,6 +400,168 @@ public sealed partial class MainWindow
             quarterTurnMapping = true, barPositionAndRotationAnchored = true, markersUseSurroundingGrass = true,
             captionControls = true, activeControlsHidden = true, inactiveControlsOverlayPitch = true,
             expandedPitch = true, statusOnGrass = true, continuousFingerAcquisition = true, directory, images };
+
+        async Task<int[]> VerifyMultiballRenderingAsync()
+        {
+            // The first three have moved clear before the second arrival. The
+            // newest four occupy the real midfield sidelines and circle tangents.
+            float sideline = FootballGame.Height / 2 - FootballGame.BallRadius;
+            float tangent = FootballGame.CenterCircleRadius + FootballGame.BallRadius;
+            Vector2[] positions = [new(-.30f, -.20f), new(.30f, -.20f), new(.32f, .22f),
+                new(0, -sideline), new(0, sideline), new(0, -tangent), new(0, tangent)];
+            var balls = positions.Select((position, index) => new FootballBallSnapshot(index, position, Vector2.Zero,
+                FootballGame.BallRadius, 0, Quaternion.CreateFromYawPitchRoll(index * .43f, index * -.31f, index * .27f), 1)).ToArray();
+            var seven = snapshot with { Balls = balls };
+            RenderRaw(seven with { Balls = [] });
+            byte[] barePitch = raw.GetPixelBytes();
+            RenderRaw(seven);
+            byte[] complete = raw.GetPixelBytes();
+            var visible = balls.Select(ball => BrightBallPixels(barePitch, complete, ball).Count).ToArray();
+            Check(visible.All(count => count > 650), "One of seven balls lacked a visible spherical body.");
+            await Save(raw, "football-seven-balls");
+            RenderRaw(seven);
+            Check(complete.AsSpan().SequenceEqual(raw.GetPixelBytes()),
+                "Reusing the ball renderer changed identical multiball snapshots.");
+
+            RenderRaw(seven with { Balls = balls.Take(3).ToArray() });
+            byte[] beforeArrival = raw.GetPixelBytes();
+            int[] previousCounts = new int[4];
+            foreach (float growth in new[] { 0f, .25f, .5f, .75f, 1f })
+            {
+                var arriving = seven with { Balls = balls.Select((ball, index) =>
+                    index < 3 ? ball : ball with { Growth = growth }).ToArray() };
+                RenderRaw(arriving);
+                byte[] pixels = raw.GetPixelBytes();
+                if (growth == 0)
+                    Check(beforeArrival.AsSpan().SequenceEqual(pixels),
+                        "Zero-size arrivals painted balls, shadows or a decorative backdrop.");
+                else
+                    for (int index = 3; index < balls.Length; index++)
+                    {
+                        var body = BrightBallPixels(beforeArrival, pixels, balls[index]);
+                        Check(body.Count > previousCounts[index - 3] + 3 && Math.Abs(body.Width - body.Height) <= 4,
+                            "A new ball did not grow continuously with a round silhouette.");
+                        previousCounts[index - 3] = body.Count;
+                    }
+                await Save(raw, $"football-new-balls-growth-{growth:0.00}");
+            }
+
+            var airborneBalls = (FootballBallSnapshot[])balls.Clone();
+            airborneBalls[4] = balls[4] with { Height = .20f,
+                Rotation = Quaternion.CreateFromYawPitchRoll(1.1f, -.75f, .9f) };
+            RenderRaw(seven with { Balls = airborneBalls });
+            byte[] independent = raw.GetPixelBytes();
+            int movedY = (int)Math.Round(66 + (balls[4].Position.Y + FootballGame.Height / 2) * 1000);
+            Check(ChangedPixels(complete, independent, 832, movedY - 110, 220,
+                    Math.Min(260, rawHeight - movedY + 110)) > 800,
+                "An individual ball did not retain its own height, shadow and rolling rotation.");
+            int stillX = (int)Math.Round(112 + (balls[0].Position.X + FootballGame.Width / 2) * 1000);
+            int stillY = (int)Math.Round(66 + (balls[0].Position.Y + FootballGame.Height / 2) * 1000);
+            Check(ChangedPixels(complete, independent, stillX - 35, stillY - 35, 70, 70) == 0,
+                "Changing one ball altered another ball's presentation.");
+            await Save(raw, "football-seven-balls-independent-height");
+
+            // Distinct panel orientations make the overlap a visible oracle.
+            // The lower ball deliberately has the greater ID, so height must
+            // outrank ID; equal heights must then use ID instead of input order.
+            var lower = balls[0] with { Id = 800, Position = Vector2.Zero,
+                Rotation = Quaternion.CreateFromYawPitchRoll(.8f, -.2f, .6f) };
+            var upper = balls[1] with { Id = 2, Height = .14f,
+                Position = new(.015f + (.14f - FootballGame.BallRadius) * .18f,
+                    (.14f - FootballGame.BallRadius) * .40f) };
+            RenderRaw(seven with { Balls = [lower] });
+            byte[] lowerOnly = raw.GetPixelBytes();
+            RenderRaw(seven with { Balls = [upper] });
+            byte[] upperOnly = raw.GetPixelBytes();
+            int overlapLeft = 112 + (int)FootballFieldGeometry.Width / 2 + 7, overlapTop = rawMidfieldY - 7;
+            Check(ChangedPixels(lowerOnly, upperOnly, overlapLeft, overlapTop, 14, 14) > 40,
+                "Ball occlusion fixture lacked distinguishable panels within the shared silhouette.");
+            foreach (var pair in new[] { new[] { lower, upper }, new[] { upper, lower } })
+            {
+                RenderRaw(seven with { Balls = pair });
+                Check(ChangedPixels(upperOnly, raw.GetPixelBytes(), overlapLeft, overlapTop, 14, 14) == 0,
+                    "An airborne ball was painted behind a lower ball because of snapshot order or ID.");
+            }
+            await Save(raw, "football-airborne-ball-overlap");
+            var equalHeight = upper with { Height = FootballGame.BallRadius, Position = new(.015f, 0) };
+            foreach (var pair in new[] { new[] { lower, equalHeight }, new[] { equalHeight, lower } })
+            {
+                RenderRaw(seven with { Balls = pair });
+                Check(ChangedPixels(lowerOnly, raw.GetPixelBytes(), overlapLeft, overlapTop, 14, 14) == 0,
+                    "Equal-height ball overlap did not preserve deterministic ID ordering.");
+            }
+            multiballRenderTiming = MeasureMultiballRendering(seven);
+            return visible;
+        }
+
+        object MeasureMultiballRendering(FootballSnapshot seven)
+        {
+            const int width = 3840, height = 2160, warmFrames = 2, samples = 5;
+            using var output = new CanvasRenderTarget(device, width, height, 96);
+            double scale = Math.Min(width / 1824d, height / (double)rawHeight);
+            var bounds = new Rect((width - FootballFieldGeometry.Width * scale) / 2,
+                (height - FootballFieldGeometry.Height * scale) / 2,
+                FootballFieldGeometry.Width * scale, FootballFieldGeometry.Height * scale);
+            FootballSnapshot[] states = [seven with { Balls = [seven.Balls[0]] }, seven];
+            var submissions = new double[2, samples];
+            var readbacks = new double[2, samples];
+            for (int frame = -warmFrames; frame < samples; frame++)
+            for (int mode = 0; mode < states.Length; mode++)
+            {
+                var state = states[mode] with { Balls = states[mode].Balls.Select(ball => ball with
+                    { Rotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(Vector3.UnitY, frame * .15f) * ball.Rotation) }).ToArray() };
+                long started = System.Diagnostics.Stopwatch.GetTimestamp();
+                using (var drawing = output.CreateDrawingSession())
+                {
+                    drawing.Clear(Windows.UI.Color.FromArgb(255, 13, 30, 25));
+                    renderer.Draw(drawing, bounds, state);
+                }
+                double submitted = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                long readbackStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                // This synchronous full-target readback waits for drawing, then
+                // allocates/copies CPU pixels. Report it separately from command
+                // submission; neither measurement is displayed frame rate.
+                byte[] pixels = output.GetPixelBytes();
+                double readback = System.Diagnostics.Stopwatch.GetElapsedTime(readbackStarted).TotalMilliseconds;
+                Check(pixels.Length == width * height * 4, "Football timing target returned an incomplete 4K readback.");
+                if (frame >= 0) { submissions[mode, frame] = submitted; readbacks[mode, frame] = readback; }
+            }
+            return new
+            {
+                width, height, warmFramesPerBallCount = warmFrames, samplesPerBallCount = samples,
+                measurement = "Offscreen Win2D command submission and synchronous full-target GPU readback plus CPU allocation/copy; no presentation, camera processing or PNG encoding.",
+                oneBall = Summarize(0), sevenBalls = Summarize(1)
+            };
+            object Summarize(int mode)
+            {
+                double[] submission = Enumerable.Range(0, samples).Select(index => submissions[mode, index]).Order().ToArray();
+                double[] readback = Enumerable.Range(0, samples).Select(index => readbacks[mode, index]).Order().ToArray();
+                double[] total = Enumerable.Range(0, samples).Select(index => submissions[mode, index] + readbacks[mode, index]).Order().ToArray();
+                return new { ballCount = states[mode].Balls.Count,
+                    submissionMedianMilliseconds = Math.Round(submission[samples / 2], 3),
+                    readbackMedianMilliseconds = Math.Round(readback[samples / 2], 3),
+                    renderAndReadbackMedianMilliseconds = Math.Round(total[samples / 2], 3),
+                    renderAndReadbackMaximumMilliseconds = Math.Round(total[^1], 3) };
+            }
+        }
+
+        static (int Count, int Width, int Height) BrightBallPixels(byte[] before, byte[] after, FootballBallSnapshot ball)
+        {
+            int centerX = (int)Math.Round(112 + (ball.Position.X + FootballGame.Width / 2) * 1000);
+            int centerY = (int)Math.Round(66 + (ball.Position.Y + FootballGame.Height / 2) * 1000);
+            int count = 0, left = int.MaxValue, right = int.MinValue, top = int.MaxValue, bottom = int.MinValue;
+            for (int y = centerY - 31; y <= centerY + 31; y++)
+            for (int x = centerX - 31; x <= centerX + 31; x++)
+            {
+                int offset = (y * 1824 + x) * 4;
+                if (after[offset] - before[offset] <= 35 || after[offset + 1] - before[offset + 1] <= 35 ||
+                    after[offset + 2] - before[offset + 2] <= 35) continue;
+                count++;
+                left = Math.Min(left, x); right = Math.Max(right, x);
+                top = Math.Min(top, y); bottom = Math.Max(bottom, y);
+            }
+            return (count, count == 0 ? 0 : right - left + 1, count == 0 ? 0 : bottom - top + 1);
+        }
 
         async Task VerifyFinishedInputAsync()
         {

@@ -67,6 +67,10 @@ public sealed partial class MainWindow
             ball = new { x = state.BallPosition.X, y = state.BallPosition.Y, height = state.BallHeight,
                 vx = state.BallVelocity.X, vy = state.BallVelocity.Y, vz = state.BallVerticalVelocity,
                 speedLimit = FootballGame.MaxBallSpeed },
+            balls = state.Balls.Select(ball => new { ball.Id, x = ball.Position.X, y = ball.Position.Y,
+                height = ball.Height, vx = ball.Velocity.X, vy = ball.Velocity.Y,
+                vz = ball.VerticalVelocity, rotation = new { ball.Rotation.X, ball.Rotation.Y,
+                    ball.Rotation.Z, ball.Rotation.W }, ball.Growth }).ToArray(),
             players = state.Kickers.Select(k => new { player = k.Index + 1, k.Present, k.IsAi,
                 style = k.Style.ToString(), x = k.Position.X, y = k.Position.Y, vx = k.Velocity.X, vy = k.Velocity.Y,
                 headingDegrees = k.Heading * 180 / Math.PI, k.MarkerAnchored }).ToArray()

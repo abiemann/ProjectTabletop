@@ -297,6 +297,6 @@ public class FootballAudioTimelineTests
             Start.AddSeconds(seconds), navigation, match, visible);
 
     private static FootballSnapshot State(FootballPhase phase, int score1 = 0, int score2 = 0)
-        => new(Vector2.Zero, Vector2.Zero, FootballGame.BallRadius, 0, Quaternion.Identity, [],
+        => new([new(0, Vector2.Zero, Vector2.Zero, FootballGame.BallRadius, 0, Quaternion.Identity, 1)], [],
             score1, score2, FootballMode.HumanVsAi, phase, string.Empty, 0, 1);
 }

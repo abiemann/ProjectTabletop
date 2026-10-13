@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Security.Cryptography;
+using System.Text;
 using ProjectTabletop.Interaction;
 using Windows.Graphics.Imaging;
 using Windows.Media.Capture;
@@ -19,6 +21,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
     private readonly object _frameGate = new();
     private MediaCapture? _capture;
     private MediaFrameReader? _reader;
+    private ExclusiveProcessLease? _deviceLease;
     private CameraFrame? _latestFrame;
     private volatile bool _running;
     private volatile bool _disposed;
@@ -60,7 +63,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
         return devices;
     }
 
-    public async Task StartAsync(string id, int requestedFramesPerSecond = 30)
+    public async Task StartAsync(string id, int requestedFramesPerSecond = 30, bool forceRestart = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         if (!CameraFrameRatePolicy.IsRequestedRate(requestedFramesPerSecond))
@@ -70,8 +73,24 @@ public sealed class CameraCaptureService : IAsyncDisposable
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            if (!forceRestart && _running && StringComparer.OrdinalIgnoreCase.Equals(ActiveDeviceId, id) &&
+                RequestedFramesPerSecond == requestedFramesPerSecond) return;
             await StopCoreAsync();
             RequestedFramesPerSecond = requestedFramesPerSecond;
+
+            // Claim the device before enumeration or any WinRT capture initialization.
+            // The handle remains held until reader and capture disposal have completed.
+            try
+            {
+                _deviceLease = ExclusiveProcessLease.TryAcquire(DeviceLeaseName(id))
+                    ?? throw new CameraAccessBlockedException(
+                        "This webcam is already open in Project Tabletop. Close its other instance, then press Start camera.");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new CameraAccessBlockedException(
+                    "The webcam safety lock is unavailable. Close other Tabletop sessions, then press Start camera to retry.", ex);
+            }
 
             var groups = await MediaFrameSourceGroup.FindAllAsync();
             MediaFrameSourceGroup? group = null;
@@ -83,7 +102,6 @@ public sealed class CameraCaptureService : IAsyncDisposable
                 throw new InvalidOperationException("The selected webcam does not provide color video frames.");
 
             var capture = new MediaCapture();
-            var hasExclusiveControl = true;
             _capture = capture;
             capture.Failed += OnCaptureFailed;
             try
@@ -96,21 +114,12 @@ public sealed class CameraCaptureService : IAsyncDisposable
                     SharingMode = MediaCaptureSharingMode.ExclusiveControl
                 });
             }
-            catch
+            catch (Exception ex)
             {
-                hasExclusiveControl = false;
-                capture.Failed -= OnCaptureFailed;
-                capture.Dispose();
-                _capture = new MediaCapture();
-                capture = _capture;
-                capture.Failed += OnCaptureFailed;
-                await capture.InitializeAsync(new MediaCaptureInitializationSettings
-                {
-                    SourceGroup = group,
-                    StreamingCaptureMode = StreamingCaptureMode.Video,
-                    MemoryPreference = MediaCaptureMemoryPreference.Cpu,
-                    SharingMode = MediaCaptureSharingMode.SharedReadOnly
-                });
+                // Never retry by opening a shared stream on a busy or failing driver.
+                throw new CameraAccessBlockedException(
+                    "The webcam could not be opened exclusively. Close other apps using it and check camera access, " +
+                    "then press Start camera to retry. " + ex.Message, ex);
             }
 
             var sourceList = new List<MediaFrameSource>();
@@ -123,7 +132,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
             if (sourceList.Count == 0)
                 throw new InvalidOperationException("Windows did not expose a color frame source for this webcam.");
 
-            HasExclusiveFormatControl = hasExclusiveControl;
+            HasExclusiveFormatControl = true;
             var formats = new List<SourceFormat>();
             foreach (var candidate in sourceList)
                 for (var i = 0; i < candidate.SupportedFormats.Count; i++)
@@ -138,58 +147,51 @@ public sealed class CameraCaptureService : IAsyncDisposable
             var failedFormatTime = TimeSpan.Zero;
             // The format attempts below change each source's format; remember the originals.
             var nativeFormats = sourceList.Select(source => new SourceFormat(source, source.CurrentFormat)).ToList();
-            if (hasExclusiveControl)
+            // Search every color source, including separate preview/record streams.
+            // A rejected advertised mode must not hide another usable 60/100 fps mode.
+            foreach (var candidate in CameraFrameRatePolicy.Order(formats,
+                candidate => VideoMode(candidate.Format), requestedFramesPerSecond))
             {
-                // Search every color source, including separate preview/record streams.
-                // A rejected advertised mode must not hide another usable 60/100 fps mode.
-                foreach (var candidate in CameraFrameRatePolicy.Order(formats,
-                    candidate => VideoMode(candidate.Format), requestedFramesPerSecond))
+                if (failures >= MaximumFormatFailures && failedFormatTime >= FormatFailureTimeBudget) break;
+                var attemptStarted = Stopwatch.GetTimestamp();
+                try
                 {
-                    if (failures >= MaximumFormatFailures && failedFormatTime >= FormatFailureTimeBudget) break;
-                    var attemptStarted = Stopwatch.GetTimestamp();
-                    try
-                    {
-                        await candidate.Source.SetFormatAsync(candidate.Format);
-                        var actual = VideoMode(candidate.Source.CurrentFormat);
-                        if (!CameraFrameRatePolicy.IsUsable(actual) ||
-                            Math.Abs(actual.FramesPerSecond - FramesPerSecond(candidate.Format)) >
-                                FramesPerSecond(candidate.Format) * .01)
-                            continue;
-                        await StartReaderAsync(capture, candidate.Source);
-                        started = true;
-                        break;
-                    }
-                    catch (Exception ex)
-                    {
-                        lastFailure = ex;
-                        failures++;
-                        failedFormatTime += Stopwatch.GetElapsedTime(attemptStarted);
-                    }
+                    await candidate.Source.SetFormatAsync(candidate.Format);
+                    var actual = VideoMode(candidate.Source.CurrentFormat);
+                    if (!CameraFrameRatePolicy.IsUsable(actual) ||
+                        Math.Abs(actual.FramesPerSecond - FramesPerSecond(candidate.Format)) >
+                            FramesPerSecond(candidate.Format) * .01)
+                        continue;
+                    await StartReaderAsync(capture, candidate.Source);
+                    started = true;
+                    break;
+                }
+                catch (Exception ex) when (!CameraAccessBlockedException.IsContention(ex))
+                {
+                    lastFailure = ex;
+                    failures++;
+                    failedFormatTime += Stopwatch.GetElapsedTime(attemptStarted);
                 }
             }
 
             if (!started)
             {
-                // SharedReadOnly cannot change formats. Under exclusive control no
-                // attempted format worked, so restore each source's original native
+                // No attempted format worked, so restore each source's original native
                 // format, which the attempts above replaced, and start with that.
                 foreach (var native in CameraFrameRatePolicy.Order(nativeFormats,
                     native => VideoMode(native.Format), requestedFramesPerSecond))
                 {
                     try
                     {
-                        if (hasExclusiveControl)
-                        {
-                            try { await native.Source.SetFormatAsync(native.Format); }
-                            // Some drivers reject format changes but can still stream
-                            // their current mode. StartReader validates and reports it.
-                            catch (Exception ex) { lastFailure = ex; }
-                        }
+                        try { await native.Source.SetFormatAsync(native.Format); }
+                        // Some drivers reject format changes but can still stream
+                        // their current mode. StartReader validates and reports it.
+                        catch (Exception ex) when (!CameraAccessBlockedException.IsContention(ex)) { lastFailure = ex; }
                         await StartReaderAsync(capture, native.Source);
                         started = true;
                         break;
                     }
-                    catch (Exception ex) { lastFailure = ex; }
+                    catch (Exception ex) when (!CameraAccessBlockedException.IsContention(ex)) { lastFailure = ex; }
                 }
             }
             if (!started)
@@ -197,9 +199,12 @@ public sealed class CameraCaptureService : IAsyncDisposable
                     "Select a camera with 720p–4K video at 20–100 fps, or close another app holding its format.", lastFailure);
             ActiveDeviceId = id;
         }
-        catch
+        catch (Exception ex)
         {
             await StopCoreAsync();
+            if (ex is not CameraAccessBlockedException && CameraAccessBlockedException.IsContention(ex))
+                throw new CameraAccessBlockedException(
+                    "The webcam is busy in another app. Close that app, then press Start camera to retry.", ex);
             throw;
         }
         finally { _lifecycle.Release(); }
@@ -221,9 +226,15 @@ public sealed class CameraCaptureService : IAsyncDisposable
             reader.FrameArrived += OnFrameArrived;
             _running = true;
             var status = await reader.StartAsync();
+            if (status == MediaFrameReaderStartStatus.ExclusiveControlNotAvailable)
+                throw new CameraAccessBlockedException(
+                    "Another app controls this webcam. Close it, then press Start camera to retry.");
+            if (status == MediaFrameReaderStartStatus.DeviceNotAvailable)
+                throw new CameraAccessBlockedException(
+                    "The webcam became unavailable. Check its connection, then press Start camera to retry.");
             if (status != MediaFrameReaderStartStatus.Success)
                 throw new InvalidOperationException($"Windows could not start the selected webcam ({status}).");
-            // Always report the native format, even when fallback or another app prevented
+            // Always report the native format, even when format fallback prevented
             // the requested rate. CPU copy throttling is not a negotiated camera rate.
             actual = VideoMode(source.CurrentFormat);
             if (!CameraFrameRatePolicy.IsUsable(actual))
@@ -237,13 +248,13 @@ public sealed class CameraCaptureService : IAsyncDisposable
         {
             _running = false;
             Interlocked.Increment(ref _epoch);
-            _reader = null;
             if (reader is not null)
             {
                 reader.FrameArrived -= OnFrameArrived;
                 try { await reader.StopAsync(); } catch { }
                 lock (_frameGate) reader.Dispose();
             }
+            _reader = null;
             NegotiatedFormat = null;
             Volatile.Write(ref _latestFrame, null);
             throw;
@@ -339,21 +350,23 @@ public sealed class CameraCaptureService : IAsyncDisposable
         SupportedRequestedFramesPerSecond = Array.Empty<int>();
         HasExclusiveFormatControl = false;
         var reader = _reader;
-        _reader = null;
         if (reader is not null)
         {
             reader.FrameArrived -= OnFrameArrived;
             try { await reader.StopAsync(); }
             catch { /* Dispose still releases a driver that stopped unexpectedly. */ }
             lock (_frameGate) reader.Dispose();
+            _reader = null;
         }
         var capture = _capture;
-        _capture = null;
         if (capture is not null)
         {
             capture.Failed -= OnCaptureFailed;
             capture.Dispose();
+            _capture = null;
         }
+        _deviceLease?.Dispose();
+        _deviceLease = null;
         Volatile.Write(ref _latestFrame, null);
     }
 
@@ -363,6 +376,9 @@ public sealed class CameraCaptureService : IAsyncDisposable
         _disposed = true;
         await StopAsync();
     }
+
+    internal static string DeviceLeaseName(string id) => @"Global\ProjectTabletop.Camera." +
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(id.ToUpperInvariant())));
 
     private static bool IsColorVideo(MediaFrameSourceInfo info) =>
         info.SourceKind == MediaFrameSourceKind.Color &&

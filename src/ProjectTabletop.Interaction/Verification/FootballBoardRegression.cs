@@ -241,10 +241,15 @@ internal static class FootballBoardRegression
         {
             // Seed a complete, low goal crossing; the board still transitions via
             // its production input and tick paths, including the final win.
-            Set("_ballPosition", new Vector2(.76f, 0));
-            Set("_ballVelocity", new Vector2(1.4f, 0));
-            Set("_ballHeight", FootballGame.BallRadius);
-            Set("_ballVerticalVelocity", 0f);
+            var balls = (System.Collections.IList)typeof(FootballGame)
+                .GetField("_balls", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(game)!;
+            var ball = balls[0]!;
+            void SetBall(string name, object value) => ball.GetType().GetField(name,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.SetValue(ball, value);
+            SetBall("Position", new Vector2(.76f, 0));
+            SetBall("Velocity", new Vector2(1.4f, 0));
+            SetBall("Height", FootballGame.BallRadius);
+            SetBall("VerticalVelocity", 0f);
             Set("_snapshot", null);
             for (int i = 0; i < 9; i++) Step();
             Require(board.FootballState.Score1 == score, "Visibility fixture did not score once.");

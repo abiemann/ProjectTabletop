@@ -53,6 +53,8 @@ public sealed partial class MainWindow
                 return await VerifyFootballAudioAsync();
             case "verify_camera_input_scheduling":
                 return await VerifyCameraInputSchedulingAsync();
+            case "verify_camera_safety":
+                return await VerifyCameraSafetyAsync();
             case "verify_camera_latency":
                 return VerifyCameraLatency();
             case "verify_photo_copy_memory_save":
@@ -476,7 +478,8 @@ public sealed partial class MainWindow
                         throw new ArgumentException("The requested deviceId does not match an available camera.");
                     // Validate before changing the running camera. Stop also cancels a pending
                     // start/reconnect; selection then runs its normal synchronous reset handler.
-                    if (_camera.IsRunning || _cameraWanted) await StopCameraAsync();
+                    if (SelectedCamera?.Device.Id != requestedCameraId && (_camera.IsRunning || _cameraWanted))
+                        await StopCameraAsync();
                     if (_closing) throw new InvalidOperationException("The app is closing.");
                     // Refresh can replace the choice objects while the stop is awaiting capture.
                     requestedCamera = FindRequestedCamera() ??

@@ -22,6 +22,7 @@ BoardInteractionRegression.CheckPhotoCopyNavigation();
 PaintBoardRegression.Run();
 WaterGardenBoardRegression.Run();
 FootballGameRegression.Run();
+FootballMultiballRegression.Run();
 FootballBoardRegression.Run();
 BoardInteractionRegression.CheckAnchoredSelection();
 BoardInteractionRegression.CheckAnchorFreshnessAndConsumption();

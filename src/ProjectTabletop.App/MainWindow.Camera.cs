@@ -25,6 +25,10 @@ public sealed partial class MainWindow
     private static readonly TimeSpan CameraPreviewInterval = TimeSpan.FromMilliseconds(40);
     private int _cameraPreviewRedrawPending;
     private readonly SemaphoreSlim _cameraOperation = new(1, 1);
+    private Task<bool>? _cameraStartTask;
+    private string? _cameraStartingDeviceId;
+    private int _cameraStartingRate;
+    private long _cameraStartingVersion;
     private readonly AsyncResultGate _pieceDetectionResults = new();
     private CameraFrame? _cameraHealthSample;
     private DateTimeOffset _cameraStartedAtUtc;
@@ -183,7 +187,7 @@ public sealed partial class MainWindow
         try
         {
             if (SelectedCamera is not { } choice || choice.Device.Id != _cameraWantedDeviceId) return;
-            var started = await StartCameraCoreAsync(choice, version);
+            var started = await StartCameraCoreAsync(choice, version, forceRestart: true);
             if (version != _cameraOperationVersion || !_cameraWanted || _closing) return;
             if (!started && attempt < CameraReconnectBackoff.Length)
                 CameraStatusText.Text += $" Retry {attempt + 1}/{CameraReconnectBackoff.Length} will follow after the backoff.";
@@ -243,29 +247,38 @@ public sealed partial class MainWindow
 
     private async void StartCamera_Click(object sender, RoutedEventArgs e) => await StartSelectedCameraAsync();
 
-    private async Task<bool> StartSelectedCameraAsync()
+    private Task<bool> StartSelectedCameraAsync()
     {
         if (SelectedCamera is not { } choice)
         {
             CameraStatusText.Text = "Select a webcam first.";
-            return false;
+            return Task.FromResult(false);
         }
+        if (_cameraStartTask is { IsCompleted: false } && _cameraWanted &&
+            _cameraStartingDeviceId == choice.Device.Id && _cameraStartingRate == _requestedCameraFramesPerSecond &&
+            _cameraStartingVersion == _cameraOperationVersion) return _cameraStartTask;
         _cameraWanted = true;
         _cameraWantedDeviceId = choice.Device.Id;
         _cameraReconnectAttempts = 0;
         _nextCameraReconnectAtUtc = DateTimeOffset.MinValue;
         _cameraRecoveryReason = null;
         var version = Interlocked.Increment(ref _cameraOperationVersion);
-        return await StartCameraCoreAsync(choice, version, _requestedCameraFramesPerSecond);
+        _cameraStartingDeviceId = choice.Device.Id;
+        _cameraStartingRate = _requestedCameraFramesPerSecond;
+        _cameraStartingVersion = version;
+        return _cameraStartTask = StartCameraCoreAsync(choice, version, _requestedCameraFramesPerSecond);
     }
 
-    private async Task<bool> StartCameraCoreAsync(CameraChoice choice, long version, int? requestedFramesPerSecond = null)
+    private async Task<bool> StartCameraCoreAsync(CameraChoice choice, long version, int? requestedFramesPerSecond = null,
+        bool forceRestart = false)
     {
         int requestedRate = requestedFramesPerSecond ?? _requestedCameraFramesPerSecond;
         await _cameraOperation.WaitAsync();
         try
         {
             if (_closing || !_cameraWanted || version != _cameraOperationVersion) return false;
+            if (!forceRestart && _camera.IsRunning && _camera.ActiveDeviceId == choice.Device.Id &&
+                _camera.RequestedFramesPerSecond == requestedRate) return true;
             ClearHandTracking();
             ResetEyeTipTracking("camera-restarted", choice.Device.Id);
             _scene.ClearBoardMediaClip();
@@ -277,8 +290,14 @@ public sealed partial class MainWindow
             _frozenFrame = null;
             Volatile.Write(ref _latestCameraFrame, null);
             CameraCanvas.Invalidate();
-            await _camera.StartAsync(choice.Device.Id, requestedRate);
-            if (version != _cameraOperationVersion || !_cameraWanted || _closing) return false;
+            await _camera.StartAsync(choice.Device.Id, requestedRate, forceRestart);
+            if (version != _cameraOperationVersion || !_cameraWanted || _closing)
+            {
+                // Still inside the operation gate: a superseded start must release
+                // its device before a queued replacement or shutdown can proceed.
+                await _camera.StopAsync();
+                return false;
+            }
             var format = _camera.NegotiatedFormat;
             _cameraLiveStatus = format is null
                 ? $"Live: {choice.Device.DisplayName}"
@@ -297,6 +316,14 @@ public sealed partial class MainWindow
             if (version == _cameraOperationVersion && _cameraWanted && !_closing)
             {
                 _cameraRecoveryReason = "Webcam could not start: " + ex.Message + ".";
+                if (ex is CameraAccessBlockedException)
+                {
+                    // A busy or rejected exclusive open is not a reconnect signal.
+                    // Leave the camera alone until the user explicitly retries.
+                    _cameraWanted = false;
+                    _cameraWantedDeviceId = null;
+                    _nextCameraReconnectAtUtc = DateTimeOffset.MaxValue;
+                }
                 CameraStatusText.Text = _cameraRecoveryReason;
                 _cameraHealthWarning = true;
                 UpdateCameraFrameRateStatus();

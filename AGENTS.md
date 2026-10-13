@@ -1,8 +1,11 @@
-# Camera testing
+# Single app instance and camera testing
 
-Before launching a test build, close any running Project Tabletop instance and
-verify that it has exited. Never run two instances against the camera: concurrent
-camera access can freeze the user's USB ports.
+Before every app launch, check for any running Project Tabletop instance,
+including other builds. If one is running, reuse it; never launch a second
+instance, even if its camera appears stopped. If a test requires a replacement
+build, close the existing instance and verify that it has exited before launching
+the replacement. Concurrent instances can disrupt the USB controller and freeze
+the user's USB ports.
 
 # Shared board improvements
 

@@ -18,7 +18,8 @@ internal sealed partial class FootballRenderer : IDisposable
     private const float PitchBitmapWidth = PitchWidth + 224;
     private const float PitchBitmapHeight = PitchHeight + 132;
     private readonly CanvasDevice _device;
-    private readonly SoccerBallRenderer _ball = new();
+    private readonly SoccerBallRenderer _ball;
+    private CanvasRadialGradientBrush? _softShadow;
     private readonly object _pitchGate = new();
     private Task? _pitchTask;
     private CanvasRenderTarget? _pitch;
@@ -27,7 +28,11 @@ internal sealed partial class FootballRenderer : IDisposable
     private ShadowEffect? _blueCarShadow;
     private bool _disposed;
 
-    internal FootballRenderer(CanvasDevice device) => _device = device;
+    internal FootballRenderer(CanvasDevice device)
+    {
+        _device = device;
+        _ball = new(device);
+    }
 
     internal bool PitchReady
     {
@@ -132,16 +137,40 @@ internal sealed partial class FootballRenderer : IDisposable
                     kicker.Present || snapshot.RecoveringInput || snapshot.Phase == FootballPhase.Finished
                         ? (byte)132 : (byte)28, blueCar: kicker.Index == 1);
             }
-            float lift = Math.Max(0, snapshot.BallHeight - FootballGame.BallRadius) * 1000;
-            var ground = FieldPoint(snapshot.BallPosition);
-            var ballCenter = ground + new Vector2(-lift * .18f, -lift * .40f);
-            float radius = FootballGame.BallRadius * 1000 * (1 + lift * .00065f);
-            float spread = 1 + lift * .0035f;
-            var shadowCenter = ground + new Vector2(8 + lift * .51f, 10 + lift * .64f);
-            byte shadowOpacity = (byte)Math.Clamp(197 - lift * .24f, 130, 197);
-            DrawSoftShadow(ds, shadowCenter, radius * .98f * spread, radius * .79f * spread, shadowOpacity);
-            if (lift < 8)
-                DrawSoftShadow(ds, ground + new Vector2(2, 4), radius * .64f, radius * .38f, (byte)(100 * (1 - lift / 8)));
+            // Seven balls at most: insertion-sort stack indices without allocating
+            // or changing the simulation's stable snapshot order. Higher spheres
+            // must occlude lower ones when their projected silhouettes cross.
+            Span<int> ballOrder = stackalloc int[snapshot.Balls.Count];
+            for (int index = 0; index < ballOrder.Length; index++)
+            {
+                var ball = snapshot.Balls[index];
+                int insert = index;
+                while (insert > 0)
+                {
+                    var preceding = snapshot.Balls[ballOrder[insert - 1]];
+                    if (preceding.Height < ball.Height ||
+                        (preceding.Height == ball.Height && preceding.Id <= ball.Id)) break;
+                    ballOrder[insert] = ballOrder[insert - 1];
+                    insert--;
+                }
+                ballOrder[insert] = index;
+            }
+            foreach (int index in ballOrder)
+            {
+                var ball = snapshot.Balls[index];
+                float growth = BallGrowth(ball.Growth);
+                if (growth <= 0) continue;
+                float lift = Math.Max(0, ball.Height - FootballGame.BallRadius) * 1000;
+                var ground = FieldPoint(ball.Position);
+                float radius = FootballGame.BallRadius * 1000 * growth * (1 + lift * .00065f);
+                float spread = 1 + lift * .0035f;
+                var shadowCenter = ground + new Vector2(8 * growth + lift * .51f, 10 * growth + lift * .64f);
+                byte shadowOpacity = (byte)Math.Clamp(197 - lift * .24f, 130, 197);
+                DrawSoftShadow(ds, shadowCenter, radius * .98f * spread, radius * .79f * spread, shadowOpacity);
+                if (lift < 8)
+                    DrawSoftShadow(ds, ground + new Vector2(2, 4) * growth, radius * .64f, radius * .38f,
+                        (byte)(100 * (1 - lift / 8)));
+            }
 
             // Bars supply a measured heading; fingers and AI turn toward play.
             foreach (var kicker in snapshot.Kickers)
@@ -149,7 +178,16 @@ internal sealed partial class FootballRenderer : IDisposable
                     kicker.Index == 0 ? Ink(239, 91, 53) : Ink(52, 161, 224),
                     kicker.Present || snapshot.RecoveringInput || snapshot.Phase == FootballPhase.Finished,
                     !kicker.IsAi && !kicker.MarkerAnchored, blueCar: kicker.Index == 1);
-            _ball.Draw(ds, ballCenter, radius, snapshot.BallRotation);
+            foreach (int index in ballOrder)
+            {
+                var ball = snapshot.Balls[index];
+                float growth = BallGrowth(ball.Growth);
+                if (growth <= 0) continue;
+                float lift = Math.Max(0, ball.Height - FootballGame.BallRadius) * 1000;
+                var center = FieldPoint(ball.Position) + new Vector2(-lift * .18f, -lift * .40f);
+                float radius = FootballGame.BallRadius * 1000 * growth * (1 + lift * .00065f);
+                _ball.Draw(ds, center, radius, ball.Rotation);
+            }
             // Elevated crossbars occlude a low ball at the goal mouth.
             DrawGoal(ds, false, true);
             DrawGoal(ds, true, true);
@@ -160,6 +198,9 @@ internal sealed partial class FootballRenderer : IDisposable
 
     private static Vector2 FieldPoint(Vector2 point) =>
         new((point.X + FootballGame.Width / 2) * 1000, (point.Y + FootballGame.Height / 2) * 1000);
+
+    // Match the simulation radius so growing balls retain natural contact edges.
+    private static float BallGrowth(float progress) => Math.Clamp(progress, 0, 1);
 
     private void BuildPitch()
     {
@@ -255,7 +296,7 @@ internal sealed partial class FootballRenderer : IDisposable
         ds.DrawRectangle(new Rect(.8, .8, PitchWidth - 1.6, PitchHeight - 1.6), chalkShadow, 5.5f);
         ds.DrawRectangle(new Rect(1.5, 1.5, PitchWidth - 3, PitchHeight - 3), chalk, 3.6f);
         ds.DrawLine(PitchWidth / 2, 2, PitchWidth / 2, PitchHeight - 2, chalk, 3.3f);
-        ds.DrawCircle(new(PitchWidth / 2, PitchHeight / 2), 139, chalk, 3.2f);
+        ds.DrawCircle(new(PitchWidth / 2, PitchHeight / 2), FootballGame.CenterCircleRadius * 1000, chalk, 3.2f);
         ds.FillCircle(new(PitchWidth / 2, PitchHeight / 2), 4.5f, chalk);
         for (int side = 0; side < 2; side++)
         {
@@ -351,15 +392,21 @@ internal sealed partial class FootballRenderer : IDisposable
         ds.DrawLine(a + new Vector2(-1, -1), b + new Vector2(-1, -1), Ink(255, 255, 238), width * .33f);
     }
 
-    private static void DrawSoftShadow(CanvasDrawingSession ds, Vector2 center, float radiusX, float radiusY, byte opacity)
+    private void DrawSoftShadow(CanvasDrawingSession ds, Vector2 center, float radiusX, float radiusY, byte opacity)
     {
-        using var shadow = new CanvasRadialGradientBrush(ds.Device,
+        // Every ball and kicker shares the same material; placement and opacity
+        // change sequentially without allocating a brush for each shadow.
+        var shadow = _softShadow ??= new CanvasRadialGradientBrush(_device,
         [
-            new() { Position = 0, Color = Ink(7, 20, 12, opacity) },
-            new() { Position = .54f, Color = Ink(7, 20, 12, (byte)(opacity * .94f)) },
-            new() { Position = .80f, Color = Ink(7, 20, 12, (byte)(opacity * .48f)) },
+            new() { Position = 0, Color = Ink(7, 20, 12, 255) },
+            new() { Position = .54f, Color = Ink(7, 20, 12, 240) },
+            new() { Position = .80f, Color = Ink(7, 20, 12, 122) },
             new() { Position = 1, Color = Ink(7, 20, 12, 0) }
-        ]) { Center = center, RadiusX = radiusX, RadiusY = radiusY };
+        ]);
+        shadow.Center = center;
+        shadow.RadiusX = radiusX;
+        shadow.RadiusY = radiusY;
+        shadow.Opacity = opacity / 255f;
         ds.FillEllipse(center, radiusX, radiusY, shadow);
     }
 
@@ -378,6 +425,9 @@ internal sealed partial class FootballRenderer : IDisposable
         lock (_pitchGate)
         {
             _disposed = true;
+            _ball.Dispose();
+            _softShadow?.Dispose();
+            _softShadow = null;
             _confettiPaper?.Dispose();
             _confettiPaper = null;
             _carShadow?.Dispose();

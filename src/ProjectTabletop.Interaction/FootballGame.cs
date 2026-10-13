@@ -11,13 +11,20 @@ public sealed record FootballKickerSnapshot(int Index, Vector2 Position, Vector2
     bool Present, FootballKickerStyle Style, bool IsAi, float Heading = 0, bool MarkerAnchored = false);
 
 /// <summary>Field coordinates are centered: X goes left to right, Y goes top to bottom.
-/// BallHeight is its center above the turf, in the same units as the field.</summary>
-public sealed record FootballSnapshot(Vector2 BallPosition, Vector2 BallVelocity, float BallHeight,
-    float BallVerticalVelocity, Quaternion BallRotation, IReadOnlyList<FootballKickerSnapshot> Kickers,
+/// Height is the center above the turf; Growth scales the ball's radius from zero to full size.</summary>
+public sealed record FootballBallSnapshot(int Id, Vector2 Position, Vector2 Velocity, float Height,
+    float VerticalVelocity, Quaternion Rotation, float Growth);
+
+public sealed record FootballSnapshot(IReadOnlyList<FootballBallSnapshot> Balls, IReadOnlyList<FootballKickerSnapshot> Kickers,
     int Score1, int Score2, FootballMode Mode, FootballPhase Phase, string Banner,
     float CountdownSeconds, long Revision)
 {
     public bool RecoveringInput { get; init; }
+    public Vector2 BallPosition => Balls[0].Position;
+    public Vector2 BallVelocity => Balls[0].Velocity;
+    public float BallHeight => Balls[0].Height;
+    public float BallVerticalVelocity => Balls[0].VerticalVelocity;
+    public Quaternion BallRotation => Balls[0].Rotation;
 }
 
 /// <summary>
@@ -30,6 +37,8 @@ public sealed class FootballGame
     public const float Width = 1.6f;
     public const float Height = 1.18f;
     public const float BallRadius = .027f;
+    public const float CenterCircleRadius = .139f;
+    public const float BallGrowthDuration = .35f;
     public const float KickerRadius = .068f;
     public const float GoalHalfWidth = .17f;
     public const float GoalHeight = .19f;
@@ -58,12 +67,10 @@ public sealed class FootballGame
     private FootballMode _mode = FootballMode.HumanVsAi;
     private FootballPhase _phase = FootballPhase.Ready;
     private bool _recoveringInput;
-    private Vector2 _ballPosition;
-    private Vector2 _ballVelocity;
-    private float _ballHeight = BallRadius;
-    private float _ballVerticalVelocity;
-    private Quaternion _ballRotation = Quaternion.Identity;
-    private float _ballSpin;
+    private readonly List<Ball> _balls = [new(0, Vector2.Zero)];
+    private int _nextBallId = 1;
+    private double _rallySeconds;
+    private int _spawnStage;
     private int _score1;
     private int _score2;
     private int _lastScorer;
@@ -74,6 +81,7 @@ public sealed class FootballGame
     private float _aiThinkRemaining;
     private Vector2 _aiTarget = new(.52f, 0);
     private int _aiRouteSide;
+    private int _aiBallId = -1;
     private FootballSnapshot? _snapshot;
 
     public long Revision { get; private set; }
@@ -198,6 +206,7 @@ public sealed class FootballGame
         _aiThinkRemaining = 0;
         _aiTarget = new(.52f, 0);
         _aiRouteSide = 0;
+        _aiBallId = -1;
         CenterBall();
         foreach (var kicker in _kickers)
         {
@@ -366,8 +375,8 @@ public sealed class FootballGame
                 if (_servePending)
                 {
                     float direction = _lastScorer == 0 ? -1 : _lastScorer == 1 ? 1 : -1;
-                    _ballVelocity = new(direction * .54f, ((_score1 + _score2) % 2 == 0 ? 1 : -1) * .10f);
-                    _ballVerticalVelocity = .30f;
+                    _balls[0].Velocity = new(direction * .54f, ((_score1 + _score2) % 2 == 0 ? 1 : -1) * .10f);
+                    _balls[0].VerticalVelocity = .30f;
                     _servePending = false;
                 }
                 // Moving during the countdown can position the bumper, but cannot bank a kick.
@@ -377,29 +386,63 @@ public sealed class FootballGame
         }
         if (_phase != FootballPhase.Playing) return;
 
-        var previousPosition = _ballPosition;
-        StepVertical();
-        MoveBall();
-        ResolveBoundary();
-        if (_phase != FootballPhase.Playing) return;
-        _ballVelocity *= MathF.Exp(-.055f * StepSeconds);
-        if (_ballVelocity.LengthSquared() > .0001f && MathF.Abs(_ballSpin) > .01f)
+        foreach (var ball in _balls)
         {
-            var across = new Vector2(-_ballVelocity.Y, _ballVelocity.X);
-            _ballVelocity += across * (_ballSpin * .008f * StepSeconds);
+            ball.StepStart = ball.Position;
+            if (ball.Growth < 1)
+            {
+                ball.Growth = Math.Min(1, ball.Growth + StepSeconds / BallGrowthDuration);
+                ball.Height = BallRadius * ball.Growth;
+            }
+            else StepVertical(ball);
         }
-        _ballVelocity = Limit(_ballVelocity, MaxBallSpeed);
-        _ballSpin *= MathF.Exp(-.75f * StepSeconds);
-        var delta = _ballPosition - previousPosition;
-        float distance = delta.Length();
-        if (distance > .000001f)
+        SeparateGrowingBalls();
+        MoveBalls();
+        foreach (var ball in _balls)
         {
-            var axis = Vector3.Normalize(new Vector3(-delta.Y, delta.X, 0));
-            _ballRotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(axis, distance / BallRadius) * _ballRotation);
+            if (ball.Growth < 1) continue;
+            ResolveBoundary(ball);
+            if (_phase != FootballPhase.Playing) return;
+            ball.Velocity *= MathF.Exp(-.055f * StepSeconds);
+            if (ball.Velocity.LengthSquared() > .0001f && MathF.Abs(ball.Spin) > .01f)
+            {
+                var across = new Vector2(-ball.Velocity.Y, ball.Velocity.X);
+                ball.Velocity += across * (ball.Spin * .008f * StepSeconds);
+            }
+            ball.Velocity = Limit(ball.Velocity, MaxBallSpeed);
+            ball.Spin *= MathF.Exp(-.75f * StepSeconds);
+            var delta = ball.Position - ball.StepStart;
+            float distance = delta.Length();
+            if (distance > .000001f)
+            {
+                var axis = Vector3.Normalize(new Vector3(-delta.Y, delta.X, 0));
+                ball.Rotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(axis, distance / BallRadius) * ball.Rotation);
+            }
+            if (MathF.Abs(ball.Spin) > .001f)
+                ball.Rotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(Vector3.UnitZ, ball.Spin * StepSeconds) * ball.Rotation);
         }
-        if (MathF.Abs(_ballSpin) > .001f)
-            _ballRotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(Vector3.UnitZ, _ballSpin * StepSeconds) * _ballRotation);
+        _rallySeconds += StepDuration;
+        if (_spawnStage == 0 && _rallySeconds + 1e-9 >= 15)
+        {
+            SpawnSideBalls();
+            _spawnStage = 1;
+        }
+        else if (_spawnStage == 1 && _rallySeconds + 1e-9 >= 30)
+        {
+            SpawnSideBalls();
+            SpawnBall(CenterCircleRadius + BallRadius);
+            SpawnBall(-CenterCircleRadius - BallRadius);
+            _spawnStage = 2;
+        }
     }
+
+    private void SpawnSideBalls()
+    {
+        SpawnBall(Height / 2 - BallRadius);
+        SpawnBall(-Height / 2 + BallRadius);
+    }
+
+    private void SpawnBall(float y) => _balls.Add(new(_nextBallId++, new(0, y), 0));
 
     private void UpdateKickers()
     {
@@ -445,49 +488,74 @@ public sealed class FootballGame
 
     private Vector2 ChooseAiTarget()
     {
+        var ball = ChooseAiBall();
+        if (ball is null) return new(.52f, 0);
+        if (_aiBallId != ball.Id) { _aiBallId = ball.Id; _aiRouteSide = 0; }
         var position = _kickers[1].Position;
-        var offset = position - _ballPosition;
+        var offset = position - ball.Position;
         float contact = KickerRadius + BallRadius;
         float clearance = contact + .055f;
         float sideLimit = Height / 2 - KickerRadius;
 
         // Player two shoots left. Proximity alone cannot authorize a strike:
         // when caught on the left of the ball it would drive it into its own goal.
-        if (_ballPosition.X > .08f && offset.X >= contact * .6f &&
+        if (ball.Position.X > .08f && offset.X >= contact * .6f &&
             MathF.Abs(offset.Y) <= contact * .55f && offset.Length() < .24f)
         {
             _aiRouteSide = 0;
-            return ClampAiTarget(new(_ballPosition.X - .14f, _ballPosition.Y));
+            return ClampAiTarget(new(ball.Position.X - .14f, ball.Position.Y));
         }
 
-        float interceptY = _ballPosition.Y;
-        if (_ballVelocity.X > .1f)
+        float interceptY = ball.Position.Y;
+        if (ball.Velocity.X > .1f)
         {
-            float until = Math.Clamp((.52f - _ballPosition.X) / _ballVelocity.X, 0, .6f);
-            interceptY += _ballVelocity.Y * until;
+            float until = Math.Clamp((.52f - ball.Position.X) / ball.Velocity.X, 0, .6f);
+            interceptY += ball.Velocity.Y * until;
         }
-        var target = _ballPosition.X > .08f
-            ? new Vector2(_ballPosition.X + clearance, _ballPosition.Y)
+        var target = ball.Position.X > .08f
+            ? new Vector2(ball.Position.X + clearance, ball.Position.Y)
             : new Vector2(.52f, interceptY);
 
         // Reach the own-goal side via a clear lateral lane. Driving directly
         // through the ball to a point behind it is itself an own-goal kick.
         // Keep the chosen lane during the manoeuvre to avoid switching sides.
-        if (position.X < _ballPosition.X + clearance * .9f && target.X > _ballPosition.X)
+        if (position.X < ball.Position.X + clearance * .9f && target.X > ball.Position.X)
         {
             if (_aiRouteSide == 0)
-                _aiRouteSide = MathF.Abs(offset.Y) > .035f ? Math.Sign(offset.Y) : (_ballPosition.Y > 0 ? -1 : 1);
-            if (MathF.Abs(_ballPosition.Y + _aiRouteSide * clearance) > sideLimit)
+                _aiRouteSide = MathF.Abs(offset.Y) > .035f ? Math.Sign(offset.Y) : (ball.Position.Y > 0 ? -1 : 1);
+            if (MathF.Abs(ball.Position.Y + _aiRouteSide * clearance) > sideLimit)
                 _aiRouteSide = -_aiRouteSide;
-            float laneY = _ballPosition.Y + _aiRouteSide * clearance;
-            float laneX = _ballPosition.X + clearance;
+            float laneY = ball.Position.Y + _aiRouteSide * clearance;
+            float laneX = ball.Position.X + clearance;
             if (offset.Y * _aiRouteSide < clearance * .9f)
-                laneX = position.X < _ballPosition.X
-                    ? Math.Min(position.X, _ballPosition.X - clearance) : position.X;
+                laneX = position.X < ball.Position.X
+                    ? Math.Min(position.X, ball.Position.X - clearance) : position.X;
             return ClampAiTarget(new(laneX, laneY));
         }
         _aiRouteSide = 0;
         return ClampAiTarget(target);
+    }
+
+    private Ball? ChooseAiBall()
+    {
+        Ball? selected = null;
+        float best = float.NegativeInfinity;
+        foreach (var ball in _balls)
+        {
+            if (ball.Growth < 1 || ball.Height > .16f) continue;
+            // Prioritize an approaching shot on our goal, then nearby balls in our
+            // half. A ball still growing or sailing above the bumper is not playable.
+            float priority = ball.Position.X - Vector2.Distance(_kickers[1].Position, ball.Position) * .35f;
+            if (ball.Velocity.X > .1f)
+            {
+                float until = (Width / 2 - ball.Position.X) / ball.Velocity.X;
+                float goalY = ball.Position.Y + ball.Velocity.Y * Math.Max(0, until);
+                if (until >= 0 && until < 1.5f && MathF.Abs(goalY) < GoalHalfWidth)
+                    priority += 2 + 1.5f - until;
+            }
+            if (priority > best) { best = priority; selected = ball; }
+        }
+        return selected;
     }
 
     private static Vector2 ClampAiTarget(Vector2 target) => new(
@@ -505,147 +573,248 @@ public sealed class FootballGame
         kicker.Heading = MathF.IEEERemainder(kicker.Heading + Math.Clamp(delta, -limit, limit), MathF.Tau);
     }
 
-    private void StepVertical()
+    private static void StepVertical(Ball ball)
     {
-        if (_ballHeight <= BallRadius && MathF.Abs(_ballVerticalVelocity) < .035f)
+        if (ball.Height <= BallRadius && MathF.Abs(ball.VerticalVelocity) < .035f)
         {
-            _ballHeight = BallRadius;
-            _ballVerticalVelocity = 0;
+            ball.Height = BallRadius;
+            ball.VerticalVelocity = 0;
             return;
         }
-        _ballVerticalVelocity -= Gravity * StepSeconds;
-        _ballHeight += _ballVerticalVelocity * StepSeconds;
-        if (_ballHeight < BallRadius)
+        ball.VerticalVelocity -= Gravity * StepSeconds;
+        ball.Height += ball.VerticalVelocity * StepSeconds;
+        if (ball.Height < BallRadius)
         {
-            _ballHeight = BallRadius + (BallRadius - _ballHeight) * .86f;
-            _ballVerticalVelocity = MathF.Abs(_ballVerticalVelocity) * .86f;
-            if (_ballVerticalVelocity < .065f) { _ballHeight = BallRadius; _ballVerticalVelocity = 0; }
+            ball.Height = BallRadius + (BallRadius - ball.Height) * .86f;
+            ball.VerticalVelocity = MathF.Abs(ball.VerticalVelocity) * .86f;
+            if (ball.VerticalVelocity < .065f) { ball.Height = BallRadius; ball.VerticalVelocity = 0; }
         }
     }
 
-    private void MoveBall()
+    private void MoveBalls()
     {
         float remaining = StepSeconds;
         float elapsed = 0;
-        for (int collision = 0; collision < 6 && remaining > .000001f; collision++)
+        // Every ball shares the same collision clock. Advancing each ball independently
+        // would make a ball hit another at its old position and make results order-dependent.
+        for (int collision = 0; collision < 6 * _balls.Count && remaining > .000001f; collision++)
         {
             float nearest = remaining + 1;
+            Ball? ball = null;
+            Ball? other = null;
             Kicker? hitter = null;
             Vector2 hitCenter = default;
             Vector2 hitVelocity = default;
             float hitRadius = 0;
-            foreach (var kicker in _kickers)
+            for (int i = 0; i < _balls.Count; i++)
             {
-                if (!kicker.Present || kicker.CollisionQuiet > 0 || _ballHeight > .16f) continue;
-                var center = kicker.StepStart + kicker.Velocity * elapsed;
-                if (SweepCircle(_ballPosition - center, _ballVelocity - kicker.Velocity,
-                    BallRadius + KickerRadius, remaining, out float time) && time < nearest)
+                var candidate = _balls[i];
+                if (candidate.Growth < 1) continue;
+                foreach (var kicker in _kickers)
                 {
-                    nearest = time;
-                    hitter = kicker;
-                    hitCenter = center;
-                    hitVelocity = kicker.Velocity;
-                    hitRadius = KickerRadius;
-                }
-            }
-            if (_ballHeight - BallRadius < GoalHeight)
-            {
-                foreach (var center in GoalPosts)
-                {
-                    if (SweepCircle(_ballPosition - center, _ballVelocity,
-                        BallRadius + PostRadius, remaining, out float time) && time < nearest)
+                    if (!kicker.Present || kicker.CollisionQuiet > 0 || candidate.Height > .16f) continue;
+                    var center = kicker.StepStart + kicker.Velocity * elapsed;
+                    if (SweepCircle(candidate.Position - center, candidate.Velocity - kicker.Velocity,
+                        BallRadius + KickerRadius, remaining, out float time) && time < nearest)
                     {
                         nearest = time;
-                        hitter = null;
+                        ball = candidate;
+                        other = null;
+                        hitter = kicker;
                         hitCenter = center;
-                        hitVelocity = Vector2.Zero;
-                        hitRadius = PostRadius;
+                        hitVelocity = kicker.Velocity;
+                        hitRadius = KickerRadius;
+                    }
+                }
+                if (candidate.Height - BallRadius < GoalHeight)
+                {
+                    foreach (var center in GoalPosts)
+                    {
+                        if (SweepCircle(candidate.Position - center, candidate.Velocity,
+                            BallRadius + PostRadius, remaining, out float time) && time < nearest)
+                        {
+                            nearest = time;
+                            ball = candidate;
+                            other = null;
+                            hitter = null;
+                            hitCenter = center;
+                            hitVelocity = Vector2.Zero;
+                            hitRadius = PostRadius;
+                        }
+                    }
+                }
+                for (int j = i + 1; j < _balls.Count; j++)
+                {
+                    var second = _balls[j];
+                    if (second.Growth < 1) continue;
+                    float height = candidate.Height - second.Height;
+                    float radiusSquared = 4 * BallRadius * BallRadius - height * height;
+                    if (radiusSquared <= 0) continue;
+                    var offset = candidate.Position - second.Position;
+                    bool overlap = offset.LengthSquared() < radiusSquared - .0000001f;
+                    if ((SweepCircle(offset, candidate.Velocity - second.Velocity,
+                        MathF.Sqrt(radiusSquared), remaining, out float time) || overlap) && time < nearest)
+                    {
+                        nearest = overlap ? 0 : time;
+                        ball = candidate;
+                        other = second;
+                        hitter = null;
                     }
                 }
             }
-            if (nearest > remaining) { _ballPosition += _ballVelocity * remaining; break; }
-            _ballPosition += _ballVelocity * nearest;
-            hitCenter += hitVelocity * nearest;
-            var offset = _ballPosition - hitCenter;
-            var normal = offset.LengthSquared() > .0000001f
-                ? Vector2.Normalize(offset) : NormalOr(-(_ballVelocity - hitVelocity), Vector2.UnitX);
-            _ballPosition = hitCenter + normal * (BallRadius + hitRadius + .00005f);
-            float closing = Vector2.Dot(_ballVelocity - hitVelocity, normal);
-            if (closing < 0)
+            if (ball is null) { MoveAll(remaining); return; }
+            MoveAll(nearest);
+            if (other is not null)
             {
-                _ballVelocity -= normal * ((1 + Restitution) * closing);
-                if (hitter is not null)
+                ResolveBallContact(ball, other);
+            }
+            else
+            {
+                hitCenter += hitVelocity * nearest;
+                var offset = ball.Position - hitCenter;
+                var normal = offset.LengthSquared() > .0000001f
+                    ? Vector2.Normalize(offset) : NormalOr(-(ball.Velocity - hitVelocity), Vector2.UnitX);
+                ball.Position = hitCenter + normal * (BallRadius + hitRadius + .00005f);
+                float closing = Vector2.Dot(ball.Velocity - hitVelocity, normal);
+                if (closing < 0)
                 {
-                    var tangent = new Vector2(-normal.Y, normal.X);
-                    float tangentSpeed = Vector2.Dot(hitVelocity, tangent);
-                    _ballVelocity += tangent * tangentSpeed * .22f;
-                    _ballSpin = Math.Clamp(_ballSpin + tangentSpeed * 6, -16, 16);
-                    if (hitter.HopCooldown <= 0)
+                    ball.Velocity -= normal * ((1 + Restitution) * closing);
+                    if (hitter is not null)
                     {
-                        _ballVerticalVelocity = Math.Max(_ballVerticalVelocity,
-                            Math.Clamp(.24f + -closing * .15f, .24f, .80f));
-                        hitter.HopCooldown = .10f;
+                        var tangent = new Vector2(-normal.Y, normal.X);
+                        float tangentSpeed = Vector2.Dot(hitVelocity, tangent);
+                        ball.Velocity += tangent * tangentSpeed * .22f;
+                        ball.Spin = Math.Clamp(ball.Spin + tangentSpeed * 6, -16, 16);
+                        if (hitter.HopCooldown <= 0)
+                        {
+                            ball.VerticalVelocity = Math.Max(ball.VerticalVelocity,
+                                Math.Clamp(.24f + -closing * .15f, .24f, .80f));
+                            hitter.HopCooldown = .10f;
+                        }
                     }
+                    ball.Velocity = Limit(ball.Velocity, MaxBallSpeed);
                 }
-                _ballVelocity = Limit(_ballVelocity, MaxBallSpeed);
             }
             // Consume a sliver of time even for an existing overlap, avoiding a zero-time loop.
             float consumed = Math.Max(nearest, .00001f);
             remaining -= consumed;
             elapsed += consumed;
         }
+        // Dense simultaneous contacts are bounded; do not make unrelated balls lose
+        // the rest of their movement when that contact budget is exhausted.
+        if (remaining > 0) MoveAll(remaining);
     }
 
-    private void ResolveBoundary()
+    private void MoveAll(float seconds)
+    {
+        foreach (var ball in _balls)
+            if (ball.Growth >= 1) ball.Position += ball.Velocity * seconds;
+    }
+
+    private static void ResolveBallContact(Ball first, Ball second)
+    {
+        float height = first.Height - second.Height;
+        float radius = MathF.Sqrt(Math.Max(0, 4 * BallRadius * BallRadius - height * height));
+        var offset = first.Position - second.Position;
+        var direction = NormalOr(offset, Vector2.UnitX);
+        var correction = direction * Math.Max(0, radius + .00005f - offset.Length()) * .5f;
+        first.Position += correction;
+        second.Position -= correction;
+        // Equal-mass sphere impact: airborne balls may pass over one another, and
+        // glancing height differences can transfer momentum vertically.
+        var normal = Vector3.Normalize(new Vector3(direction * radius, height));
+        var relative = new Vector3(first.Velocity - second.Velocity,
+            first.VerticalVelocity - second.VerticalVelocity);
+        float closing = Vector3.Dot(relative, normal);
+        if (closing >= 0) return;
+        var impulse = normal * (-(1 + Restitution) * closing * .5f);
+        var horizontal = new Vector2(impulse.X, impulse.Y);
+        first.Velocity = Limit(first.Velocity + horizontal, MaxBallSpeed);
+        second.Velocity = Limit(second.Velocity - horizontal, MaxBallSpeed);
+        first.VerticalVelocity += impulse.Z;
+        second.VerticalVelocity -= impulse.Z;
+    }
+
+    private void SeparateGrowingBalls()
+    {
+        // The second wave uses the same sideline spots. If an earlier ball is still
+        // there, gradually make room as the new sphere grows, without a launch impulse.
+        for (int i = 0; i < _balls.Count; i++)
+        for (int j = i + 1; j < _balls.Count; j++)
+        {
+            var first = _balls[i];
+            var second = _balls[j];
+            if (first.Growth >= 1 && second.Growth >= 1) continue;
+            float radius = BallRadius * (first.Growth + second.Growth);
+            float height = first.Height - second.Height;
+            float horizontalSquared = radius * radius - height * height;
+            var offset = first.Position - second.Position;
+            if (horizontalSquared <= 0 || offset.LengthSquared() >= horizontalSquared) continue;
+            var correction = NormalOr(offset, Vector2.UnitX) *
+                ((MathF.Sqrt(horizontalSquared) - offset.Length()) * .5f);
+            first.Position = ClampBall(first.Position + correction, BallRadius * first.Growth);
+            second.Position = ClampBall(second.Position - correction, BallRadius * second.Growth);
+        }
+    }
+
+    private static Vector2 ClampBall(Vector2 position, float radius) => new(
+        Math.Clamp(position.X, -Width / 2 + radius, Width / 2 - radius),
+        Math.Clamp(position.Y, -Height / 2 + radius, Height / 2 - radius));
+
+    private void ResolveBoundary(Ball ball)
     {
         float side = Height / 2 - BallRadius;
-        if (_ballPosition.Y < -side)
+        if (ball.Position.Y < -side)
         {
-            _ballPosition.Y = -side + (-side - _ballPosition.Y);
-            _ballVelocity.Y = MathF.Abs(_ballVelocity.Y) * Restitution;
+            ball.Position.Y = -side + (-side - ball.Position.Y);
+            ball.Velocity.Y = MathF.Abs(ball.Velocity.Y) * Restitution;
         }
-        else if (_ballPosition.Y > side)
+        else if (ball.Position.Y > side)
         {
-            _ballPosition.Y = side - (_ballPosition.Y - side);
-            _ballVelocity.Y = -MathF.Abs(_ballVelocity.Y) * Restitution;
+            ball.Position.Y = side - (ball.Position.Y - side);
+            ball.Velocity.Y = -MathF.Abs(ball.Velocity.Y) * Restitution;
         }
-        bool inMouth = MathF.Abs(_ballPosition.Y) < GoalHalfWidth - BallRadius - PostRadius &&
-            _ballHeight + BallRadius < GoalHeight;
+        bool inMouth = MathF.Abs(ball.Position.Y) < GoalHalfWidth - BallRadius - PostRadius &&
+            ball.Height + BallRadius < GoalHeight;
         float end = Width / 2 - BallRadius;
-        if (inMouth && MathF.Abs(_ballPosition.X) >= Width / 2 + BallRadius)
+        if (inMouth && MathF.Abs(ball.Position.X) >= Width / 2 + BallRadius)
         {
-            ScoreGoal(_ballPosition.X > 0 ? 1 : 2);
+            ScoreGoal(ball, ball.Position.X > 0 ? 1 : 2);
             return;
         }
         if (inMouth) return;
-        if (_ballPosition.X < -end)
+        if (ball.Position.X < -end)
         {
-            _ballPosition.X = -end + MathF.Min(.10f, -end - _ballPosition.X);
-            _ballVelocity.X = MathF.Abs(_ballVelocity.X) * Restitution;
+            ball.Position.X = -end + MathF.Min(.10f, -end - ball.Position.X);
+            ball.Velocity.X = MathF.Abs(ball.Velocity.X) * Restitution;
         }
-        else if (_ballPosition.X > end)
+        else if (ball.Position.X > end)
         {
-            _ballPosition.X = end - MathF.Min(.10f, _ballPosition.X - end);
-            _ballVelocity.X = -MathF.Abs(_ballVelocity.X) * Restitution;
+            ball.Position.X = end - MathF.Min(.10f, ball.Position.X - end);
+            ball.Velocity.X = -MathF.Abs(ball.Velocity.X) * Restitution;
         }
     }
 
-    private void ScoreGoal(int scorer)
+    private void ScoreGoal(Ball ball, int scorer)
     {
         _lastScorer = scorer;
         if (scorer == 1) _score1++; else _score2++;
-        _ballVelocity = Vector2.Zero;
-        _ballVerticalVelocity = 0;
+        ball.Velocity = Vector2.Zero;
+        ball.VerticalVelocity = 0;
+        _balls.Clear();
+        _balls.Add(ball);
+        _rallySeconds = 0;
+        _spawnStage = 0;
         _phase = _score1 >= WinningScore || _score2 >= WinningScore ? FootballPhase.Finished : FootballPhase.Goal;
         _phaseRemaining = _phase == FootballPhase.Goal ? 1.25f : 0;
     }
 
     private void CenterBall()
     {
-        _ballPosition = _ballVelocity = Vector2.Zero;
-        _ballHeight = BallRadius;
-        _ballVerticalVelocity = _ballSpin = 0;
-        _ballRotation = Quaternion.Identity;
+        _balls.Clear();
+        _balls.Add(new(_nextBallId++, Vector2.Zero));
+        _rallySeconds = 0;
+        _spawnStage = 0;
     }
 
     private FootballSnapshot CreateSnapshot()
@@ -668,8 +837,10 @@ public sealed class FootballGame
             kicker.MeasuredHeading is not null ? kicker.Target : kicker.Position,
             kicker.Velocity, kicker.Present, kicker.Style, IsAi(kicker), kicker.Heading,
             kicker.MeasuredHeading is not null)).ToArray());
-        return new(_ballPosition, _recoveringInput ? Vector2.Zero : _ballVelocity, _ballHeight,
-            _recoveringInput ? 0 : _ballVerticalVelocity, _ballRotation, kickers,
+        var balls = Array.AsReadOnly(_balls.Select(ball => new FootballBallSnapshot(ball.Id, ball.Position,
+            _recoveringInput ? Vector2.Zero : ball.Velocity, ball.Height,
+            _recoveringInput ? 0 : ball.VerticalVelocity, ball.Rotation, ball.Growth)).ToArray());
+        return new(balls, kickers,
             _score1, _score2, _mode, _phase, banner, _phaseRemaining, Revision) { RecoveringInput = _recoveringInput };
     }
 
@@ -703,6 +874,19 @@ public sealed class FootballGame
     private static void ValidateIndex(int index)
     {
         if (index is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(index));
+    }
+
+    private sealed class Ball(int id, Vector2 position, float growth = 1)
+    {
+        public readonly int Id = id;
+        public Vector2 Position = position;
+        public Vector2 Velocity;
+        public Vector2 StepStart;
+        public float Height = BallRadius * growth;
+        public float VerticalVelocity;
+        public Quaternion Rotation = Quaternion.Identity;
+        public float Spin;
+        public float Growth = growth;
     }
 
     private sealed class Kicker(int index)

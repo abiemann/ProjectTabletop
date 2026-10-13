@@ -11,7 +11,7 @@ namespace ProjectTabletop.App.Projection.Football;
 /// spherical pentagons, thirty seams and hemisphere clipping, driven by the
 /// simulation's rolling quaternion. The caller owns height and the cast shadow.
 /// </summary>
-internal sealed class SoccerBallRenderer
+internal sealed class SoccerBallRenderer : IDisposable
 {
     private const int PanelCount = 12;
     private const int PanelVertices = 5;
@@ -24,6 +24,22 @@ internal sealed class SoccerBallRenderer
     private readonly Vector3[] _rotated = new Vector3[Surface.Length];
     private readonly Vector3[] _rotatedSeams = new Vector3[Seams.Length];
     private readonly Vector2[] _clipped = new Vector2[PanelVertices + HorizonSegments];
+    private readonly CanvasRadialGradientBrush _sphereShade;
+    private readonly CanvasRadialGradientBrush _shine;
+
+    internal SoccerBallRenderer(CanvasDevice device)
+    {
+        _sphereShade = new CanvasRadialGradientBrush(device,
+        [
+            new() { Position = 0, Color = Color.FromArgb(0, 10, 25, 32) },
+            new() { Position = .48f, Color = Color.FromArgb(0, 10, 25, 32) },
+            new() { Position = .82f, Color = Color.FromArgb(25, 10, 25, 32) },
+            new() { Position = 1, Color = Color.FromArgb(110, 10, 25, 32) }
+        ]) { Center = new(-.3f, -.4f), RadiusX = 1.55f, RadiusY = 1.55f };
+        _shine = new CanvasRadialGradientBrush(device,
+            Color.FromArgb(135, 255, 255, 255), Color.FromArgb(0, 255, 255, 255))
+            { Center = new(-.34f, -.47f), RadiusX = .29f, RadiusY = .19f };
+    }
 
     internal void Draw(CanvasDrawingSession ds, Vector2 center, float radius, Quaternion rotation)
     {
@@ -60,21 +76,17 @@ internal sealed class SoccerBallRenderer
                     ds.DrawLine(_clipped[v], _clipped[closes ? (v + 1) % count : v + 1], ink, .025f);
             }
 
-            using var sphereShade = new CanvasRadialGradientBrush(ds.Device,
-            [
-                new() { Position = 0, Color = Color.FromArgb(0, 10, 25, 32) },
-                new() { Position = .48f, Color = Color.FromArgb(0, 10, 25, 32) },
-                new() { Position = .82f, Color = Color.FromArgb(25, 10, 25, 32) },
-                new() { Position = 1, Color = Color.FromArgb(110, 10, 25, 32) }
-            ]) { Center = new(-.3f, -.4f), RadiusX = 1.55f, RadiusY = 1.55f };
-            ds.FillCircle(Vector2.Zero, 1, sphereShade);
-            using var shine = new CanvasRadialGradientBrush(ds.Device,
-                Color.FromArgb(135, 255, 255, 255), Color.FromArgb(0, 255, 255, 255))
-                { Center = new(-.34f, -.47f), RadiusX = .29f, RadiusY = .19f };
-            ds.FillEllipse(new(-.34f, -.47f), .29f, .19f, shine);
+            ds.FillCircle(Vector2.Zero, 1, _sphereShade);
+            ds.FillEllipse(new(-.34f, -.47f), .29f, .19f, _shine);
             ds.DrawCircle(Vector2.Zero, .995f, Color.FromArgb(205, 28, 37, 34), .045f);
         }
         finally { ds.Transform = previous; }
+    }
+
+    public void Dispose()
+    {
+        _sphereShade.Dispose();
+        _shine.Dispose();
     }
 
     private int ClipPanel(int start, out int edgeCount, out bool closes)
