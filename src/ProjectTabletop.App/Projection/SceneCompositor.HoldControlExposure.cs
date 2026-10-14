@@ -53,11 +53,9 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             var now = HoldClock();
-            if (HoldControlsSettling(frameTime) || !AcquisitionBoardReady ||
-                HasBoardControlDrawerAnimation() || context is null || context.Revision != _holdRevision ||
-                !ReferenceEquals(context.ExpectedScene, _holdExpectedScene) || frameTime > now ||
+            if (frameTime < _holdNavigationStartedAt || HoldControlsSettling(frameTime) || !AcquisitionBoardReady ||
+                HasBoardControlDrawerAnimation() || context is null || !IsCurrentHoldContext(context) || frameTime > now ||
                 now - frameTime > TimeSpan.FromMilliseconds(350) || frameTime <= _holdControlObservation ||
-                !context.ButtonIds.SequenceEqual(_boardSession.Buttons.Select(button => button.Id)) ||
                 presence?.TextPatterns is not { Count: > 0 } patterns) return false;
             _holdControlObservation = frameTime;
             // An unreadable, saturated caption may need less projected light.

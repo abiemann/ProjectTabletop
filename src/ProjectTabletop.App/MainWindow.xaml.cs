@@ -69,6 +69,8 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _cameraInputWorker = new(ProcessCameraInputFrame,
+            error => AppLog.Write("Camera input scheduling", error));
         _dispatchInputResult = action => DispatcherQueue.TryEnqueue(() => action());
         _scene.LicensesRequested += () => DispatcherQueue.TryEnqueue(() => _ = ShowLicensesAsync());
         _scene.BoardOpened += BoardOpenedForStickTracking;
@@ -257,6 +259,7 @@ public sealed partial class MainWindow : Window
         _footballMatchSound.Dispose();
         _footballAmbienceSound.Dispose();
         _statusTimer.Stop();
+        await _cameraInputWorker.StopAsync();
         await DisposeEyeTipTrackingAsync();
         await DisposeFootballInputAsync();
         await DisposeStrykersRunInputAsync();

@@ -30,6 +30,7 @@
     <Compile Include="..\..\src\ProjectTabletop.App\Camera\CameraFramePool.cs" Link="App\CameraFramePool.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Camera\CameraFrameRatePolicy.cs" Link="App\CameraFrameRatePolicy.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Camera\FrameWorker.cs" Link="App\FrameWorker.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Camera\LatestFrameWorker.cs" Link="App\LatestFrameWorker.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Camera\CoalescedDispatch.cs" Link="App\CoalescedDispatch.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\HandTrackingVideoRecorder.cs" Link="App\HandTrackingVideoRecorder.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\HandTrackingVideoRecorderVerification.cs" Link="App\HandTrackingVideoRecorderVerification.cs" />

@@ -29,6 +29,8 @@ public sealed partial class SceneCompositor
     private float _waterEntranceProgress = 1;
     private CanvasRenderTarget? _waterFrameTarget;
     private (long Visual, int Feedback)? _waterRenderedFrame;
+    private DateTimeOffset _waterProjectorRenderedAt;
+    private long _waterRenderedFrames, _waterPreviewFrameReuses;
 
     public double WaterGardenPreviewAspect { get { lock (_gate) return PaintBoardAspect(); } }
     public bool WaterGardenDrawerOpen { get { lock (_gate) return _boardSession.WaterGardenDrawerOpen; } }
@@ -54,7 +56,8 @@ public sealed partial class SceneCompositor
     }
 
     internal sealed record WaterGardenDiagnostics(bool Active, bool TipVisible, Point2? BoardTip,
-        DateTimeOffset SourceTime, long InputCount, int PendingDisturbances, object? Simulation);
+        DateTimeOffset SourceTime, long InputCount, int PendingDisturbances, object? Simulation,
+        long RenderedFrames, long PreviewFrameReuses);
 
     internal WaterGardenDiagnostics GetWaterGardenDiagnostics()
     {
@@ -65,7 +68,8 @@ public sealed partial class SceneCompositor
             ExpireWaterStick(_waterClock());
             return new(_waterWasActive, _waterTip is not null,
                 _waterTip is { } tip ? new Point2(tip.X, tip.Y) : null, _waterFrameTime,
-                _waterInputCount, _waterDisturbances.Count, _waterSimulation?.GetDiagnostics());
+                _waterInputCount, _waterDisturbances.Count, _waterSimulation?.GetDiagnostics(),
+                _waterRenderedFrames, _waterPreviewFrameReuses);
         }
     }
 
@@ -125,15 +129,23 @@ public sealed partial class SceneCompositor
             double aspect = PaintBoardAspect();
             double drawWidth = Math.Min(width, height * aspect), drawHeight = drawWidth / aspect;
             ReserveBoardPixels(ds.Device, drawWidth * ds.Dpi / 96, drawHeight * ds.Dpi / 96);
-            var rendered = GetWaterGardenFrame(ds.Device, _waterClock(), CurrentFingerSelectionFeedback);
+            var rendered = GetWaterGardenFrame(ds.Device, _waterClock(), CurrentFingerSelectionFeedback, preview: true);
             ds.DrawImage(rendered, new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight),
                 new Rect(0, 0, rendered.SizeInPixels.Width, rendered.SizeInPixels.Height));
         }
     }
 
     private CanvasRenderTarget GetWaterGardenFrame(CanvasDevice device, DateTimeOffset now,
-        IReadOnlyList<BoardFingerSelectionFeedback> feedback)
+        IReadOnlyList<BoardFingerSelectionFeedback> feedback, bool preview)
     {
+        // The live projector owns simulation and full-resolution shading. Both
+        // laptop previews consume its completed frame instead of advancing the
+        // same water again at their independently scheduled draw timestamps.
+        if (preview && CanReuseWaterGardenProjectorFrame(device, now))
+        {
+            _waterPreviewFrameReuses++;
+            return _waterFrameTarget!;
+        }
         var key = (WaterGardenVisualRevision(now), FingerSelectionRenderStep(feedback));
         if (EnsureBoardRenderTarget(ref _waterFrameTarget, device)) _waterRenderedFrame = null;
         if (_waterRenderedFrame != key)
@@ -145,17 +157,36 @@ public sealed partial class SceneCompositor
             DrawWaterGardenTitle(drawing, now);
             DrawWaterGardenControls(drawing, _boardSession.Buttons, [], feedback, now);
             _waterRenderedFrame = key;
+            _waterRenderedFrames++;
         }
         return _waterFrameTarget!;
     }
 
     private void DrawCachedWaterGarden(CanvasDrawingSession ds, DateTimeOffset now,
-        IReadOnlyList<BoardFingerSelectionFeedback> feedback)
+        IReadOnlyList<BoardFingerSelectionFeedback> feedback, bool preview)
     {
-        var rendered = GetWaterGardenFrame(ds.Device, now, feedback);
+        var rendered = GetWaterGardenFrame(ds.Device, now, feedback, preview);
         ds.DrawImage(rendered, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize),
             new Rect(0, 0, rendered.SizeInPixels.Width, rendered.SizeInPixels.Height));
     }
+
+    private void MarkWaterGardenProjectorFrame()
+    {
+        // Diagnostic screenshots also use preview:false; only ProjectionWindow
+        // marks live presentation. Absent/stalled output releases ownership.
+        if (_waterWasActive && _boardSession.Screen == BoardScreen.WaterGarden && _waterRenderedFrame is not null)
+            _waterProjectorRenderedAt = _waterClock();
+    }
+
+    private bool CanReuseWaterGardenProjectorFrame(CanvasDevice device, DateTimeOffset now) =>
+        _waterNavigation == _boardSession.NavigationRevision &&
+        _waterResetRevision == _boardSession.WaterGardenResetRevision &&
+        ReferenceEquals(_waterCameraMap, _boardCameraMap) && ReferenceEquals(_waterSurfaceMap, _boardSurfaceMap) &&
+        _waterProjectorRenderedAt != default && now >= _waterProjectorRenderedAt &&
+        now - _waterProjectorRenderedAt <= TimeSpan.FromMilliseconds(250) &&
+        _waterRenderedFrame is not null && _waterFrameTarget is { } target && target.Device == device &&
+        target.SizeInPixels.Width == _boardRasterPixels.Width &&
+        target.SizeInPixels.Height == _boardRasterPixels.Height;
 
     // Stick observations cannot select buttons, but disarm controls while the
     // tip is in the water. The calibrated plane supplies position, not contact
@@ -313,6 +344,7 @@ public sealed partial class SceneCompositor
         _waterNavigation = _boardSession.NavigationRevision;
         _waterResetRevision = _boardSession.WaterGardenResetRevision;
         _waterAppliedDuckCount = 0;
+        _waterProjectorRenderedAt = default;
         _waterWasActive = active;
         if (entered)
         {
@@ -365,8 +397,6 @@ public sealed partial class SceneCompositor
             int width = aspect >= 1 ? 512 : Math.Max(64, (int)Math.Round(512 * aspect));
             int height = aspect <= 1 ? 512 : Math.Max(64, (int)Math.Round(512 / aspect));
             _waterSimulation = new(ds.Device, width, height, aspect,
-                _waterImages?.Image("warm-limestone.png") ??
-                throw new InvalidOperationException("Water Garden basin artwork was not loaded before rendering."),
                 _waterImages?.Image("wet-slate.png") ??
                 throw new InvalidOperationException("Water Garden cascade artwork was not loaded before rendering."),
                 _waterImages?.Image("sand-ground.png") ??
@@ -496,6 +526,7 @@ public sealed partial class SceneCompositor
         _waterFrameTarget?.Dispose();
         _waterFrameTarget = null;
         _waterRenderedFrame = null;
+        _waterProjectorRenderedAt = default;
         _waterDevice = null;
         _waterAdvancedAt = default;
         _waterAppliedDuckCount = 0;

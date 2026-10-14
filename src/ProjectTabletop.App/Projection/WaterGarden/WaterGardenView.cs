@@ -14,13 +14,15 @@ internal static class WaterGardenView
     public const float TiltRadians = MathF.PI / 4;
     public const float SinTilt = .70710678f;
     public const float CosTilt = .70710678f;
-    // The settled view retains the familiar 45-degree angle. A slightly longer
-    // lens enlarges the far edge without losing the rounded near rim.
+    // Enlarge width and front-to-back span by 5%, retaining the far waterline
+    // below the sand title. The shared camera keeps wand input registered to
+    // the enlarged surface; stationary controls remain in their own layer.
     public const float Distance = 3.3f;
-    public const float Zoom = .891f;
+    public const float Zoom = .8505f;
     public const float CentreX = .5f;
-    public const float CentreY = .493f;
-    public const float RimHeight = .04f;
+    public const float CentreY = .45070687f;
+    public const float WaterDepth = .16f;
+    public const float GroundDepth = WaterDepth + .007f;
     public const float PondCornerRadius = .18f;
     public const float SurfaceEdgeMargin = .004f;
     private static readonly WaterGardenCamera FinalCamera =
@@ -39,9 +41,9 @@ internal static class WaterGardenView
         float tilt = initialTilt + (TiltRadians - initialTilt) * t;
         return new(MathF.Sin(tilt), MathF.Cos(tilt),
             3.85f + (Distance - 3.85f) * t,
-            .68f + (Zoom - .68f) * t,
+            .59f + (Zoom - .59f) * t,
             CentreX,
-            .45f + (CentreY - .45f) * t);
+            .41f + (CentreY - .41f) * t);
     }
 
     public static Vector2 ScreenToSurface(Vector2 screen)
@@ -92,12 +94,8 @@ internal static class WaterGardenView
         var q = Vector2.Abs(new((surface.X - .5f) * aspect, surface.Y - .5f)) -
             new Vector2(aspect * .5f - radius, .5f - radius);
         float roundedDistance = Vector2.Max(q, Vector2.Zero).Length() + Math.Min(Math.Max(q.X, q.Y), 0) - radius;
-        if (roundedDistance > -SurfaceEdgeMargin) return false;
-        // The raised near rim hides a narrow strip of the water plane. Follow
-        // the sight line toward the camera to reject pixels landing on that rim.
-        float planeY = surface.Y - .5f;
-        float atRimY = planeY + (Distance * SinTilt - planeY) * RimHeight / (Distance * CosTilt);
-        return atRimY < .5f - SurfaceEdgeMargin;
+        // Containment is unchanged, but no visible rim occludes the near edge.
+        return roundedDistance <= -SurfaceEdgeMargin;
     }
 
     private static bool IsFinite(Vector2 value) => float.IsFinite(value.X) && float.IsFinite(value.Y);

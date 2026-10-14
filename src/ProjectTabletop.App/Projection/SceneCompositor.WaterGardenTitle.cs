@@ -1,5 +1,7 @@
 using System.Numerics;
+using ComputeSharp.D2D1.WinUI;
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Effects;
 using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.Text;
 using Microsoft.UI.Text;
@@ -11,14 +13,15 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
-    // The title is painted on the sand above the far rim only after the camera
-    // has settled. Segoe Script ships with Windows, so the installer does not
-    // depend on a separately licensed or installed font asset.
+    // Script outlines define shallow trenches in the sand after the camera
+    // settles. Cache their grain and lighting at the board's native density;
+    // drawing the title never copies the live scene or reads pixels back.
     private DateTimeOffset _waterIntroStartedAt;
     private CanvasDevice? _waterTitleDevice;
     private float _waterTitleAspect;
-    private CanvasGeometry? _waterTitleLeft, _waterTitleRight;
-    private Rect _waterTitleLeftInk, _waterTitleRightInk;
+    private CanvasRenderTarget? _waterTitleLeft, _waterTitleRight;
+    private Rect _waterTitleLeftBounds, _waterTitleRightBounds;
+    private Vector2 _waterTitleRasterScale;
 
     private void ResetWaterGardenIntro(DateTimeOffset now)
     {
@@ -35,24 +38,66 @@ public sealed partial class SceneCompositor
 
         float aspect = (float)PaintBoardAspect();
         EnsureWaterGardenTitle(ds.Device, aspect);
-        // The brief stagger makes the two words read as one handwritten title.
-        DrawWaterGardenScriptWord(ds, _waterTitleLeft!, _waterTitleLeftInk,
+        // Finish Water, briefly lift the imaginary stick, then write Garden.
+        DrawWaterGardenScriptWord(ds, _waterTitleLeft!, _waterTitleLeftBounds,
             (float)Math.Clamp((elapsed - .12) / 1.65, 0, 1));
-        DrawWaterGardenScriptWord(ds, _waterTitleRight!, _waterTitleRightInk,
-            (float)Math.Clamp((elapsed - .54) / 1.95, 0, 1));
+        DrawWaterGardenScriptWord(ds, _waterTitleRight!, _waterTitleRightBounds,
+            (float)Math.Clamp((elapsed - 1.95) / 1.95, 0, 1));
     }
 
     private void EnsureWaterGardenTitle(CanvasDevice device, float aspect)
     {
+        var size = _waterFrameTarget!.SizeInPixels;
+        var rasterScale = new Vector2(size.Width / (float)BoardSurfaceSize,
+            size.Height / (float)BoardSurfaceSize);
         if (_waterTitleLeft is not null && _waterTitleRight is not null &&
-            _waterTitleDevice == device && _waterTitleAspect == aspect) return;
+            _waterTitleDevice == device && _waterTitleAspect == aspect &&
+            _waterTitleRasterScale == rasterScale) return;
         DisposeWaterGardenTitle();
-        _waterTitleLeft = CreateWaterGardenScriptWord(device, "Water", aspect, 180);
-        _waterTitleRight = CreateWaterGardenScriptWord(device, "Garden", aspect, 820);
-        _waterTitleLeftInk = _waterTitleLeft.ComputeBounds();
-        _waterTitleRightInk = _waterTitleRight.ComputeBounds();
+        _waterTitleLeft = CreateWaterGardenSandWord(device, "Water", aspect, 180, rasterScale,
+            out _waterTitleLeftBounds);
+        _waterTitleRight = CreateWaterGardenSandWord(device, "Garden", aspect, 820, rasterScale,
+            out _waterTitleRightBounds);
         _waterTitleDevice = device;
         _waterTitleAspect = aspect;
+        _waterTitleRasterScale = rasterScale;
+    }
+
+    private static CanvasRenderTarget CreateWaterGardenSandWord(CanvasDevice device, string word,
+        float aspect, float centerX, Vector2 rasterScale, out Rect bounds)
+    {
+        using var letters = CreateWaterGardenScriptWord(device, word, aspect, centerX);
+        var ink = letters.ComputeBounds();
+        const float padding = 5;
+        bounds = new Rect(ink.X - padding / aspect, ink.Y - padding,
+            ink.Width + padding * 2 / aspect, ink.Height + padding * 2);
+        int width = Math.Max(1, (int)Math.Ceiling(bounds.Width * rasterScale.X));
+        int height = Math.Max(1, (int)Math.Ceiling(bounds.Height * rasterScale.Y));
+        using var mask = new CanvasRenderTarget(device, width, height, 96);
+        using (var drawing = mask.CreateDrawingSession())
+        {
+            drawing.Clear(Color.FromArgb(0, 0, 0, 0));
+            drawing.Transform = Matrix3x2.CreateTranslation(-(float)bounds.X, -(float)bounds.Y) *
+                Matrix3x2.CreateScale(rasterScale);
+            drawing.FillGeometry(letters, Color.FromArgb(255, 255, 255, 255));
+        }
+        using var rounded = new GaussianBlurEffect
+        {
+            Source = mask, BlurAmount = .8f * rasterScale.Y, BorderMode = EffectBorderMode.Soft
+        };
+        using var groove = new PixelShaderEffect<SandWritingShader>();
+        groove.Sources[0] = rounded;
+        groove.ConstantBuffer = new SandWritingShader(rasterScale.Y);
+        var shaded = new CanvasRenderTarget(device, width, height, 96);
+        try
+        {
+            using var drawing = shaded.CreateDrawingSession();
+            drawing.Clear(Color.FromArgb(0, 0, 0, 0));
+            drawing.DrawImage(groove, Vector2.Zero, new Rect(0, 0, width, height),
+                1, CanvasImageInterpolation.Linear, CanvasComposite.Copy);
+            return shaded;
+        }
+        catch { shaded.Dispose(); throw; }
     }
 
     private static CanvasGeometry CreateWaterGardenScriptWord(CanvasDevice device, string word,
@@ -79,36 +124,32 @@ public sealed partial class SceneCompositor
             Matrix3x2.CreateTranslation(x, y));
     }
 
-    private static void DrawWaterGardenScriptWord(CanvasDrawingSession ds, CanvasGeometry letters,
-        Rect ink, float progress)
+    private static void DrawWaterGardenScriptWord(CanvasDrawingSession ds, CanvasRenderTarget letters,
+        Rect bounds, float progress)
     {
         if (progress <= 0) return;
         if (progress < 1)
         {
             // A narrow slanted front exposes the connected script continuously,
-            // like a pen moving through each letter, rather than fading a word in.
-            float front = (float)(ink.Left + ink.Width * progress);
-            float upper = Math.Max((float)ink.Left, front - 12);
-            float lower = Math.Min((float)ink.Right, front + 12);
+            // like a stick moving through each letter, rather than fading a word in.
+            // Sweep beyond both padded edges, so the final slanted corner and
+            // its sandy lip are already revealed when the clip is removed.
+            const float slant = 12;
+            float front = (float)bounds.Left - slant + ((float)bounds.Width + 2 * slant) * progress;
+            float upper = front - slant, lower = front + slant;
             using var reveal = CanvasGeometry.CreatePolygon(ds.Device,
             [
-                new Vector2((float)ink.Left - 3, (float)ink.Top - 3),
-                new Vector2(upper, (float)ink.Top - 3),
-                new Vector2(lower, (float)ink.Bottom + 3),
-                new Vector2((float)ink.Left - 3, (float)ink.Bottom + 3)
+                new Vector2((float)bounds.Left, (float)bounds.Top),
+                new Vector2(upper, (float)bounds.Top),
+                new Vector2(lower, (float)bounds.Bottom),
+                new Vector2((float)bounds.Left, (float)bounds.Bottom)
             ]);
             using var clip = ds.CreateLayer(1, reveal);
-            PaintWaterGardenScriptInk(ds, letters);
+            Paint();
         }
-        else PaintWaterGardenScriptInk(ds, letters);
-    }
-
-    private static void PaintWaterGardenScriptInk(CanvasDrawingSession ds, CanvasGeometry letters)
-    {
-        // A restrained dark keyline keeps white lettering legible against the
-        // pale sand, while the face of the script remains white.
-        ds.DrawGeometry(letters, Color.FromArgb(135, 70, 65, 52), 2.8f);
-        ds.FillGeometry(letters, Color.FromArgb(255, 255, 255, 255));
+        else Paint();
+        void Paint() => ds.DrawImage(letters, bounds, new Rect(0, 0,
+            letters.SizeInPixels.Width, letters.SizeInPixels.Height));
     }
 
     private void DisposeWaterGardenTitle()
@@ -117,6 +158,7 @@ public sealed partial class SceneCompositor
         _waterTitleRight?.Dispose(); _waterTitleRight = null;
         _waterTitleDevice = null;
         _waterTitleAspect = 0;
-        _waterTitleLeftInk = _waterTitleRightInk = default;
+        _waterTitleRasterScale = default;
+        _waterTitleLeftBounds = _waterTitleRightBounds = default;
     }
 }

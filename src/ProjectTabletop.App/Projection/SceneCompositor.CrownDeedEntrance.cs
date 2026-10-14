@@ -41,6 +41,9 @@ public sealed partial class SceneCompositor
 
     private void OnBoardOpened(BoardScreen screen)
     {
+        // Context capture can run after the camera frame arrived. A new visit
+        // must never treat pre-navigation pixels as its own caption evidence.
+        _holdNavigationStartedAt = HoldClock();
         SyncBoardOrientation();
         BoardOpened?.Invoke(screen);
         CancelCrownDeedDevelopment();

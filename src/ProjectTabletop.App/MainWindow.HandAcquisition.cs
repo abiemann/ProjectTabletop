@@ -67,6 +67,7 @@ public sealed partial class MainWindow
     // Hold buttons keep their own detector: it must keep watching while a hand
     // is tracked and must not restart when a hold activation changes the board.
     private readonly HandAcquisitionPresenceTracker _holdPresence = new();
+    private readonly object _holdDetectionGate = new();
     private long _holdContextRevision = -1;
     private long _holdGeneration = -1;
 
@@ -77,21 +78,33 @@ public sealed partial class MainWindow
         long generation)
     {
         if (context is null) return new([], [], null);
-        if (context.Revision != _holdContextRevision || generation != _holdGeneration) _holdPresence.Reset();
-        _holdContextRevision = context.Revision;
-        _holdGeneration = generation;
-        var presence = _holdPresence.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-            context.SearchPolygon, context.ExpectedScene, frame.Timestamp, MonotonicClock.UtcNow);
-        var query = new HoldButtonQuery(context.HeldButtons(presence), context.ClearedButtons(presence), presence);
+        HoldButtonQuery query;
+        // Capture boards share the optics with the independent caption worker.
+        // A board transition can briefly overlap them; never race that history.
+        lock (_holdDetectionGate)
+        {
+            if (context.Revision != _holdContextRevision || generation != _holdGeneration) _holdPresence.Reset();
+            _holdContextRevision = context.Revision;
+            _holdGeneration = generation;
+            var presence = _holdPresence.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
+                context.SearchPolygon, context.ExpectedScene, frame.Timestamp, MonotonicClock.UtcNow);
+            query = new(context.HeldButtons(presence), context.ClearedButtons(presence), presence);
+        }
 #if DEBUG
         // Retain one immutable camera/context/result tuple only during explicit
         // board diagnostics. The saver must never pair a newer image with this fit.
-        lock (_handGate)
+        // Optional diagnostics must not make caption input wait for a queued
+        // landmark/UI publication holding the hand gate.
+        if (Monitor.TryEnter(_handGate))
         {
-            var previous = _lastHoldButtonSnapshot;
-            _lastHoldButtonSnapshot = _boardHandDiagnosticLogging && !_closing && generation == _handGeneration
-                ? new(frame, context, query, generation, MonotonicClock.UtcNow) : null;
-            previous?.FrameLease.Dispose();
+            try
+            {
+                var previous = _lastHoldButtonSnapshot;
+                _lastHoldButtonSnapshot = _boardHandDiagnosticLogging && !_closing && generation == _handGeneration
+                    ? new(frame, context, query, generation, MonotonicClock.UtcNow) : null;
+                previous?.FrameLease.Dispose();
+            }
+            finally { Monitor.Exit(_handGate); }
         }
 #endif
         return query;

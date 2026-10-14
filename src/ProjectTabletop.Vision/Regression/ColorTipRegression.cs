@@ -9,6 +9,7 @@ internal static class ColorTipRegression
     public static void Run()
     {
         CheckLearningAndLighting();
+        CheckProjectedIlluminationHueShift();
         CheckRejections();
         CheckPinkSkinCannotReplaceRedPin();
         CheckSmallCoreSaturationChange();
@@ -67,6 +68,61 @@ internal static class ColorTipRegression
             var result = ColorTipDetector.Detect(width, height, width * 4, visible, profile);
             Require(result.Candidates.Count == 1 && Near(result.Candidates[0], 160, 175),
                 "Core colour conformity lost a real red pin under a brightness change.");
+        }
+    }
+
+    private static void CheckProjectedIlluminationHueShift()
+    {
+        const int width = 320, height = 240;
+        foreach (double learnedHue in new[] { 336.0, 24.0, 144.0 })
+        {
+            byte[] training = Frame(width, height);
+            Tip(training, width, height, 160, 120, 6, learnedHue, .80, .80);
+            var profile = ColorTipDetector.Learn(width, height, width * 4, training, new(160, 120))
+                with { HueToleranceDegrees = 14 };
+            foreach (double shift in new[] { -24.0, 24.0 })
+            {
+                double hue = (learnedHue + shift + 360) % 360;
+                byte[] rendered = Frame(width, height);
+                // Give every tested hue visible grayscale contrast for the existing
+                // artwork matcher; hue 312 is nearly isoluminant with Frame's grey.
+                for (int i = 0; i < rendered.Length; i += 4)
+                    rendered[i] = rendered[i + 1] = rendered[i + 2] = 30;
+                double projectedHue = (hue + Math.Sign(shift) * 6 + 360) % 360;
+                Tip(rendered, width, height, 70, 90, 6, projectedHue, .80, .80);
+                byte[] occupied = rendered.ToArray();
+                // The camera sees a small colour shift from the rendered mark. Its original
+                // narrow learned hue window would miss this negative projection evidence.
+                Tip(occupied, width, height, 70, 90, 6, hue, .80, .80);
+                // Weaker skin and a touching wooden shaft must still fail their existing
+                // saturation gates when projection moves their hue into the wider window.
+                Tip(occupied, width, height, 120, 150, 6, hue, .60, .80);
+                for (int y = 160; y <= 215; y += 4)
+                    Tip(occupied, width, height, 200, y, 5, hue, .42, .60);
+                Tip(occupied, width, height, 200, 150, 6, hue, .76, .70);
+                var plain = ColorTipDetector.Detect(width, height, width * 4, occupied, profile);
+                Require(plain.Candidates.Count == 2 && plain.Candidates.Any(item => Near(item, 200, 150)),
+                    "Projected illumination lost a saturated tip or admitted weaker skin/shaft colour.");
+                var reference = new EyeTipProjectionFrame(width, height, rendered,
+                    [1.0 / width, 0, 0, 0, 1.0 / height, 0, 0, 0, 1], Epoch);
+                var options = new ColorTipDetectionOptions(ProjectionFrames: [reference], FrameTime: Epoch);
+                var filtered = ColorTipDetector.Detect(width, height, width * 4, occupied, profile, options);
+                Require(filtered.Candidates.Count == 1 && Near(filtered.Candidates[0], 200, 150),
+                    $"Illumination hue {learnedHue}, shift {shift}: the artwork veto returned " +
+                    $"{JsonSerializer.Serialize(filtered.Candidates)} instead of only the physical tip.");
+                Require(profile.HueToleranceDegrees == 14,
+                    "Detecting an illuminated marker changed its saved learned profile.");
+            }
+
+            byte[] different = Frame(width, height);
+            Tip(different, width, height, 160, 120, 6, (learnedHue + 60) % 360, .80, .80);
+            Require(ColorTipDetector.Detect(width, height, width * 4, different, profile).Candidates.Count == 0,
+                "The illumination allowance admitted a clearly different hue.");
+            byte[] outsideCap = Frame(width, height);
+            Tip(outsideCap, width, height, 160, 120, 6, (learnedHue + 42) % 360, .80, .80);
+            Require(ColorTipDetector.Detect(width, height, width * 4, outsideCap,
+                profile with { HueToleranceDegrees = 35 }).Candidates.Count == 0,
+                "The illumination allowance exceeded its bounded hue window.");
         }
     }
 

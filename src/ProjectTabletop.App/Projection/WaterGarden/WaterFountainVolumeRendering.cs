@@ -25,8 +25,8 @@ internal readonly partial struct WaterSurfaceShader
             Float2 pixel1 = tile1 * fountainGridSize.XY + cell.XY + .5f;
             // Each XY sample stays within the centers of one slice tile.
             // Explicit interpolation in Z reconstructs the full 3D density.
-            Float4 lower = D2D.SampleInputAtPosition(5, pixel0 / atlasSize * size);
-            Float4 upper = D2D.SampleInputAtPosition(5, pixel1 / atlasSize * size);
+            Float4 lower = D2D.SampleInputAtPosition(4, pixel0 / atlasSize * size);
+            Float4 upper = D2D.SampleInputAtPosition(4, pixel1 / atlasSize * size);
             value = Hlsl.Lerp(lower, upper, cell.Z - slice0);
         }
         return value;
@@ -195,12 +195,9 @@ internal readonly partial struct WaterSurfaceShader
     private Float3 FountainFluidBehind(Float3 origin, Float3 ray, Float3 fallback)
     {
         Float4 rock = FountainSolidRay(origin, ray);
-        Float4 basin = BasinHit(origin, ray);
         float pondDistance = ray.Z < -.00001f ? -origin.Z / ray.Z : 10000;
         Float3 color = fallback;
-        if (rock.W >= 0 && rock.W < Hlsl.Min(pondDistance, basin.W)) color = rock.XYZ;
-        else if (basin.W >= 0 && basin.W < Hlsl.Min(pondDistance, rock.W))
-            color = Granite(origin + ray * basin.W, basin.XYZ);
+        if (rock.W >= 0 && rock.W < pondDistance) color = rock.XYZ;
         else if (pondDistance > 0 && pondDistance < 1000)
         {
             Float3 pond = origin + ray * pondDistance;
@@ -216,14 +213,11 @@ internal readonly partial struct WaterSurfaceShader
                 slope = Hlsl.Clamp(slope, new Float2(-.85f, -.85f), new Float2(.85f, .85f));
                 Float3 pondNormal = Hlsl.Normalize(new Float3(-slope, 1));
                 Float3 throughPool = Hlsl.Refract(ray, pondNormal, 1 / 1.333f);
-                float depth = .042f + .008f * Noise(uv * new Float2(aspect, 1) * 3);
-                Float2 gravel = uv + throughPool.XY / Hlsl.Max(.15f, -throughPool.Z) * depth / new Float2(aspect, 1);
-                Float3 bed = D2D.SampleInputAtPosition(1,
-                    Hlsl.Clamp(gravel * size, new Float2(.5f, .5f), size - .5f)).XYZ;
+                Float3 bed = WaterTransmission(pond, throughPool);
                 Float4 sky = Environment(Hlsl.Reflect(ray, pondNormal), pond.XY);
                 float facing = Hlsl.Saturate(Hlsl.Dot(pondNormal, -ray));
                 float reflectedAmount = .035f + .965f * Hlsl.Pow(1 - facing, 5) + .23f * sky.W * sky.W;
-                color = Hlsl.Lerp(bed * new Float3(.976f, .986f, .989f), sky.XYZ, Hlsl.Saturate(reflectedAmount));
+                color = Hlsl.Lerp(bed, sky.XYZ, Hlsl.Saturate(reflectedAmount));
             }
         }
         else if (ray.Z > 0) color = Environment(ray, origin.XY).XYZ;

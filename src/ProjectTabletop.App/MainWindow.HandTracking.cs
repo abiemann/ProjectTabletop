@@ -150,7 +150,10 @@ public sealed partial class MainWindow
         ResetFootballInput();
         ResetStrykersRunInput();
         lock (_handGate)
+        lock (_captionGate)
         {
+            _captionGeneration++;
+            _captionInputNotBefore = MonotonicClock.UtcNow;
             _handGeneration++;
             _handPreview = null;
             _handGestures.Reset();
@@ -164,6 +167,7 @@ public sealed partial class MainWindow
             ClearPaintDiagnostics();
 #endif
             _handWorker.ResetCadence();
+            _holdWorker.ResetCadence();
             _scene.ClearHandTips();
             _scene.InvalidatePhotoCopyCapture();
             _scene.SetPaintInputAvailable(false);
@@ -182,23 +186,26 @@ public sealed partial class MainWindow
             // Delivery can cross a reset before joining this gate. Do not assign
             // those earlier pixels to the generation captured below.
             if (frame.Timestamp < _handInputNotBefore) return InputFrameQueueResult.PredatesReset;
-            bool captionOnly = _scene.CurrentBoardScreen == BoardScreen.StrykersRun;
+            // The dedicated caption worker handles Stryker's menu without
+            // loading a hand model or waiting for a laptop UI publication.
+            if (_scene.CurrentBoardScreen == BoardScreen.StrykersRun) return InputFrameQueueResult.Skipped;
             if (_closing || !_cameraWanted || !_camera.IsRunning || _cameraOperation.CurrentCount == 0 ||
                 Volatile.Read(ref _cameraHealthWarning) ||
-                !_handTrackingEnabled || !captionOnly && _handTrackingError is not null ||
+                !_handTrackingEnabled || _handTrackingError is not null ||
                 IsBoardScanMeasuring || !_scene.HandDetectionRequired || _handWorker.IsBusy)
                 return InputFrameQueueResult.Skipped;
             var interval = _handPreview is { Cursors.Length: > 0 } preview &&
                 frame.Timestamp - preview.Timestamp <= HandMarkerLifetime
                 ? TimeSpan.Zero : HandDetectionInterval;
             if (!_handWorker.CanRun(tick, interval)) return InputFrameQueueResult.Skipped;
-            var acquisitionContext = captionOnly ? null : _scene.GetHandAcquisitionContext(frame.Timestamp);
+            var acquisitionContext = _scene.GetHandAcquisitionContext(frame.Timestamp);
             // These frames cannot show the new search light yet and would only
             // repeat the failed unlit search, delaying the first lit frame.
             if (acquisitionContext?.IlluminatedHint is not null &&
                 frame.Timestamp - acquisitionContext.IlluminationStartedAt < HandAcquisitionPresenceTracker.SearchLightSettling)
                 return InputFrameQueueResult.Skipped;
-            var holdContext = _scene.GetHoldButtonContext(frame.Timestamp);
+            bool handOwnsCaptions = HandFrameOwnsCaptions(_scene.CurrentBoardScreen);
+            var holdContext = handOwnsCaptions ? _scene.GetHoldButtonContext(frame.Timestamp) : null;
             var generation = _handGeneration;
             var requestedInTester = IsHandTrackingTester;
             var sequence = Interlocked.Increment(ref _handDetectionSequence);
@@ -207,31 +214,26 @@ public sealed partial class MainWindow
                 try
                 {
                     if (!_scene.HandDetectionRequired ||
-                        !captionOnly && _scene.CurrentBoardScreen == BoardScreen.StrykersRun) return;
+                        _scene.CurrentBoardScreen == BoardScreen.StrykersRun) return;
                     // Model loading is not inference time; create the engine before timing.
-                    if (!captionOnly)
-                        _handEngine ??= new HandTrackingEngine(Path.Combine(AppContext.BaseDirectory, "Models", "Hands"));
+                    _handEngine ??= new HandTrackingEngine(Path.Combine(AppContext.BaseDirectory, "Models", "Hands"));
                     var detectionStarted = Stopwatch.GetTimestamp();
                     double? frameInterval = null;
                     bool engineReset = false;
                     var acquisitionHints = new HandAcquisitionQuery([], [], null);
                     IReadOnlyList<HandDetection> hands = [];
-                    if (!captionOnly)
+                    _handEngine!.CaptureDiagnostics = requestedInTester || acquisitionContext is not null;
+                    frameInterval = _lastHandEngineFrameTime is { } previousFrame
+                        ? (frame.Timestamp - previousFrame).TotalMilliseconds : null;
+                    engineReset = _handEngineGeneration != generation || frameInterval is <= 0 or > 350;
+                    if (engineReset)
                     {
-                        _handEngine!.CaptureDiagnostics = requestedInTester || acquisitionContext is not null;
-                        frameInterval = _lastHandEngineFrameTime is { } previousFrame
-                            ? (frame.Timestamp - previousFrame).TotalMilliseconds : null;
-                        engineReset = _handEngineGeneration != generation || frameInterval is <= 0 or > 350;
-                        if (engineReset)
-                        {
-                            _handEngine.ResetTracking();
-                            _handEngineGeneration = generation;
-                        }
-                        _lastHandEngineFrameTime = frame.Timestamp;
-                        acquisitionHints = FindHandAcquisitionHints(frame, acquisitionContext, generation);
+                        _handEngine.ResetTracking();
+                        _handEngineGeneration = generation;
                     }
-                    var holdQuery = FindHeldButtons(frame, holdContext, generation);
-                    var heldButtons = holdQuery.Held;
+                    _lastHandEngineFrameTime = frame.Timestamp;
+                    acquisitionHints = FindHandAcquisitionHints(frame, acquisitionContext, generation);
+                    var holdQuery = handOwnsCaptions ? FindHeldButtons(frame, holdContext, generation) : null;
                     // Start a qualified search light now. The unlit crop search
                     // below still runs first on these pixels, overlapping the
                     // camera's delay in seeing the light; a hand found there
@@ -247,11 +249,10 @@ public sealed partial class MainWindow
                                     _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.LightingHints,
                                         [], frame.Timestamp, projectedWhiteClipped: acquisitionHints.Presence?.ProjectedWhiteClipped);
                         });
-                    if (!captionOnly)
-                        hands = _handEngine!.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
+                    hands = _handEngine!.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
                             acquisitionHints.SearchRegions,
                             restrictAcquisitionToSearchRegions: acquisitionContext?.RestrictAcquisitionToSearchRegions == true);
-                    var detectorTrace = captionOnly ? null : _handEngine!.LastDiagnostics;
+                    var detectorTrace = _handEngine!.LastDiagnostics;
                     var inferenceMilliseconds = Stopwatch.GetElapsedTime(detectionStarted).TotalMilliseconds;
                     var visibleHands = hands.Where(hand =>
                             double.IsFinite(hand.IndexTip.X) && double.IsFinite(hand.IndexTip.Y) &&
@@ -265,7 +266,7 @@ public sealed partial class MainWindow
                             if (_closing || generation != _handGeneration || !_handTrackingEnabled ||
                                 !_cameraWanted || !_camera.IsRunning ||
                                 Volatile.Read(ref _cameraHealthWarning) || IsBoardScanMeasuring || !_scene.HandDetectionRequired ||
-                                !captionOnly && _scene.CurrentBoardScreen == BoardScreen.StrykersRun)
+                                _scene.CurrentBoardScreen == BoardScreen.StrykersRun)
                             {
                                 LogHandDetection(sequence, requestedInTester, frame, generation, engineReset,
                                     inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, [],
@@ -275,7 +276,6 @@ public sealed partial class MainWindow
                                     IsBoardScanMeasuring ? "board_scan" : "caption_controls_hidden");
                                 return;
                             }
-                            if (captionOnly) _captionCheckError = null;
                             var age = MonotonicClock.UtcNow - frame.Timestamp;
                             _lastHandDetection = new(frame.Timestamp, inferenceMilliseconds,
                                 age.TotalMilliseconds, frameInterval, age > HandMarkerLifetime,
@@ -302,33 +302,11 @@ public sealed partial class MainWindow
                                 _scene.SetHandCursors(cursors, frame.Timestamp, _photoCopyTask is { IsCompleted: false }, visualCursors);
                                 _scene.SetHandSpotlights(visibleHands, frame.Timestamp);
                                 PublishFootballFingers(visibleHands, frame);
-                                if (!captionOnly)
-                                    _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.LightingHints, visibleHands, frame.Timestamp,
+                                _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.LightingHints, visibleHands, frame.Timestamp,
                                         acquisitionHints.Presence?.IlluminatedPresence, acquisitionHints.Presence?.IlluminatedWhiteLuminance,
                                         acquisitionHints.Presence?.ProjectedWhiteClipped);
-                                var holdBoard = _scene.CurrentBoardScreen;
-                                _scene.ObserveHoldControlExposure(holdContext, holdQuery.Presence, frame.Timestamp);
-                                var holdActivations = _scene.ObserveHoldButtons(holdContext, heldButtons, frame.Timestamp,
-                                    holdQuery.Cleared);
-                                // The hold detector's own view: whether it had its reference
-                                // scene, which captions it saw covered, and the timer progress.
-                                _lastHoldButtonDetection = new { frameTime = frame.Timestamp,
-                                    board = holdBoard.ToString(),
-                                    context = holdContext is not null, held = heldButtons,
-                                    cleared = holdQuery.Cleared, revision = holdContext?.Revision,
-                                    buttonIds = holdContext?.ButtonIds, enabledHoldIds = holdContext?.EnabledHoldIds,
-                                    ageMilliseconds = age.TotalMilliseconds,
-                                    reason = holdQuery.Presence?.Reason, baselineReady = holdQuery.Presence?.BaselineReady,
-                                    textPatterns = holdQuery.Presence?.TextPatterns, localFits = holdQuery.Presence?.LocalFits,
-                                    progress = _scene.CurrentHoldProgress };
-                                if (holdActivations.Count > 0)
-                                {
-                                    _lastHoldButtonActivation = new { buttons = holdActivations,
-                                        evidence = _lastHoldButtonDetection };
-                                    LogHandTrackingEvent("hold_activation", _lastHoldButtonActivation, force: true);
-                                }
-                                if (_scene.CurrentBoardButtons.Any(button => button.IsHold && button.Enabled))
-                                    LogHandTrackingEvent("hold_frame", _lastHoldButtonDetection);
+                                if (holdQuery is not null)
+                                    PublishHoldButtonEvidence(frame, holdContext, holdQuery);
                                 DescribeHandAcquisition(frame, acquisitionContext, acquisitionHints, detectorTrace, visibleHands.Length);
                                 LogHandDetection(sequence, requestedInTester, frame, generation, engineReset,
                                     inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, cursors, "accepted");
@@ -354,15 +332,8 @@ public sealed partial class MainWindow
                         lock (_handGate)
                         {
                             if (_closing || generation != _handGeneration || !_scene.HandDetectionRequired ||
-                                !captionOnly && _scene.CurrentBoardScreen == BoardScreen.StrykersRun) return;
-                            if (captionOnly)
-                            {
-                                // The caption check does not use the hand model. Its failure must
-                                // not disable hand tracking for the boards that still need it.
-                                if (_captionCheckError != ex.Message) AppLog.Write("Caption hold check", ex);
-                                _captionCheckError = ex.Message;
-                            }
-                            else _handTrackingError = "Hand tracking unavailable: " + ex.Message;
+                                _scene.CurrentBoardScreen == BoardScreen.StrykersRun) return;
+                            _handTrackingError = "Hand tracking unavailable: " + ex.Message;
                             ClearHandTracking();
                         }
                         CameraCanvas.Invalidate();
@@ -450,6 +421,7 @@ public sealed partial class MainWindow
         _handStatusTimer?.Stop();
         ClearHandTracking();
         await _handWorker.WorkerTask;
+        await _holdWorker.WorkerTask;
         if (_photoCopyTask is { } photoCopyTask) await photoCopyTask;
         if (_paintSaveTask is { } paintSaveTask) await paintSaveTask;
         if (_photoCopyObservationTask is { } observationTask) await observationTask;

@@ -50,6 +50,7 @@ public sealed partial class MainWindow
         var aspects = new List<object>();
         var perspectiveTouches = new List<object>();
         var sandAppearance = new List<object>();
+        var waterDepthAppearance = new List<object>();
         int perspectiveRoundTrips = 0;
         foreach (float aspect in new[] { 1f, 16f / 9, 9f / 16 })
         foreach (var surface in new Vector2[] { new(.08f, .08f), new(.83f, .17f), new(.5f, .5f), new(.17f, .83f), new(.91f, .89f) })
@@ -73,9 +74,19 @@ public sealed partial class MainWindow
                 nearLeft.Y > farLeft.Y && farLeft.Y > .1 && nearLeft.Y < .85,
             "The garden camera lost its foreshortened, close oblique framing.");
         Require(!WaterGardenView.ContainsWater(new(.04f, .22f)) &&
-                !WaterGardenView.ContainsWater(WaterGardenView.SurfaceToScreen(new(.5f, .98f))) &&
+                WaterGardenView.ContainsWater(WaterGardenView.SurfaceToScreen(new(.5f, .98f))) &&
                 !WaterGardenView.ContainsWater(new(float.NaN, .5f)),
-            "The water hit region accepted a point outside the trapezoid, behind the near rim, or non-finite.");
+            "The water hit region rejected the exposed near edge or accepted an outside/non-finite point.");
+        foreach (float aspect in new[] { 1f, 16f / 9, 9f / 16 })
+        {
+            var surfaceEdge = WaterGardenView.Project(new(0, .5f, 0), aspect);
+            var side = WaterGardenView.Project(new(0, .5f, -WaterGardenView.WaterDepth * .5f), aspect);
+            var bed = WaterGardenView.Project(new(0, .5f, -WaterGardenView.WaterDepth), aspect);
+            Require(surfaceEdge.Y < side.Y && side.Y < bed.Y &&
+                    bed.Y - surfaceEdge.Y is > .08f and < .10f && bed.Y < .89f &&
+                    !WaterGardenView.ContainsWater(side, aspect),
+                $"The {aspect:G4} garden lost its deep cutaway or accepted its vertical side as water-surface input.");
+        }
         static float FarWidth(float progress)
         {
             var camera = WaterGardenView.CameraAt(progress);
@@ -111,15 +122,61 @@ public sealed partial class MainWindow
         Draw(scene, target);
         var writingFrame = Pixels(target);
         await Save(target, "water-title-writing");
-        now += TimeSpan.FromSeconds(1.8);
+        now += TimeSpan.FromSeconds(.95);
+        Draw(scene, target);
+        var waterWrittenFrame = Pixels(target);
+        await Save(target, "water-title-water-complete");
+        now += TimeSpan.FromSeconds(1.05);
+        Draw(scene, target);
+        var gardenWritingFrame = Pixels(target);
+        await Save(target, "water-title-garden-writing");
+        now += TimeSpan.FromSeconds(1.15);
         Draw(scene, target);
         var writtenFrame = Pixels(target);
-        Require(ChangedPixels(settledFrame, writingFrame, new(.045, .02, .27, .14)) > 40 &&
-                ChangedPixels(settledFrame, writingFrame, new(.685, .02, .27, .14)) > 20 &&
-                ChangedPixels(writingFrame, writtenFrame, new(.045, .02, .27, .14)) > 40 &&
-                ChangedPixels(writingFrame, writtenFrame, new(.685, .02, .27, .14)) > 40,
-            "The white Water and Garden script did not write progressively after the camera settled.");
+        BoardRect waterTitleRegion = new(.045, .02, .27, .14), gardenTitleRegion = new(.685, .02, .27, .14);
+        var titleSequence = new
+        {
+            waterStarted = ChangedPixels(settledFrame, writingFrame, waterTitleRegion),
+            gardenBeforeWaterComplete = ChangedPixels(settledFrame, writingFrame, gardenTitleRegion),
+            waterCompleted = ChangedPixels(writingFrame, waterWrittenFrame, waterTitleRegion),
+            gardenDuringPause = ChangedPixels(settledFrame, waterWrittenFrame, gardenTitleRegion),
+            gardenStarted = ChangedPixels(waterWrittenFrame, gardenWritingFrame, gardenTitleRegion),
+            waterDuringGarden = ChangedPixels(waterWrittenFrame, gardenWritingFrame, waterTitleRegion),
+            gardenCompleted = ChangedPixels(gardenWritingFrame, writtenFrame, gardenTitleRegion),
+            waterAfterGarden = ChangedPixels(waterWrittenFrame, writtenFrame, waterTitleRegion)
+        };
+        Require(titleSequence.waterStarted > 40 && titleSequence.waterCompleted > 40 &&
+                titleSequence.gardenBeforeWaterComplete == 0 && titleSequence.gardenDuringPause == 0 &&
+                titleSequence.gardenStarted > 40 && titleSequence.gardenCompleted > 40 &&
+                titleSequence.waterDuringGarden == 0 && titleSequence.waterAfterGarden == 0,
+            "The sand grooves did not finish Water before tracing Garden, or a completed word kept changing: " +
+            System.Text.Json.JsonSerializer.Serialize(titleSequence));
         await Save(target, "water-title-complete");
+        // Independently scheduled laptop canvases must reuse the completed
+        // projector frame rather than run another full-resolution water pass.
+        Draw(scene, target, isProjectorFrame: true);
+        var beforePreviews = scene.GetWaterGardenDiagnostics();
+        long beforePreviewSimulation = Simulation(scene).Revision;
+        now += TimeSpan.FromMilliseconds(40);
+        Draw(scene, preview, isPreview: true);
+        Require(scene.GetWaterGardenDiagnostics().RenderedFrames == beforePreviews.RenderedFrames &&
+                Simulation(scene).Revision == beforePreviewSimulation,
+            "The general preview rerendered or advanced water behind an active projector.");
+        DrawRawPreview(scene, preview);
+        var afterPreviews = scene.GetWaterGardenDiagnostics();
+        Require(afterPreviews.RenderedFrames == beforePreviews.RenderedFrames &&
+                afterPreviews.PreviewFrameReuses > beforePreviews.PreviewFrameReuses &&
+                Simulation(scene).Revision == beforePreviewSimulation,
+            "The Water Garden preview rerendered or advanced the projector's completed water frame.");
+        now += TimeSpan.FromMilliseconds(20);
+        Draw(scene, target);
+        Require(scene.GetWaterGardenDiagnostics().RenderedFrames > afterPreviews.RenderedFrames,
+            "A requested screenshot incorrectly reused an older projector frame.");
+        long beforeFallback = scene.GetWaterGardenDiagnostics().RenderedFrames;
+        now += TimeSpan.FromMilliseconds(300);
+        DrawRawPreview(scene, preview);
+        Require(scene.GetWaterGardenDiagnostics().RenderedFrames > beforeFallback,
+            "The preview froze after the projector stopped producing frames.");
         Require(scene.CurrentBoardButtons.Single() is { Id: "water-drawer-open", Label: "^", Enabled: true },
             "The initial water board did not show only the bottom-left up-arrow.");
         await Save(target, "water-square-closed-drawer");
@@ -171,6 +228,7 @@ public sealed partial class MainWindow
         Draw(scene, target);
         var blank = Pixels(target);
         CheckSandGround(blank, 1000, 1000, inset, "square");
+        CheckWaterDepth(blank, 1000, 1000, inset, "square");
         var calm = Statistics(water);
         var initialDucks = DuckStates(water);
         Require(IsFinite(calm) && calm.TotalEnergy == 0 && calm.MaximumHeight == 0,
@@ -960,10 +1018,15 @@ public sealed partial class MainWindow
                 scene.GetWaterGardenDiagnostics() is { TipVisible: false, PendingDisturbances: 0 },
             "A tip inside the old rectangular region but outside the oblique water trapezoid created a ripple.");
         now += TimeSpan.FromMilliseconds(20);
-        var hiddenByRim = WaterGardenView.SurfaceToScreen(new(.5f, .98f));
-        Require(!scene.SetWaterStickTip(CameraPoint(hiddenByRim.X, hiddenByRim.Y, inset), now) &&
+        var exposedNearEdge = WaterGardenView.SurfaceToScreen(new(.5f, .98f));
+        Require(scene.SetWaterStickTip(CameraPoint(exposedNearEdge.X, exposedNearEdge.Y, inset), now) &&
+                scene.GetWaterGardenDiagnostics() is { TipVisible: true, PendingDisturbances: 1 },
+            "The invisible boundary blocked a tip over the exposed near-edge water.");
+        now += TimeSpan.FromMilliseconds(20);
+        var frontWaterSide = WaterGardenView.Project(new(0, .5f, -WaterGardenView.WaterDepth * .5f), 1);
+        Require(!scene.SetWaterStickTip(CameraPoint(frontWaterSide.X, frontWaterSide.Y, inset), now) &&
                 scene.GetWaterGardenDiagnostics() is { TipVisible: false, PendingDisturbances: 0 },
-            "A tip behind the raised near rim created a hidden ripple.");
+            "A stick on the vertical water cutaway was treated as touching its upper surface.");
 
         scene.SetBoardFacingDegrees(90);
         Require(scene.GetEyeTipProjectionFrames().Count == 0,
@@ -1001,6 +1064,7 @@ public sealed partial class MainWindow
             Draw(aspectScene, output);
             var initialAspectPixels = Pixels(output);
             CheckSandGround(initialAspectPixels, width, height, aspectInset, label);
+            CheckWaterDepth(initialAspectPixels, width, height, aspectInset, label);
             var aspectWater = Simulation(aspectScene);
             // Allow actual parcels to travel over the rock before capturing the
             // falling water. Advance at the normal cadence without rendering 4K
@@ -1086,6 +1150,47 @@ public sealed partial class MainWindow
                 "Recreating the water GPU resources lost accepted ducks or kept a stale drawer open.");
         }
 
+        // Returning to the same board can expose identical caption IDs. An
+        // in-flight worker from the previous visit must not arm this new visit.
+        using (var captions = NewScene(1, out _))
+        {
+            await captions.EnsureBoardArtworkResourcesAsync(device, BoardScreen.WaterGarden);
+            Draw(captions, target);
+            now += TimeSpan.FromSeconds(WaterGardenView.EntranceDurationSeconds + .1);
+            Draw(captions, target);
+            var oldContext = captions.GetHoldButtonContext(now)
+                ?? throw new InvalidOperationException("The caption navigation fixture has no arrow reference.");
+            var beforeNavigation = now;
+            now += TimeSpan.FromMilliseconds(10);
+            captions.ShowBoardMenu();
+            captions.ShowWaterGarden();
+            Draw(captions, target);
+            Require(captions.GetHoldButtonContext(beforeNavigation) is null,
+                "Pre-navigation camera pixels received the new visit's caption reference.");
+            now += TimeSpan.FromMilliseconds(10);
+            captions.ObserveHoldButtons(oldContext, [], now, ["water-drawer-open"]);
+            for (int sample = 0; sample < 12; sample++)
+            {
+                now += TimeSpan.FromMilliseconds(100);
+                Require(captions.ObserveHoldButtons(oldContext, ["water-drawer-open"], now, []).Count == 0 &&
+                        !captions.WaterGardenDrawerOpen,
+                    "An in-flight caption context activated the arrow after a departure and return.");
+            }
+            var newContext = captions.GetHoldButtonContext(now)
+                ?? throw new InvalidOperationException("The returned water board has no arrow reference.");
+            Require(newContext.Revision != oldContext.Revision &&
+                    newContext.NavigationRevision != oldContext.NavigationRevision,
+                "Re-entering Water Garden retained the old visit's caption context.");
+            for (int sample = 0; sample < 12; sample++)
+            {
+                now += TimeSpan.FromMilliseconds(100);
+                Require(captions.ObserveHoldButtons(newContext, ["water-drawer-open"], now, []).Count == 0,
+                    "A caption observation from the departed visit armed or activated the new arrow.");
+            }
+            Require(!captions.WaterGardenDrawerOpen && captions.CurrentHoldProgress.Count == 0,
+                "Unarmed or departed caption evidence left a partial hold in the new visit.");
+        }
+
         using (var uncalibrated = new SceneCompositor(blackjackClock: () => now, waterClock: () => now))
         {
             uncalibrated.ShowWaterGarden();
@@ -1132,13 +1237,15 @@ public sealed partial class MainWindow
             fullDuckDrawMilliseconds,
             sameClockDuckStateStable = true,
             sameClockFountainStable = true,
-            perspectiveRoundTrips, perspectiveTouches, trapezoidAndRimOcclusionRejected = true,
+            perspectiveRoundTrips, perspectiveTouches, outsideWaterRejectedAndNearEdgeAccepted = true,
             boundedEyeProjectionReference = true,
             sameClockDrawStable = true, stationaryCaptionPixelsStable = true, freshCalibratedStickMapping = true,
             rawPreviewSameClockStable = true, uncalibratedPreviewControls = true,
+            projectorFrameReusedByPreviews = true, stoppedProjectorPreviewFallback = true,
+            screenshotsRenderFresh = true, departedCaptionContextRejected = true,
             lossHasNoConnectingStroke = true, staleAndDuplicateFramesRejected = true, quarterTurnMapping = true,
             liveHardwareUnchanged = true, aspects, renderedFrames, drawMilliseconds, readbackMilliseconds,
-            sandAppearance,
+            sandAppearance, waterDepthAppearance, titleSequence, verticalWaterSideInputRejected = true,
             timingScope = "Isolated GPU draw submission and explicit field/pixel readbacks; PNG encoding excluded; not projector frame pacing.",
             directory, images };
 
@@ -1162,12 +1269,13 @@ public sealed partial class MainWindow
             return new(1000 * (safetyInset / 2 + u * (1 - safetyInset)),
                 1000 * (safetyInset / 2 + v * (1 - safetyInset)));
         }
-        void Draw(SceneCompositor drawingScene, CanvasRenderTarget output, bool isPreview = false)
+        void Draw(SceneCompositor drawingScene, CanvasRenderTarget output, bool isPreview = false,
+            bool isProjectorFrame = false)
         {
             var timer = Stopwatch.StartNew();
             using (var drawing = output.CreateDrawingSession())
                 drawingScene.Draw(drawing, (float)output.Size.Width, (float)output.Size.Height,
-                    preview: isPreview, runningSlowly: false);
+                    preview: isPreview, runningSlowly: false, isProjectorFrame: isProjectorFrame);
             drawMilliseconds += timer.Elapsed.TotalMilliseconds;
             renderedFrames++;
         }
@@ -1188,19 +1296,50 @@ public sealed partial class MainWindow
         }
         void CheckSandGround(byte[] pixels, int width, int height, double safetyInset, string label)
         {
-            // These strips are beyond the far and near basin walls, clear of the
+            // These strips are beyond the far water edge and below the cutaway, clear of the
             // moss rocks, fountain and control drawer for all tested aspects.
             // They sample the actual projected frame, including its board fit.
             var far = SampleSandGround(pixels, width, height, safetyInset,
                 new(.20, .025, .60, .075));
+            float belowBed = WaterGardenView.Project(new(0, .5f,
+                -WaterGardenView.WaterDepth - .035f), width / (float)height).Y;
             var near = SampleSandGround(pixels, width, height, safetyInset,
-                new(.20, .84, .60, .02));
+                new(.72, belowBed, .13, .018));
             foreach (var (name, sample) in new[] { ("far", far), ("near", near) })
                 Require(sample.Count > 1000 && sample.NonOpaque == 0 &&
                         sample.Red > sample.Green + 3 && sample.Green > sample.Blue + 4 &&
                         sample.Red < 240 && sample.LuminanceStdDev > 1.5,
                     $"The {label} {name} ground is missing warm, varied, opaque sand: {sample}.");
             sandAppearance.Add(new { label, far, near });
+        }
+        void CheckWaterDepth(byte[] pixels, int width, int height, double safetyInset, string label)
+        {
+            float aspect = width / (float)height;
+            var sidePoint = WaterGardenView.Project(new(0, .5f, -WaterGardenView.WaterDepth * .5f), aspect);
+            var belowWaterPoint = WaterGardenView.Project(new(0, .5f,
+                -WaterGardenView.WaterDepth - .02f), aspect);
+            var sandContactPoint = WaterGardenView.Project(new(0, .5f,
+                -WaterGardenView.WaterDepth + .004f), aspect);
+            // Sample the straight front edge just right of the open drawer.
+            // The larger foreground must retain sand beneath the cutaway,
+            // without letting the stationary controls contaminate the probe.
+            var side = SampleSandGround(pixels, width, height, safetyInset,
+                new(.70, sidePoint.Y - .008, .08, .016));
+            var sandBelow = SampleSandGround(pixels, width, height, safetyInset,
+                new(.70, belowWaterPoint.Y - .004, .08, .008));
+            var sandContact = SampleSandGround(pixels, width, height, safetyInset,
+                new(.70, sandContactPoint.Y - .002, .08, .004));
+            Require(side.Count > 400 && side.NonOpaque == 0 && side.Green > side.Red + 4,
+                $"The {label} front cutaway is missing visible turquoise water: {side}.");
+            Require(sandBelow.Count > 400 && sandBelow.NonOpaque == 0 && sandBelow.Red > 120 &&
+                    sandBelow.Red > sandBelow.Green + 3 && sandBelow.Green > sandBelow.Blue + 4 &&
+                    sandBelow.LuminanceStdDev > 1.5,
+                $"The {label} water cutaway retained a dark base or lost the light sand beneath it: {sandBelow}.");
+            Require(sandContact.Count > 200 && sandContact.NonOpaque == 0 &&
+                    sandContact.Red > sandContact.Green + 3 && sandContact.Green > sandContact.Blue + 4,
+                $"The {label} front water edge is missing the displaced sand against its base: {sandContact}.");
+            waterDepthAppearance.Add(new { label, sidePoint, belowWaterPoint, sandContactPoint,
+                side, sandBelow, sandContact });
         }
         static SandGroundSample SampleSandGround(byte[] pixels, int width, int height,
             double safetyInset, BoardRect region)

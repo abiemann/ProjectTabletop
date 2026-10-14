@@ -14,10 +14,25 @@ programmatic image editing has been applied.
 
 ## Scene composition
 
-The garden opens with a three-second move into a close oblique camera, with larger procedural pebbles and
-perspective-rendered warm limestone walls with rounded corners and softened edges.
+The garden opens with a three-second move into an oblique camera, with larger procedural pebbles and
+invisible rounded containment boundaries. No stone walls, rim or wall shadows are drawn.
+The water has a clearer, lightly green-tinted volume with visible rounded cutaway sides.
+Its depth is reduced slightly, and the brown sediment layers are removed completely.
+The settled framing adds 5% to the pond's width and front-to-back span while keeping
+the far waterline in place. Light sand remains below the water; the title and
+stationary controls retain their positions, with controls drawn over the foreground.
+A little displaced sand gathers along the lower front edge and wraps around the
+rounded front corners, tapering before the straight side edges. Its low, irregular
+relief uses the existing sand texture and partly covers the bottommost water edge,
+as though the container has settled into the ground. This adds no wall, brown base
+or image asset; water depth, surface projection and simulation remain unchanged.
 The same camera projects original fine-grained sand artwork onto the ground
-beneath the basin, with rounded contact shading along its footprint.
+beneath the deeper pebble bed.
+After the camera settles, the title is traced into the sand as shaded grooves with
+a narrow lit edge, preserving the ground grain. Water finishes first, followed by
+a brief pause, then Garden. Completed letters stay still as the next word is traced;
+there is no white ink or opaque title backdrop. The native lettering needs no new
+image asset.
 A low layered wet-stone cascade stands at the far center of the pond. Its
 irregular ledges are native three-dimensional geometry. A bounded particle
 simulation moves water over the stone face; a reconstructed three-dimensional
@@ -26,12 +41,18 @@ Actual falling parcels drive the pond wave field where they land. The dark
 slate material is original generated imagery,
 with its prompt recorded below. It uses no pixels, plants or branding from the
 supplied photograph. Refraction follows the viewing
-ray through the water's full depth to the pebble bed or submerged wall. The original
+ray through the water's full depth to the pebble bed. Pool and waterfall refraction
+share the same depth and colour absorption. The cutaway uses bounded native geometry
+and existing materials, with no new image asset. The original
 rock cutout is placed inside the far-left and near-right corners, with the larger
 foreground cluster emphasizing depth. Both clusters leave a visible water margin
-between their silhouettes and the basin walls; their source pixels and provenance
-are unchanged. Input uses
-the same camera projection and rock silhouettes to keep ripples on visible water.
+between their silhouettes and the invisible pond boundary. Both bases sit at
+world z = -0.02, representing 2 cm of immersion in the scene's metre scale.
+A wet turquoise band follows each base silhouette, and the offset drop shadow is
+removed. Projection anchors the opaque feet throughout the camera entrance; the
+source image pixels and provenance are unchanged. Input uses
+the same camera projection and rock silhouettes to keep ripples on the upper water
+surface; the visible vertical sides do not accept stick input.
 
 Ten tiny yellow rubber ducks use original analytic three-dimensional geometry,
 including rounded bodies, wings, bills and eyes. GPU buoyancy samples the actual
@@ -41,42 +62,63 @@ aside; the water reflects the same moving geometry. **Duck+** adds one duck at a
 time up to twenty, while **Reset** restores the original ten and clears their motion.
 The ducks introduce no image asset or additional dependency.
 
+The sand title, sand buildup, immersed rocks, enlarged framing and clearer tint passed the Debug x64 build and
+camera-free native verification: 368 rendered frames, 24 saved images and
+15 projection round-trips. The title finishes Water before starting Garden,
+with completed grooves unchanged. Sand-contact probes pass on square, landscape
+and portrait views while the transparent water remains visible above the mound.
+Containment, upper-surface input and stationary control captions remain verified.
+Visual inspection confirmed the sand buildup, immersed rock bases and wider
+forward framing, with clear title, waterfall and control spacing in settled
+views and the moving entrance. No app or webcam was launched.
+
 ## Selected output and alpha inspection
 
 ### Updated menu thumbnail
 
-`../MenuPreviews/water-garden.png` is an original illustration generated on
-2026-10-06 using the built-in OpenAI `image_gen` tool. It depicts the current
-rounded limestone pool on pale sand, with a wet slate waterfall, clear water,
-mossy rocks and yellow rubber ducks. The old project thumbnail and a native
-render of the current board were supplied as composition and design references.
-No external photograph or reference branding is included.
+`../MenuPreviews/water-garden.png` is an original illustration updated on
+2026-10-13 using the built-in OpenAI `image_gen` tool. It depicts the current
+wall-free pool on pale sand, with clear rounded water sides, visible pebbles,
+a wet slate waterfall, immersed mossy rocks and yellow rubber ducks. The old
+project thumbnail was the edit target; a native render of the current board
+provided the water-volume reference. No external photograph or reference
+branding is included.
 
 The selected output is preserved byte-for-byte at its native 2172 × 724 size.
-The request specified 2304 × 512, but the returned image has a 3:1 aspect ratio;
-the menu's existing height-based scaling and right-anchored crop accommodate it.
-Its quiet sand on the left can extend across wider cards, while the pool,
-fountain and ducks remain on the right. The offline generator retains this
-illustration instead of replacing it with a native board capture.
+The menu's existing height-based scaling and right-anchored crop accommodate its
+3:1 aspect ratio. Quiet sand on the left can extend across wider cards, while
+the pool, fountain and ducks remain on the right. The offline generator retains
+this illustration instead of replacing it with a native board capture.
 
-- Source: `exec-715f533b-375d-4d65-8698-8ceedb8bc09a.png`.
-- PNG: opaque RGB, 2172 × 724, 3,077,523 bytes.
+Camera-free menu verification passed with 14 saved images across landscape,
+portrait and native 4K views, including DPI and thumbnail-cache checks. Visual
+inspection confirmed the wall-free water and ducks remain visible in both
+landscape and portrait crops. No app window or webcam was launched.
+
+- Source: `exec-83801cd6-8ce5-423e-84b5-b25d07251dbd.png`.
+- PNG: opaque RGB, 2172 × 724, 3,051,140 bytes.
 - All 1,572,528 pixels are opaque; there are no transparent or translucent pixels.
-- SHA-256: `7696cfad650c53d15e7d8761e7c25e2e970f070ce2edb5f7755f7305edd82884`.
+- SHA-256: `db621b6b114c7cc4d0e832b447b06f37f5b7171c26d8b111db51ab268aa1004a`.
 
 Generation prompt:
 
 ```text
-Use case: stylized-concept. Asset type: production game-menu thumbnail banner for Project Tabletop Water Garden. Edit target: first reference is the old 2304 x 512 panoramic menu thumbnail. Supporting visual reference: second image shows the CURRENT board; use its warm rounded limestone basin, dark wet stacked-slate waterfall, pebble bed, tiny glossy yellow rubber duckies and sand as the design reference. Completely modernize the old thumbnail to this current scene with premium photorealistic 3D game-art quality. Output an opaque ultra-wide 2304 x 512 PNG banner (4.5:1). Composition is crucial: put a compact beautiful shallow rounded-rectangle pool in the RIGHTMOST 40 percent of the banner; the focal wet-rock fountain and several clearly recognizable yellow rubber ducks must remain inside the RIGHTMOST 27 percent. Keep the entire top of the fountain and front pool lip in frame. Left 55 percent is quiet natural pale beige sand with subtle fine grains and no focal objects, continuous with the scene. This is deliberately right-anchored artwork: the app crops away the left for narrow menu cards and draws its own text there. Show a low oblique view from the front at about 45 degrees, natural perspective, thin gently rounded warm ivory limestone walls, sparkling clear water over smooth varied pebbles, a short dark layered slate rock cascade at the far edge pouring convincing water into the pool with delicate splash and ripples, 5 to 7 tiny shiny yellow rubber ducks with orange beaks floating naturally, restrained moss-covered rocks INSIDE the pool margins. Inviting calm feng-shui/spa mood, warm soft daylight, elegant natural materials, rich crisp detail and readable silhouettes at small thumbnail size. A prominent duck in the right foreground and readable flowing fountain behind it. No text at all, no Water Garden lettering, no UI buttons, arrows, logo, watermark, border, people, bowl fountain, grey cement box, cartoon scenery or excessive spray. Do not reproduce the screenshot UI. Preserve opaque sand background, no transparency, no artificial gradient or rectangular fade. Compose the image itself naturally for the right-anchored crop.
+Use case: precise-object-edit.
+Asset type: production game-menu thumbnail banner for Project Tabletop Water Garden.
+Input images: Image 1 is the existing thumbnail and edit target. Image 2 is a supporting reference of the updated native game board, showing the new water volume without visible walls.
+Primary request: update the pool in image 1 to match the wall-free Water Garden in image 2. Completely remove the ivory limestone walls and rim. Replace them with clear rounded exposed water-volume sides, as if perfectly invisible containment holds the water; the smooth pebble bed is visible through both the gently rippling top and the rounded front cutaway. No visible glass thickness, no glass rim or frames. Subtle natural pale sand bunches against the very bottom front edge. Use clear neutral water with only a faint green tint, not saturated cyan or blue. Keep the mossy rocks partially submerged rather than floating.
+Preserve: existing premium photorealistic 3D game-art quality, warm daylight, pale sand, dark wet slate waterfall and its flowing water, tiny glossy yellow rubber ducks with orange beaks, restrained mossy rocks, inviting calm atmosphere, and low oblique perspective. Maintain the wide 3:1 panoramic banner, roughly 2172 by 724 pixels, with quiet textured sand over the left 45 percent and all main pool/fountain/duck detail on the right. Keep the fountain top and water's front edge fully in frame. Preserve the existing spatial composition as closely as possible, changing the pool walls and water appearance only.
+Constraints: opaque RGB PNG with sand filling the whole background; no text, no title lettering, no user interface, no arrows, no logos, no border or watermark. Do not copy the UI or lettering from image 2. No stone basin, no opaque walls, no brown soil layers, no artificial fade or gradient. Crisp beautiful details and recognizable silhouettes at thumbnail size.
 ```
 
 ### Warm limestone basin material
 
 `warm-limestone.png` is an original opaque material texture generated on
 2026-10-06 with OpenAI's built-in image-generation tool. Its warm ivory and
-honey-beige limestone mineral detail is mapped across the pond's thin rounded
-walls and softened lips. The geometry and lighting
-are native shaders; the supplied reference photograph's pixels are not used.
+honey-beige limestone mineral detail was used on the pond's former visible walls
+and lips. The live renderer no longer loads this retained source asset because
+the boundaries are now invisible. The supplied reference photograph's pixels
+are not used.
 The menu thumbnail uses the updated generated illustration documented above.
 
 Source: `exec-f609169a-518b-4646-b25d-6169384311bb.png`.

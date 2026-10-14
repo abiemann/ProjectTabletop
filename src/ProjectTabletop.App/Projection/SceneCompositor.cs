@@ -513,7 +513,7 @@ public sealed partial class SceneCompositor : IDisposable
     }
 
     public void Draw(CanvasDrawingSession ds, float canvasWidth, float canvasHeight,
-                     bool preview, bool runningSlowly
+                     bool preview, bool runningSlowly, bool isProjectorFrame = false
 #if DEBUG
                      , TimeSpan? presentationTotalTime = null, TimeSpan? presentationElapsedTime = null
 #endif
@@ -594,6 +594,7 @@ public sealed partial class SceneCompositor : IDisposable
 
             if (TryDrawBoardReveal(ds, output, preview)) return;
             DrawBoardScene(ds, output, preview);
+            if (isProjectorFrame && !preview) MarkWaterGardenProjectorFrame();
 #if DEBUG
             if (strykersRunLockAcquired != 0)
                 RecordStrykersRunTiming(strykersRunDrawStarted, strykersRunLockRequested, strykersRunLockAcquired,

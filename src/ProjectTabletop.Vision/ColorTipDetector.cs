@@ -101,19 +101,23 @@ public static class ColorTipDetector
         EyeTipProjectionMatcher? projection = options?.ProjectionFrames is null ? null :
             new(options.ProjectionFrames, options.FrameTime);
         if (projection is { Ready: false }) return new([], "waiting-for-projected-tip-reference");
+        // Learning measures one lighting condition. Coloured projection can shift a physical
+        // pin's hue while its saturated core and shape remain intact. Keep that bounded
+        // allowance local to detection, and use it for the artwork veto as well as the mask.
+        var illuminatedProfile = profile with { HueToleranceDegrees = Math.Min(35, profile.HueToleranceDegrees + 12) };
         var image = new ColorImage(width, height, stride, bgra);
-        using Mat mask = image.Mask(profile);
+        using Mat mask = image.Mask(illuminatedProfile);
         Cv2.FindContours(mask, out Point[][] contours, out HierarchyIndex[] hierarchy,
             RetrievalModes.CComp, ContourApproximationModes.ApproxSimple);
         double expectedArea = profile.NormalizedArea * width * height;
         var components = contours.Where((_, index) => hierarchy[index].Parent < 0)
-            .Select(contour => Component(contour, image, expectedArea, profile))
+            .Select(contour => Component(contour, image, expectedArea, illuminatedProfile))
             .Where(item => item is not null).Cast<ColorTipObservation>();
         var ranked = options?.PreferredCenter is { } location ?
             components.OrderBy(item => Distance(item.Center, location)).ThenByDescending(item => item.Score) :
             components.OrderByDescending(item => item.Score);
         ColorTipObservation[] result = ranked.Take(128).Where(item => projection is null ||
-            projection.IsPhysicalColorCandidate(item, profile, image.Gray, image.Width, image.Height,
+            projection.IsPhysicalColorCandidate(item, illuminatedProfile, image.Gray, image.Width, image.Height,
                 image.ScaleX, image.ScaleY)).Take(8).ToArray();
         return new(result, result.Length == 0 ? "no-colour-tip" : result.Length == 1 ? "colour-tip-candidate" : "multiple-colour-tips");
     }

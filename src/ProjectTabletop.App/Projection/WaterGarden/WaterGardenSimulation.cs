@@ -59,11 +59,9 @@ internal sealed class WaterGardenSimulation : IDisposable
     private readonly PixelShaderEffect<WaterDuckDynamicsShader> _duckDynamicsEffect = new();
     private readonly Transform2DEffect _surfaceField = new();
     private readonly Transform2DEffect _surfaceDucks = new();
-    private readonly Transform2DEffect _surfaceStone = new();
     private readonly Transform2DEffect _surfaceWetStone = new();
     private readonly Transform2DEffect _surfaceSand = new();
     private readonly Transform2DEffect _surfaceFountainVolume = new();
-    private readonly CanvasBitmap? _ownedStoneTexture;
     private readonly CanvasBitmap? _ownedWetStoneTexture;
     private readonly CanvasBitmap? _ownedSandTexture;
     private readonly CanvasBitmap? _fountainAtlas;
@@ -103,7 +101,7 @@ internal sealed class WaterGardenSimulation : IDisposable
     // Production supplies the asynchronously preloaded, artwork-owned bitmap.
     // The four-argument verification/generator path owns its file-backed copies.
     public WaterGardenSimulation(CanvasDevice device, int fieldWidth, int fieldHeight, double aspect,
-        CanvasBitmap? stoneTexture, CanvasBitmap? wetStoneTexture = null, CanvasBitmap? sandTexture = null)
+        CanvasBitmap? wetStoneTexture, CanvasBitmap? sandTexture = null)
     {
         ArgumentNullException.ThrowIfNull(device);
         if (fieldWidth is < 32 or > 2048 || fieldHeight is < 32 or > 2048)
@@ -138,14 +136,6 @@ internal sealed class WaterGardenSimulation : IDisposable
         var allocated = new List<CanvasRenderTarget>();
         try
         {
-            CanvasBitmap stone = stoneTexture ?? (_ownedStoneTexture = CanvasBitmap.LoadAsync(device,
-                Path.Combine(AppContext.BaseDirectory, "Assets", "WaterGarden", "warm-limestone.png"),
-                96).AsTask().GetAwaiter().GetResult());
-            _surfaceStone.Source = stone;
-            _surfaceStone.TransformMatrix = Matrix3x2.CreateScale(bedWidth / (float)stone.Size.Width,
-                bedHeight / (float)stone.Size.Height);
-            _surfaceStone.InterpolationMode = CanvasImageInterpolation.Linear;
-            _surfaceStone.BorderMode = EffectBorderMode.Hard;
             CanvasBitmap wetStone = wetStoneTexture ?? (_ownedWetStoneTexture = CanvasBitmap.LoadAsync(device,
                 Path.Combine(AppContext.BaseDirectory, "Assets", "WaterGarden", "wet-slate.png"),
                 96).AsTask().GetAwaiter().GetResult());
@@ -215,7 +205,6 @@ internal sealed class WaterGardenSimulation : IDisposable
         {
             foreach (var target in allocated) target.Dispose();
             DisposeEffects();
-            _ownedStoneTexture?.Dispose();
             _ownedWetStoneTexture?.Dispose();
             _ownedSandTexture?.Dispose();
             _fountainAtlas?.Dispose();
@@ -651,17 +640,16 @@ internal sealed class WaterGardenSimulation : IDisposable
         _surfaceEffect.Sources[1] = _bed;
         _surfaceDucks.Source = _ducks;
         _surfaceEffect.Sources[2] = _surfaceDucks;
-        _surfaceEffect.Sources[3] = _surfaceStone;
-        _surfaceEffect.Sources[4] = _surfaceWetStone;
-        _surfaceEffect.Sources[5] = _surfaceFountainVolume;
-        _surfaceEffect.Sources[6] = _surfaceSand;
+        _surfaceEffect.Sources[3] = _surfaceWetStone;
+        _surfaceEffect.Sources[4] = _surfaceFountainVolume;
+        _surfaceEffect.Sources[5] = _surfaceSand;
         Vector3 fountainMinimum = _fountainFluid.WorldMinimum;
         Vector3 fountainSize = _fountainFluid.WorldSize;
         WaterGardenCamera camera = WaterGardenView.CameraAt(_entranceProgress);
         _surfaceEffect.ConstantBuffer = new WaterSurfaceShader(_fieldSize, _bedSize, _aspect,
             (float)_simulatedSeconds, _ambientEnabled ? 1 : 0,
             new Float4(camera.SinTilt, camera.CosTilt, camera.Distance, camera.Zoom),
-            new Float2(camera.CentreX, camera.CentreY), WaterGardenView.RimHeight,
+            new Float2(camera.CentreX, camera.CentreY),
             new Float2(WaterGardenDucks.MaximumCount, WaterGardenDucks.Rows), _activeDuckCount,
             new Float2(_duckSplashPosition.X, _duckSplashPosition.Y),
             _fountainFluid.ParticleCount > 0 ? 1f : 0f,
@@ -689,7 +677,6 @@ internal sealed class WaterGardenSimulation : IDisposable
         _duckStickContactEffect.Dispose();
         _duckDynamicsEffect.Dispose();
         _surfaceDucks.Dispose();
-        _surfaceStone.Dispose();
         _surfaceWetStone.Dispose();
         _surfaceSand.Dispose();
         _surfaceFountainVolume.Dispose();
@@ -705,7 +692,6 @@ internal sealed class WaterGardenSimulation : IDisposable
         _bed.Dispose();
         _ducks.Dispose();
         _nextDucks.Dispose();
-        _ownedStoneTexture?.Dispose();
         _ownedWetStoneTexture?.Dispose();
         _ownedSandTexture?.Dispose();
         _fountainAtlas?.Dispose();

@@ -228,7 +228,7 @@ public sealed partial class ProjectionWindow : Window
             Volatile.Write(ref _renderResolution, new(size.Width, size.Height, dpi,
                 (int)Math.Round(size.Width * dpi / 96), (int)Math.Round(size.Height * dpi / 96)));
         _scene.Draw(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height,
-            preview: false, runningSlowly: args.Timing.IsRunningSlowly
+            preview: false, runningSlowly: args.Timing.IsRunningSlowly, isProjectorFrame: true
 #if DEBUG
             , presentationTotalTime: args.Timing.TotalTime, presentationElapsedTime: args.Timing.ElapsedTime
 #endif

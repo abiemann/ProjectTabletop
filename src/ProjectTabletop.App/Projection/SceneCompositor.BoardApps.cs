@@ -215,7 +215,9 @@ public sealed partial class SceneCompositor
             slots ? _boardSession.SlotsState.Revision : 0, slots ? PaintBoardAspect() : 0, MenuVisualFrame(blackjackNow),
             roulette ? _boardSession.RouletteState.Revision : 0, roulette ? PaintBoardAspect() : 0,
             roulette && handsFresh ? string.Join('|', _boardSession.HoveredButtonIds) : null,
-            water ? WaterGardenVisualRevision(waterNow) : 0, football ? FootballVisualRevision() : 0,
+            water ? preview && CanReuseWaterGardenProjectorFrame(ds.Device, waterNow)
+                ? _waterRenderedFrame!.Value.Visual : WaterGardenVisualRevision(waterNow) : 0,
+            football ? FootballVisualRevision() : 0,
             strykersRun ? StrykersRunVisualRevision() : 0);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
@@ -274,7 +276,7 @@ public sealed partial class SceneCompositor
             }
             else if (water)
             {
-                DrawCachedWaterGarden(surface, waterNow, selectionFeedback);
+                DrawCachedWaterGarden(surface, waterNow, selectionFeedback, preview);
             }
             else if (football)
             {

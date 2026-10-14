@@ -14,17 +14,19 @@ public sealed partial class SceneCompositor
     // Hold buttons activate from covered-caption evidence alone. Their own
     // reference follows only what changes the rendered controls, so activating
     // one (for example, zooming Earth) does not restart the hold.
-    private readonly record struct HoldSceneKey(BoardScreen Screen, string Controls, double Aspect,
+    private readonly record struct HoldSceneKey(BoardScreen Screen, long Navigation, string Controls, double Aspect,
         decimal ControlValue, double ControlBrightness, object? CameraMap, object? SurfaceMap);
     private readonly record struct HoldControlAppearance(string Label, bool Enabled, BoardRect Bounds, decimal Value);
     private HoldSceneKey? _holdSceneKey;
     private Dictionary<string, HoldControlAppearance> _holdControlAppearances = [];
     private HandAcquisitionSceneImage? _holdExpectedScene;
     private long _holdRevision;
+    private DateTimeOffset _holdNavigationStartedAt;
 
     /// <param name="ButtonIds">Every current button, index-aligned with the scene's control regions.</param>
     public sealed record HoldButtonContext(long Revision, PixelPoint[] SearchPolygon,
-        HandAcquisitionSceneImage ExpectedScene, IReadOnlyList<string> ButtonIds, IReadOnlySet<string> EnabledHoldIds)
+        HandAcquisitionSceneImage ExpectedScene, IReadOnlyList<string> ButtonIds, IReadOnlySet<string> EnabledHoldIds,
+        long NavigationRevision)
     {
         // Golden rule: a long press requires broken lettering. A colour or
         // reflectance change beneath still-readable letters is never a press.
@@ -53,9 +55,9 @@ public sealed partial class SceneCompositor
             var now = HoldClock();
             var buttons = _boardSession.Buttons;
             if (!AcquisitionBoardReady || HoldControlsSettling(frameTime) || !buttons.Any(button => button.IsHold && button.Enabled) ||
-                HasBoardControlDrawerAnimation() || frameTime > now ||
+                HasBoardControlDrawerAnimation() || frameTime < _holdNavigationStartedAt || frameTime > now ||
                 now - frameTime > TimeSpan.FromMilliseconds(350)) return null;
-            var key = new HoldSceneKey(_boardSession.Screen,
+            var key = new HoldSceneKey(_boardSession.Screen, _boardSession.NavigationRevision,
                 string.Join('|', buttons.Select(button => $"{button.Id}:{button.Label}:{button.Enabled}:{button.Bounds}")),
                 PaintBoardAspect(), _boardSession.Screen == BoardScreen.Slots ? _boardSession.SlotsState.BuyCost : 0,
                 _holdControlBrightness, _boardCameraMap, _boardSurfaceMap);
@@ -68,7 +70,7 @@ public sealed partial class SceneCompositor
                 var appearances = buttons.ToDictionary(button => button.Id, button =>
                     new HoldControlAppearance(button.Label, button.Enabled, button.Bounds,
                         button.Id == "slot-buy" ? _boardSession.SlotsState.BuyCost : 0));
-                bool sameGeometry = _holdSceneKey is { } previous && previous.Screen == key.Screen &&
+                bool sameGeometry = _holdSceneKey is { } previous && previous.Screen == key.Screen && previous.Navigation == key.Navigation &&
                     previous.Aspect == key.Aspect && previous.ControlBrightness == key.ControlBrightness && Equals(previous.CameraMap, key.CameraMap) &&
                     Equals(previous.SurfaceMap, key.SurfaceMap);
                 // A sibling becoming enabled must not interrupt a continuous
@@ -87,7 +89,8 @@ public sealed partial class SceneCompositor
                 .Select(point => _boardCameraMap!.InverseTransform(_boardSurfaceMap!.Transform(point)))
                 .Select(point => new PixelPoint(point.X, point.Y)).ToArray();
             return new(_holdRevision, polygon, _holdExpectedScene, buttons.Select(button => button.Id).ToArray(),
-                buttons.Where(button => button.IsHold && button.Enabled).Select(button => button.Id).ToHashSet());
+                buttons.Where(button => button.IsHold && button.Enabled).Select(button => button.Id).ToHashSet(),
+                _boardSession.NavigationRevision);
         }
     }
 
@@ -98,8 +101,9 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             RefreshWaterStickPresence();
-            if (HoldControlsSettling(frameTime) || context is null || context.Revision != _holdRevision ||
-                !AcquisitionBoardReady) return [];
+            if (frameTime < _holdNavigationStartedAt || HoldControlsSettling(frameTime) ||
+                context is null || !IsCurrentHoldContext(context) ||
+                !AcquisitionBoardReady || HasBoardControlDrawerAnimation()) return [];
             var activated = _boardSession.ObserveHeldButtons(heldIds, frameTime, HoldClock(), clearedIds);
             if (activated.Count > 0)
             {
@@ -109,6 +113,14 @@ public sealed partial class SceneCompositor
             return activated;
         }
     }
+
+    // Caption workers publish independently of hand/UI work. Recheck the exact
+    // visit and reference after acquiring the scene gate, including a departure
+    // and return to a board whose button IDs happen to be identical.
+    private bool IsCurrentHoldContext(HoldButtonContext context) =>
+        context.Revision == _holdRevision && context.NavigationRevision == _boardSession.NavigationRevision &&
+        ReferenceEquals(context.ExpectedScene, _holdExpectedScene) &&
+        context.ButtonIds.SequenceEqual(_boardSession.Buttons.Select(button => button.Id));
 
     // A held long-press button's outside rim warms from amber to hot orange-red
     // as its second fills. Its inner edge follows the actual rounded surface;

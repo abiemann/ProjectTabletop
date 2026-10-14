@@ -1,8 +1,11 @@
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Effects;
+using ComputeSharp;
+using ComputeSharp.D2D1.WinUI;
 using ProjectTabletop.App.Projection.WaterGarden;
 using System.Numerics;
 using Windows.Foundation;
+using Windows.Graphics.DirectX;
 using Windows.UI;
 
 namespace ProjectTabletop.App.Projection;
@@ -10,7 +13,7 @@ namespace ProjectTabletop.App.Projection;
 public sealed partial class SceneCompositor
 {
     // The simulation cannot render without these; the rock cutouts are optional.
-    private static readonly string[] WaterGardenBasinFiles = ["warm-limestone.png", "wet-slate.png", "sand-ground.png"];
+    private static readonly string[] WaterGardenBasinFiles = ["wet-slate.png", "sand-ground.png"];
     private BitmapAssetSet? _waterImages;
     private bool _waterArtworkPublished;
 
@@ -26,7 +29,10 @@ public sealed partial class SceneCompositor
             .FirstOrDefault());
     private byte[]? _waterRockPixels;
     private int _waterRockWidth, _waterRockHeight;
-    private ShadowEffect? _waterRockShadow;
+    private double _waterRockOpaqueFoot;
+    private CanvasBitmap? _waterRockFootMap;
+    private Transform2DEffect? _waterRockFootSource;
+    private PixelShaderEffect<RockImmersionShader>? _waterRockImmersion;
 
     private BitmapAssetSet GetWaterGardenImages(CanvasDevice device)
     {
@@ -34,7 +40,7 @@ public sealed partial class SceneCompositor
         {
             DisposeWaterGardenArtwork();
             _waterImages = new(device, Path.Combine(AppContext.BaseDirectory, "Assets", "WaterGarden"),
-                ["moss-rocks.png", "warm-limestone.png", "wet-slate.png", "sand-ground.png"]);
+                ["moss-rocks.png", "wet-slate.png", "sand-ground.png"]);
         }
         return _waterImages;
     }
@@ -60,11 +66,29 @@ public sealed partial class SceneCompositor
             // Read the static artwork once for precise silhouette hit testing.
             // The live water field remains entirely on the GPU.
             _waterRockPixels = rocks.GetPixelBytes();
-            _waterRockShadow = new ShadowEffect
+            // One static column footprint lets water wrap each irregular rock
+            // foot without tinting a rectangular band or copying live frames.
+            var feet = new byte[_waterRockWidth * 4];
+            int lowest = 0;
+            for (int x = 0; x < _waterRockWidth; x++)
             {
-                Source = rocks, BlurAmount = 13,
-                ShadowColor = Color.FromArgb(110, 16, 28, 23)
-            };
+                int bottom = 0;
+                for (int y = _waterRockHeight - 1; y >= 0; y--)
+                    if (_waterRockPixels[(y * _waterRockWidth + x) * 4 + 3] > 32)
+                    { bottom = y + 1; break; }
+                lowest = Math.Max(lowest, bottom);
+                feet[x * 4 + 1] = (byte)(bottom & 255);
+                feet[x * 4 + 2] = (byte)(bottom >> 8);
+                feet[x * 4 + 3] = 255;
+            }
+            _waterRockOpaqueFoot = lowest / (double)_waterRockHeight;
+            _waterRockFootMap = CanvasBitmap.CreateFromBytes(device, feet, _waterRockWidth, 1,
+                DirectXPixelFormat.B8G8R8A8UIntNormalized);
+            _waterRockFootSource = new Transform2DEffect
+            { Source = _waterRockFootMap, TransformMatrix = Matrix3x2.CreateScale(1, _waterRockHeight) };
+            _waterRockImmersion = new PixelShaderEffect<RockImmersionShader>();
+            _waterRockImmersion.Sources[0] = rocks;
+            _waterRockImmersion.Sources[1] = _waterRockFootSource;
         }
         foreach (var (file, error) in images.Errors)
             AppLog.Write("Water Garden artwork: " + file, new InvalidDataException(error));
@@ -74,47 +98,26 @@ public sealed partial class SceneCompositor
         return WaterGardenBasinLoaded;
     }
 
-    private (Rect First, Rect Second) WaterGardenRockPlacements(float entranceProgress = 1)
-    {
-        var (first, second) = WaterGardenRockLayout.GetPlacements(PaintBoardAspect(),
-            _waterRockWidth / (double)Math.Max(1, _waterRockHeight));
-        if (entranceProgress >= 1) return (first, second);
-        var camera = WaterGardenView.CameraAt(entranceProgress);
-        var final = WaterGardenView.CameraAt(1);
-        return (Move(first), Move(second));
-
-        // The cutout rocks are a separate overlay. Anchor each one at its
-        // waterline so it follows the same camera move as the 3D pond below.
-        Rect Move(Rect bounds)
-        {
-            var foot = new Vector2((float)(bounds.X + bounds.Width / 2),
-                (float)(bounds.Y + bounds.Height));
-            var surface = WaterGardenView.ScreenToSurface(foot);
-            float worldY = surface.Y - .5f;
-            var moved = WaterGardenView.Project(new Vector3(surface.X - .5f, worldY, 0), 1, camera);
-            float apparentScale = (camera.Zoom * camera.Distance /
-                    (camera.Distance - worldY * camera.SinTilt)) /
-                (final.Zoom * final.Distance /
-                    (final.Distance - worldY * final.SinTilt));
-            double width = bounds.Width * apparentScale, height = bounds.Height * apparentScale;
-            return new Rect(moved.X - width / 2, moved.Y - height, width, height);
-        }
-    }
+    private (WaterGardenRockPlacement First, WaterGardenRockPlacement Second)
+        WaterGardenRockPlacements(float entranceProgress = 1) =>
+        WaterGardenRockLayout.GetPlacements(PaintBoardAspect(),
+            _waterRockWidth / (double)Math.Max(1, _waterRockHeight), _waterRockOpaqueFoot, entranceProgress);
 
     private void DrawWaterGardenRocks(CanvasDrawingSession ds)
     {
-        if (_waterImages?.Image("moss-rocks.png") is not { } rocks) return;
+        if (_waterImages?.Image("moss-rocks.png") is not { } rocks || _waterRockImmersion is null) return;
         var (first, second) = WaterGardenRockPlacements(_waterEntranceProgress);
         Draw(first); Draw(second);
-        void Draw(Rect bounds)
+        void Draw(WaterGardenRockPlacement placement)
         {
+            var bounds = placement.Bounds;
             var destination = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
                 bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
             var source = new Rect(0, 0, rocks.Size.Width, rocks.Size.Height);
-            if (_waterRockShadow is not null)
-                ds.DrawImage(_waterRockShadow, new Rect(destination.X + 3 / PaintBoardAspect(), destination.Y + 5,
-                    destination.Width, destination.Height), source);
-            ds.DrawImage(rocks, destination, source);
+            _waterRockImmersion.ConstantBuffer = new RockImmersionShader(
+                new Float2(_waterRockWidth, _waterRockHeight),
+                (float)(placement.SubmergedHeight / bounds.Height * _waterRockHeight));
+            ds.DrawImage(_waterRockImmersion, destination, source);
         }
     }
 
@@ -122,7 +125,7 @@ public sealed partial class SceneCompositor
     {
         if (_waterRockPixels is null) return false;
         var (first, second) = WaterGardenRockPlacements();
-        return Contains(first) || Contains(second);
+        return Contains(first.Bounds) || Contains(second.Bounds);
         bool Contains(Rect bounds)
         {
             double x = (u - bounds.X) / bounds.Width, y = (v - bounds.Y) / bounds.Height;
@@ -138,10 +141,13 @@ public sealed partial class SceneCompositor
         // The field borrows the stone texture from this set. Drop its effect
         // references before replacing or disposing the device-owned artwork.
         if (_waterImages is not null) DisposeWaterGardenResources();
-        _waterRockShadow?.Dispose(); _waterRockShadow = null;
+        _waterRockImmersion?.Dispose(); _waterRockImmersion = null;
+        _waterRockFootSource?.Dispose(); _waterRockFootSource = null;
+        _waterRockFootMap?.Dispose(); _waterRockFootMap = null;
         _waterImages?.Dispose(); _waterImages = null;
         _waterRockPixels = null;
         _waterRockWidth = _waterRockHeight = 0;
+        _waterRockOpaqueFoot = 0;
         _waterArtworkPublished = false;
     }
 }

@@ -12,12 +12,25 @@ public sealed partial class MainWindow
         if (_camera.IsRunning || _cameraWanted || _cameraOperation.CurrentCount == 0 || _closing)
             throw new InvalidOperationException("Stop the camera before checking input scheduling.");
         var ran = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handCompletionQueued = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var captionsCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_handGate)
             if (!_handWorker.TryRun(System.Diagnostics.Stopwatch.GetTimestamp(), TimeSpan.Zero, work =>
             {
                 if (!work.TryPost(_dispatchInputResult, () => ran.TrySetResult(_handWorker.IsBusy)))
                     ran.TrySetException(new InvalidOperationException("The hand result could not enter the UI queue."));
+                handCompletionQueued.TrySetResult();
             })) throw new InvalidOperationException("Wait for the pending hand result before checking input scheduling.");
+        // Keep this UI callback occupied while independent caption work runs.
+        // A completed caption check cannot require the queued landmark callback.
+        if (!handCompletionQueued.Task.Wait(TimeSpan.FromSeconds(5)))
+            throw new InvalidOperationException("The hand completion was not queued.");
+        if (!_holdWorker.TryRun(Stopwatch.GetTimestamp(), TimeSpan.Zero, _ => captionsCompleted.TrySetResult()))
+            throw new InvalidOperationException("The caption worker was blocked by hand tracking.");
+        if (!captionsCompleted.Task.Wait(TimeSpan.FromSeconds(5)) || !_handWorker.IsBusy || ran.Task.IsCompleted)
+            throw new InvalidOperationException("Caption work waited for the queued landmark UI callback.");
+        await _holdWorker.WorkerTask.WaitAsync(TimeSpan.FromSeconds(5));
+        _holdWorker.ResetCadence();
         if (!await ran.Task.WaitAsync(TimeSpan.FromSeconds(5)))
             throw new InvalidOperationException("The hand worker was not held through UI publication.");
         await _handWorker.WorkerTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -58,6 +71,7 @@ public sealed partial class MainWindow
             throw new InvalidOperationException("The deferred final camera preview did not run without another frame.");
 
         return new { passed = true, handWorkerHeldThroughUiPublication = true,
+            captionWorkerIndependentOfHandUiPublication = true,
             completedHandResultReleasesWorker = true, stickStatusRefreshesCoalesced = true,
             cameraPreviewRequestsCoalesced = true, cameraPreviewPendingSlotReleased = true,
             deferredFinalCameraPreviewRuns = true };

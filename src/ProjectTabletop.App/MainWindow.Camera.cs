@@ -29,6 +29,12 @@ public sealed partial class MainWindow
     private long _cameraStartingVersion;
     private readonly AsyncResultGate _pieceDetectionResults = new();
     private readonly CameraFrameSlot _cameraHealthFrames = new();
+    private readonly LatestFrameWorker<CameraInputArrival> _cameraInputWorker;
+    private long _cameraInputNotBeforeTicks;
+
+    // Scheduling runs after delivery. Detector selection and reset generations
+    // still belong to the moment the frame arrived, not to when it was scheduled.
+    private readonly record struct CameraInputArrival(long PieceGeneration, bool BoardSetupActive);
     private DateTimeOffset _cameraStartedAtUtc;
     private DateTimeOffset _cameraImageChangedAtUtc;
     private string? _cameraLiveStatus;
@@ -72,6 +78,8 @@ public sealed partial class MainWindow
 
     private void ClearLatestCameraFrame()
     {
+        Interlocked.Exchange(ref _cameraInputNotBeforeTicks, MonotonicClock.UtcNow.UtcTicks);
+        _cameraInputWorker.Clear();
         Volatile.Write(ref _latestCameraFrame, null);
         _latestCameraFrames.Clear();
     }
@@ -362,22 +370,44 @@ public sealed partial class MainWindow
             _camera.ActiveDeviceId != _cameraWantedDeviceId) return;
         _latestCameraFrames.Set(frame);
         Volatile.Write(ref _latestCameraFrame, frame);
-        var now = Stopwatch.GetTimestamp();
         RequestCameraPreviewRedraw();
         if (_cameraManualRestartRequired) return;
+        // This only reserves an independent worker; all caption/scene access
+        // happens inside it, so hand scheduling cannot delay the next caption.
+        QueueHoldButtonDetection(frame, Stopwatch.GetTimestamp());
+        // No detector or compositor lock belongs on the capture consumer. A
+        // busy scene may delay scheduling, but cannot hold up webcam delivery.
+        _cameraInputWorker.Enqueue(frame, new(pieceGeneration, Volatile.Read(ref _boardSetupActive)));
+    }
+
+    private void ProcessCameraInputFrame(CameraFrame frame, CameraInputArrival arrival)
+    {
+        // A frame delivered on the other side of a setup start or finish shows
+        // the wrong projection (for example the scan's white field) for the
+        // detectors that would now be chosen. A newer frame follows at once.
+        if (_closing || !_cameraWanted || !_camera.IsRunning || _cameraManualRestartRequired ||
+            _cameraOperation.CurrentCount == 0 || _camera.ActiveDeviceId != _cameraWantedDeviceId ||
+            arrival.BoardSetupActive != Volatile.Read(ref _boardSetupActive) ||
+            frame.Timestamp.UtcTicks < Interlocked.Read(ref _cameraInputNotBeforeTicks) ||
+            MonotonicClock.UtcNow - frame.Timestamp > HandMarkerLifetime) return;
+        ScheduleCameraInputFrame(frame, arrival);
+    }
+
+    private void ScheduleCameraInputFrame(CameraFrame frame, CameraInputArrival arrival)
+    {
+        var now = Stopwatch.GetTimestamp();
         // This board needs only its rail and stationary captions. Do not queue
         // unrelated full-frame detectors or the hand model behind its artwork.
-        if (!Volatile.Read(ref _boardSetupActive) && _scene.CurrentBoardScreen == BoardScreen.StrykersRun)
+        if (!arrival.BoardSetupActive && _scene.CurrentBoardScreen == BoardScreen.StrykersRun)
         {
             QueueStrykersRunDetection(frame);
-            QueueHandDetection(frame, now);
             return;
         }
         QueueEyeTipDetection(frame);
         QueueFootballDetection(frame);
         QueueHandTrackingVideoFrame(frame);
 
-        if (Volatile.Read(ref _boardSetupActive))
+        if (arrival.BoardSetupActive)
         {
             if (!_boardScanSuspendedForCameraOutage)
                 QueueBoardDetection(frame, now);
@@ -387,7 +417,7 @@ public sealed partial class MainWindow
 
         QueuePaintDetection(frame, now);
         QueueHandDetection(frame, now);
-        QueuePieceDetection(frame, pieceGeneration);
+        QueuePieceDetection(frame, arrival.PieceGeneration);
     }
 
     // Each preview redraw uploads a whole camera frame on the UI thread, which
