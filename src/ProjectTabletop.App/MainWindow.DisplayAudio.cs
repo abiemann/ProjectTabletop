@@ -129,6 +129,8 @@ public sealed partial class MainWindow
             _displayAudioDevice, available && _displayAudioRequested);
         _waterGardenSound.ConfigureOutput(SelectedDisplay?.PhysicalMode?.FriendlyName,
             _displayAudioDevice, available && _displayAudioRequested);
+        _waterGardenSwishSound.ConfigureOutput(SelectedDisplay?.PhysicalMode?.FriendlyName,
+            _displayAudioDevice, available && _displayAudioRequested);
         UpdateFootballAmbience();
         UpdateWaterGardenAudio();
     }

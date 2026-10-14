@@ -140,7 +140,9 @@ public sealed partial class SceneCompositor
         if (_boardSurfaceMap is null) return;
         if (!PrepareBoardArtwork(ds.Device))
         {
-            DrawArtworkLoading(ds, BoardBounds(_boardMediaClip!, output));
+            // All projected loading captions face the player across the table.
+            // Dedicated laptop previews keep their upright loading captions.
+            DrawArtworkLoading(ds, BoardBounds(_boardMediaClip!, output), rotate180: true);
             return;
         }
         SyncPhotoCopySession();

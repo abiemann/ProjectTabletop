@@ -69,6 +69,7 @@ public sealed partial class MainWindow
         Microsoft.UI.Xaml.Controls.Grid.SetRowSpan(BlackjackPreviewPanel, water || football || strykersRun ? 1 : 2);
         CameraPreviewPanel.Visibility = water || football || strykersRun || !boardGame ? Visibility.Visible : Visibility.Collapsed;
         ProjectionPreviewPanel.Visibility = boardGame ? Visibility.Collapsed : Visibility.Visible;
+        ApplyProjectionPreviewState();
         BoardAppStatusText.Text = _scene.CurrentBoardTitle + ". " +
             (_cameraManualRestartRequired ? "Check Camera. " + ManualCameraRecoveryHint :
              IsBoardScanMeasuring ? "Board alignment is in progress." :

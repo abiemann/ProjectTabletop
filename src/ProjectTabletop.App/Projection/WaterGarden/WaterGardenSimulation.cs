@@ -20,7 +20,7 @@ internal sealed record WaterGardenDiagnostics(int FieldWidth, int FieldHeight,
 internal sealed record WaterGardenFieldStatistics(double HeightMass, double MinimumHeight,
     double MaximumHeight, double MaximumSpeed, double TotalEnergy, int NonFiniteValues);
 
-internal sealed record WaterGardenFieldProbe(double Height, double Velocity);
+internal sealed record WaterGardenFieldProbe(double Height, double Velocity, bool IsSolid);
 
 #if DEBUG
 internal sealed record WaterGardenDuckState(int Index, float SurfaceX, float SurfaceY,
@@ -44,6 +44,8 @@ internal sealed class WaterGardenSimulation : IDisposable
     private readonly float _waveSpeed;
     private readonly Float2 _fieldSize;
     private readonly Float2 _bedSize;
+    private readonly WaterGardenObstacles? _obstacles;
+    private readonly byte[]? _fieldSeed;
     private readonly WaterFountainFluid _fountainFluid;
     private CanvasRenderTarget _field;
     private CanvasRenderTarget _next;
@@ -101,18 +103,22 @@ internal sealed class WaterGardenSimulation : IDisposable
     // Production supplies the asynchronously preloaded, artwork-owned bitmap.
     // The four-argument verification/generator path owns its file-backed copies.
     public WaterGardenSimulation(CanvasDevice device, int fieldWidth, int fieldHeight, double aspect,
-        CanvasBitmap? wetStoneTexture, CanvasBitmap? sandTexture = null)
+        CanvasBitmap? wetStoneTexture, CanvasBitmap? sandTexture = null, WaterGardenObstacles? obstacles = null)
     {
         ArgumentNullException.ThrowIfNull(device);
         if (fieldWidth is < 32 or > 2048 || fieldHeight is < 32 or > 2048)
             throw new ArgumentOutOfRangeException(nameof(fieldWidth));
         if (!double.IsFinite(aspect) || aspect is < .1 or > 10)
             throw new ArgumentOutOfRangeException(nameof(aspect));
+        if (obstacles is not null && (obstacles.Width != fieldWidth || obstacles.Height != fieldHeight ||
+                Math.Abs(obstacles.Aspect - aspect) > 1e-6 * Math.Max(1, aspect)))
+            throw new ArgumentException("Water obstacles must match the simulation field and aspect.", nameof(obstacles));
         if (!device.IsPixelFormatSupported(DirectXPixelFormat.R32G32B32A32Float))
             throw new NotSupportedException("The display adapter does not support floating-point water fields.");
         FieldWidth = fieldWidth;
         FieldHeight = fieldHeight;
         _aspect = (float)aspect;
+        _obstacles = obstacles;
         _fountainFluid = new WaterFountainFluid(_aspect);
         _fieldSize = new(fieldWidth, fieldHeight);
         // The physical domain is aspect by one. Bound c*dt/dx and c*dt/dy so
@@ -136,6 +142,19 @@ internal sealed class WaterGardenSimulation : IDisposable
         var allocated = new List<CanvasRenderTarget>();
         try
         {
+            if (obstacles is not null)
+            {
+                // Retain one immutable reset image. The solid channel then travels
+                // with the existing ping-pong field, with no extra live texture.
+                _fieldSeed = new byte[fieldWidth * fieldHeight * 16];
+                ReadOnlySpan<byte> mask = obstacles.Mask.Span;
+                for (int index = 0; index < mask.Length; index++)
+                {
+                    BinaryPrimitives.WriteSingleLittleEndian(_fieldSeed.AsSpan(index * 16 + 8, 4),
+                        mask[index] == 0 ? 0 : 1);
+                    BinaryPrimitives.WriteSingleLittleEndian(_fieldSeed.AsSpan(index * 16 + 12, 4), 1);
+                }
+            }
             CanvasBitmap wetStone = wetStoneTexture ?? (_ownedWetStoneTexture = CanvasBitmap.LoadAsync(device,
                 Path.Combine(AppContext.BaseDirectory, "Assets", "WaterGarden", "wet-slate.png"),
                 96).AsTask().GetAwaiter().GetResult());
@@ -168,8 +187,7 @@ internal sealed class WaterGardenSimulation : IDisposable
                 var target = new CanvasRenderTarget(device, fieldWidth, fieldHeight, 96,
                     DirectXPixelFormat.R32G32B32A32Float, CanvasAlphaMode.Ignore);
                 allocated.Add(target);
-                using var drawing = target.CreateDrawingSession();
-                drawing.Clear(Color.FromArgb(255, 0, 0, 0));
+                InitializeField(target);
                 return target;
             }
             _field = Field();
@@ -230,7 +248,7 @@ internal sealed class WaterGardenSimulation : IDisposable
 
     public WaterGardenDiagnostics GetDiagnostics() => new(FieldWidth, FieldHeight,
         (int)_bedSize.X, (int)_bedSize.Y, _steps, _simulatedSeconds, _droppedSeconds,
-        _disturbances, _waveSpeed, "RGBA32Float (height, vertical velocity, reserved, opaque)", _duckCount,
+        _disturbances, _waveSpeed, "RGBA32Float (height, vertical velocity, solid obstacle, opaque)", _duckCount,
         _fountainEnabled, _fountainImpacts);
 
     public bool HasFountainWater => _fountainFluid.ParticleCount > 0;
@@ -292,11 +310,7 @@ internal sealed class WaterGardenSimulation : IDisposable
             _duckLandingObserved[index] = true;
             // The zero-volume depression/rim feeds the existing height-field;
             // its ring then propagates at the pond's physical wave speed.
-            _disturbanceEffect.ConstantBuffer = new WaterDisturbanceShader(_fieldSize, _aspect,
-                new Float2(position.X, position.Y), .026f, .011f);
-            Run(_disturbanceEffect, _next, _field);
-            (_field, _next) = (_next, _field);
-            _disturbances++;
+            if (ApplyDisturbance(position, .026f, .011f)) _disturbances++;
             _duckSplashPosition = position;
             _duckSplashStrength = .22f;
             Revision++;
@@ -318,15 +332,33 @@ internal sealed class WaterGardenSimulation : IDisposable
         if (!float.IsFinite(center.X) || !float.IsFinite(center.Y) ||
             !float.IsFinite(radius) || !float.IsFinite(strength))
             throw new ArgumentException("Water disturbance parameters must be finite.");
-        if (strength == 0) return;
-        _disturbanceEffect.ConstantBuffer = new WaterDisturbanceShader(_fieldSize, _aspect,
-            new Float2(Math.Clamp(center.X, 0, 1), Math.Clamp(center.Y, 0, 1)),
-            Math.Clamp(radius, .006f, .15f), Math.Clamp(strength, -.016f, .016f));
-        Run(_disturbanceEffect, _next, _field);
-        (_field, _next) = (_next, _field);
+        center = Vector2.Clamp(center, Vector2.Zero, Vector2.One);
+        if (!ApplyDisturbance(center, Math.Clamp(radius, .006f, .15f),
+                Math.Clamp(strength, -.016f, .016f))) return;
         _disturbances++;
         Revision++;
         BindSurface();
+    }
+
+    private bool ApplyDisturbance(Vector2 center, float radius, float strength)
+    {
+        if (strength == 0) return false;
+        if (_obstacles is not null)
+        {
+            if (_obstacles.IsSolid(center)) return false;
+            // The depression and its equal-volume rim occupy three radii.
+            // Keep that entire support in water: cutting the rim at a rock
+            // adds net volume, and a wide kernel can otherwise jump through it.
+            radius = Math.Min(radius, _obstacles.Clearance(center) / 3);
+            // Resolve the depression and rim across enough cells to preserve
+            // their volume balance even when the centre lies between texels.
+            if (radius < 2.5f * Math.Max(_aspect / FieldWidth, 1f / FieldHeight)) return false;
+        }
+        _disturbanceEffect.ConstantBuffer = new WaterDisturbanceShader(_fieldSize, _aspect,
+            new Float2(center.X, center.Y), radius, strength);
+        Run(_disturbanceEffect, _next, _field);
+        (_field, _next) = (_next, _field);
+        return true;
     }
 
     /// <summary>
@@ -345,6 +377,7 @@ internal sealed class WaterGardenSimulation : IDisposable
         Vector2 delta = (current - previous) * new Vector2(_aspect, 1);
         float distance = delta.Length();
         if (distance < .0035f || distance > .18f || strength <= 0) return;
+        if (_obstacles is not null && !_obstacles.IsPathClear(previous, current)) return;
         _duckStickContactEffect.ConstantBuffer = new WaterDuckStickContactShader(_aspect,
             _activeDuckCount, new Float2(previous.X, previous.Y), new Float2(current.X, current.Y),
             Math.Clamp(strength, 0, 1));
@@ -438,10 +471,7 @@ internal sealed class WaterGardenSimulation : IDisposable
                     {
                         Vector2 landing = _fountainLandingPosition[bin] / momentum;
                         float pulse = Math.Clamp(momentum * 150f, 0, .0015f);
-                        _disturbanceEffect.ConstantBuffer = new WaterDisturbanceShader(_fieldSize, _aspect,
-                            new Float2(landing.X, landing.Y), .018f, pulse);
-                        Run(_disturbanceEffect, _next, _field);
-                        (_field, _next) = (_next, _field);
+                        ApplyDisturbance(landing, .018f, pulse);
                     }
                     _fountainLandingPosition[bin] = Vector2.Zero;
                     _fountainLandingMomentum[bin] = 0;
@@ -478,8 +508,8 @@ internal sealed class WaterGardenSimulation : IDisposable
     public void Reset()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        using (var drawing = _field.CreateDrawingSession()) drawing.Clear(Color.FromArgb(255, 0, 0, 0));
-        using (var drawing = _next.CreateDrawingSession()) drawing.Clear(Color.FromArgb(255, 0, 0, 0));
+        InitializeField(_field);
+        InitializeField(_next);
         _duckCount = WaterGardenDucks.InitialCount;
         _activeDuckCount = WaterGardenDucks.InitialCount;
         _pendingDuckLaunches.Clear();
@@ -564,7 +594,7 @@ internal sealed class WaterGardenSimulation : IDisposable
             throw new ArgumentOutOfRangeException(nameof(point));
         byte[] pixels = _field.GetPixelBytes(Math.Min(FieldWidth - 1, (int)(point.X * FieldWidth)),
             Math.Min(FieldHeight - 1, (int)(point.Y * FieldHeight)), 1, 1);
-        return new(Read(pixels, 0), Read(pixels, 4));
+        return new(Read(pixels, 0), Read(pixels, 4), Read(pixels, 8) > .5f);
     }
 
     public IReadOnlyList<WaterGardenDuckState> GetDuckStates()
@@ -620,6 +650,16 @@ internal sealed class WaterGardenSimulation : IDisposable
         using var drawing = target.CreateDrawingSession();
         drawing.DrawImage(effect, Vector2.Zero, new Rect(0, 0, target.Size.Width, target.Size.Height),
             1, CanvasImageInterpolation.Linear, CanvasComposite.Copy);
+    }
+
+    private void InitializeField(CanvasRenderTarget target)
+    {
+        if (_fieldSeed is not null) target.SetPixelBytes(_fieldSeed);
+        else
+        {
+            using var drawing = target.CreateDrawingSession();
+            drawing.Clear(Color.FromArgb(255, 0, 0, 0));
+        }
     }
 
     private void InitializeDucks()

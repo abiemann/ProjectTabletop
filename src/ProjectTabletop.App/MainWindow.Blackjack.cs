@@ -21,6 +21,7 @@ public sealed partial class MainWindow
 
     private void BlackjackPreview_Draw(ICanvasAnimatedControl sender, CanvasAnimatedDrawEventArgs args)
     {
+        if (!_boardGamePreviewDrawingEnabled) return;
         if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.StrykersRun)
             _scene.DrawStrykersRunPreview(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height);
         else if (_scene.CurrentBoardScreen == ProjectTabletop.Interaction.BoardScreen.Football)
@@ -40,6 +41,7 @@ public sealed partial class MainWindow
 
     private void BlackjackPreview_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        if (!_boardGamePreviewDrawingEnabled) return;
         var point = e.GetCurrentPoint(BlackjackPreview);
         if (!point.Properties.IsLeftButtonPressed) return;
         double width = BlackjackPreview.ActualWidth, height = BlackjackPreview.ActualHeight;

@@ -1,3 +1,4 @@
+using System.Numerics;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Text;
 using ProjectTabletop.Interaction;
@@ -72,7 +73,7 @@ public sealed partial class SceneCompositor
         return false;
     }
 
-    private void DrawArtworkLoading(CanvasDrawingSession drawing, Rect bounds)
+    private void DrawArtworkLoading(CanvasDrawingSession drawing, Rect bounds, bool rotate180 = false)
     {
         drawing.FillRectangle(bounds, AppPalette.Background);
         using var format = new CanvasTextFormat
@@ -91,7 +92,15 @@ public sealed partial class SceneCompositor
             BoardScreen.StrykersRun => _strykersRunRenderer?.Error,
             _ => null
         };
-        drawing.DrawText(error is null ? "Loading…" : "Could not load board",
-            bounds, AppPalette.MutedText, format);
+        var previous = drawing.Transform;
+        if (rotate180)
+            drawing.Transform = Matrix3x2.CreateScale(-1, -1,
+                new Vector2((float)(bounds.X + bounds.Width / 2), (float)(bounds.Y + bounds.Height / 2))) * previous;
+        try
+        {
+            drawing.DrawText(error is null ? "Loading…" : "Could not load board",
+                bounds, AppPalette.MutedText, format);
+        }
+        finally { drawing.Transform = previous; }
     }
 }

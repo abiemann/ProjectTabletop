@@ -86,6 +86,7 @@ public sealed partial class MainWindow : Window
         _statusTimer.Tick += StatusTimer_Tick;
         _statusTimer.Start();
         _initialized = true;
+        ApplyProjectionPreviewState();
         StartHandTrackingStatus();
         InitializeEyeTipTracking();
         InitializeFootballInput();
@@ -247,6 +248,7 @@ public sealed partial class MainWindow : Window
     {
         if (_closing) return;
         _closing = true;
+        ApplyProjectionPreviewState();
         Interlocked.Increment(ref _boardSetupGeneration);
         Volatile.Write(ref _boardSetupActive, false);
         ClearBoardFrameReferences();
@@ -261,6 +263,7 @@ public sealed partial class MainWindow : Window
         _footballAmbienceSound.Dispose();
         _scene.WaterGardenAudioChanged -= WaterGardenAudioChanged;
         _waterGardenSound.Dispose();
+        _waterGardenSwishSound.Dispose();
         _statusTimer.Stop();
         await _cameraInputWorker.StopAsync();
         await DisposeEyeTipTrackingAsync();

@@ -68,7 +68,8 @@ public sealed partial class MainWindow
                 bool? projectorFixedTimeStep = _output?.SetRenderPacing(fixedTimeStep);
                 BlackjackPreview.IsFixedTimeStep = fixedTimeStep;
                 ProjectionPreview.IsFixedTimeStep = fixedTimeStep;
-                if (hasPreviewPaused) BlackjackPreview.Paused = previewPausedValue.GetBoolean();
+                // Keep the diagnostic pause and the visible preview switches in sync.
+                if (hasPreviewPaused) SetProjectionPreviewEnabled(!previewPausedValue.GetBoolean());
                 return new
                 {
                     projectorFixedTimeStep,
@@ -87,6 +88,8 @@ public sealed partial class MainWindow
                 return await VerifyFootballAudioAsync();
             case "verify_water_garden_audio":
                 return await VerifyWaterGardenAudioAsync();
+            case "verify_water_garden_swish_audio":
+                return await VerifyWaterGardenSwishAudioAsync();
             case "verify_camera_input_scheduling":
                 return await VerifyCameraInputSchedulingAsync();
             case "verify_camera_safety":
@@ -261,6 +264,7 @@ public sealed partial class MainWindow
                     photoCopyAudio = _photocopierSound.Status,
                     footballAudio = FootballAudioDiagnostics,
                     waterGardenAudio = _waterGardenSound.Status,
+                    waterGardenSwishAudio = _waterGardenSwishSound.Status,
                     displayAudio = DisplayAudioDiagnostics,
                     outputVisible = _output?.AppWindow.IsVisible ?? false,
                     outputFullScreen = _output?.IsFullScreen ?? false,
@@ -322,6 +326,7 @@ public sealed partial class MainWindow
                     lastSavedPhotoPath = _lastSavedPhotoPath,
                     photoCopySaveDirectory = PhotoCopyImageStore.DefaultDirectory,
                     renderStatus = RenderStatusText.Text,
+                    projectionPreviewEnabled = _projectionPreviewEnabled,
                     status = StatusText.Text
                 };
             case "set_hand_tracking":

@@ -245,7 +245,10 @@ public sealed partial class MainWindow
         }
     }
 
-    private void ProjectionPreview_Draw(ICanvasAnimatedControl sender, CanvasAnimatedDrawEventArgs args) =>
+    private void ProjectionPreview_Draw(ICanvasAnimatedControl sender, CanvasAnimatedDrawEventArgs args)
+    {
+        if (!_projectionPreviewDrawingEnabled) return;
         _scene.Draw(args.DrawingSession, (float)sender.Size.Width, (float)sender.Size.Height,
             preview: true, runningSlowly: args.Timing.IsRunningSlowly);
+    }
 }

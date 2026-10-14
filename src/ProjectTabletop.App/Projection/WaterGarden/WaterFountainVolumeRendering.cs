@@ -207,9 +207,10 @@ internal readonly partial struct WaterSurfaceShader
                 // height field and gravel at the displaced three-dimensional ray.
                 Float2 uv = pond.XY / new Float2(aspect, 1) + .5f;
                 Float2 texel = 1 / fieldSize, metric = new Float2(aspect, 1) / fieldSize;
+                float height = Height(uv, 0);
                 Float2 slope = new Float2(
-                    Height(uv + new Float2(texel.X, 0)) - Height(uv - new Float2(texel.X, 0)),
-                    Height(uv + new Float2(0, texel.Y)) - Height(uv - new Float2(0, texel.Y))) / (2 * metric) * 2.4f;
+                    Height(uv + new Float2(texel.X, 0), height) - Height(uv - new Float2(texel.X, 0), height),
+                    Height(uv + new Float2(0, texel.Y), height) - Height(uv - new Float2(0, texel.Y), height)) / (2 * metric) * 2.4f;
                 slope = Hlsl.Clamp(slope, new Float2(-.85f, -.85f), new Float2(.85f, .85f));
                 Float3 pondNormal = Hlsl.Normalize(new Float3(-slope, 1));
                 Float3 throughPool = Hlsl.Refract(ray, pondNormal, 1 / 1.333f);

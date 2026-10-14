@@ -15,6 +15,7 @@ public sealed partial class SceneCompositor
 {
     private readonly Func<DateTimeOffset> _waterClock;
     private WaterGardenSimulation? _waterSimulation;
+    private WaterGardenObstacles? _waterObstacles;
     private CanvasDevice? _waterDevice;
     private readonly Queue<(Vector2 Position, float Strength)> _waterDisturbances = new();
     private readonly Queue<(Vector2 Previous, Vector2 Current, float Strength)> _waterStickStrokes = new();
@@ -26,6 +27,7 @@ public sealed partial class SceneCompositor
     private long _waterVisualRevision, _waterInputCount;
     private bool _waterWasActive;
     private bool _waterAudioActive;
+    private bool _waterSwishAudioActive;
     private bool _waterIntroPending;
     private float _waterEntranceProgress = 1;
     private CanvasRenderTarget? _waterFrameTarget;
@@ -35,6 +37,15 @@ public sealed partial class SceneCompositor
 
     public event Action? WaterGardenAudioChanged;
     public bool WaterGardenAudioActive { get { lock (_gate) return _waterAudioActive && WaterGardenVisible; } }
+    public bool WaterGardenSwishAudioActive
+    {
+        get
+        {
+            lock (_gate)
+                return _waterSwishAudioActive && WaterGardenVisible &&
+                    _waterClock() - _waterFrameTime <= TimeSpan.FromMilliseconds(250);
+        }
+    }
 
     private void UpdateWaterGardenAudioState()
     {
@@ -174,6 +185,15 @@ public sealed partial class SceneCompositor
                 DrawWaterGardenTitle(drawing, now);
                 DrawWaterGardenControls(drawing, _boardSession.Buttons, [], feedback, now);
             }
+            if (_waterIntroPending)
+            {
+                // Exclude all first-frame CPU preparation and drawing-session
+                // submission from the three-second entrance.
+                var started = _waterClock();
+                ResetWaterGardenIntro(started);
+                _waterAdvancedAt = started;
+                _waterIntroPending = false;
+            }
             _waterRenderedFrame = key;
             _waterRenderedFrames++;
             // Start only after the completed frame contains emitted fountain
@@ -219,6 +239,7 @@ public sealed partial class SceneCompositor
             if (_disposed) return false;
             SyncWaterGardenSession();
             var now = _waterClock();
+            ExpireWaterStick(now);
             if (cameraPoint is not { } camera)
             {
                 if (frameTime != default && frameTime < _waterFrameTime) return false;
@@ -269,8 +290,18 @@ public sealed partial class SceneCompositor
             // board. Invert the garden camera so the wave renders at that same
             // location even though the simulated water is viewed at an angle.
             var point = WaterGardenView.ScreenToSurface(boardPoint);
+            if (_waterObstacles?.IsSolid(point) == true)
+            {
+                ClearWaterStick();
+                _waterFrameTime = frameTime;
+                return false;
+            }
             Vector2? previous = _waterSurfaceTip;
             if (now - _waterFrameTime > TimeSpan.FromMilliseconds(250)) previous = null;
+            // A marker can jump across a rock between camera observations. Start
+            // locally on the far side instead of stirring a path through stone.
+            if (previous is { } start && _waterObstacles?.IsPathClear(start, point) == false)
+                previous = null;
             float aspect = (float)PaintBoardAspect();
             float distance = previous is { } prior
                 ? Vector2.Distance(new(prior.X * aspect, prior.Y), new(point.X * aspect, point.Y)) : 0;
@@ -302,6 +333,7 @@ public sealed partial class SceneCompositor
 
     private void QueueWaterDisturbance(Vector2 position, float strength)
     {
+        if (_waterObstacles?.IsSolid(position) == true) return;
         if (_waterDisturbances.Count >= 24) _waterDisturbances.Dequeue();
         _waterDisturbances.Enqueue((position, strength));
         _waterInputCount++;
@@ -333,6 +365,14 @@ public sealed partial class SceneCompositor
 
     private void SetWaterStickPresence(bool present)
     {
+        // Use the same accepted water contact as ripples, independently of the
+        // fountain's rendered-flow gate. Repeated observations do not restart audio.
+        bool swish = present && WaterGardenVisible;
+        if (_waterSwishAudioActive != swish)
+        {
+            _waterSwishAudioActive = swish;
+            WaterGardenAudioChanged?.Invoke();
+        }
         if (!_boardSession.SetWaterGardenStickPresent(present, _waterClock())) return;
         // Reject in-flight caption results even if the marker enters and leaves
         // between two hold-context captures. Re-arming requires a fresh clear.
@@ -404,11 +444,8 @@ public sealed partial class SceneCompositor
 
     private void DrawWaterGardenSurface(CanvasDrawingSession ds, DateTimeOffset now)
     {
-        if (_waterIntroPending)
-        {
-            ResetWaterGardenIntro(now);
-            _waterIntroPending = false;
-        }
+        // Keep the establishing view still while first-use resources and the
+        // initial draw are prepared; that work must not consume the zoom time.
         _waterEntranceProgress = WaterGardenEntranceProgress(now);
         if (_waterSimulation is null || _waterDevice != ds.Device)
         {
@@ -416,11 +453,16 @@ public sealed partial class SceneCompositor
             double aspect = PaintBoardAspect();
             int width = aspect >= 1 ? 512 : Math.Max(64, (int)Math.Round(512 * aspect));
             int height = aspect <= 1 ? 512 : Math.Max(64, (int)Math.Round(512 / aspect));
+            _waterObstacles = _waterRockPixels is { } pixels
+                ? WaterGardenObstacles.FromRockArtwork(width, height, aspect, pixels,
+                    _waterRockWidth, _waterRockHeight, _waterRockOpaqueFoot)
+                : null;
             _waterSimulation = new(ds.Device, width, height, aspect,
                 _waterImages?.Image("wet-slate.png") ??
                 throw new InvalidOperationException("Water Garden cascade artwork was not loaded before rendering."),
                 _waterImages?.Image("sand-ground.png") ??
-                throw new InvalidOperationException("Water Garden sand artwork was not loaded before rendering."));
+                throw new InvalidOperationException("Water Garden sand artwork was not loaded before rendering."),
+                _waterObstacles);
             _waterDevice = ds.Device;
             _waterAdvancedAt = now;
             _waterAppliedDuckCount = 0;
@@ -543,6 +585,7 @@ public sealed partial class SceneCompositor
         DisposeWaterGardenTitle();
         _waterSimulation?.Dispose();
         _waterSimulation = null;
+        _waterObstacles = null;
         UpdateWaterGardenAudioState();
         _waterFrameTarget?.Dispose();
         _waterFrameTarget = null;

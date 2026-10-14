@@ -325,13 +325,20 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="3" />
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <Border Background="{StaticResource TabletopSecondaryAccentBrush}" CornerRadius="2" />
-                            <TextBlock Grid.Column="1" Text="PROJECTION PREVIEW  ·  mapped board output" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TabletopAccentBrush}" CharacterSpacing="40" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="1" Text="PROJECTION PREVIEW  ·  mapped board output" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TabletopAccentBrush}" CharacterSpacing="40" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            <ToggleSwitch x:Name="ProjectionPreviewToggle" Grid.Column="2" IsOn="True" OnContent="" OffContent="" MinWidth="0" VerticalAlignment="Center"
+                                          AutomationProperties.Name="Projection preview" ToolTipService.ToolTip="Show the laptop board preview. Projector output and camera tracking stay active."
+                                          Toggled="ProjectionPreviewToggle_Toggled" />
                         </Grid>
                     </Border>
                     <Border Grid.Row="1" Background="Black" BorderBrush="{StaticResource TabletopPanelBorderBrush}" BorderThickness="1" CornerRadius="9">
-                        <canvas:CanvasAnimatedControl x:Name="ProjectionPreview" UseSharedDevice="True" Draw="ProjectionPreview_Draw" />
+                        <Grid>
+                            <canvas:CanvasAnimatedControl x:Name="ProjectionPreview" UseSharedDevice="True" Paused="True" Draw="ProjectionPreview_Draw" />
+                            <TextBlock x:Name="ProjectionPreviewOffText" Text="Preview is off" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource TabletopMutedBrush}" />
+                        </Grid>
                     </Border>
                 </Grid>
             </Border>
@@ -342,9 +349,21 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <Border Background="{StaticResource TabletopHeaderBrush}" CornerRadius="9" Padding="14,11">
-                        <TextBlock x:Name="BoardGamePreviewTitle" Text="BLACKJACK  ·  click the table to play  ·  virtual chips" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TabletopAccentBrush}" TextTrimming="CharacterEllipsis" />
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="BoardGamePreviewTitle" Text="BLACKJACK  ·  click the table to play  ·  virtual chips" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TabletopAccentBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            <ToggleSwitch x:Name="BoardGamePreviewToggle" Grid.Column="1" IsOn="True" OnContent="" OffContent="" MinWidth="0" VerticalAlignment="Center"
+                                          AutomationProperties.Name="Projection preview" ToolTipService.ToolTip="Show the laptop board preview. Projector output and camera tracking stay active."
+                                          Toggled="ProjectionPreviewToggle_Toggled" />
+                        </Grid>
                     </Border>
-                    <canvas:CanvasAnimatedControl Grid.Row="1" x:Name="BlackjackPreview" UseSharedDevice="True" Draw="BlackjackPreview_Draw" PointerPressed="BlackjackPreview_PointerPressed" />
+                    <Grid Grid.Row="1" Background="Black">
+                        <canvas:CanvasAnimatedControl x:Name="BlackjackPreview" UseSharedDevice="True" Paused="True" Draw="BlackjackPreview_Draw" PointerPressed="BlackjackPreview_PointerPressed" />
+                        <TextBlock x:Name="BoardGamePreviewOffText" Text="Preview is off" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource TabletopMutedBrush}" />
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>

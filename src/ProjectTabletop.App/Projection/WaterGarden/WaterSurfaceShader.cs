@@ -56,12 +56,16 @@ internal readonly partial struct WaterSurfaceShader(Float2 fieldSize, Float2 siz
         return new Float4(normal, far >= Hlsl.Max(near, 0) ? near : 10000);
     }
 
-    private float Height(Float2 uv)
+    private float Height(Float2 uv, float solidHeight)
     {
         // Input zero is scaled to the bed's bounds by the host. Keep its clamp at
         // actual field-cell centers while sampling in the shared image coordinates.
         Float2 fieldUv = Hlsl.Clamp(uv, .5f / fieldSize, (fieldSize - .5f) / fieldSize);
-        float height = D2D.SampleInputAtPosition(0, fieldUv * size).X;
+        Float4 field = D2D.SampleInputAtPosition(0, fieldUv * size);
+        // Match the solver's reflecting rock boundary in normals and caustics;
+        // optical ambient waves must not animate the submerged stone footprint.
+        if (field.Z > .5f) return solidHeight;
+        float height = field.X;
         Float2 world = uv * new Float2(aspect, 1);
         // Ambient ripples are optical only: they cannot accumulate mass or disturb
         // deterministic simulation tests. Calm Water stays flat before they fade in.
@@ -127,7 +131,7 @@ internal readonly partial struct WaterSurfaceShader(Float2 fieldSize, Float2 siz
         // Duck clipping still uses the height at this ray outside the footprint.
         // Keep its state-texture loop below both surface branches: a loop with
         // derivative-based samples must not sit inside pixel-varying flow.
-        float height = Height(uv);
+        float height = Height(uv, 0);
         Float3 reflection = new Float3(0, 0, 1);
         Float3 color = new Float3(0, 0, 0);
         float visibleDistance = planeDistance;
@@ -138,10 +142,10 @@ internal readonly partial struct WaterSurfaceShader(Float2 fieldSize, Float2 siz
             // replacing it with the visible sand or the water's exposed side.
             Float2 texel = 1 / fieldSize;
             Float2 cell = new Float2(aspect, 1) / fieldSize;
-            float left = Height(uv - new Float2(texel.X, 0));
-            float right = Height(uv + new Float2(texel.X, 0));
-            float top = Height(uv - new Float2(0, texel.Y));
-            float bottom = Height(uv + new Float2(0, texel.Y));
+            float left = Height(uv - new Float2(texel.X, 0), height);
+            float right = Height(uv + new Float2(texel.X, 0), height);
+            float top = Height(uv - new Float2(0, texel.Y), height);
+            float bottom = Height(uv + new Float2(0, texel.Y), height);
             // Small physical displacements need a modest optical normal enhancement to remain
             // legible in an overhead projection. The actual simulation amplitude is unchanged.
             Float2 slope = new Float2((right - left) / (2 * cell.X), (bottom - top) / (2 * cell.Y)) * 2.4f;
@@ -157,9 +161,9 @@ internal readonly partial struct WaterSurfaceShader(Float2 fieldSize, Float2 siz
             // cannot flash the projector white or produce infinities.
             float xx = (left + right - 2 * height) / (cell.X * cell.X);
             float yy = (top + bottom - 2 * height) / (cell.Y * cell.Y);
-            float tl = Height(uv - texel), br = Height(uv + texel);
-            float tr = Height(uv + new Float2(texel.X, -texel.Y));
-            float bl = Height(uv + new Float2(-texel.X, texel.Y));
+            float tl = Height(uv - texel, height), br = Height(uv + texel, height);
+            float tr = Height(uv + new Float2(texel.X, -texel.Y), height);
+            float bl = Height(uv + new Float2(-texel.X, texel.Y), height);
             float xy = (tl + br - tr - bl) / (4 * cell.X * cell.Y);
             float focusDistance = depth * (1 - eta);
             float determinant = (1 - focusDistance * xx) * (1 - focusDistance * yy) -

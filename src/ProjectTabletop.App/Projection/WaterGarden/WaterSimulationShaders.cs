@@ -21,13 +21,14 @@ internal readonly partial struct WaterDisturbanceShader(Float2 size, float aspec
     {
         Float2 p = D2D.GetScenePosition().XY;
         Float4 field = D2D.SampleInputAtPosition(0, p);
+        if (field.Z > .5f) return new Float4(0, 0, field.Z, 1);
         Float2 delta = (p / size - center) * new Float2(aspect, 1);
         float r2 = Hlsl.Dot(delta, delta) / (radius * radius);
         // A depression pushes an equal-volume rim outward. Zero-integral radial
         // displacement avoids accumulating permanent mounds from repeated strokes.
         float impulse = r2 < 9 ? (1 - 3 * r2) * Hlsl.Exp(-3 * r2) : 0;
         float height = Hlsl.Clamp(field.X - strength * impulse, -.04f, .04f);
-        return new Float4(height, field.Y, 0, 1);
+        return new Float4(height, field.Y, field.Z, 1);
     }
 }
 
@@ -49,13 +50,20 @@ internal readonly partial struct WaterStepShader(Float2 size, float aspect, floa
         return Hlsl.Length(Hlsl.Max(q, new Float2(0, 0))) + Hlsl.Min(Hlsl.Max(q.X, q.Y), 0) <= radius;
     }
 
-    private float Height(Float2 p, float center) => InPond(p)
-        ? D2D.SampleInputAtPosition(0, Hlsl.Clamp(p, new Float2(.5f, .5f), size - .5f)).X : center;
+    private float Height(Float2 p, float center)
+    {
+        Float4 neighbor = D2D.SampleInputAtPosition(0,
+            Hlsl.Clamp(p, new Float2(.5f, .5f), size - .5f));
+        // A solid face reflects the wave with zero normal flux, just like
+        // the basin edge. Energy can reach the far side only around its ends.
+        return InPond(p) && neighbor.Z < .5f ? neighbor.X : center;
+    }
 
     public Float4 Execute()
     {
         Float2 p = D2D.GetScenePosition().XY;
         Float4 field = D2D.SampleInputAtPosition(0, p);
+        if (field.Z > .5f) return new Float4(0, 0, field.Z, 1);
         Float2 cell = new Float2(aspect, 1) / size;
         float laplacian = (Height(p + new Float2(-1, 0), field.X) + Height(p + new Float2(1, 0), field.X) - 2 * field.X) /
             (cell.X * cell.X) + (Height(p + new Float2(0, -1), field.X) + Height(p + new Float2(0, 1), field.X) - 2 * field.X) /
@@ -66,6 +74,6 @@ internal readonly partial struct WaterStepShader(Float2 size, float aspect, floa
         float velocity = (field.Y + laplacian * waveSpeed * waveSpeed * dt) * Hlsl.Exp(-drag * dt);
         velocity = Hlsl.Clamp(velocity, -.30f, .30f);
         float height = Hlsl.Clamp(field.X + velocity * dt, -.04f, .04f);
-        return InPond(p) ? new Float4(height, velocity, 0, 1) : new Float4(0, 0, 0, 1);
+        return InPond(p) ? new Float4(height, velocity, field.Z, 1) : new Float4(0, 0, field.Z, 1);
     }
 }
