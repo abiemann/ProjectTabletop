@@ -127,7 +127,10 @@ public sealed partial class MainWindow
             _displayAudioDevice, available && _displayAudioRequested);
         _footballAmbienceSound.ConfigureOutput(SelectedDisplay?.PhysicalMode?.FriendlyName,
             _displayAudioDevice, available && _displayAudioRequested);
+        _waterGardenSound.ConfigureOutput(SelectedDisplay?.PhysicalMode?.FriendlyName,
+            _displayAudioDevice, available && _displayAudioRequested);
         UpdateFootballAmbience();
+        UpdateWaterGardenAudio();
     }
 
     private void EnableDisplayAudio_Changed(object sender, RoutedEventArgs args)

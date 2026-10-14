@@ -233,6 +233,8 @@ internal sealed class WaterGardenSimulation : IDisposable
         _disturbances, _waveSpeed, "RGBA32Float (height, vertical velocity, reserved, opaque)", _duckCount,
         _fountainEnabled, _fountainImpacts);
 
+    public bool HasFountainWater => _fountainFluid.ParticleCount > 0;
+
     public WaterFountainFluidDiagnostics GetFountainDiagnostics() => _fountainFluid.GetDiagnostics();
 
     /// <summary>Queues a duck to fall into the screen centre without resetting the pond.</summary>
@@ -652,7 +654,7 @@ internal sealed class WaterGardenSimulation : IDisposable
             new Float2(camera.CentreX, camera.CentreY),
             new Float2(WaterGardenDucks.MaximumCount, WaterGardenDucks.Rows), _activeDuckCount,
             new Float2(_duckSplashPosition.X, _duckSplashPosition.Y),
-            _fountainFluid.ParticleCount > 0 ? 1f : 0f,
+            HasFountainWater ? 1f : 0f,
             new Float3(fountainMinimum.X, fountainMinimum.Y, fountainMinimum.Z),
             new Float3(fountainSize.X, fountainSize.Y, fountainSize.Z),
             new Float3(WaterFountainFluid.GridX, WaterFountainFluid.GridY, WaterFountainFluid.GridZ),

@@ -51,7 +51,10 @@ public sealed partial class MainWindow
         SyncFootballControls();
         SettingsToolsPanel.Visibility = _scene.CurrentBoardScreen == BoardScreen.Settings
             ? Visibility.Visible : Visibility.Collapsed;
-        bool boardGame = blackjack || crownDeed || globe || slots || roulette || water || football || strykersRun;
+        // During a camera outage all boards use the shared projection warning;
+        // hide the interactive game preview until explicit camera recovery.
+        bool boardGame = !_cameraManualRestartRequired &&
+            (blackjack || crownDeed || globe || slots || roulette || water || football || strykersRun);
         BoardGamePreviewTitle.Text = strykersRun ? "STRYKER'S RUN  ·  slide along the dots  ·  automatic fire" :
             football ? "FOOTBALL  ·  black cardboard bars or index fingers  ·  first to five" :
             water ? "WATER GARDEN  ·  stick tip makes ripples  ·  click controls" :
@@ -67,7 +70,8 @@ public sealed partial class MainWindow
         CameraPreviewPanel.Visibility = water || football || strykersRun || !boardGame ? Visibility.Visible : Visibility.Collapsed;
         ProjectionPreviewPanel.Visibility = boardGame ? Visibility.Collapsed : Visibility.Visible;
         BoardAppStatusText.Text = _scene.CurrentBoardTitle + ". " +
-            (IsBoardScanMeasuring ? "Board alignment is in progress." :
+            (_cameraManualRestartRequired ? "Check Camera. " + ManualCameraRecoveryHint :
+             IsBoardScanMeasuring ? "Board alignment is in progress." :
              blackjack ? _scene.BlackjackState.Status :
              slots ? _scene.SlotsState.Status :
              roulette ? _scene.RouletteState.Status :

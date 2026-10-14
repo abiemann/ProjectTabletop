@@ -92,6 +92,7 @@ public sealed partial class MainWindow
         _cameraLiveStatus = null;
         _cameraHealthWarning = false;
         _cameraManualRestartRequired = false;
+        _scene.SetCameraCheckRequired(false);
         if (!preserveBoardScanSuspension)
             _boardScanSuspendedForCameraOutage = false;
     }
@@ -103,11 +104,11 @@ public sealed partial class MainWindow
         var hadMediaClip = _scene.HasBoardMediaClip;
         _scene.ClearBoardMediaClip();
         if (hadMediaClip && !Volatile.Read(ref _boardSetupActive))
-            SetStatus("Webcam video is stale. Projection is black; rescan the board after the camera recovers.");
+            SetStatus("Webcam video is stale. Check Camera; rescan the board after the camera recovers.");
         if (!Volatile.Read(ref _boardSetupActive) || _boardScanSuspendedForCameraOutage) return;
         _boardScanSuspendedForCameraOutage = true;
         ClearBoardPreview();
-        BoardSetupStatusText.Text = "Webcam video is stale. Projector is black. " + ManualCameraRecoveryHint;
+        BoardSetupStatusText.Text = "Webcam video is stale. Check Camera. " + ManualCameraRecoveryHint;
     }
 
     private void UpdateCameraHealth()
@@ -175,6 +176,7 @@ public sealed partial class MainWindow
         _cameraManualRestartRequired = true;
         _cameraHealthWarning = true;
         SuspendBoardScanForCameraOutage();
+        _scene.SetCameraCheckRequired(true);
         CameraStatusText.Text = reason + " " + ManualCameraRecoveryHint;
     }
 

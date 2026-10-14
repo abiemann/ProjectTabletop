@@ -835,7 +835,7 @@ public sealed partial class MainWindow
         if (!Volatile.Read(ref _boardSetupActive)) return;
         if (_boardScanSuspendedForCameraOutage)
         {
-            BoardSetupStatusText.Text = "Webcam input is paused. Projector is black. " + ManualCameraRecoveryHint;
+            BoardSetupStatusText.Text = "Webcam input is paused. Check Camera. " + ManualCameraRecoveryHint;
             return;
         }
         if (!_camera.IsRunning)

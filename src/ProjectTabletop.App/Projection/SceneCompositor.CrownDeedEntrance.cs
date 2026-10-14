@@ -45,6 +45,7 @@ public sealed partial class SceneCompositor
         // must never treat pre-navigation pixels as its own caption evidence.
         _holdNavigationStartedAt = HoldClock();
         SyncBoardOrientation();
+        SyncWaterGardenSession();
         BoardOpened?.Invoke(screen);
         CancelCrownDeedDevelopment();
         CancelCrownDeedEntrance();

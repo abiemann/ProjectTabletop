@@ -85,6 +85,8 @@ public sealed partial class MainWindow
                 return await CaptureStrykersRunInputAsync();
             case "verify_football_audio":
                 return await VerifyFootballAudioAsync();
+            case "verify_water_garden_audio":
+                return await VerifyWaterGardenAudioAsync();
             case "verify_camera_input_scheduling":
                 return await VerifyCameraInputSchedulingAsync();
             case "verify_camera_safety":
@@ -258,6 +260,7 @@ public sealed partial class MainWindow
                     outputOpen = _output is not null,
                     photoCopyAudio = _photocopierSound.Status,
                     footballAudio = FootballAudioDiagnostics,
+                    waterGardenAudio = _waterGardenSound.Status,
                     displayAudio = DisplayAudioDiagnostics,
                     outputVisible = _output?.AppWindow.IsVisible ?? false,
                     outputFullScreen = _output?.IsFullScreen ?? false,

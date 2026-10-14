@@ -25,12 +25,28 @@ public sealed partial class SceneCompositor
     private int _waterAppliedDuckCount;
     private long _waterVisualRevision, _waterInputCount;
     private bool _waterWasActive;
+    private bool _waterAudioActive;
     private bool _waterIntroPending;
     private float _waterEntranceProgress = 1;
     private CanvasRenderTarget? _waterFrameTarget;
     private (long Visual, int Feedback)? _waterRenderedFrame;
     private DateTimeOffset _waterProjectorRenderedAt;
     private long _waterRenderedFrames, _waterPreviewFrameReuses;
+
+    public event Action? WaterGardenAudioChanged;
+    public bool WaterGardenAudioActive { get { lock (_gate) return _waterAudioActive && WaterGardenVisible; } }
+
+    private void UpdateWaterGardenAudioState()
+    {
+        bool active = _waterWasActive && WaterGardenVisible && _waterSimulation is { HasFountainWater: true };
+        if (_waterAudioActive == active) return;
+        _waterAudioActive = active;
+        WaterGardenAudioChanged?.Invoke();
+    }
+
+    private bool WaterGardenVisible => !_disposed && _boardSession.Screen == BoardScreen.WaterGarden &&
+        !_blackOutput && !_boardSetup && _calibrationTarget < 0 && !IsBoardRevealActive &&
+        _boardCameraMap is not null && _boardSurfaceMap is not null;
 
     public double WaterGardenPreviewAspect { get { lock (_gate) return PaintBoardAspect(); } }
     public bool WaterGardenDrawerOpen { get { lock (_gate) return _boardSession.WaterGardenDrawerOpen; } }
@@ -150,14 +166,19 @@ public sealed partial class SceneCompositor
         if (EnsureBoardRenderTarget(ref _waterFrameTarget, device)) _waterRenderedFrame = null;
         if (_waterRenderedFrame != key)
         {
-            using var drawing = _waterFrameTarget!.CreateDrawingSession();
-            drawing.Transform = BoardRasterTransform(_waterFrameTarget);
-            DrawWaterGardenSurface(drawing, now);
-            DrawWaterGardenRocks(drawing);
-            DrawWaterGardenTitle(drawing, now);
-            DrawWaterGardenControls(drawing, _boardSession.Buttons, [], feedback, now);
+            using (var drawing = _waterFrameTarget!.CreateDrawingSession())
+            {
+                drawing.Transform = BoardRasterTransform(_waterFrameTarget);
+                DrawWaterGardenSurface(drawing, now);
+                DrawWaterGardenRocks(drawing);
+                DrawWaterGardenTitle(drawing, now);
+                DrawWaterGardenControls(drawing, _boardSession.Buttons, [], feedback, now);
+            }
             _waterRenderedFrame = key;
             _waterRenderedFrames++;
+            // Start only after the completed frame contains emitted fountain
+            // water, never merely because the board is visible or time passed.
+            UpdateWaterGardenAudioState();
         }
         return _waterFrameTarget!;
     }
@@ -326,9 +347,7 @@ public sealed partial class SceneCompositor
     {
         bool entered = _boardSession.Screen == BoardScreen.WaterGarden &&
             _waterNavigation != _boardSession.NavigationRevision;
-        bool active = !_disposed && _boardSession.Screen == BoardScreen.WaterGarden &&
-            !_blackOutput && !_boardSetup && _calibrationTarget < 0 && !IsBoardRevealActive &&
-            _boardCameraMap is not null && _boardSurfaceMap is not null;
+        bool active = WaterGardenVisible;
         bool registrationChanged = !ReferenceEquals(_waterCameraMap, _boardCameraMap) ||
             !ReferenceEquals(_waterSurfaceMap, _boardSurfaceMap);
         if (_waterWasActive == active && !registrationChanged &&
@@ -363,6 +382,7 @@ public sealed partial class SceneCompositor
         else _waterSimulation?.Reset();
         _waterVisualRevision++;
         _renderedBoardState = null;
+        UpdateWaterGardenAudioState();
     }
 
     private long WaterGardenVisualRevision(DateTimeOffset now)
@@ -523,6 +543,7 @@ public sealed partial class SceneCompositor
         DisposeWaterGardenTitle();
         _waterSimulation?.Dispose();
         _waterSimulation = null;
+        UpdateWaterGardenAudioState();
         _waterFrameTarget?.Dispose();
         _waterFrameTarget = null;
         _waterRenderedFrame = null;

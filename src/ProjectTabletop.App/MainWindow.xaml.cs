@@ -75,6 +75,7 @@ public sealed partial class MainWindow : Window
         _scene.LicensesRequested += () => DispatcherQueue.TryEnqueue(() => _ = ShowLicensesAsync());
         _scene.BoardOpened += BoardOpenedForStickTracking;
         _scene.FootballAudioRequested += FootballAudioRequested;
+        _scene.WaterGardenAudioChanged += WaterGardenAudioChanged;
         AppPalette.ApplyTitleBar(AppWindow.TitleBar);
         InitializeHandDetectionLogging();
         _camera.FrameReceived += Camera_FrameReceived;
@@ -258,6 +259,8 @@ public sealed partial class MainWindow : Window
         _footballGoalSounds.Dispose();
         _footballMatchSound.Dispose();
         _footballAmbienceSound.Dispose();
+        _scene.WaterGardenAudioChanged -= WaterGardenAudioChanged;
+        _waterGardenSound.Dispose();
         _statusTimer.Stop();
         await _cameraInputWorker.StopAsync();
         await DisposeEyeTipTrackingAsync();

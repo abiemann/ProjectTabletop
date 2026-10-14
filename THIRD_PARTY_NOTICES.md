@@ -138,6 +138,18 @@ See the [Football audio credits](https://github.com/abiemann/ProjectTabletop/blo
 These source recordings retain their respective terms independently of the project's
 license.
 
+## Water Garden fountain recording
+
+The bundled fountain loop uses
+[Swale by Siddharth Patil (Ksd5 / Sidpatil)](https://commons.wikimedia.org/wiki/File:Swale.ogg),
+dedicated to the public domain under
+[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).
+ProjectTabletop trims the recording and overlaps its repeat boundary to make a
+30-second mono loop, without filtering, added layers or gain adjustment. Editing details, source and output
+checksums, and the CC0 license text are bundled in `Assets/WaterGarden/Audio`
+and available through **Settings → Licenses**.
+See the [Water Garden audio credits](https://github.com/abiemann/ProjectTabletop/blob/main/src/ProjectTabletop.App/Assets/WaterGarden/Audio/AUDIO.md).
+
 ## ComputeSharp
 
 The Paint, Globe and Water Garden GPU shaders use [ComputeSharp](https://github.com/Sergio0694/ComputeSharp)

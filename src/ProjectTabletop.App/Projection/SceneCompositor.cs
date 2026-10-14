@@ -33,6 +33,7 @@ public sealed partial class SceneCompositor : IDisposable
     private bool _calibrationTargetTop;
     private bool _boardSetup;
     private bool _blackOutput;
+    private bool _cameraCheckRequired;
     private BoardGrid? _boardGrid;
     private Point2[]? _detectedBoardCorners;
     private ProjectionClipRegion? _boardMediaClip;
@@ -342,6 +343,11 @@ public sealed partial class SceneCompositor : IDisposable
         }
     }
 
+    internal void SetCameraCheckRequired(bool required)
+    {
+        lock (_gate) _cameraCheckRequired = required;
+    }
+
     /// <summary>Full-black projector output for an ambient camera reference frame.</summary>
     public void SetBlackOutput(bool enabled)
     {
@@ -548,9 +554,17 @@ public sealed partial class SceneCompositor : IDisposable
             long strykersRunPreviousTexture = _strykersRunTextureSequence;
 #endif
             if (_disposed) return;
+            var output = FitDisplay(canvasWidth, canvasHeight, preview);
+            // The camera outage invalidates the board clip. Show its explanation
+            // independently of that clip, including when a scan was interrupted.
+            if (_cameraCheckRequired)
+            {
+                CasinoText(ds, "Check Camera", output,
+                    (float)Math.Min(output.Width, output.Height) * .075f, Colors.White, bold: true);
+                return;
+            }
             PrepareMenuPreviews(ds.Device);
             if (_blackOutput) return;
-            var output = FitDisplay(canvasWidth, canvasHeight, preview);
 
             if (_boardSetup)
             {
@@ -926,6 +940,8 @@ public sealed partial class SceneCompositor : IDisposable
             CancelPaintIntroduction();
             ResetPaintAutomatic();
             _disposed = true;
+            _waterWasActive = false;
+            UpdateWaterGardenAudioState();
             foreach (var asset in _overlays.Values.Append(_background).OfType<MediaAsset>().Distinct()) asset.Dispose();
             _overlays.Clear();
             _boardApplicationTarget?.Dispose();
