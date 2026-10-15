@@ -1,5 +1,4 @@
 using Microsoft.Graphics.Canvas;
-using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.Text;
 using ProjectTabletop.Interaction;
 using Windows.Foundation;
@@ -42,16 +41,7 @@ public sealed partial class SceneCompositor
             bool hovered = button.Enabled && handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id);
             if (button.Id == "settings") DrawSettingsCogButton(ds, button, hovered, selectionFeedback);
             else if (IsMenuScrollHandle(button))
-            {
-                var bounds = button.Bounds;
-                var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
-                    bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
-                DrawSecondaryPrecisionButtonSurface(ds, rect, hovered, BoardButtonCornerRadius(button));
-                using var chevron = CanvasGeometry.CreatePolygon(ds.Device,
-                    DrawerArrowVertices(MenuArrowAppearance(button), PaintBoardAspect()));
-                ds.FillGeometry(chevron, AppPalette.ButtonText);
-                DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, AppPalette.IndicatorOn);
-            }
+                DrawBoardDrawerHandle(ds, MenuArrowAppearance(button), hovered, PaintBoardAspect(), _holdControlBrightness);
         }
         ds.DrawText("Aim with four fingers together.", 80, 907, AppPalette.MutedText, small);
         ds.DrawText("Move your index sideways to open.", 80, 937, AppPalette.MutedText, small);

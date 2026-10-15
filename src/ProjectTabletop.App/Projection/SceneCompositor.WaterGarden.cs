@@ -31,7 +31,7 @@ public sealed partial class SceneCompositor
     private bool _waterIntroPending;
     private float _waterEntranceProgress = 1;
     private CanvasRenderTarget? _waterFrameTarget;
-    private (long Visual, int Feedback)? _waterRenderedFrame;
+    private (long Visual, int Feedback, bool ButtonsVisible)? _waterRenderedFrame;
     private DateTimeOffset _waterProjectorRenderedAt;
     private long _waterRenderedFrames, _waterPreviewFrameReuses;
 
@@ -173,7 +173,7 @@ public sealed partial class SceneCompositor
             _waterPreviewFrameReuses++;
             return _waterFrameTarget!;
         }
-        var key = (WaterGardenVisualRevision(now), FingerSelectionRenderStep(feedback));
+        var key = (WaterGardenVisualRevision(now), FingerSelectionRenderStep(feedback), _boardSession.ButtonsVisible);
         if (EnsureBoardRenderTarget(ref _waterFrameTarget, device)) _waterRenderedFrame = null;
         if (_waterRenderedFrame != key)
         {
@@ -225,7 +225,8 @@ public sealed partial class SceneCompositor
         ReferenceEquals(_waterCameraMap, _boardCameraMap) && ReferenceEquals(_waterSurfaceMap, _boardSurfaceMap) &&
         _waterProjectorRenderedAt != default && now >= _waterProjectorRenderedAt &&
         now - _waterProjectorRenderedAt <= TimeSpan.FromMilliseconds(250) &&
-        _waterRenderedFrame is not null && _waterFrameTarget is { } target && target.Device == device &&
+        _waterRenderedFrame is { } rendered && rendered.ButtonsVisible == _boardSession.ButtonsVisible &&
+        _waterFrameTarget is { } target && target.Device == device &&
         target.SizeInPixels.Width == _boardRasterPixels.Width &&
         target.SizeInPixels.Height == _boardRasterPixels.Height;
 

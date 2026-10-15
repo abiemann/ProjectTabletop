@@ -7,31 +7,55 @@ internal static class MenuScrollRegression
 
     public static void Run()
     {
-        CheckReachPastArrow();
+        CheckCaptionOnlyArrow();
         CheckScrollAndInputBarriers();
         CheckArrowReleaseAndReverse();
         CheckReset();
     }
 
-    private static void CheckReachPastArrow()
+    private static void CheckCaptionOnlyArrow()
     {
         var board = new BoardSession();
         var arrow = Button(board, "menu-scroll-down");
-        Require(board.Buttons.All(button => !button.IsHold) && arrow is { Label: "v", Enabled: true } &&
-            arrow.Bounds == BoardSession.MenuScrollButtonBounds, "Menu navigation must use precision gestures.");
-        Clear(board, arrow.Id, 10);
+        Require(arrow is { Label: "v", Enabled: true, Hold: BoardButtonHold.Once } &&
+            arrow.Bounds == BoardSession.MenuScrollButtonBounds &&
+            board.Buttons.Where(button => button.Id != arrow.Id).All(button => !button.IsHold),
+            "Only the paging arrow should use a one-shot caption hold.");
         var hand = Together(arrow);
-        for (int time = 100; time <= 2100; time += 100)
+        for (int time = 100; time <= 1300; time += 100)
         {
             Require(Hold(board, arrow.Id, time).Count == 0 && board.HoldProgress(At(time)).Count == 0,
-                "An arm covering the menu arrow warmed or completed a long press.");
+                "A covered arrow armed without a fresh clear-caption observation.");
             Require(board.Update([hand], At(time), At(time)) is null && !board.MenuScrolling && !board.MenuScrolled,
-                "A stationary hand over the menu arrow paged without a selection gesture.");
+                "Hand landmarks alone paged the menu.");
         }
+        Require(board.Update([Pinch(arrow, 1, 1400)], At(1400), At(1400)) is null &&
+            SelectFinger(board, hand, 1500) is null && !board.MenuScrolled,
+            "A pinch or sideways-index gesture activated the caption-only arrow.");
+
+        Clear(board, arrow.Id, 1800);
+        for (int time = 1900; time <= 2400; time += 100)
+            Require(Hold(board, arrow.Id, time).Count == 0, "The arrow paged before a full second of caption damage.");
+        Require(board.HoldProgress(At(2400)).Single().Progress == .5,
+            "The menu arrow did not show shared long-press progress.");
+        Clear(board, arrow.Id, 2450);
+        Require(board.HoldProgress(At(2450)).Count == 0,
+            "Intact arrow lettering did not cancel partial hold progress.");
+        for (int time = 2500; time < 3500; time += 100)
+            Require(Hold(board, arrow.Id, time).Count == 0,
+                "A new hold inherited progress from an earlier interrupted obstruction.");
+        Require(Hold(board, arrow.Id, 3500).SequenceEqual([arrow.Id]) && board.MenuScrolling,
+            "A full second of fresh arrow obstruction did not page once.");
+        Require(board.TickMenu(At(4150)), "The held-arrow paging fixture did not settle.");
+        var up = Button(board, "menu-scroll-up");
+        Require(up is { Label: "^", Hold: BoardButtonHold.Once } &&
+            board.Update([Pinch(up, 2, 4200)], At(4200), At(4200)) is null &&
+            SelectFinger(board, Together(up), 4300) is null && board.MenuScrolled,
+            "The return arrow accepted a gesture instead of caption evidence.");
         var settings = Button(board, "settings");
-        Require(SelectFinger(board, Together(settings), 2200) is
-            { ButtonId: "settings", Current: BoardScreen.Settings, Gesture: BoardSelectionGesture.IndexSeparation } &&
-            !board.MenuScrolled, "Reaching past the arrow to deliberately select Settings scrolled the menu.");
+        Require(SelectFinger(board, Together(settings), 4700) is
+            { ButtonId: "settings", Current: BoardScreen.Settings, Gesture: BoardSelectionGesture.IndexSeparation },
+            "Making the arrow a hold button disabled the existing Settings selection gesture.");
     }
 
     private static void CheckScrollAndInputBarriers()
@@ -44,9 +68,11 @@ internal static class MenuScrollRegression
             Button(board, "water-garden").Bounds == new BoardRect(.52, .45, .40, .16),
             "The first page must contain six cards with Football beside Slots and Water Garden beside Stryker's Run.");
         var arrow = Button(board, "menu-scroll-down");
-        Require(board.Update([Pinch(arrow, 1, 1300)], At(1300), At(1300)) is
-            { ButtonId: "menu-scroll-down", Gesture: BoardSelectionGesture.Pinch } && board.MenuScrolling && board.MenuScrolled,
-            "A deliberate pinch did not start the downward menu scroll.");
+        Clear(board, arrow.Id, 200);
+        for (int time = 300; time < 1300; time += 100)
+            Require(Hold(board, arrow.Id, time).Count == 0, "Paging started before the hold was complete.");
+        Require(Hold(board, arrow.Id, 1300).SequenceEqual([arrow.Id]) && board.MenuScrolling && board.MenuScrolled,
+            "The completed arrow hold did not start the downward menu scroll.");
         long revision = board.Revision;
         Require(Near(board.GetMenuScrollOffset(At(1300)), 0) &&
             Near(board.GetMenuScrollOffset(At(1625)), .3) && Near(board.GetMenuScrollOffset(At(1950)), .6) &&
@@ -92,34 +118,34 @@ internal static class MenuScrollRegression
     {
         var board = new BoardSession();
         var firstPage = board.Buttons.Select(button => (button.Id, button.Bounds)).ToArray();
-        var hand = Together(Button(board, "menu-scroll-down"));
-        Require(SelectFinger(board, hand, 100) is
-            { ButtonId: "menu-scroll-down", Gesture: BoardSelectionGesture.IndexSeparation },
-            "A grouped-to-sideways-index gesture did not page down.");
-        Require(board.TickMenu(At(1030)), "The downward page did not settle.");
-        for (int time = 1100; time <= 2400; time += 100)
-            Require(board.Update([Apart(hand)], At(time), At(time)) is null &&
-                Hold(board, "menu-scroll-up", time).Count == 0 && !board.MenuScrolling && board.MenuScrolled,
-                "A held or separated hand automatically reversed the menu without a fresh gesture.");
-        Require(SelectFinger(board, Together(Button(board, "menu-scroll-up")), 2500) is
-            { ButtonId: "menu-scroll-up", Gesture: BoardSelectionGesture.IndexSeparation } && board.MenuScrolling &&
-            !board.MenuScrolled && Near(board.GetMenuScrollOffset(At(3105)), .3),
-            "Regrouping and deliberately separating the index did not scroll smoothly back.");
-        Require(board.TickMenu(At(3430)) && Near(board.GetMenuScrollOffset(At(3430)), 0) &&
+        Clear(board, "menu-scroll-down", 10);
+        for (int time = 100; time < 1100; time += 100)
+            Require(Hold(board, "menu-scroll-down", time).Count == 0, "The first paging hold completed early.");
+        Require(Hold(board, "menu-scroll-down", 1100).SequenceEqual(["menu-scroll-down"]) &&
+            board.TickMenu(At(1750)), "The downward one-shot paging hold did not settle.");
+        for (int time = 1800; time <= 3000; time += 100)
+            Require(Hold(board, "menu-scroll-up", time).Count == 0 &&
+                board.HoldProgress(At(time)).Count == 0 && !board.MenuScrolling && board.MenuScrolled,
+                "Keeping the caption covered automatically reversed the one-shot arrow.");
+
+        // A brief clear frame is not a release of the spent physical place.
+        Clear(board, "menu-scroll-up", 3100);
+        Require(Hold(board, "menu-scroll-up", 3200).Count == 0 &&
+            board.HoldProgress(At(3200)).Count == 0, "A brief optical dropout rearmed the replacement arrow.");
+        Clear(board, "menu-scroll-up", 3300);
+        Clear(board, "menu-scroll-up", 3650);
+        for (int time = 3800; time < 4800; time += 100)
+            Require(Hold(board, "menu-scroll-up", time).Count == 0, "The reverse hold completed early.");
+        Require(Hold(board, "menu-scroll-up", 4800).SequenceEqual(["menu-scroll-up"]) && board.MenuScrolling &&
+            !board.MenuScrolled && Near(board.GetMenuScrollOffset(At(5125)), .3),
+            "Uncovering and holding the replacement arrow did not scroll smoothly back.");
+        Require(board.TickMenu(At(5450)) && Near(board.GetMenuScrollOffset(At(5450)), 0) &&
             Button(board, "menu-scroll-down").Enabled &&
             board.Buttons.Select(button => (button.Id, button.Bounds)).SequenceEqual(firstPage),
             "The reverse scroll did not restore the entire first page and its original positions.");
-
-        // A pinch pulse lasts longer than the slide. Reusing it at the same
-        // physical place must not activate the replacement direction.
-        board = new BoardSession();
-        var pinch = Pinch(Button(board, "menu-scroll-down"), 1, 100);
-        Require(board.Update([pinch], At(100), At(100))?.ButtonId == "menu-scroll-down" && board.TickMenu(At(750)),
-            "The pinch paging fixture did not settle.");
-        Require(board.Update([pinch], At(800), At(800)) is null && board.MenuScrolled && !board.MenuScrolling,
-            "A pinch carried across paging automatically reversed the menu.");
-        Require(board.Update([Pinch(Button(board, "menu-scroll-up"), 2, 900)], At(900), At(900))?.ButtonId == "menu-scroll-up",
-            "A fresh pinch could not select the return arrow.");
+        for (int time = 5500; time <= 6800; time += 100)
+            Require(Hold(board, "menu-scroll-down", time).Count == 0 && !board.MenuScrolled && !board.MenuScrolling,
+                "The restored down arrow repeated under the same covered caption.");
     }
 
     private static void CheckReset()
@@ -131,6 +157,16 @@ internal static class MenuScrollRegression
             "Calibration/input reset left a moving menu or a stale hold.");
         Require(board.Update([Pinch(Button(board, "slots"), 1, 150)], At(250), At(250)) is null,
             "An execution from before reset crossed the restored menu.");
+
+        board = new BoardSession();
+        Clear(board, "menu-scroll-down", 10);
+        Hold(board, "menu-scroll-down", 100);
+        Hold(board, "menu-scroll-down", 200);
+        board.ResetInput(At(250));
+        for (int time = 300; time <= 1500; time += 100)
+            Require(Hold(board, "menu-scroll-down", time).Count == 0 &&
+                board.HoldProgress(At(time)).Count == 0 && !board.MenuScrolling,
+                "Input reset retained the old clear-caption readiness or partial hold.");
     }
 
     private static BoardButton Button(BoardSession board, string id) => board.Buttons.Single(button => button.Id == id);

@@ -376,7 +376,9 @@ public sealed partial class MainWindow
         if (_cameraManualRestartRequired) return;
         // This only reserves an independent worker; all caption/scene access
         // happens inside it, so hand scheduling cannot delay the next caption.
-        QueueHoldButtonDetection(frame, Stopwatch.GetTimestamp());
+        var detectionTick = Stopwatch.GetTimestamp();
+        QueueHoldButtonDetection(frame, detectionTick);
+        QueueControlSwipeDetection(frame, detectionTick);
         // No detector or compositor lock belongs on the capture consumer. A
         // busy scene may delay scheduling, but cannot hold up webcam delivery.
         _cameraInputWorker.Enqueue(frame, new(pieceGeneration, Volatile.Read(ref _boardSetupActive)));

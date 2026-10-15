@@ -119,7 +119,8 @@ public sealed partial class SceneCompositor
                 surface.Transform = BoardRasterTransform(_crownDeedPreviewTarget);
                 DrawCrownDeedBoard(surface, state, _boardSession.Buttons, hovered, feedback, aspect,
                     hideDiceDisplay: dicePresented, rolling: HasCrownDeedDiceAnimation(now),
-                    drawerOpen: _boardSession.CrownDeedDrawerOpen, drawerProgress: CrownDeedDrawerProgress(now), entrance: entrance);
+                    drawerOpen: _boardSession.ButtonsVisible && _boardSession.CrownDeedDrawerOpen,
+                    drawerProgress: CrownDeedDrawerProgress(now), entrance: entrance);
                 _crownDeedPreviewState = key;
             }
             var rendered = _crownDeedPreviewTarget!;

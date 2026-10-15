@@ -20,7 +20,7 @@ public sealed partial class SceneCompositor
     private CanvasRenderTarget? _boardApplicationTarget;
     private BoardSurfaceState? _renderedBoardState;
 
-    private readonly record struct BoardSurfaceState(BoardScreen Screen, int HoverMask, int FingerSelectionStep, int HandStatus,
+    private readonly record struct BoardSurfaceState(BoardScreen Screen, bool ButtonsVisible, int HoverMask, int FingerSelectionStep, int HandStatus,
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long PhotoUiRevision, int PhotoDrawerFrame, double PhotoAspect,
         long BlackjackRevision, long BlackjackFlightRevision,
         long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long CrownDeedRevision, long CrownDeedDiceRevision,
@@ -193,7 +193,7 @@ public sealed partial class SceneCompositor
         for (var index = 0; index < _boardSession.Buttons.Count; index++)
             if (handsFresh && _boardSession.HoveredButtonIds.Contains(_boardSession.Buttons[index].Id))
                 hoverMask |= 1 << index;
-        var state = new BoardSurfaceState(_boardSession.Screen, hoverMask, FingerSelectionRenderStep(selectionFeedback),
+        var state = new BoardSurfaceState(_boardSession.Screen, _boardSession.ButtonsVisible, hoverMask, FingerSelectionRenderStep(selectionFeedback),
             handStatus,
             photoCopy ? PhotoCopyStampCount(now) : 0,
             photoCopy ? PhotoCopyDisplayStatus(now) : null,
@@ -273,7 +273,7 @@ public sealed partial class SceneCompositor
                 DrawCrownDeedBoard(surface, crownDeedPresented, _boardSession.Buttons,
                     handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback,
                     PaintBoardAspect(), hideDiceDisplay: crownDeedDicePresented,
-                    rolling: HasCrownDeedDiceAnimation(crownDeedNow), drawerOpen: _boardSession.CrownDeedDrawerOpen,
+                    rolling: HasCrownDeedDiceAnimation(crownDeedNow), drawerOpen: _boardSession.ButtonsVisible && _boardSession.CrownDeedDrawerOpen,
                     drawerProgress: CrownDeedDrawerProgress(crownDeedNow), entrance: crownDeedEntrance);
             }
             else if (water)

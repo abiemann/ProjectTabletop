@@ -304,6 +304,8 @@ public sealed partial class MainWindow
                     handAcquisition = new { lighting = _scene.GetHandAcquisitionDiagnostics(),
                         lastDetection = _lastHandAcquisitionDetection },
                     boardApp = _scene.CurrentBoardScreen.ToString(),
+                    boardButtonsVisible = _scene.BoardButtonsVisible,
+                    controlSwipe = ControlSwipeDiagnostics,
                     boardAppTitle = _scene.CurrentBoardTitle,
                     blackjack = _scene.BlackjackState,
                     crownDeed = _scene.CrownDeedState,

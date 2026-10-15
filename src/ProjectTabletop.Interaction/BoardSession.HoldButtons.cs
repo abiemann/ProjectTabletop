@@ -49,7 +49,7 @@ public sealed partial class BoardSession
         DateTimeOffset frameTime, DateTimeOffset now, IReadOnlyCollection<string>? clearedIds = null)
     {
         ArgumentNullException.ThrowIfNull(heldIds);
-        if (frameTime > now || now - frameTime > ObservationLifetime) return [];
+        if (frameTime > now || now - frameTime > ObservationLifetime || frameTime <= _controlsInputReadyAfter) return [];
         AdvanceMenuScroll(now);
         if (Screen == BoardScreen.Menu && (MenuScrolling || frameTime <= _menuInputReadyAfter)) return [];
         bool strictCaptions = clearedIds is not null;

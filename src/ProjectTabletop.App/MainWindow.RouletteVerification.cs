@@ -227,14 +227,13 @@ public sealed partial class MainWindow
         fixture.Draw();
         var topReference = scene.GetHandAcquisitionContext(fixture.Now);
         Check(topReference?.ExpectedScene is not null, "The initial menu did not capture its stationary control reference.");
-        Check(scene.CurrentBoardButtons.All(button => !button.IsHold) && scene.GetHoldButtonContext(fixture.Now) is null,
-            "The menu still permits caption obstruction to activate its paging arrow.");
-        CheckArrowObstructionDoesNotPage("menu-scroll-down", topReference!);
-        SelectArrow("menu-scroll-down");
+        CheckArrowGesturesDoNotPage("menu-scroll-down");
+        var topHold = HoldArrow("menu-scroll-down");
         var started = fixture.Now;
         Check(board.MenuScrolling && scene.CurrentBoardButtons.All(button => !button.Enabled),
             "A moving menu left cards or navigation controls enabled.");
         Check(scene.GetHandAcquisitionContext(fixture.Now) is null && scene.GetHoldButtonContext(fixture.Now) is null &&
+            scene.ObserveHoldButtons(topHold, ["menu-scroll-down"], fixture.Now, []).Count == 0 &&
             !board.ActivateButton("roulette", fixture.Now) && !board.ActivateButton("paint", fixture.Now) &&
             !board.ActivateButton("settings", fixture.Now),
             "The moving menu accepted input or a camera reference.");
@@ -277,42 +276,54 @@ public sealed partial class MainWindow
         Check(bottomReference?.ExpectedScene is not null && bottomReference.Revision != topReference!.Revision &&
             !ReferenceEquals(bottomReference.ExpectedScene, topReference.ExpectedScene),
             "The scrolled cards reused a stale camera reference.");
-        CheckArrowObstructionDoesNotPage("menu-scroll-up", bottomReference!);
-        SelectArrow("menu-scroll-up");
+        Check(scene.ObserveHoldButtons(topHold, ["menu-scroll-down"], fixture.Now, []).Count == 0 &&
+            board.MenuScrolled && !board.MenuScrolling,
+            "A prior page's caption result reversed the settled menu.");
+        CheckArrowGesturesDoNotPage("menu-scroll-up");
+        var bottomHold = HoldArrow("menu-scroll-up");
         var returning = fixture.Now;
         fixture.Now = returning + BoardSession.MenuScrollDuration;
         byte[] returned = await Capture("menu-returned");
         Check(!board.MenuScrolled && !board.MenuScrolling &&
             scene.CurrentBoardButtons.Select(button => (button.Id, button.Bounds)).SequenceEqual(initialButtons) &&
             fixture.RegionUnchanged(initial, returned, BoardSession.MenuCardViewport),
-            "The up-arrow precision gesture did not restore all six initial cards, their positions and their native pixels.");
+            "The up-arrow caption hold did not restore all six initial cards, their positions and their native pixels.");
+        fixture.Now += TimeSpan.FromMilliseconds(1);
+        Check(scene.ObserveHoldButtons(bottomHold, ["menu-scroll-up"], fixture.Now, []).Count == 0 &&
+            !board.MenuScrolled && !board.MenuScrolling,
+            "A prior page's caption result paged again after the return slide.");
         Check(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "Isolated menu-scroll verification changed live hardware or navigation.");
-        return new { passed = true, directory, images, indexSeparationSelections = 2, renderedChevronAcquisition = true,
-            armObstructionCannotPage = true, noCaptionHoldTargets = true, continuedSeparationCannotReverse = true,
+        return new { passed = true, directory, images, nativeChevronHolds = 2, renderedChevronAcquisition = true,
+            onlyPagingArrowUsesCaptionHold = true, oneSecondHoldRequired = true, intactChevronCancels = true,
+            freshClearRequired = true, pinchAndIndexSeparationRejected = true, continuedSeparationCannotReverse = true,
             staleGesturesRejected = true, scrollDurationMilliseconds = BoardSession.MenuScrollDuration.TotalMilliseconds,
             fixedHeadingAndFooter = true, movingInputAndAcquisitionSuppressed = true,
             secondPageCardsRevealed = true, fullPageScroll = true, originalCardsFullyLeaveViewport = true,
             firstPageRestoredExactly = true, sharedVisibleAndInputBounds = true, settledReferenceRefreshed = true,
             liveHardwareUnchanged = true };
 
-        void CheckArrowObstructionDoesNotPage(string id, SceneCompositor.HandAcquisitionContext context)
+        SceneCompositor.HoldButtonContext HoldArrow(string id)
         {
             var button = scene.CurrentBoardButtons.Single(item => item.Id == id);
-            int index = scene.CurrentBoardButtons.ToList().FindIndex(item => item.Id == id);
+            var context = scene.GetHoldButtonContext(fixture.Now) ??
+                throw new InvalidOperationException("The menu arrow has no native hold reference: " + id + ".");
+            int index = context.ButtonIds.ToList().IndexOf(id);
             var trigger = context.ExpectedScene!.BoardTriggerRegions![index];
             var control = context.ExpectedScene.BoardSearchRegions![index];
-            Check(!button.IsHold && trigger.Width > 0 && trigger.Height > 0 &&
+            Check(button is { Enabled: true, Hold: BoardButtonHold.Once } &&
+                scene.CurrentBoardButtons.Where(item => item.Id != id).All(item => !item.IsHold) &&
+                context.EnabledHoldIds.SetEquals([id]) && trigger.Width > 0 && trigger.Height > 0 &&
                 button.Bounds.Contains(trigger.X + trigger.Width / 2, trigger.Y + trigger.Height / 2),
-                "The precision arrow has no rendered-chevron acquisition target: " + id + ".");
+                "The paging arrow is not the menu's sole native one-shot hold target: " + id + ".");
             byte[] empty = fixture.Draw();
             var tracker = new HandAcquisitionPresenceTracker();
             var clear = tracker.Update(fixture.Width, fixture.Height, fixture.Width * 4, empty,
                 context.SearchPolygon, context.ExpectedScene, fixture.Now, fixture.Now);
             Check(clear.TextPatterns?.SingleOrDefault(pattern => pattern.ControlRegion == index) is
                 { LabelIntact: true, ShapeCorrupted: false },
-                "The native precision arrow has no intact generated-chevron reference: " + id + ".");
+                "The native paging arrow has no intact generated-chevron reference: " + id + ".");
             byte[] occupied = (byte[])empty.Clone();
             var center = fixture.CameraPoint(trigger.X + trigger.Width / 2, trigger.Y + trigger.Height / 2);
             double scale = fixture.CameraPoint(1, 0).X - fixture.CameraPoint(0, 0).X;
@@ -331,46 +342,80 @@ public sealed partial class MainWindow
                 int pixel = (y * fixture.Width + x) * 4;
                 occupied[pixel] = 75; occupied[pixel + 1] = 95; occupied[pixel + 2] = 185; occupied[pixel + 3] = 255;
             }
-            long revision = board.Revision;
             bool confirmed = false;
-            for (int frame = 0; frame < 25; frame++)
+            // Observing an intact reference above must not arm the button until
+            // that clear camera evidence is actually published. This also
+            // models a hand still covering the replacement arrow after paging.
+            for (int frame = 0; frame < 14; frame++)
             {
-                fixture.Now += TimeSpan.FromMilliseconds(100);
-                var presence = tracker.Update(fixture.Width, fixture.Height, fixture.Width * 4, occupied,
-                    context.SearchPolygon, context.ExpectedScene, fixture.Now, fixture.Now);
-                confirmed |= presence.TextPatterns?.SingleOrDefault(pattern => pattern.ControlRegion == index) is
-                    { ShapeCorrupted: true, LabelIntact: false, ConfirmationFrames: >= 2 };
-                scene.CompleteHandAcquisition(context, presence.Hints, [], fixture.Now);
-                Check(scene.GetHoldButtonContext(fixture.Now) is null &&
-                    scene.ObserveHoldButtons(null, [id], fixture.Now).Count == 0 &&
-                    board.Update([], fixture.Now, fixture.Now) is null && board.Revision == revision && !board.MenuScrolling &&
-                    scene.CurrentBoardButtons.Single(item => item.Id == id).Enabled && scene.CurrentHoldProgress.Count == 0,
-                    "An arm covering the precision arrow started navigation or hold progress: " + id + ".");
+                Check(Feed(occupied).Activated.Count == 0 && !board.MenuScrolling && scene.CurrentHoldProgress.Count == 0,
+                    "A covered arrow armed without fresh clear evidence: " + id + ".");
             }
             Check(confirmed, "The simulated arm never obstructed the native arrow's actual chevron: " + id + ".");
-            var lit = scene.GetHandAcquisitionContext(fixture.Now);
-            scene.CompleteHandAcquisition(lit, [], [], fixture.Now, illuminatedPresence: false);
-            fixture.Now += TimeSpan.FromMilliseconds(1000);
-            fixture.Draw();
+            for (int frame = 0; frame < 5; frame++)
+                Check(Feed(empty).Activated.Count == 0 && !board.MenuScrolling,
+                    "An intact chevron started navigation: " + id + ".");
+            for (int frame = 0; frame < 4; frame++)
+                Check(Feed(occupied).Activated.Count == 0 && !board.MenuScrolling,
+                    "A partial arrow hold started navigation: " + id + ".");
+            Check(scene.CurrentHoldProgress.Any(progress => progress.ButtonId == id),
+                "Broken native chevron pixels never started partial hold feedback: " + id + ".");
+            Check(Feed(empty).Activated.Count == 0 && scene.CurrentHoldProgress.Count == 0,
+                "An intact chevron did not immediately cancel partial hold progress: " + id + ".");
+
+            DateTimeOffset? firstHeld = null;
+            for (int frame = 0; frame < 18; frame++)
+            {
+                var result = Feed(occupied);
+                if (result.Held) firstHeld ??= fixture.Now;
+                if (result.Activated.Count == 0)
+                {
+                    Check(!board.MenuScrolling, "The menu paged without an activated caption: " + id + ".");
+                    continue;
+                }
+                Check(firstHeld is { } heldStart && fixture.Now - heldStart >= BoardSession.HoldActivationInterval &&
+                    result.Activated.SequenceEqual([id]) && board.MenuScrolling,
+                    "The native chevron hold paged early or activated more than its arrow: " + id + ".");
+                return context;
+            }
+            throw new InvalidOperationException("A full native chevron hold failed to page: " + id + ".");
+
+            (bool Held, IReadOnlyList<string> Activated) Feed(byte[] pixels)
+            {
+                fixture.Now += TimeSpan.FromMilliseconds(100);
+                var presence = tracker.Update(fixture.Width, fixture.Height, fixture.Width * 4, pixels,
+                    context.SearchPolygon, context.ExpectedScene, fixture.Now, fixture.Now);
+                var held = context.HeldButtons(presence);
+                bool corrupted = presence.TextPatterns?.SingleOrDefault(pattern => pattern.ControlRegion == index) is
+                    { ShapeCorrupted: true, LabelIntact: false, ConfirmationFrames: >= 1 };
+                confirmed |= corrupted;
+                Check(!held.Contains(id) || corrupted && ReferenceEquals(pixels, occupied),
+                    "Unbroken native chevron pixels counted as a hold: " + id + ".");
+                return (held.Contains(id), scene.ObserveHoldButtons(context, held, fixture.Now, context.ClearedButtons(presence)));
+            }
         }
 
-        void SelectArrow(string id)
+        void CheckArrowGesturesDoNotPage(string id)
         {
             var button = scene.CurrentBoardButtons.Single(item => item.Id == id);
             var together = ArrowFingers(button, together: true);
-            Feed(together, 50, shouldSelect: false);
-            Feed(together, 100, shouldSelect: false);
+            long revision = board.Revision;
+            Feed(together, 50);
+            Feed(together, 100);
             var separated = together with { FingersTogether = false, IndexFingerSeparated = true };
-            Feed(separated, 50, shouldSelect: false);
-            Feed(separated, 80, shouldSelect: true);
+            Feed(separated, 50);
+            Feed(separated, 80);
+            fixture.Now += TimeSpan.FromMilliseconds(100);
+            var pinch = new BoardHandSample(button.Bounds.X + button.Bounds.Width / 2,
+                button.Bounds.Y + button.Bounds.Height / 2, fixture.Now.AddSeconds(1), 91, fixture.Now);
+            Feed(pinch, 100);
 
-            void Feed(BoardHandSample hand, int milliseconds, bool shouldSelect)
+            void Feed(BoardHandSample hand, int milliseconds)
             {
                 fixture.Now += TimeSpan.FromMilliseconds(milliseconds);
-                var navigation = board.Update([hand], fixture.Now, fixture.Now);
-                Check(shouldSelect ? navigation is { Gesture: BoardSelectionGesture.IndexSeparation } && navigation.ButtonId == id
-                    : navigation is null && !board.MenuScrolling,
-                    "The precision arrow did not require the complete together-to-separated gesture: " + id + ".");
+                Check(board.Update([hand], fixture.Now, fixture.Now) is null &&
+                    !board.MenuScrolling && board.Revision == revision && scene.CurrentHoldProgress.Count == 0,
+                    "A pinch or index-separation gesture activated the long-press arrow: " + id + ".");
             }
         }
 

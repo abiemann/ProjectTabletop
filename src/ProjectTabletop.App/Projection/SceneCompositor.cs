@@ -360,6 +360,7 @@ public sealed partial class SceneCompositor : IDisposable
                 CancelCrownDeedEntrance();
                 PausePaintIdle();
             }
+            if (_blackOutput != enabled) InvalidateControlSwipeContext(_blackjackClock());
             _blackOutput = enabled;
             SyncWaterGardenSession();
             SyncFootballSession();

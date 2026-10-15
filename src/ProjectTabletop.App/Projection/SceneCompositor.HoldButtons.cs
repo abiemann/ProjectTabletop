@@ -101,7 +101,9 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             RefreshWaterStickPresence();
-            if (frameTime < _holdNavigationStartedAt || HoldControlsSettling(frameTime) ||
+            if (ControlSwipeTraversalActive(HoldClock()) ||
+                frameTime <= _controlSwipeHoldNotBefore ||
+                frameTime < _holdNavigationStartedAt || HoldControlsSettling(frameTime) ||
                 context is null || !IsCurrentHoldContext(context) ||
                 !AcquisitionBoardReady || HasBoardControlDrawerAnimation()) return [];
             var activated = _boardSession.ObserveHeldButtons(heldIds, frameTime, HoldClock(), clearedIds);

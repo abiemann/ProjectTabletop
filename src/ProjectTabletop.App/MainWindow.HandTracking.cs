@@ -149,6 +149,7 @@ public sealed partial class MainWindow
         ResetPieceDetections();
         ResetFootballInput();
         ResetStrykersRunInput();
+        ResetControlSwipeInput();
         lock (_handGate)
         lock (_captionGate)
         {
@@ -422,6 +423,7 @@ public sealed partial class MainWindow
         ClearHandTracking();
         await _handWorker.WorkerTask;
         await _holdWorker.WorkerTask;
+        await _controlSwipeWorker.WorkerTask;
         if (_photoCopyTask is { } photoCopyTask) await photoCopyTask;
         if (_paintSaveTask is { } paintSaveTask) await paintSaveTask;
         if (_photoCopyObservationTask is { } observationTask) await observationTask;

@@ -68,14 +68,14 @@ public sealed partial class SceneCompositor
     private void SynchronizeBlackjackFlights(DateTimeOffset now)
     {
         var game = _boardSession.BlackjackState;
-        if (_blackjackFlightNavigationRevision != _boardSession.Revision ||
+        if (_blackjackFlightNavigationRevision != _boardSession.NavigationRevision ||
             _boardSession.Screen != BoardScreen.Blackjack)
         {
             if (_blackjackFlights.Count > 0 || _blackjackDeal is not null) _blackjackFlightRevision++;
             _blackjackFlights.Clear();
             _blackjackDeal = null;
             _blackjackDealStage = -1;
-            _blackjackFlightNavigationRevision = _boardSession.Revision;
+            _blackjackFlightNavigationRevision = _boardSession.NavigationRevision;
         }
         if (_blackjackFlights.RemoveAll(hit => now - hit.StartedAt >= BlackjackFlightDuration ||
             hit.RoundNumber != game.RoundNumber || hit.HandIndex >= game.Hands.Count ||

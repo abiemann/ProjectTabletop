@@ -129,7 +129,7 @@ public sealed partial class BoardSession
         BoardScreen.Roulette => "Roulette",
         _ => throw new InvalidOperationException("Unknown board screen.")
     };
-    public IReadOnlyList<BoardButton> Buttons => Screen switch
+    public IReadOnlyList<BoardButton> Buttons => !ButtonsVisible ? [] : Screen switch
     {
         BoardScreen.Menu => CurrentMenuButtons(),
         BoardScreen.PhotoCopy => CurrentPhotoCopyButtons(),
@@ -267,6 +267,8 @@ public sealed partial class BoardSession
         if (screen == BoardScreen.Globe) _globe.Start(now);
         ClearHolds();
         Screen = screen;
+        if (!ButtonsVisible) _controlsInputReadyAfter = Later(_controlsInputReadyAfter, now);
+        ButtonsVisible = true;
         Revision++;
         NavigationRevision++;
         if (screen == BoardScreen.WaterGarden) RequestWaterGardenReset();

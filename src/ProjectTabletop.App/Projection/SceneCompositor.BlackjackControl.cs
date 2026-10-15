@@ -12,6 +12,7 @@ public sealed partial class SceneCompositor
     private string _blackjackPreviewHover = string.Empty;
     private int _blackjackPreviewFingerSelectionStep;
     private long _blackjackPreviewFlightRevision = -1;
+    private bool _blackjackPreviewButtonsVisible;
 
     public BlackjackSnapshot BlackjackState { get { lock (_gate) return _boardSession.BlackjackState; } }
     public IReadOnlyList<BoardButton> CurrentBoardButtons
@@ -86,7 +87,8 @@ public sealed partial class SceneCompositor
             int selectionStep = FingerSelectionRenderStep(selectionFeedback);
             if (_blackjackPreviewRevision != game.Revision || _blackjackPreviewHover != hoverKey ||
                 _blackjackPreviewFingerSelectionStep != selectionStep ||
-                _blackjackPreviewFlightRevision != _blackjackFlightRevision)
+                _blackjackPreviewFlightRevision != _blackjackFlightRevision ||
+                _blackjackPreviewButtonsVisible != _boardSession.ButtonsVisible)
             {
                 using var surface = _blackjackPreviewTarget!.CreateDrawingSession();
                 surface.Transform = BoardRasterTransform(_blackjackPreviewTarget);
@@ -96,6 +98,7 @@ public sealed partial class SceneCompositor
                 _blackjackPreviewHover = hoverKey;
                 _blackjackPreviewFingerSelectionStep = selectionStep;
                 _blackjackPreviewFlightRevision = _blackjackFlightRevision;
+                _blackjackPreviewButtonsVisible = _boardSession.ButtonsVisible;
             }
             ds.DrawImage(_blackjackPreviewTarget!, new Rect((width - size) / 2, (height - size) / 2, size, size),
                 new Rect(0, 0, _blackjackPreviewTarget!.SizeInPixels.Width, _blackjackPreviewTarget.SizeInPixels.Height));

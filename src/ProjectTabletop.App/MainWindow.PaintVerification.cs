@@ -1,5 +1,6 @@
 #if DEBUG
 using System.Numerics;
+using System.Reflection;
 using Microsoft.Graphics.Canvas;
 using ProjectTabletop.App.Camera;
 using ProjectTabletop.App.Projection;
@@ -118,6 +119,19 @@ public sealed partial class MainWindow
                     ChangedPixels(blank, target.GetPixelBytes(), new(.75, .10, .15, .65)) == 0,
                 "Introductory paint was launched away from the board's center.");
             await Save(target, "paint-introduction-central-drops");
+            var paintedPixels = Draw(introduction);
+            var paintSession = (BoardSession)typeof(SceneCompositor).GetField("_boardSession",
+                BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(introduction)!;
+            Require(paintSession.SetButtonsVisible(false, now), "Paint controls did not hide.");
+            var hiddenPixels = Draw(introduction);
+            var hiddenPaint = introduction.GetPaintDiagnostics();
+            Require(introduction.CurrentBoardButtons.Count == 0 && hiddenPaint.DropCount == complete.DropCount &&
+                    hiddenPaint.SessionRevision == complete.SessionRevision && hiddenPaint.PendingIntroductionDrops == 0 &&
+                    introduction.CanSavePaint && ChangedPixels(paintedPixels, hiddenPixels, canvas) == 0,
+                "Hiding Paint controls erased or restarted the painting.");
+            Require(paintSession.SetButtonsVisible(true, now) && paintedPixels.SequenceEqual(Draw(introduction)) &&
+                    introduction.GetPaintDiagnostics().DropCount == complete.DropCount,
+                "Restoring Paint controls changed the existing canvas or replayed its introduction.");
             Require(introduction.AddPaintDrop(new(.5, .5), .06, now),
                 "Introductory paint prevented the first real camera disturbance from depositing paint in the same central area.");
             introduction.ResetPaint();

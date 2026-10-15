@@ -1,5 +1,6 @@
 #if DEBUG
 using System.Numerics;
+using System.Reflection;
 using Microsoft.Graphics.Canvas;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
@@ -62,6 +63,14 @@ public sealed partial class MainWindow
             "The halfway HIT card is missing its visible moving/rotating pose.");
         Require(scene.BlackjackState.Revision == revision && Differences(startPixels, middlePixels) > 3000,
             "Animation motion did not repaint while the game revision stayed unchanged.");
+        var flightSession = Session(scene);
+        Require(flightSession.SetButtonsVisible(false, now), "Blackjack controls did not hide during a HIT.");
+        Draw(scene);
+        Require(scene.BlackjackAnimation.Single() == flight && scene.BlackjackState.Revision == revision,
+            "Hiding Blackjack controls cancelled or restarted the flying HIT card.");
+        Require(flightSession.SetButtonsVisible(true, now) && middlePixels.SequenceEqual(Draw(scene)) &&
+                scene.BlackjackAnimation.Single() == flight,
+            "Restoring Blackjack controls changed the in-flight card or table state.");
         await Save(target, "hit-middle");
 
         now = started.AddMilliseconds(720);
@@ -293,6 +302,18 @@ public sealed partial class MainWindow
                 Require(moving.Progress == .5f && moving.Center.Y > 0 && Math.Abs(moving.Rotation) > .01f &&
                         Differences(pixels, movingPixels) > 1500,
                     "An opening card did not visibly move and rotate between cache boundaries.");
+                if (index == 0)
+                {
+                    var openingSession = Session(opening);
+                    Require(openingSession.SetButtonsVisible(false, now), "Blackjack controls did not hide during a deal.");
+                    Draw(opening);
+                    Require(opening.BlackjackDealAnimation is { Phase: "dealing", LandedCards: 0 } hiddenDeal &&
+                            hiddenDeal.Cards.Single() == moving,
+                        "Hiding Blackjack controls cancelled or restarted the opening deal.");
+                    Require(openingSession.SetButtonsVisible(true, now) && movingPixels.SequenceEqual(Draw(opening)) &&
+                            opening.BlackjackDealAnimation!.Cards.Single() == moving,
+                        "Restoring Blackjack controls interrupted the opening deal.");
+                }
                 await Save(target, index == 3 ? "deal-hole-card-middle" : $"deal-card-{index + 1}-middle");
             }
             now = dealStarted.AddMilliseconds(1800);
@@ -427,6 +448,9 @@ public sealed partial class MainWindow
 
         static BlackjackGame Game(params int[] ranks) => new(seed: 173,
             initialShoe: ranks.Select((rank, index) => new BlackjackCard(rank, (BlackjackSuit)(index % 4))));
+        static BoardSession Session(SceneCompositor drawingScene) =>
+            (BoardSession)typeof(SceneCompositor).GetField("_boardSession", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(drawingScene)!;
         static void Act(SceneCompositor drawingScene, string id) =>
             Require(drawingScene.ActivateBlackjackButton(id), "Animation fixture rejected " + id + ".");
         static int Differences(byte[] first, byte[] second)

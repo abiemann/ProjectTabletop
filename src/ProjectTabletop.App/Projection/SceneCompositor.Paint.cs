@@ -121,9 +121,9 @@ public sealed partial class SceneCompositor
 
     private void SyncPaintSession()
     {
-        if (_paintSessionRevision == _boardSession.Revision && _paintPreviousScreen == _boardSession.Screen) return;
+        if (_paintSessionRevision == _boardSession.NavigationRevision && _paintPreviousScreen == _boardSession.Screen) return;
         if (_paintPreviousScreen == BoardScreen.Paint || _boardSession.Screen == BoardScreen.Paint) ResetPaint();
-        _paintSessionRevision = _boardSession.Revision;
+        _paintSessionRevision = _boardSession.NavigationRevision;
         _paintPreviousScreen = _boardSession.Screen;
         if (_boardSession.Screen == BoardScreen.Paint) SchedulePaintIntroduction();
     }

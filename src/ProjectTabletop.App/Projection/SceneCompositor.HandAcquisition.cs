@@ -167,11 +167,13 @@ public sealed partial class SceneCompositor
         }
     }
 
-    // Keep Football acquisition restricted even when every control is hidden:
-    // fingertips search the calibrated pitch; marker-only play searches no regions.
-    // A null context would instead permit the normal full-camera hand search.
-    private bool AcquisitionBoardReady => !_disposed && CurrentBoardArtworkReady && !_boardSession.MenuScrolling &&
-        (_boardSession.Buttons.Count > 0 || _boardSession.Screen is BoardScreen.Football or BoardScreen.StrykersRun) &&
+    // Hidden controls must not fall back to full-camera hand acquisition.
+    // Football retains its independent fingertip pitch-search policy.
+    private bool AcquisitionBoardReady => MappedBoardInputReady &&
+        (_boardSession.Buttons.Count > 0 || !_boardSession.ButtonsVisible ||
+            _boardSession.Screen is BoardScreen.Football or BoardScreen.StrykersRun);
+
+    private bool MappedBoardInputReady => !_disposed && CurrentBoardArtworkReady && !_boardSession.MenuScrolling &&
         (_boardSession.Screen is not (BoardScreen.Menu or BoardScreen.Settings) || _menuPreviewReady) &&
         !_blackOutput && !_boardSetup && !IsBoardRevealActive && _calibrationTarget < 0 &&
         _boardMediaClip is not null && _boardCameraMap is not null && _boardSurfaceMap is not null;

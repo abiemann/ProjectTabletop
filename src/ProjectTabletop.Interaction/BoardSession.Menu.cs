@@ -41,7 +41,7 @@ public sealed partial class BoardSession
     /// <summary>All launcher cards for drawing inside MenuCardViewport, including moving, clipped cards.
     /// Use Buttons for input; partially visible or moving cards are never targets.</summary>
     public IReadOnlyList<BoardButton> GetMenuCards(DateTimeOffset now) =>
-        MenuCards.Select(button => MoveMenuCard(button, GetMenuScrollOffset(now), !MenuScrolling)).ToArray();
+        !ButtonsVisible ? [] : MenuCards.Select(button => MoveMenuCard(button, GetMenuScrollOffset(now), !MenuScrolling)).ToArray();
 
     public bool TickMenu(DateTimeOffset now) => AdvanceMenuScroll(now);
 
@@ -53,7 +53,7 @@ public sealed partial class BoardSession
                 button.Bounds.Y + button.Bounds.Height <= MenuCardViewport.Y + MenuCardViewport.Height).ToList();
         buttons.Add(new("settings", "Settings", SettingsCogBounds, BoardScreen.Settings, Enabled: !MenuScrolling));
         buttons.Add(new(_menuScrolled ? "menu-scroll-up" : "menu-scroll-down", _menuScrolled ? "^" : "v",
-            MenuScrollButtonBounds, BoardScreen.Menu, Enabled: !MenuScrolling));
+            MenuScrollButtonBounds, BoardScreen.Menu, Enabled: !MenuScrolling, Hold: BoardButtonHold.Once));
         return buttons.AsReadOnly();
     }
 
@@ -90,6 +90,9 @@ public sealed partial class BoardSession
         _ignoreFramesThrough = Later(_ignoreFramesThrough, now);
         HoveredButtonIds = Array.Empty<string>();
         InvalidateFingerSelection(now);
+        // The replacement arrow must be seen clear after the slide. Preserve
+        // spent places so fingers left on the control cannot reverse the page.
+        ResetHoldCaptionEvidence();
     }
 
     private void ClearMenuScroll(DateTimeOffset now)
