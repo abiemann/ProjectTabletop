@@ -10,6 +10,7 @@ internal static class StrykersRunCampaignRegression
     {
         CheckMinuteBoundary();
         CheckBossEntrance();
+        CheckBarrelThrowPresentation();
         CheckBarrelFuse();
         CheckCommanderWaves();
         CheckLightningAndDodging();
@@ -20,7 +21,7 @@ internal static class StrykersRunCampaignRegression
         CheckBossBalanceAndBounds();
         CheckPlayableBossFights();
         Console.WriteLine("Stryker's five-level campaign passed: exact active minutes, pausable three-second boss entrances, stationary arenas, " +
-            "three-second barrel fuses, commanded minions, dodgeable lightning, fungal transformation and poison, " +
+            "pausable barrel windup/release/recovery, three-second barrel fuses, commanded minions, dodgeable lightning, fungal transformation and poison, " +
             "separate giant legs and warning stomps, survivor carryover, victory/reset, input pauses and bounded hazards.");
     }
 
@@ -69,7 +70,7 @@ internal static class StrykersRunCampaignRegression
             Invalidate(game);
             var start = game.Snapshot;
             Require(start.Stage == StrykersRunStage.BossEntrance && start.StageSeconds == 0 &&
-                start.Boss is { EntranceProgress: 0, Y: StrykersRunGame.BossEntranceStartY } &&
+                start.Boss is { EntranceProgress: 0, Y: StrykersRunGame.BossEntranceStartY, BarrelThrowProgress: -1 } &&
                 start.Boss.Value.Kind == (StrykersRunBossKind)(level - 1),
                 "Each distinct boss must begin above the arena rather than appear at its combat position.");
 
@@ -91,7 +92,7 @@ internal static class StrykersRunCampaignRegression
                 fixture.OneStep();
                 var state = game.Snapshot;
                 Require(state.Stage == StrykersRunStage.BossEntrance && state.StageSeconds == tick / 120f &&
-                    state.Boss is { PhaseSeconds: 0, AttackSeconds: 0 } boss &&
+                    state.Boss is { PhaseSeconds: 0, AttackSeconds: 0, BarrelThrowProgress: -1 } boss &&
                     boss.EntranceProgress == tick / 360f && boss.Y > previousY && boss.Y < StrykersRunGame.BossY &&
                     boss.Health == boss.MaxHealth && state.SoldierCount == 13 && state.Ally is { Health: 7 } &&
                     state.Distance == start.Distance && state.LevelSeconds == 60 && state.Bullets.Count == 0 &&
@@ -131,6 +132,85 @@ internal static class StrykersRunCampaignRegression
         Require(reset.Game.Snapshot is { Phase: StrykersRunPhase.Ready, Stage: StrykersRunStage.Running,
             Level: 1, StageSeconds: 0, Boss: null, SoldierCount: 1 },
             "Reset during an entrance must clear the arriving boss and its progress.");
+    }
+
+    private static void CheckBarrelThrowPresentation()
+    {
+        var fixture = new Fixture(1, 20);
+        var game = fixture.Game;
+        Require(game.Snapshot.Boss is { BarrelThrowProgress: -1 },
+            "A newly arrived warden must stay idle until the first windup, rather than play a spurious recovery.");
+        for (int tick = 1; tick < 144; tick++)
+        {
+            fixture.OneStep();
+            float expected = tick < 78 ? -1 : (tick - 78) / 120f;
+            Require(game.Snapshot.Boss!.Value.BarrelThrowProgress == expected && game.Snapshot.Hazards.Count == 0,
+                "The first windup must begin 66 active ticks before the unchanged 144-tick first release.");
+            if (tick == 100) CheckFrozenThrow(fixture);
+        }
+        // Aim is sampled at release, not at the beginning of the windup.
+        Put(game, "_squadX", .72f); Put(game, "_targetX", .72f);
+        fixture.OneStep();
+        var barrel = game.Snapshot.Hazards.Single();
+        Require(game.Snapshot.Boss!.Value.BarrelThrowProgress == StrykersRunGame.BarrelThrowReleaseProgress &&
+            barrel is { Kind: StrykersRunHazardKind.Barrel, Age: 0, Duration: 3 } &&
+            barrel.X == game.Snapshot.SquadX && barrel.TargetX == barrel.X && Math.Abs(barrel.X - .72f) < .00001f,
+            "The release pose must coincide with a new barrel, its locked lane and the start of its three-second fuse.");
+        Put(game, "_targetX", .15f);
+        for (int tick = 1; tick <= 54; tick++)
+        {
+            fixture.OneStep();
+            var state = game.Snapshot;
+            Require(state.Boss!.Value.BarrelThrowProgress == (66 + tick) / 120f &&
+                state.Hazards.Single() is { Kind: StrykersRunHazardKind.Barrel } rolling &&
+                rolling.Age == tick / 120f && rolling.X == barrel.X,
+                "Recovery must progress with the rolling barrel, retaining the release lane and fuse clock.");
+            if (tick == 17) CheckFrozenThrow(fixture);
+        }
+        for (int tick = 55; tick < 276; tick++)
+        {
+            fixture.OneStep();
+            float expected = tick < 210 ? -1 : (tick - 210) / 120f;
+            Require(game.Snapshot.Boss!.Value.BarrelThrowProgress == expected && game.Snapshot.Hazards.Count == 1,
+                "The warden must return to idle, then wind up before the unchanged 276-tick repeat release.");
+        }
+        fixture.OneStep();
+        var second = game.Snapshot.Hazards.Single(hazard => hazard.Id != barrel.Id);
+        Require(game.Snapshot.Boss!.Value.BarrelThrowProgress == StrykersRunGame.BarrelThrowReleaseProgress &&
+            game.Snapshot.Hazards.Count == 2 && second.Age == 0 &&
+            game.Snapshot.Hazards.Single(hazard => hazard.Id == barrel.Id).Age == 276 / 120f,
+            "The second release must occur after exactly 2.3 active seconds without resetting the first barrel's fuse.");
+        for (int tick = 277; tick < 360; tick++) fixture.OneStep();
+        Require(game.Snapshot.Hazards.Single(hazard => hazard.Id == barrel.Id) is
+            { Kind: StrykersRunHazardKind.Barrel, Age: < 3 }, "Throw presentation shortened the barrel fuse.");
+        fixture.OneStep();
+        Require(game.Snapshot.Hazards.Single(hazard => hazard.Id == barrel.Id) is
+            { Kind: StrykersRunHazardKind.BarrelBlast, Age: 0 },
+            "Throw presentation must preserve the explosion exactly 360 active ticks after release.");
+        game.Reset(Epoch.AddMilliseconds(fixture.Milliseconds + 1));
+        Require(game.Snapshot.Boss is null && game.Snapshot.Hazards.Count == 0,
+            "Reset must discard an ongoing throw and every released barrel.");
+        for (int level = 2; level <= StrykersRunGame.LevelCount; level++)
+        {
+            var other = new Fixture(level, 20);
+            other.Attack();
+            Require(other.Game.Snapshot.Boss is { BarrelThrowProgress: -1 },
+                "Other bosses must never expose the warden's throwing pose.");
+        }
+    }
+
+    private static void CheckFrozenThrow(Fixture fixture)
+    {
+        var game = fixture.Game;
+        game.ClearInput(Epoch.AddMilliseconds(fixture.Milliseconds + 1));
+        var frozen = game.Snapshot;
+        fixture.Milliseconds += 1000;
+        game.Advance(Epoch.AddMilliseconds(fixture.Milliseconds));
+        Require(game.Phase == StrykersRunPhase.WaitingForInput && SameCampaign(frozen, game.Snapshot),
+            "Lifting the finger must freeze the throw pose and all barrel clocks.");
+        fixture.OneStep();
+        Require(game.Phase == StrykersRunPhase.Playing && SameCampaign(frozen, game.Snapshot),
+            "Resuming a throw must preserve the exact pose without replaying paused time.");
     }
 
     private static void CheckBarrelFuse()

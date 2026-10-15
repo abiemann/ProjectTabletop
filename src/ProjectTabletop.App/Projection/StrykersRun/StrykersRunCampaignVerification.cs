@@ -7,7 +7,8 @@ namespace ProjectTabletop.App.Projection.StrykersRun;
 
 internal sealed record StrykersRunCampaignRenderResult(string[] Images, int RenderedFrames,
     bool DistinctBosses, bool AttackWarnings, bool SkinTransformation, bool BossHealth,
-    bool Victory, bool RailProtected);
+    bool Victory, bool RailProtected, bool ArticulatedThrow, bool BarrelRelease,
+    bool AnimatedFlames, bool PausedAttacks);
 
 /// <summary>Native offscreen fixtures, also callable without constructing an app window or camera.</summary>
 internal static class StrykersRunCampaignVerification
@@ -42,6 +43,7 @@ internal static class StrykersRunCampaignVerification
         }
 
         var barrel = baseline with { Boss = Boss(StrykersRunBossKind.BarrelWarden) };
+        await CheckBarrelThrow(barrel);
         await Capture(barrel with { Hazards = [Hazard(StrykersRunHazardKind.Barrel, .38f, .32f, .38f, .78f, .12f, 0, 3, .065f)] }, "barrel-in-flight");
         await Capture(barrel with { Hazards = [Hazard(StrykersRunHazardKind.Barrel, .5f, .45f, .5f, .78f, .94f, 0, 3, .065f)] }, "barrel-rolling");
         await Capture(barrel with { Hazards = [Hazard(StrykersRunHazardKind.Barrel, .5f, .75f, .5f, .78f, 2.82f, 0, 3, .065f)] }, "barrel-fuse-ending");
@@ -113,7 +115,70 @@ internal static class StrykersRunCampaignVerification
         Require(Changed(plainBarrel!, won, new(0, 230, 900, 1000)) > 2000, "Victory did not receive its own presentation.");
         await Capture(baseline with { Level = 1, LevelSeconds = 60, Stage = StrykersRunStage.Intermission,
             StageSeconds = .8f, Banner = "LEVEL 1 CLEAR · survivors advance" }, "level-clear");
-        return new(images.ToArray(), frames, true, true, true, true, true, true);
+        return new(images.ToArray(), frames, true, true, true, true, true, true, true, true, true, true);
+
+        async Task CheckBarrelThrow(StrykersRunSnapshot standing)
+        {
+            byte[] idle = Draw(standing);
+            byte[]? previous = null;
+            var arms = new Rect(265, 230, 370, 230);
+            var protectedHud = new Rect(0, 0, 900, 214);
+            float release = StrykersRunGame.BarrelThrowReleaseProgress;
+            for (int frame = 0; frame < 8; frame++)
+            {
+                float progress = frame < 4 ? (frame + .25f) / 4 * release
+                    : release + (frame - 4 + .25f) / 4 * (1 - release);
+                var state = standing with { Boss = standing.Boss!.Value with { BarrelThrowProgress = progress } };
+                byte[] pose = await Capture(state, $"warden-throw-{frame:00}");
+                if (previous is not null)
+                    Require(Changed(previous, pose, arms) > 350,
+                        "The Warden's next throw pose did not visibly articulate the arms.");
+                Require(Changed(idle, pose, protectedHud) == 0,
+                    "The throwing arms or held barrel obscured the stationary boss HUD.");
+                previous = pose;
+            }
+
+            var released = standing with { Boss = standing.Boss!.Value with { BarrelThrowProgress = release } };
+            var projectile = Hazard(StrykersRunHazardKind.Barrel, .18f, StrykersRunGame.BossY,
+                .18f, StrykersRunGame.SquadY, 0, 0, 3, .065f);
+            byte[] leftRelease = await Capture(released with { Hazards = [projectile] }, "warden-release-left");
+            byte[] rightRelease = await Capture(released with { Hazards = [projectile with { X = .82f, TargetX = .82f }] },
+                "warden-release-right");
+            Require(Changed(leftRelease, rightRelease, new(0, 0, 900, 1600)) == 0,
+                "A newly thrown barrel teleported to the aimed lane instead of leaving the Warden's hands.");
+            Require(Changed(Draw(released), leftRelease, arms) > 250,
+                "The released barrel was not visible at the Warden's hands.");
+            Require(Changed(idle, leftRelease, protectedHud) == 0,
+                "The released barrel or flames obscured the stationary boss HUD.");
+            await Capture(standing with { Boss = standing.Boss!.Value with { BarrelThrowProgress = release - .001f } },
+                "warden-last-held-barrel");
+            foreach (float age in new[] { .08f, .18f })
+                await Capture(standing with
+                {
+                    Boss = standing.Boss!.Value with { BarrelThrowProgress = release + age },
+                    Hazards = [projectile with { Age = age,
+                        Y = StrykersRunGame.BossY + (StrykersRunGame.SquadY - StrykersRunGame.BossY) * age / 2.35f }]
+                }, $"warden-release-{(int)(age * 100):000}");
+
+            var rolling = projectile with { X = .5f, TargetX = .5f, Y = .53f, Age = .65f };
+            byte[]? previousFlame = null;
+            for (int frame = 0; frame < 8; frame++)
+            {
+                byte[] flame = await Capture(standing with { Hazards = [rolling with { Age = rolling.Age + frame / 13f }] },
+                    $"barrel-flames-{frame:00}");
+                if (previousFlame is not null)
+                    Require(Changed(previousFlame, flame, new(340, 650, 220, 220)) > 250,
+                        "The burning barrel's flame silhouettes did not evolve.");
+                Require(Changed(idle, flame, protectedHud) == 0,
+                    "The barrel flame loop obscured the stationary boss HUD.");
+                previousFlame = flame;
+            }
+
+            var paused = released with { Phase = StrykersRunPhase.WaitingForInput, Hazards = [rolling] };
+            byte[] pauseBefore = Draw(paused, 13), pauseAfter = Draw(paused, 42);
+            Require(Changed(pauseBefore, pauseAfter, new(265, 230, 370, 670)) == 0,
+                "The Warden's arms, projectile or flames advanced while the simulation was paused.");
+        }
 
         async Task CheckEntrance(StrykersRunSnapshot standing)
         {
@@ -157,12 +222,12 @@ internal static class StrykersRunCampaignVerification
             }
         }
 
-        byte[] Draw(StrykersRunSnapshot state)
+        byte[] Draw(StrykersRunSnapshot state, double elapsedSeconds = 13)
         {
             using (var drawing = target.CreateDrawingSession())
             {
                 drawing.Clear(Windows.UI.Color.FromArgb(255, 0, 0, 0));
-                renderer.Draw(drawing, new(0, 0, 900, 1600), state, 13);
+                renderer.Draw(drawing, new(0, 0, 900, 1600), state, elapsedSeconds);
             }
             frames++;
             var pixels = target.GetPixelBytes();

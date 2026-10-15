@@ -24,8 +24,11 @@ internal sealed partial class StrykersRunRenderer : IDisposable
     private readonly Rect[] _allyCells = new Rect[4];
     private readonly Rect[] _bossCells = new Rect[6];
     private readonly Rect[] _bossWalkCells = new Rect[16];
+    private readonly Rect[] _bossThrowCells = new Rect[8];
     private readonly Rect[] _barrelCells = new Rect[4];
+    private readonly Rect[] _barrelFlameCells = new Rect[8];
     private readonly Rect[] _explosionCells = new Rect[8];
+    private CanvasBitmap? _bossThrow, _barrels, _barrelFlames;
     private float _barrelFrameHeight;
     private readonly Dictionary<(StrykersRunGateKind, int), string> _gateLabels = new();
     private readonly CanvasTextFormat _title = TextFormat(51);
@@ -52,7 +55,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             if (_loading is null)
             {
                 _images = new(_device, Path.Combine(AppContext.BaseDirectory, "Assets", "StrykersRun"),
-                    ["actors.png", "hero.png", "ally.png", "bosses.png", "boss-walk.png", "barrels.png", "explosion.png", "road.png", "game-over-wall.png"]);
+                    ["actors.png", "hero.png", "ally.png", "bosses.png", "boss-walk.png", "boss-throw.png", "barrels.png", "barrel-flames.png", "explosion.png", "road.png", "game-over-wall.png"]);
                 _loading = LoadAsync(_images);
                 _ = _loading.ContinueWith(task => _ = task.Exception, CancellationToken.None,
                     TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
@@ -67,7 +70,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
         lock (_resourceGate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            foreach (string file in new[] { "actors.png", "hero.png", "ally.png", "bosses.png", "boss-walk.png", "barrels.png", "explosion.png", "road.png", "game-over-wall.png" })
+            foreach (string file in new[] { "actors.png", "hero.png", "ally.png", "bosses.png", "boss-walk.png", "boss-throw.png", "barrels.png", "barrel-flames.png", "explosion.png", "road.png", "game-over-wall.png" })
                 if (images.Image(file) is null)
                     throw new InvalidDataException("Stryker's Run artwork: " + file + ": " +
                         images.Errors.GetValueOrDefault(file, "not loaded"));
@@ -80,20 +83,19 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             FindSpriteCells(images.Image("ally.png")!, 1, _allyCells);
             FindSpriteCells(images.Image("bosses.png")!, 2, _bossCells, 3, sharedVerticalBounds: false);
             FindSpriteCells(images.Image("boss-walk.png")!, 4, _bossWalkCells);
-            FindSpriteCells(images.Image("barrels.png")!, 2, _barrelCells, 2);
+            _bossThrow = images.Image("boss-throw.png")!;
+            _barrels = images.Image("barrels.png")!;
+            _barrelFlames = images.Image("barrel-flames.png")!;
+            if (_bossThrow.SizeInPixels.Width != 1774 || _bossThrow.SizeInPixels.Height != 887)
+                throw new InvalidDataException("The Warden throw atlas must match its measured 1774 x 887 pose anchors.");
+            FindUniformCells(_bossThrow, _bossThrowCells);
+            FindUniformCells(_barrelFlames, _barrelFlameCells);
+            FindSpriteCells(_barrels, 2, _barrelCells, 2);
             foreach (var cell in _barrelCells)
                 _barrelFrameHeight = Math.Max(_barrelFrameHeight, (float)cell.Height);
             // Keep full cells and a common pivot: cropping each blast phase to
             // its ink would enlarge ignition and make the fireball jump around.
-            var explosionSize = images.Image("explosion.png")!.SizeInPixels;
-            for (int frame = 0; frame < _explosionCells.Length; frame++)
-            {
-                int column = frame % 4, row = frame / 4;
-                int left = column * (int)explosionSize.Width / 4, top = row * (int)explosionSize.Height / 2;
-                _explosionCells[frame] = new(left, top,
-                    (column + 1) * (int)explosionSize.Width / 4 - left,
-                    (row + 1) * (int)explosionSize.Height / 2 - top);
-            }
+            FindUniformCells(images.Image("explosion.png")!, _explosionCells);
             _road.Sources[0] = images.Image("road.png")!;
             _particles = CreateParticles();
             _ready = true;
@@ -381,6 +383,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             _ready = false;
             _images?.Dispose();
             _images = null;
+            _bossThrow = _barrels = _barrelFlames = null;
             _particles?.Dispose();
             _particles = null;
             _road.Dispose();

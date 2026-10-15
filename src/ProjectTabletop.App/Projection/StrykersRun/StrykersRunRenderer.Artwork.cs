@@ -5,6 +5,18 @@ namespace ProjectTabletop.App.Projection.StrykersRun;
 
 internal sealed partial class StrykersRunRenderer
 {
+    private static void FindUniformCells(CanvasBitmap bitmap, Rect[] cells)
+    {
+        int width = (int)bitmap.SizeInPixels.Width, height = (int)bitmap.SizeInPixels.Height;
+        for (int frame = 0; frame < cells.Length; frame++)
+        {
+            int column = frame % 4, row = frame / 4;
+            int left = column * width / 4, top = row * height / 2;
+            cells[frame] = new(left, top, (column + 1) * width / 4 - left,
+                (row + 1) * height / 2 - top);
+        }
+    }
+
     private static void FindSpriteCells(CanvasBitmap bitmap, int rows, Rect[] cells, int columns = 4,
         bool sharedVerticalBounds = true)
     {

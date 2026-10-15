@@ -271,3 +271,61 @@ Edit this16sprite boss walking atlas as a technical spacing and alpha cleanup on
 Make EACH sprite substantially smaller inside its own existing equal cell: reduce to75percent of its CURRENT size, keep common scale within each row, place its feet at82percent of its cellheight. There must be at least35pixels of EMPTY transparent space on every side of each sprite INCLUDING soles, flame tips, claws and lightning. No character may touch a row boundary. The commander boots currently nearly touch the next row; move them well clear. Keep all4rows and4columns.
 Remove all unwanted alpha1 film and isolated alpha2 residue from emptybackground, borders and gutters. Actual source has57456alpha1pixels. Every empty exterior pixel must have alpha exactly0, preserve clean immediate antialiased silhouette edges. Keep lightning as thin close arcs only, no broad glows. No checkerboard, background, matte, shadow, floor, text or new imagery.
 ```
+
+## Barrel Warden throw and travelling fire: exact prompts, 2026-10-15
+
+Both sheets were generated with the built-in image-generation tool and 	ransparent_background: true. The Warden references were osses.png and oss-walk.png; the flame reference was arrels.png. Each sheet had two subsequent edits. The user explicitly authorized alpha-1-only cleanup after these attempts; see [ARTWORK.md](ARTWORK.md).
+
+### Throw poses
+
+```text
+Use case: stylized-concept. Asset type: production-ready transparent animation sprite atlas for an arcade game.
+Input image 1 (bosses.png) is the identity and high-quality painting reference: use ONLY the top-left Barrel Warden character. Input image 2 (boss-walk.png) is the reference for slightly elevated front camera and identity.
+Create ONE new sprite sheet, exactly eight full-body images of this same massive bald gray zombie in mustard-yellow industrial bib overalls and heavy scuffed boots, carrying and throwing his chipped red steel burning drum. Match his face, bulky exposed scarred arms, costume, barrel shape, textures, and rich hand-painted arcade lighting. Keep the hard-edged high detail and mature illustrated look, not smooth plastic and not primitive.
+Layout: 2048×1024 PNG, 4 columns × 2 rows of 512×512 equal cells. Read left to right across top then bottom. Every pose shares the same body scale, center x=256 within its cell, feet on y=455 baseline. Keep at least 35 fully transparent pixels between all art and every cell edge, including fingertips, fire and boots. Full figure with no clipping. No contact shadow.
+The animation is an articulated two-handed throw toward the player, who views the boss from a slightly elevated frontal camera:
+Frame 0: ready stance, burning barrel on his right shoulder (viewer left), right hand supports it, other arm low.
+Frame 1: anticipation, both hands grip barrel, elbows bend, shoulders twist back, torso gathers force.
+Frame 2: hoist barrel up and behind the head, both arms bent raised, chest stretches, knees flex.
+Frame 3: forceful forward swing, barrel still held by both hands forward above chest, shoulders and elbows visibly rotate.
+Frame 4: exact release, both hands now EMPTY with fingers spread, arms reaching forward, barrel is ABSENT from this cell, NO detached projectile.
+Frame 5: follow-through, EMPTY hands and arms swing down, torso leans forward, NO barrel.
+Frame 6: recovery, empty arms return toward torso, torso straightens, NO barrel.
+Frame 7: return to ready with a NEW red burning barrel lifted back to the same shoulder position as frame 0.
+Make shoulder and elbow motion anatomically connected and genuinely different for each keyframe. Maintain recognizable same individual, costume and proportions. The player separately renders the flying projectile, so do not paint any airborne barrel in frames 4–6.
+Transparency requirements: genuinely transparent RGBA background. Every exterior pixel and all grid gutters must have alpha exactly zero, not almost-transparent residue. Clean antialiased silhouette only. No backdrops, no ground plane, no shadow, no matte, no opaque checkerboard, no outlines of cells, no text, no labels, no broad colored glow. Fire attached to carried barrel only, sharply shaped yellow/orange tongues entirely within cell.
+```
+
+### Throw pose spacing
+
+```text
+Edit ONLY the framing, spacing and transparent background of this existing eight-pose Barrel Warden sprite atlas. Preserve the exact art identity, costume, barrel details, textures and pose sequence.
+Output must have 4 columns by 2 rows in equal cells, 2048 pixels wide and 1024 tall if possible. Each cell MUST have at least 50 fully transparent pixels on all four edges. Shrink every entire character and its flames to fit safely. All eight feet must align to a common cell-local baseline at 85% of cell height, and body scale must be identical across frames. Complete the clipped orange flame above the overhead barrel in top row third cell. Never clip a boot, hand, flame, or any part.
+Keep poses exactly as existing: shoulder ready; grip windup; overhead hoist; forward swing still holding barrel; release empty hands; follow-through empty hands; empty recovery; new barrel ready. No detached flying barrels.
+Genuinely transparent RGBA: every exterior, margin, and gutter pixel alpha exactly 0, not alpha1, with clean antialiased silhouettes only. No broad glow, no shadows, no grey matte, no checkerboard, no text, no grid. This is a strict padding/placement correction, not a new design.
+```
+
+### Throw pose transparency
+
+```text
+Production correction to this eight-pose character animation sheet. Keep the eight character drawings, identities, sequence and rendering quality. The current figures are TOO LARGE for the cells and the top flame nearly touches canvas edge. Reduce EVERY drawing to 65% of its current size, including flames. Center each drawing in its own equal cell, align lowest boot of every pose at 80% cell height. Maintain 4 equal columns and 2 equal rows. Leave broad EMPTY TRANSPARENT padding, at least 80 pixels on EVERY cell edge. Do not try to fill the available canvas with art. The sheet must look deliberately spacious. The overhead barrel flame in top-row column 3 must be short and fully inside its cell.
+Most important technical correction: absolutely all empty background pixels must have alpha=0. Remove the approximately 34,444 spurious background pixels with alpha1. Corners, outermost 60-pixel border, and internal row/column gutters must be entirely RGBA alpha0. Keep smooth antialiasing directly on silhouette edges only. No semi-transparent noise, no fog, no shadows, no matte, no colored halo, no checkerboard. Keep the original eight highly detailed arcade character poses. Final sheet 4 columns×2 rows.
+```
+
+### Flame sequence
+
+```text
+Use case: stylized-concept. Asset type: production animated flame sprite atlas for the burning red barrel in an elevated-camera arcade road shooter. Input image is a STYLE and material reference ONLY: keep its premium realistic hand-painted arcade lighting, but draw NO barrels and NO solid objects in the output. Generate exactly EIGHT distinct consecutive animation frames, arranged in an exact regular grid of FOUR columns by TWO rows. Landscape canvas, equal square cells if possible. Each frame is a small fierce turbulent orange/yellow fire plume rising from a broad curved base at the BOTTOM CENTER, sized to engulf a rolling steel drum from behind. Detailed physically believable twisting flame sheets, forked licking tongues, yellow-white hot cores transitioning through rich orange to sparse dark red edges; natural negative gaps between tongues, tiny sparse embers, just a trace of curling soot at tips. Attractive high-end arcade VFX, sharp readable complex flame silhouettes, convincing three-dimensional folds, no flat teardrops, no soft blurred oval glow. All eight frames show an evolving continuous LOOP: flame tongues stretch, curl, split and reform, changing asymmetrically while the base stays planted at exactly the same coordinate; frame8 flows naturally into frame1. Keep consistent overall scale and comparable energy across all frames. Every frame has its entire flame, soot and sparks wholly INSIDE its own cell with at least 35px genuinely empty margin on each edge; isolated frames, no shared glow or bridges. IMPORTANT: real transparent RGBA PNG. Every exterior background pixel, cell gutter and border MUST be alpha exactly ZERO, not alpha1. No checkerboard in image pixels, no black/grey/colored backdrop, no ambient ground shadow, no matte, no rectangular haze, no vignette, no text, labels, numbers, UI or watermark. Natural antialiased flame edges only. Fire remains bright and richly textured on a dark asphalt game background.
+```
+
+### Flame spacing and transparency
+
+```text
+Use case: background-extraction. Edit target: the provided eight-frame flame atlas. Keep exactly these eight rich detailed orange-yellow flames and their evolving shapes in a regular four-column two-row grid, keep each source pixel of visible fire as closely as possible. Remove ALL the orange-brown background glow, matte and backdrop. No background gradient or haze anywhere. Output real RGBA transparency, every exterior pixel and every gutter pixel alpha exactly 0, including any nearly invisible alpha1 residue. Flame edges should be naturally antialiased, genuine semitransparent flame only, with empty transparent negative gaps. Do NOT paint a checkerboard. Keep full plume and sparks inside each cell; shrink within cells slightly if needed so all four cell edges have at least 32 pixels fully transparent padding. Maintain the same 1536x1024 canvas, 4 by 2 frame layout, common centered base and consistent scale. No text, labels, frame borders or new objects.
+```
+
+### Flame transparency cleanup
+
+```text
+Use case: background-extraction. Production sprite alpha cleanup only. Input is an eight-frame fire atlas: keep all eight fire shapes, colors, texture, grid arrangement and scale unchanged. Eliminate the entire brown-orange backdrop and diffuse glow; deliver isolated flame tongues and sparse sparks on truly empty RGBA background. Background alpha must equal ZERO everywhere outside actual flame/sparks, including alpha1 residue. No broad semitransparent atmosphere or rectangular fog anywhere. Retain fine antialiased edges only immediately along real fire contours. Keep transparent holes between tongues. Four columns, two rows, 1536x1024, each flame entirely within its cell. No checkerboard, labels, borders, shadows or matte.
+```

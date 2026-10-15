@@ -250,3 +250,52 @@ the giant's alternating foot placement. The complete headless Interaction
 verifier passed, including all five entrance regressions and ten steering-only
 boss victories. All 300 tests passed through the xUnit in-process runner.
 The running app and webcam were not restarted.
+
+## Articulated barrel throw and travelling flames
+
+`boss-throw.png` adds eight painted Barrel Warden poses derived from the
+existing boss and walking artwork. The sequence grips, hoists and swings the
+barrel, releases with empty hands, follows through and returns to carrying
+another barrel. It retains the bald gray zombie, mustard workwear, boots and
+detailed red steel drum. The renderer measures each pose against a common
+body scale and fixed boot anchor rather than shrinking raised arms to fit.
+The last held barrel's center and height anchor the projectile at release.
+The original boss and walking atlases remain unchanged.
+
+`barrel-flames.png` provides eight turbulent fire frames derived from the
+painted barrel's style. These replace the elongated glow sprites with forked
+flame sheets, hot cores and irregular orange edges. Neighboring fire frames
+blend at a fixed base behind the drum; smaller independently phased curls
+overlap its rims, leaving the metal readable. Six bounded embers accompany
+the flames. Cached textures and frame rectangles avoid per-frame image reads
+or new managed collections. The flame and throw clocks pause with gameplay.
+
+Both sheets used three built-in image-generation calls with real transparency
+requested. After the tool retained nearly invisible background residue, the
+user explicitly authorized setting only alpha-1 pixels to zero. Exact pixel
+comparison verified that every RGB value and every other alpha value was
+preserved. Both final files are RGBA PNGs with fully transparent outer edges,
+corners and cell gutters, no alpha-1 residue and no baked checkerboard.
+
+| Asset | Dimensions / layout | Alpha-1 pixels cleared | SHA-256 |
+| --- | --- | ---: | --- |
+| `boss-throw.png` | 1774 × 887; 4 columns × 2 rows | 27,428 | `a81ac1877a2d88ad868ea2d14ece78089143aee409a6a1d2d33deeb1176a1d75` |
+| `barrel-flames.png` | 1536 × 1024; 4 columns × 2 rows | 103,433 | `cea4e57c1fab6373aed2ef7fa6b8df649b40cc4a5d8d29ad1b1de7bba6b42833` |
+
+The throwing sequence uses 0.55 active seconds before release and 0.45 after.
+The existing first attack, repeat interval, locked lane, damage and three-second
+fuse are unchanged. The short airborne path now starts at the held barrel.
+Road projection, boss entrance, explosion artwork, HUD and dotted input strip
+are preserved. Exact generation and edit prompts appear in [PROMPTS.md](PROMPTS.md).
+
+The final Debug x64 build passed with zero warnings and errors. All four
+focused Stryker's Run test groups passed, including tick-by-tick throw timing,
+release-lane locking and windup/recovery pauses. The camera-free native fixture
+passed 102 draws and saved 72 inspection images. Its checks cover distinct
+throw poses, lane-independent release from the hands, evolving flames, paused
+attack pixels, all five boss entrances and protected HUD/input regions. Visual
+review matched the last held barrel to the released projectile and confirmed
+compact fire at release grows over 0.25 seconds without covering the face.
+A separate four-second native preview contains 120 frames at a 30 fps capture
+cadence; this is an animation inspection, not a displayed-frame-rate measurement.
+The running app and webcam were left untouched; live acceptance remains pending.

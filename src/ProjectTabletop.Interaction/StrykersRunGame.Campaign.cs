@@ -11,6 +11,8 @@ public readonly record struct StrykersRunBossSnapshot(StrykersRunBossKind Kind, 
     float AnimationPhase, int LeftLegHealth, int RightLegHealth)
 {
     public float EntranceProgress { get; init; } = 1;
+    // Negative while idle; otherwise one complete windup, release and recovery.
+    public float BarrelThrowProgress { get; init; } = -1;
 }
 public readonly record struct StrykersRunHazardSnapshot(int Id, StrykersRunHazardKind Kind,
     float X, float Y, float TargetX, float TargetY, float Age, float WarningSeconds, float Duration, float Radius)
@@ -26,7 +28,11 @@ public sealed partial class StrykersRunGame
     public const float BossX = .5f, BossY = .30f;
     public const float BossLeftLegX = .32f, BossRightLegX = .68f, BossLegY = .36f;
     public const float SkinTransformationSeconds = 1.1f;
+    public const float BarrelThrowWindupSeconds = .55f, BarrelThrowRecoverySeconds = .45f;
+    public const float BarrelThrowReleaseProgress = BarrelThrowWindupSeconds /
+        (BarrelThrowWindupSeconds + BarrelThrowRecoverySeconds);
     private const int LevelTicks = 60 * 120, IntermissionTicks = 2 * 120, BossEntranceTicks = 3 * 120;
+    private const int BarrelThrowWindupTicks = 66, BarrelThrowRecoveryTicks = 54;
     private readonly List<Hazard> _hazards = new(MaximumHazards);
     private StrykersRunStage _stage;
     private int _level = 1, _levelTicks, _stageTicks;
@@ -340,7 +346,21 @@ public sealed partial class StrykersRunGame
         float entrance = _stage == StrykersRunStage.BossEntrance ? _stageTicks / (float)BossEntranceTicks : 1;
         return new(boss.Kind, BossX, BossEntranceStartY + (BossY - BossEntranceStartY) * entrance,
             boss.Health, boss.MaxHealth, boss.Phase, boss.PhaseTicks / 120f, boss.AttackTicks / 120f,
-            _stageTicks / 120f % 1, boss.LeftLegHealth, boss.RightLegHealth) { EntranceProgress = entrance };
+            _stageTicks / 120f % 1, boss.LeftLegHealth, boss.RightLegHealth)
+        { EntranceProgress = entrance, BarrelThrowProgress = GetBarrelThrowProgress(boss) };
+    }
+
+    private float GetBarrelThrowProgress(Boss boss)
+    {
+        if (_stage != StrykersRunStage.Boss || boss.Kind != StrykersRunBossKind.BarrelWarden) return -1;
+        const float totalTicks = BarrelThrowWindupTicks + BarrelThrowRecoveryTicks;
+        if (boss.AttackRemaining is > 0 and <= BarrelThrowWindupTicks)
+            return (BarrelThrowWindupTicks - boss.AttackRemaining) / totalTicks;
+        // Before the first release both counters advance together. Only a real
+        // attack resets AttackTicks, so arrival cannot masquerade as recovery.
+        if (boss.AttackTicks < boss.PhaseTicks && boss.AttackTicks <= BarrelThrowRecoveryTicks)
+            return (BarrelThrowWindupTicks + boss.AttackTicks) / totalTicks;
+        return -1;
     }
 
     private string CampaignBanner() => _stage switch

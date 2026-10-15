@@ -134,7 +134,12 @@ internal sealed partial class StrykersRunRenderer
                     size, 0, step * .018f * walking, walking);
             }
             if (walking < 1)
-                DrawBossPose(batch, _images!.Image("bosses.png")!, source, point, size, breath, lean, 1 - walking);
+            {
+                if (boss.Kind == StrykersRunBossKind.BarrelWarden)
+                    DrawWardenThrowPose(batch, boss, point, size, 1 - walking);
+                else
+                    DrawBossPose(batch, _images!.Image("bosses.png")!, source, point, size, breath, lean, 1 - walking);
+            }
         }
         if (boss.Kind == StrykersRunBossKind.StormRevenant)
         {
@@ -169,6 +174,34 @@ internal sealed partial class StrykersRunRenderer
             Matrix3x2.CreateScale(scale, scale * (1 + breath)) *
             Matrix3x2.CreateRotation(lean) * Matrix3x2.CreateTranslation(point);
         batch.DrawFromSpriteSheet(bitmap, transform, source, new Vector4(1, 1, 1, opacity));
+    }
+
+    // Full atlas cells share a body scale and planted-foot anchor. In particular,
+    // the overhead pose must not shrink just because its raised arms are taller.
+    // Measured in the 1774 x 887 atlas, relative to each integer source cell.
+    // Its second row has more bottom padding; keep the actual boots on the road.
+    private const float WardenReadyHeight = 283;
+    private static readonly Vector2[] WardenFootAnchors =
+        [new(234, 402), new(259, 402), new(225, 402), new(207.5f, 403),
+         new(235, 337), new(247.5f, 336), new(215, 336), new(213.5f, 336)];
+    private static readonly Vector2 WardenReleaseAnchor = new(188, 279);
+    private const float WardenHeldBarrelHeight = 98;
+
+    private void DrawWardenThrowPose(CanvasSpriteBatch batch, StrykersRunBossSnapshot boss,
+        Vector2 point, float size, float opacity)
+    {
+        float progress = boss.BarrelThrowProgress;
+        float release = StrykersRunGame.BarrelThrowReleaseProgress;
+        int frame = progress < 0 ? 0 : progress < release
+            ? Math.Min(3, (int)(progress / release * 4))
+            : 4 + Math.Min(3, (int)((progress - release) / (1 - release) * 4));
+        Rect source = _bossThrowCells[frame];
+        float scale = size / WardenReadyHeight;
+        var transform = Matrix3x2.CreateTranslation(-WardenFootAnchors[frame]) *
+            Matrix3x2.CreateScale(scale) * Matrix3x2.CreateTranslation(point);
+        // One opaque articulated pose at a time: blending bodies doubles arms
+        // and can leave a second barrel visible after the projectile is released.
+        batch.DrawFromSpriteSheet(_bossThrow!, transform, source, new Vector4(1, 1, 1, opacity));
     }
 
     private static void ColossusEntranceStep(float progress, int leg, out float y, out float lift, out float scale)
@@ -317,42 +350,65 @@ internal sealed partial class StrykersRunRenderer
 
     private void DrawBurningBarrel(CanvasDrawingSession ds, StrykersRunHazardSnapshot hazard)
     {
+        using var hudClip = ds.CreateLayer(1, new Rect(0, 214, Width, RailTop - 214));
         float thrown = Math.Clamp(hazard.Age / .30f, 0, 1);
-        Vector2 point = Point(StrykersRunGame.BossX + (hazard.X - StrykersRunGame.BossX) * thrown, hazard.Y);
-        float depth = DepthScale(hazard.Y), size = 72 * depth;
-        ds.FillEllipse(point.X + 6, point.Y + 8, size * .70f, size * .25f, Ink(0, 0, 0, 161));
-        point.Y -= (1 - thrown) * 165 * depth + MathF.Sin(thrown * MathF.PI) * 45 * depth;
+        float depth = DepthScale(hazard.Y), bossScale = 335 * DepthScale(StrykersRunGame.BossY) / WardenReadyHeight;
+        var releaseOffset = (WardenReleaseAnchor - WardenFootAnchors[3]) * bossScale;
+        Vector2 release = Point(StrykersRunGame.BossX, StrykersRunGame.BossY) + releaseOffset;
+        float releaseSize = WardenHeldBarrelHeight * bossScale;
+        float size = releaseSize + (72 * depth - releaseSize) * thrown;
+        Vector2 ground = Point(hazard.X, hazard.Y);
+        Vector2 center = Vector2.Lerp(release, ground - new Vector2(0, size * .5f), thrown);
+        center.Y -= MathF.Sin(thrown * MathF.PI) * 45 * depth;
+        ds.FillEllipse(center.X + 6, ground.Y + 8, size * .70f, size * .25f, Ink(0, 0, 0, 161));
         using (var flames = ds.CreateSpriteBatch(CanvasSpriteSortMode.None, CanvasImageInterpolation.Linear))
         {
-            for (int tongue = 0; tongue < 7; tongue++)
-            {
-                float age = Fraction(hazard.Age * (1.7f + tongue * .13f) + tongue * .27f);
-                float x = point.X + (tongue - 3) * 10 * depth + MathF.Sin(age * 8 + tongue) * 7 * depth;
-                float y = point.Y - size * .60f - age * 88 * depth;
-                float w = (25 - age * 16) * depth, h = (49 + MathF.Sin(age * MathF.PI) * 43) * depth;
-                flames.DrawFromSpriteSheet(_particles!, new Rect(x - w / 2, y - h, w, h), GlowCell,
-                    new Vector4(1, .29f + age * .39f, .04f, (1 - age) * .95f));
-            }
+            float fireClock = hazard.Age * 13 + Noise(hazard.Id * 73) * _barrelFlameCells.Length;
+            float fireGrowth = Math.Clamp(hazard.Age / .25f, 0, 1);
+            fireGrowth = fireGrowth * fireGrowth * (3 - 2 * fireGrowth);
+            // The carried fire stays compact at the hands, then billows as the
+            // drum leaves him. Grow the flame silhouette rather than fading it.
+            DrawBarrelFlame(flames, center + new Vector2(0, size * .35f),
+                size * (1.05f + .80f * fireGrowth), size * (.90f + 1.60f * fireGrowth), fireClock, .94f);
             // The atlas rotates the drum around its cylinder, keeping its
             // silhouette and lighting stable instead of spinning a flat card.
             int frame = (int)(Math.Max(0, hazard.Age - .30f) * 6) % _barrelCells.Length;
             Rect source = _barrelCells[frame];
             float scale = size / _barrelFrameHeight;
-            float spriteHeight = (float)source.Height * scale;
             var transform = Matrix3x2.CreateTranslation(-(float)source.Width / 2, -(float)source.Height / 2) *
                 Matrix3x2.CreateScale(scale) * Matrix3x2.CreateRotation((1 - thrown) * -.45f) *
-                Matrix3x2.CreateTranslation(point.X, point.Y - spriteHeight / 2);
-            flames.DrawFromSpriteSheet(_images!.Image("barrels.png")!, transform, source, Vector4.One);
+                Matrix3x2.CreateTranslation(center);
+            flames.DrawFromSpriteSheet(_barrels!, transform, source, Vector4.One);
+            // Smaller, independently phased tongues curl over both rims while
+            // leaving the detailed metal drum readable between them.
+            DrawBarrelFlame(flames, center + new Vector2(-size * .43f, size * .34f),
+                size * (.32f + .12f * fireGrowth), size * (.52f + .34f * fireGrowth), fireClock + 2.7f, .84f);
+            DrawBarrelFlame(flames, center + new Vector2(size * .43f, size * .12f),
+                size * (.29f + .09f * fireGrowth), size * (.44f + .29f * fireGrowth), fireClock + 5.1f, .78f);
             for (int spark = 0; spark < 6; spark++)
             {
                 float age = Fraction(hazard.Age * (1.2f + spark * .11f) + spark * .173f);
-                float x = point.X + MathF.Sin(spark * 2.4f + age * 4) * (14 + age * 22) * depth;
-                float y = point.Y - size * .74f - age * 104 * depth;
+                float x = center.X + MathF.Sin(spark * 2.4f + age * 4) * (14 + age * (6 + fireGrowth * 16)) * depth;
+                float y = center.Y - size * .24f - age * (26 + fireGrowth * 78) * depth;
                 float width = (3.8f - age * 2.2f) * depth;
                 flames.DrawFromSpriteSheet(_particles!, new Rect(x, y, width, width * 2.7f), GlowCell,
                     new Vector4(1, .68f, .20f, (1 - age) * .95f));
             }
         }
+    }
+
+    private void DrawBarrelFlame(CanvasSpriteBatch batch, Vector2 basePoint, float width, float height,
+        float clock, float opacity)
+    {
+        int frame = (int)clock % _barrelFlameCells.Length;
+        float blend = Fraction(clock);
+        var destination = new Rect(basePoint.X - width * .5f, basePoint.Y - height, width, height);
+        // Adjacent flame silhouettes blend at a fixed base, unlike stretching
+        // glow particles into a uniform column. Both layers retain real alpha.
+        batch.DrawFromSpriteSheet(_barrelFlames!, destination, _barrelFlameCells[frame],
+            new Vector4(1, 1, 1, opacity * (1 - blend)));
+        batch.DrawFromSpriteSheet(_barrelFlames!, destination, _barrelFlameCells[(frame + 1) % _barrelFlameCells.Length],
+            new Vector4(1, 1, 1, opacity * blend));
     }
 
     private void DrawBarrelExplosion(CanvasDrawingSession ds, StrykersRunHazardSnapshot hazard)
