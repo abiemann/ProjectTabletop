@@ -93,11 +93,13 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private static void DrawGlobeControls(CanvasDrawingSession ds, IReadOnlyList<BoardButton> buttons,
+    private void DrawGlobeControls(CanvasDrawingSession ds, IReadOnlyList<BoardButton> buttons,
         IReadOnlyList<string> hovered, IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback,
         bool drawerOpen = false, float drawerProgress = 1, double boardAspect = 1, double holdExposure = 1)
     {
         DrawBoardTitle(ds, "GLOBE");
+        if (buttons.Count == 0) return;
+        using var fade = CreateBoardControlsFadeLayer(ds);
         DrawBoardDrawerControls(ds, buttons, hovered, selectionFeedback, drawerOpen, drawerProgress, boardAspect,
             holdExposure);
     }

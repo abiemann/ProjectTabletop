@@ -74,6 +74,7 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             var now = _blackjackClock();
+            _boardSession.TickControlVisibility(now);
             if (_boardSession.Screen == BoardScreen.PhotoCopy) SyncPhotoCopySession();
             if (!AcquisitionBoardReady)
             {
@@ -170,7 +171,7 @@ public sealed partial class SceneCompositor
     // Hidden controls must not fall back to full-camera hand acquisition.
     // Football retains its independent fingertip pitch-search policy.
     private bool AcquisitionBoardReady => MappedBoardInputReady &&
-        (_boardSession.Buttons.Count > 0 || !_boardSession.ButtonsVisible ||
+        (_boardSession.Buttons.Count > 0 || !_boardSession.ButtonsVisible || BoardControlsAnimating ||
             _boardSession.Screen is BoardScreen.Football or BoardScreen.StrykersRun);
 
     private bool MappedBoardInputReady => !_disposed && CurrentBoardArtworkReady && !_boardSession.MenuScrolling &&
@@ -357,7 +358,7 @@ public sealed partial class SceneCompositor
         var slots = _boardSession.Screen == BoardScreen.Slots;
         bool roulette = _boardSession.Screen == BoardScreen.Roulette;
         if (_boardApplicationTarget is null || _renderedBoardState is not { } rendered ||
-            rendered.Screen != _boardSession.Screen) return null;
+            rendered.Screen != _boardSession.Screen || rendered.ControlsVisualStep != BoardControlsVisualStep) return null;
         if (!photoCopy && !globe && !roulette && !water && !football && !strykersRun &&
             (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
         if (_boardSession.Screen == BoardScreen.Blackjack &&

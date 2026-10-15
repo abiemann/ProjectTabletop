@@ -99,6 +99,8 @@ public sealed partial class SceneCompositor
         bool hideDiceDisplay, bool rolling, bool drawerOpen, float drawerProgress, CrownDeedDevelopmentFrame? development = null)
     {
         DrawCrownDeedCenter(ds, game, boardAspect, hideDiceDisplay, drawerOpen, development);
+        if (buttons.Count == 0 && !drawerOpen) return;
+        using var fade = CreateBoardControlsFadeLayer(ds);
         if (drawerOpen)
         {
             // Slide within the felt; the drawer never covers property tiles.

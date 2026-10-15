@@ -74,6 +74,8 @@ public sealed partial class SceneCompositor
         DrawSlotPlaque(ds, new Rect(670, 740, 270, 92), game.InFreeSpins ? "FREE SPINS WIN" : "WIN",
             SlotGame.Format(game.InFreeSpins ? game.FreeSpinsWin : game.RoundWin), a, highlight: game.RoundWin > 0);
 
+        if (buttons.Count == 0) return;
+        using var fade = CreateBoardControlsFadeLayer(ds);
         foreach (var button in buttons) DrawSlotButton(ds, button, game, a, _holdControlBrightness);
     }
 

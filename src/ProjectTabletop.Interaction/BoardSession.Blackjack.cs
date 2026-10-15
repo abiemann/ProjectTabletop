@@ -70,6 +70,8 @@ public sealed partial class BoardSession
     // Mouse/touch and pinch selections share the same enabled targets and rules.
     public bool ActivateButton(string id, DateTimeOffset now)
     {
+        TickControlVisibility(now);
+        if (now < _controlsInputReadyAfter) return false;
         AdvanceBlackjackPresentation(now);
         AdvanceCrownDeedPresentation(now);
         AdvanceBottomDrawers(now);

@@ -12,7 +12,7 @@ public sealed partial class SceneCompositor
     private string _blackjackPreviewHover = string.Empty;
     private int _blackjackPreviewFingerSelectionStep;
     private long _blackjackPreviewFlightRevision = -1;
-    private bool _blackjackPreviewButtonsVisible;
+    private int _blackjackPreviewControlsStep;
 
     public BlackjackSnapshot BlackjackState { get { lock (_gate) return _boardSession.BlackjackState; } }
     public IReadOnlyList<BoardButton> CurrentBoardButtons
@@ -21,6 +21,7 @@ public sealed partial class SceneCompositor
         {
             lock (_gate)
             {
+                _boardSession.TickControlVisibility(_blackjackClock());
                 RefreshWaterStickPresence();
                 return _boardSession.Buttons.ToArray();
             }
@@ -85,20 +86,21 @@ public sealed partial class SceneCompositor
             var hoverKey = string.Join(",", hovered);
             var selectionFeedback = CurrentFingerSelectionFeedback;
             int selectionStep = FingerSelectionRenderStep(selectionFeedback);
+            int controlsStep = BoardControlsVisualStep;
             if (_blackjackPreviewRevision != game.Revision || _blackjackPreviewHover != hoverKey ||
                 _blackjackPreviewFingerSelectionStep != selectionStep ||
                 _blackjackPreviewFlightRevision != _blackjackFlightRevision ||
-                _blackjackPreviewButtonsVisible != _boardSession.ButtonsVisible)
+                _blackjackPreviewControlsStep != controlsStep)
             {
                 using var surface = _blackjackPreviewTarget!.CreateDrawingSession();
                 surface.Transform = BoardRasterTransform(_blackjackPreviewTarget);
-                DrawBlackjackTable(surface, game, _boardSession.Buttons, hovered, selectionFeedback,
+                DrawBlackjackTable(surface, game, BoardControlsForRendering, hovered, selectionFeedback,
                     HiddenBlackjackCards(flights), deal);
                 _blackjackPreviewRevision = game.Revision;
                 _blackjackPreviewHover = hoverKey;
                 _blackjackPreviewFingerSelectionStep = selectionStep;
                 _blackjackPreviewFlightRevision = _blackjackFlightRevision;
-                _blackjackPreviewButtonsVisible = _boardSession.ButtonsVisible;
+                _blackjackPreviewControlsStep = controlsStep;
             }
             ds.DrawImage(_blackjackPreviewTarget!, new Rect((width - size) / 2, (height - size) / 2, size, size),
                 new Rect(0, 0, _blackjackPreviewTarget!.SizeInPixels.Width, _blackjackPreviewTarget.SizeInPixels.Height));

@@ -31,14 +31,14 @@ public sealed partial class SceneCompositor
         return _boardSession.PhotoCopyDrawerOpen && _boardSession.GetPhotoCopyDrawerProgress(now) < 1;
     }
 
-    private bool HasBoardControlDrawerAnimation() => _boardSession.Screen switch
+    private bool HasBoardControlDrawerAnimation() => BoardControlsAnimating || (_boardSession.Screen switch
     {
         BoardScreen.Globe => HasGlobeDrawerAnimation(_globeClock()),
         BoardScreen.PhotoCopy => HasPhotoCopyDrawerAnimation(_blackjackClock()),
         BoardScreen.WaterGarden => HasWaterGardenDrawerAnimation(_waterClock()),
         BoardScreen.Football => _boardSession.FootballControlsAnimating,
         _ => false
-    };
+    });
 
     private int PhotoCopyDrawerVisualFrame(DateTimeOffset now) => _boardSession.PhotoCopyDrawerOpen
         ? 1 + (int)Math.Round(_boardSession.GetPhotoCopyDrawerProgress(now) * 100000) : 0;

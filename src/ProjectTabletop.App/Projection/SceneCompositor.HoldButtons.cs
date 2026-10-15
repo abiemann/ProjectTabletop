@@ -53,6 +53,7 @@ public sealed partial class SceneCompositor
         {
             RefreshWaterStickPresence();
             var now = HoldClock();
+            _boardSession.TickControlVisibility(_blackjackClock());
             var buttons = _boardSession.Buttons;
             if (!AcquisitionBoardReady || HoldControlsSettling(frameTime) || !buttons.Any(button => button.IsHold && button.Enabled) ||
                 HasBoardControlDrawerAnimation() || frameTime < _holdNavigationStartedAt || frameTime > now ||

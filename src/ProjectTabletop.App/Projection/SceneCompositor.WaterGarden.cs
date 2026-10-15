@@ -31,7 +31,7 @@ public sealed partial class SceneCompositor
     private bool _waterIntroPending;
     private float _waterEntranceProgress = 1;
     private CanvasRenderTarget? _waterFrameTarget;
-    private (long Visual, int Feedback, bool ButtonsVisible)? _waterRenderedFrame;
+    private (long Visual, int Feedback, int ControlsStep)? _waterRenderedFrame;
     private DateTimeOffset _waterProjectorRenderedAt;
     private long _waterRenderedFrames, _waterPreviewFrameReuses;
 
@@ -173,7 +173,7 @@ public sealed partial class SceneCompositor
             _waterPreviewFrameReuses++;
             return _waterFrameTarget!;
         }
-        var key = (WaterGardenVisualRevision(now), FingerSelectionRenderStep(feedback), _boardSession.ButtonsVisible);
+        var key = (WaterGardenVisualRevision(now), FingerSelectionRenderStep(feedback), BoardControlsVisualStep);
         if (EnsureBoardRenderTarget(ref _waterFrameTarget, device)) _waterRenderedFrame = null;
         if (_waterRenderedFrame != key)
         {
@@ -183,7 +183,7 @@ public sealed partial class SceneCompositor
                 DrawWaterGardenSurface(drawing, now);
                 DrawWaterGardenRocks(drawing);
                 DrawWaterGardenTitle(drawing, now);
-                DrawWaterGardenControls(drawing, _boardSession.Buttons, [], feedback, now);
+                DrawWaterGardenControls(drawing, BoardControlsForRendering, [], feedback, now);
             }
             if (_waterIntroPending)
             {
@@ -225,7 +225,7 @@ public sealed partial class SceneCompositor
         ReferenceEquals(_waterCameraMap, _boardCameraMap) && ReferenceEquals(_waterSurfaceMap, _boardSurfaceMap) &&
         _waterProjectorRenderedAt != default && now >= _waterProjectorRenderedAt &&
         now - _waterProjectorRenderedAt <= TimeSpan.FromMilliseconds(250) &&
-        _waterRenderedFrame is { } rendered && rendered.ButtonsVisible == _boardSession.ButtonsVisible &&
+        _waterRenderedFrame is { } rendered && rendered.ControlsStep == BoardControlsVisualStep &&
         _waterFrameTarget is { } target && target.Device == device &&
         target.SizeInPixels.Width == _boardRasterPixels.Width &&
         target.SizeInPixels.Height == _boardRasterPixels.Height;
@@ -511,6 +511,8 @@ public sealed partial class SceneCompositor
     private void DrawWaterGardenControls(CanvasDrawingSession ds, IReadOnlyList<BoardButton> buttons,
         IReadOnlyList<string> hovered, IReadOnlyList<BoardFingerSelectionFeedback> feedback, DateTimeOffset now)
     {
+        if (buttons.Count == 0) return;
+        using var fade = CreateBoardControlsFadeLayer(ds);
         var drawerButtons = buttons.Where(button => !IsBoardDrawerHandle(button)).ToArray();
         if (_boardSession.WaterGardenDrawerOpen && drawerButtons.Length > 0)
         {

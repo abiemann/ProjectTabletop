@@ -482,8 +482,11 @@ public sealed partial class SceneCompositor
     private void DrawFieldGameControls(CanvasDrawingSession ds)
     {
         SyncHoldControlExposure();
+        var buttons = BoardControlsForRendering;
+        if (buttons.Count == 0) return;
+        using var fade = CreateBoardControlsFadeLayer(ds);
         using var format = FieldGameButtonTextFormat();
-        foreach (var button in _boardSession.Buttons)
+        foreach (var button in buttons)
         {
             var b = button.Bounds;
             var rect = new Rect(b.X * BoardSurfaceSize, b.Y * BoardSurfaceSize, b.Width * BoardSurfaceSize, b.Height * BoardSurfaceSize);

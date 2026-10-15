@@ -20,7 +20,7 @@ public sealed partial class SceneCompositor
     private CanvasRenderTarget? _boardApplicationTarget;
     private BoardSurfaceState? _renderedBoardState;
 
-    private readonly record struct BoardSurfaceState(BoardScreen Screen, bool ButtonsVisible, int HoverMask, int FingerSelectionStep, int HandStatus,
+    private readonly record struct BoardSurfaceState(BoardScreen Screen, int ControlsVisualStep, int HoverMask, int FingerSelectionStep, int HandStatus,
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long PhotoUiRevision, int PhotoDrawerFrame, double PhotoAspect,
         long BlackjackRevision, long BlackjackFlightRevision,
         long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long CrownDeedRevision, long CrownDeedDiceRevision,
@@ -155,6 +155,7 @@ public sealed partial class SceneCompositor
 
         var now = MonotonicClock.UtcNow;
         var blackjackNow = _blackjackClock();
+        _boardSession.TickControlVisibility(blackjackNow);
         _boardSession.TickMenu(blackjackNow);
         TickBlackjackVisuals(blackjackNow);
         var crownDeedNow = _crownDeedClock();
@@ -193,7 +194,8 @@ public sealed partial class SceneCompositor
         for (var index = 0; index < _boardSession.Buttons.Count; index++)
             if (handsFresh && _boardSession.HoveredButtonIds.Contains(_boardSession.Buttons[index].Id))
                 hoverMask |= 1 << index;
-        var state = new BoardSurfaceState(_boardSession.Screen, _boardSession.ButtonsVisible, hoverMask, FingerSelectionRenderStep(selectionFeedback),
+        var controls = BoardControlsForRendering;
+        var state = new BoardSurfaceState(_boardSession.Screen, BoardControlsVisualStep, hoverMask, FingerSelectionRenderStep(selectionFeedback),
             handStatus,
             photoCopy ? PhotoCopyStampCount(now) : 0,
             photoCopy ? PhotoCopyDisplayStatus(now) : null,
@@ -264,16 +266,16 @@ public sealed partial class SceneCompositor
             var muted = AppPalette.MutedText;
             if (_boardSession.Screen == BoardScreen.Blackjack)
             {
-                DrawBlackjackTable(surface, _boardSession.BlackjackState, _boardSession.Buttons,
+                DrawBlackjackTable(surface, _boardSession.BlackjackState, controls,
                     handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback,
                     HiddenBlackjackCards(flights), deal);
             }
             else if (_boardSession.Screen == BoardScreen.CrownDeed)
             {
-                DrawCrownDeedBoard(surface, crownDeedPresented, _boardSession.Buttons,
+                DrawCrownDeedBoard(surface, crownDeedPresented, controls,
                     handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback,
                     PaintBoardAspect(), hideDiceDisplay: crownDeedDicePresented,
-                    rolling: HasCrownDeedDiceAnimation(crownDeedNow), drawerOpen: _boardSession.ButtonsVisible && _boardSession.CrownDeedDrawerOpen,
+                    rolling: HasCrownDeedDiceAnimation(crownDeedNow), drawerOpen: controls.Count > 0 && _boardSession.CrownDeedDrawerOpen,
                     drawerProgress: CrownDeedDrawerProgress(crownDeedNow), entrance: crownDeedEntrance);
             }
             else if (water)
@@ -291,13 +293,13 @@ public sealed partial class SceneCompositor
                 DrawStrykersRunControls(surface);
             }
             else if (slots)
-                DrawSlotsMachine(surface, _boardSession.SlotsState, _boardSession.Buttons, PaintBoardAspect());
+                DrawSlotsMachine(surface, _boardSession.SlotsState, controls, PaintBoardAspect());
             else if (roulette)
-                DrawRouletteBoard(surface, _boardSession.RouletteState, _boardSession.Buttons,
+                DrawRouletteBoard(surface, _boardSession.RouletteState, controls,
                     handsFresh ? _boardSession.HoveredButtonIds : [], selectionFeedback, PaintBoardAspect());
             else if (globe)
             {
-                DrawCachedGlobeBoard(surface, globeNow, _boardSession.GetGlobeSnapshot(globeNow), _boardSession.Buttons,
+                DrawCachedGlobeBoard(surface, globeNow, _boardSession.GetGlobeSnapshot(globeNow), controls,
                     handsFresh ? _boardSession.HoveredButtonIds : Array.Empty<string>(), selectionFeedback, PaintBoardAspect(),
                     drawerOpen: _boardSession.GlobeDrawerOpen, drawerProgress: GlobeDrawerProgress(globeNow));
             }
@@ -308,9 +310,11 @@ public sealed partial class SceneCompositor
             else
             {
                 if (photoCopy)
-                    DrawPhotoCopyControls(surface, _boardSession.Buttons,
+                    DrawPhotoCopyControls(surface, controls,
                         handsFresh ? _boardSession.HoveredButtonIds : [], selectionFeedback, blackjackNow);
-                foreach (var button in _boardSession.Buttons)
+                if (controls.Count > 0)
+                using (CreateBoardControlsFadeLayer(surface))
+                foreach (var button in controls)
                     if (_boardSession.Screen == BoardScreen.Settings && button.Destination == BoardScreen.HandTracking)
                         DrawMenuButton(surface, button, handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id),
                             label, small, selectionFeedback);

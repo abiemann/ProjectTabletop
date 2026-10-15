@@ -5,6 +5,7 @@ using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
 using ProjectTabletop.Vision;
+using Windows.Foundation;
 
 namespace ProjectTabletop.App;
 
@@ -15,8 +16,9 @@ public sealed partial class MainWindow
     {
         const int size = 700;
         var now = MonotonicClock.UtcNow.AddMinutes(1);
+        DateTimeOffset? frozenWaterTime = null;
         var device = CanvasDevice.GetSharedDevice();
-        using var scene = new SceneCompositor(blackjackClock: () => now, waterClock: () => now,
+        using var scene = new SceneCompositor(blackjackClock: () => now, waterClock: () => frozenWaterTime ?? now,
             footballClock: () => now, strykersRunClock: () => now);
         using var target = new CanvasRenderTarget(device, size, size, 96);
         await scene.EnsureMenuPreviewResourcesAsync(device);
@@ -154,22 +156,55 @@ public sealed partial class MainWindow
         }
         Require(opened && scene.WaterGardenDrawerOpen, "A freshly uncovered caption could not rearm.");
         Require(scene.GetControlSwipeContext(now) is null, "A sliding drawer trained a motion baseline.");
-
+        now += BoardSession.WaterGardenDrawerOpeningDuration + TimeSpan.FromMilliseconds(50);
+        session.TickWaterGarden(now);
+        Draw();
+        var waterButtons = scene.CurrentBoardButtons.ToArray();
+        Require(waterButtons.Length == 4, "The Water Garden fade fixture did not open all drawer controls.");
+        frozenWaterTime = now;
+        double waterAspect = (double)typeof(SceneCompositor).GetMethod("PaintBoardAspect",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(scene, null)!;
+        double waterWidth = Math.Min(size, size * waterAspect), waterHeight = waterWidth / waterAspect;
+        VerifyFade("Water Garden", DrawWaterPreview, waterButtons,
+            bounds => new Rect((size - waterWidth) / 2 + bounds.X * waterWidth,
+                (size - waterHeight) / 2 + bounds.Y * waterHeight,
+                bounds.Width * waterWidth, bounds.Height * waterHeight));
+        frozenWaterTime = null;
+        Require(scene.WaterGardenDrawerOpen, "Fading controls closed the Water Garden drawer.");
+        var fadedHold = scene.GetHoldButtonContext(now);
+        Require(fadedHold is not null, "Completed Water Garden fade did not restore the caption context.");
+        string duckButton = waterButtons.Single(button => button.Id == "water-garden-duck-add").Id;
+        long ducksBefore = session.WaterGardenDuckAddRevision;
+        for (int i = 0; i < 12; i++)
+        {
+            now += TimeSpan.FromMilliseconds(100);
+            Require(scene.ObserveHoldButtons(fadedHold, [duckButton], now, []).Count == 0,
+                "A button restored by a fade accepted coverage without fresh clear lettering.");
+        }
+        Require(session.WaterGardenDuckAddRevision == ducksBefore,
+            "A covered DUCK+ button activated on completion of the fade.");
+        now += TimeSpan.FromMilliseconds(100);
+        scene.ObserveHoldButtons(fadedHold, [], now, [duckButton]);
+        for (int i = 0; i < 12 && session.WaterGardenDuckAddRevision == ducksBefore; i++)
+        {
+            now += TimeSpan.FromMilliseconds(100);
+            scene.ObserveHoldButtons(fadedHold, [duckButton], now, []);
+        }
+        Require(session.WaterGardenDuckAddRevision > ducksBefore,
+            "A fully shown button did not rearm after fresh clear lettering.");
         scene.ShowBlackjack();
         var blackjackContext = Context();
         Require(blackjackContext.Top == .75 && blackjackContext.Bottom == .90,
             "Blackjack did not use its lower action-row band.");
-        byte[] shown = DrawPreview();
-        session.SetButtonsVisible(false, now);
-        byte[] hidden = DrawPreview();
-        session.SetButtonsVisible(true, now);
-        Require(!shown.SequenceEqual(hidden) && shown.SequenceEqual(DrawPreview()),
-            "The dedicated Blackjack preview retained hidden controls or failed to restore them.");
+        VerifyFade("Blackjack", DrawPreview, scene.CurrentBoardButtons.ToArray(),
+            bounds => new Rect(bounds.X * size, bounds.Y * size, bounds.Width * size, bounds.Height * size));
         return new { passed = true, playerFacingAngles = new[] { 0, 90, 180 },
             disturbanceOnly = true, hiddenBandRetained = true, excludedMenuAndStryker = true,
             excludedFootballPlay = true, cameraNavigationCalibrationAndVisibilityBarriers = true,
             slowSwipeSuppressesHolds = true, restoredCaptionRequiresClear = true,
-            introAndDrawerAnimationExcluded = true, liveHardwareUntouched = true };
+            introAndDrawerAnimationExcluded = true, simultaneousFadeMilliseconds = BoardSession.ControlFadeDuration.TotalMilliseconds,
+            fadeBoards = new[] { "WaterGarden", "Blackjack" }, fadingControlsExcludedFromInput = true,
+            worldPixelsUnaffected = true, liveHardwareUntouched = true };
 
         SceneCompositor.ControlSwipeContext Cross(bool hide)
         {
@@ -195,7 +230,106 @@ public sealed partial class MainWindow
                 Draw();
             }
             Require(applied, "The fresh cross-board motion was not published.");
+            Require(session.ControlVisibilityAnimating(now), "A swipe changed controls without beginning their fade.");
+            RequireFadeInputBlocked("Swipe");
+            now += BoardSession.ControlFadeDuration;
+            session.TickControlVisibility(now);
+            Draw();
+            Require(!session.ControlVisibilityAnimating(now) && session.GetButtonsOpacity(now) == (hide ? 0 : 1),
+                "A swipe fade failed to reach its requested endpoint.");
             return context;
+        }
+
+        void VerifyFade(string name, Func<byte[]> capture, BoardButton[] buttons, Func<BoardRect, Rect> map)
+        {
+            Require(buttons.Length >= 2 && session.ButtonsVisible && !session.ControlVisibilityAnimating(now),
+                name + " did not begin with multiple settled controls.");
+            byte[] shown = capture();
+            Require(session.SetButtonsVisible(false, now), name + " did not start fading out.");
+            Require(session.GetButtonsOpacity(now) == 1 && session.GetVisibleButtons(now).Count == buttons.Length,
+                name + " removed its visual controls before the hide fade.");
+            RequireFadeInputBlocked(name);
+            now += BoardSession.ControlFadeDuration / 2;
+            byte[] hideMiddle = capture();
+            Require(Math.Abs(session.GetButtonsOpacity(now) - .5) < .0001,
+                name + " did not use one shared midpoint opacity.");
+            RequireFadeInputBlocked(name);
+            Require(hideMiddle.SequenceEqual(capture()), name + " changed its fade with no clock advancement.");
+            now += BoardSession.ControlFadeDuration / 2;
+            session.TickControlVisibility(now);
+            byte[] hidden = capture();
+            Require(session.GetButtonsOpacity(now) == 0 && session.GetVisibleButtons(now).Count == 0 &&
+                    scene.CurrentBoardButtons.Count == 0 && !session.ControlVisibilityAnimating(now),
+                name + " retained controls after the hide fade completed.");
+            Require(session.SetButtonsVisible(true, now), name + " did not start fading in.");
+            Require(session.GetButtonsOpacity(now) == 0 && session.GetVisibleButtons(now).Count == buttons.Length,
+                name + " did not restore its visuals at zero opacity.");
+            RequireFadeInputBlocked(name);
+            now += BoardSession.ControlFadeDuration / 2;
+            byte[] showMiddle = capture();
+            RequireFadeInputBlocked(name);
+            now += BoardSession.ControlFadeDuration / 2;
+            session.TickControlVisibility(now);
+            byte[] restored = capture();
+            Require(session.GetButtonsOpacity(now) == 1 && !session.ControlVisibilityAnimating(now) &&
+                    scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(buttons.Select(button => button.Id)),
+                name + " failed to restore all controls after its show fade.");
+            Require(shown.SequenceEqual(restored), name + " did not return to its original rendered scene.");
+            foreach (var button in buttons)
+            {
+                var rectangle = map(button.Bounds);
+                RequireMidpoint(name + " " + button.Id + " hide", shown, hidden, hideMiddle, rectangle);
+                RequireMidpoint(name + " " + button.Id + " show", shown, hidden, showMiddle, rectangle);
+            }
+            // Exclude button shadows/anti-aliasing, but check every other scene pixel.
+            var controls = buttons.Select(button => map(new BoardRect(button.Bounds.X - .02, button.Bounds.Y - .02,
+                button.Bounds.Width + .04, button.Bounds.Height + .04))).ToArray();
+            int changedWorld = 0;
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                if (controls.Any(rectangle => rectangle.Contains(new Point(x, y)))) continue;
+                int offset = (y * size + x) * 4;
+                for (int channel = 0; channel < 4; channel++)
+                    if (shown[offset + channel] != hidden[offset + channel] ||
+                        shown[offset + channel] != hideMiddle[offset + channel] ||
+                        shown[offset + channel] != showMiddle[offset + channel]) { changedWorld++; break; }
+            }
+            Require(changedWorld == 0, name + " faded or repainted " + changedWorld + " world pixels outside its controls.");
+        }
+
+        void RequireFadeInputBlocked(string name)
+        {
+            Require(session.ControlVisibilityAnimating(now) && scene.CurrentBoardButtons.Count == 0 &&
+                    scene.GetHoldButtonContext(now) is null && scene.GetControlSwipeContext(now) is null,
+                name + " accepted control input while its buttons were fading.");
+            var acquisition = scene.GetHandAcquisitionContext(now);
+            Require(acquisition is { ObserveMotion: false, ExpectedScene: null, IlluminatedHint: null,
+                    RestrictAcquisitionToSearchRegions: true } &&
+                    (acquisition.StationarySearchCenters?.Length ?? 0) == 0 &&
+                    (acquisition.HoldControls?.Count ?? 0) == 0,
+                name + " exposed fading captions to acquisition or enabled an unrestricted camera search.");
+        }
+
+        void RequireMidpoint(string name, byte[] shown, byte[] hidden, byte[] middle, Rect rectangle)
+        {
+            double squaredContrast = 0, projectedContrast = 0, error = 0;
+            int samples = 0;
+            for (int y = Math.Max(0, (int)Math.Ceiling(rectangle.Top)); y < Math.Min(size, rectangle.Bottom); y++)
+            for (int x = Math.Max(0, (int)Math.Ceiling(rectangle.Left)); x < Math.Min(size, rectangle.Right); x++)
+            for (int channel = 0; channel < 3; channel++)
+            {
+                int offset = (y * size + x) * 4 + channel, contrast = shown[offset] - hidden[offset];
+                if (Math.Abs(contrast) < 20) continue;
+                squaredContrast += contrast * contrast;
+                projectedContrast += (middle[offset] - hidden[offset]) * contrast;
+                error += Math.Abs(middle[offset] - (shown[offset] + hidden[offset]) / 2d);
+                samples++;
+            }
+            Require(samples > 150 && projectedContrast / squaredContrast is > .46 and < .54 && error / samples < 3,
+                name + " did not blend simultaneously at half opacity (samples=" + samples +
+                ", opacity=" + (projectedContrast / squaredContrast).ToString("F3") +
+                ", pixel error=" + (error / Math.Max(1, samples)).ToString("F3") + ").");
         }
         SceneCompositor.ControlSwipeContext Context()
         {
@@ -223,6 +357,11 @@ public sealed partial class MainWindow
         byte[] DrawPreview()
         {
             using (var drawing = target.CreateDrawingSession()) scene.DrawBlackjackPreview(drawing, size, size);
+            return target.GetPixelBytes();
+        }
+        byte[] DrawWaterPreview()
+        {
+            using (var drawing = target.CreateDrawingSession()) scene.DrawWaterGardenPreview(drawing, size, size);
             return target.GetPixelBytes();
         }
         T Field<T>(string name) => (T)typeof(SceneCompositor).GetField(name,

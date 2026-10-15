@@ -10,7 +10,7 @@ public sealed partial class SceneCompositor
     private readonly Func<DateTimeOffset> _crownDeedClock;
     private CanvasRenderTarget? _crownDeedPreviewTarget;
     private (long Revision, long DiceRevision, long SessionRevision, int DrawerFrame, long EntranceRevision,
-        int EntranceFrame, long DevelopmentFrame, string Hover, int Feedback, double Aspect)? _crownDeedPreviewState;
+        int EntranceFrame, long DevelopmentFrame, string Hover, int Feedback, double Aspect, int ControlsStep)? _crownDeedPreviewState;
     public double CrownDeedPreviewAspect { get { lock (_gate) return PaintBoardAspect(); } }
 
     public CrownDeedSnapshot CrownDeedState { get { lock (_gate) return _boardSession.CrownDeedState; } }
@@ -112,14 +112,15 @@ public sealed partial class SceneCompositor
             var feedback = CurrentFingerSelectionFeedback;
             var key = (state.Revision, CrownDeedDicePresentationRevision, _boardSession.Revision,
                 CrownDeedDrawerFrame(now), CrownDeedEntranceRevision, CrownDeedEntranceRenderFrame(entrance), CrownDeedDevelopmentRenderFrame(now), string.Join(",", hovered),
-                FingerSelectionRenderStep(feedback), aspect);
+                FingerSelectionRenderStep(feedback), aspect, BoardControlsVisualStep);
             if (_crownDeedPreviewState != key)
             {
                 using var surface = _crownDeedPreviewTarget!.CreateDrawingSession();
                 surface.Transform = BoardRasterTransform(_crownDeedPreviewTarget);
-                DrawCrownDeedBoard(surface, state, _boardSession.Buttons, hovered, feedback, aspect,
+                var buttons = BoardControlsForRendering;
+                DrawCrownDeedBoard(surface, state, buttons, hovered, feedback, aspect,
                     hideDiceDisplay: dicePresented, rolling: HasCrownDeedDiceAnimation(now),
-                    drawerOpen: _boardSession.ButtonsVisible && _boardSession.CrownDeedDrawerOpen,
+                    drawerOpen: buttons.Count > 0 && _boardSession.CrownDeedDrawerOpen,
                     drawerProgress: CrownDeedDrawerProgress(now), entrance: entrance);
                 _crownDeedPreviewState = key;
             }

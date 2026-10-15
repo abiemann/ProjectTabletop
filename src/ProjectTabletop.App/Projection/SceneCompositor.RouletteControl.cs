@@ -8,7 +8,7 @@ namespace ProjectTabletop.App.Projection;
 public sealed partial class SceneCompositor
 {
     private CanvasRenderTarget? _roulettePreviewTarget;
-    private (long Revision, double Aspect, string Hover, int SelectionStep, bool ButtonsVisible)? _roulettePreviewKey;
+    private (long Revision, double Aspect, string Hover, int SelectionStep, int ControlsStep)? _roulettePreviewKey;
     public RouletteSnapshot RouletteState { get { lock (_gate) return _boardSession.RouletteState; } }
     public double RoulettePreviewAspect { get { lock (_gate) return PaintBoardAspect(); } }
 
@@ -57,12 +57,12 @@ public sealed partial class SceneCompositor
             var game = _boardSession.RouletteState;
             var hovered = HoveredBoardButtons;
             var feedback = CurrentFingerSelectionFeedback;
-            var key = (game.Revision, aspect, string.Join('|', hovered), FingerSelectionRenderStep(feedback), _boardSession.ButtonsVisible);
+            var key = (game.Revision, aspect, string.Join('|', hovered), FingerSelectionRenderStep(feedback), BoardControlsVisualStep);
             if (_roulettePreviewKey != key)
             {
                 using var drawing = _roulettePreviewTarget!.CreateDrawingSession();
                 drawing.Transform = BoardRasterTransform(_roulettePreviewTarget);
-                DrawRouletteBoard(drawing, game, _boardSession.Buttons, hovered, feedback, aspect);
+                DrawRouletteBoard(drawing, game, BoardControlsForRendering, hovered, feedback, aspect);
                 _roulettePreviewKey = key;
             }
             var destination = new Rect((width - w) / 2, (height - h) / 2, w, h);

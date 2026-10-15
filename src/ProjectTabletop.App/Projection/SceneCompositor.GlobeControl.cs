@@ -13,7 +13,7 @@ public sealed partial class SceneCompositor
     private BoardButton[] _globeRenderedButtons = [];
     private long _globeFrameRenderCount;
     private readonly record struct GlobeFrameState(long Frame, long GlobeRevision, long SessionRevision,
-        double Aspect, int HoverMask, int FeedbackStep, bool DrawerOpen, bool Ready, string? Error);
+        double Aspect, int HoverMask, int FeedbackStep, bool DrawerOpen, bool Ready, string? Error, int ControlsStep);
     public double GlobePreviewAspect { get { lock (_gate) return PaintBoardAspect(); } }
     public GlobeSnapshot GlobeState { get { lock (_gate) return _boardSession.GetGlobeSnapshot(_globeClock()); } }
 
@@ -36,7 +36,7 @@ public sealed partial class SceneCompositor
             if (hovered.Contains(buttons[index].Id)) hoverMask |= 1 << index;
         var frame = new GlobeFrameState(GlobeVisualFrame(now), state.Revision, _boardSession.Revision,
             aspect, hoverMask, FingerSelectionRenderStep(selectionFeedback), drawerOpen,
-            renderer.IsReady, renderer.Error);
+            renderer.IsReady, renderer.Error, BoardControlsVisualStep);
         if (_globeRenderedFrame != frame || !_globeRenderedButtons.SequenceEqual(buttons))
         {
             using (var surface = _globePreviewTarget!.CreateDrawingSession())
@@ -115,7 +115,7 @@ public sealed partial class SceneCompositor
             double aspect = PaintBoardAspect();
             double drawWidth = Math.Min(width, height * aspect), drawHeight = drawWidth / aspect;
             ReserveBoardPixels(ds.Device, drawWidth * ds.Dpi / 96, drawHeight * ds.Dpi / 96);
-            var rendered = GetGlobeFrame(ds.Device, now, _boardSession.GetGlobeSnapshot(now), _boardSession.Buttons,
+            var rendered = GetGlobeFrame(ds.Device, now, _boardSession.GetGlobeSnapshot(now), BoardControlsForRendering,
                 HoveredBoardButtons, CurrentFingerSelectionFeedback, aspect,
                 _boardSession.GlobeDrawerOpen, GlobeDrawerProgress(now));
             ds.DrawImage(rendered,

@@ -95,6 +95,8 @@ public sealed partial class SceneCompositor
         IReadOnlyList<BoardButton> buttons, IReadOnlyList<string> hovered,
         IReadOnlyList<BoardFingerSelectionFeedback> feedback, double aspect)
     {
+        if (buttons.Count == 0) return;
+        using var fade = CreateBoardControlsFadeLayer(ds);
         foreach (var button in buttons)
         {
             DrawRouletteButton(ds, button, game, hovered.Contains(button.Id), aspect, _holdControlBrightness);

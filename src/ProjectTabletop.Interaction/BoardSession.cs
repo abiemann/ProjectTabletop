@@ -129,7 +129,9 @@ public sealed partial class BoardSession
         BoardScreen.Roulette => "Roulette",
         _ => throw new InvalidOperationException("Unknown board screen.")
     };
-    public IReadOnlyList<BoardButton> Buttons => !ButtonsVisible ? [] : Screen switch
+    public IReadOnlyList<BoardButton> Buttons => !ButtonsVisible || _controlFadeStartedAt is not null ? [] : CurrentButtons;
+
+    private IReadOnlyList<BoardButton> CurrentButtons => Screen switch
     {
         BoardScreen.Menu => CurrentMenuButtons(),
         BoardScreen.PhotoCopy => CurrentPhotoCopyButtons(),
@@ -161,6 +163,7 @@ public sealed partial class BoardSession
             return null;
         }
         _lastNow = now;
+        TickControlVisibility(now);
         AdvanceBlackjackPresentation(now);
         AdvanceCrownDeedPresentation(now);
         AdvanceBottomDrawers(now);
@@ -178,7 +181,7 @@ public sealed partial class BoardSession
 
         // Hold-to-repeat buttons respond only to held caption evidence.
         var buttons = Buttons.Where(button => !button.IsHold).ToArray();
-        var fingerTargets = FingerTargets(buttons);
+        var fingerTargets = _controlFadeStartedAt is null ? FingerTargets(buttons) : buttons;
         FingerSelectionCandidate? fingerSelection = UpdateFingerSelection(hands, fingerTargets, frameTime);
         HoveredButtonIds = fingerTargets.Where(button => button.Enabled && hands.Any(hand =>
                 (hand.TrackingId > 0 && hand.FourFingersExtended
@@ -267,8 +270,7 @@ public sealed partial class BoardSession
         if (screen == BoardScreen.Globe) _globe.Start(now);
         ClearHolds();
         Screen = screen;
-        if (!ButtonsVisible) _controlsInputReadyAfter = Later(_controlsInputReadyAfter, now);
-        ButtonsVisible = true;
+        ResetControlVisibility(now);
         Revision++;
         NavigationRevision++;
         if (screen == BoardScreen.WaterGarden) RequestWaterGardenReset();

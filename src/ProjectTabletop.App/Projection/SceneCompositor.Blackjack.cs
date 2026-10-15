@@ -110,11 +110,15 @@ public sealed partial class SceneCompositor
         CasinoText(ds, FingerSelectionCaption(selectionFeedback, betting
                 ? $"BET {CasinoAmount(game.SelectedBet)}" : string.Empty, includeGroupingInstruction: false),
             new Rect(80, 742, 840, 24), 15, CasinoGold, "Bahnschrift", true);
-        foreach (var button in buttons)
+        if (buttons.Count > 0)
+        using (CreateBoardControlsFadeLayer(ds))
         {
-            DrawCasinoButton(ds, button, button.Enabled,
-                hovered.Contains(button.Id), game.SelectedBet, game.Bankroll);
-            DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, CasinoGold);
+            foreach (var button in buttons)
+            {
+                DrawCasinoButton(ds, button, button.Enabled,
+                    hovered.Contains(button.Id), game.SelectedBet, game.Bankroll);
+                DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, CasinoGold);
+            }
         }
 
         CasinoText(ds, "Dealer stands on soft 17  ·  One split  ·  No insurance or surrender",

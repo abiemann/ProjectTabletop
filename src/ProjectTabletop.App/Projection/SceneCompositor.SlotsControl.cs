@@ -8,7 +8,7 @@ namespace ProjectTabletop.App.Projection;
 public sealed partial class SceneCompositor
 {
     private CanvasRenderTarget? _slotsPreviewTarget;
-    private (long Revision, double Aspect, bool ButtonsVisible)? _slotsPreviewKey;
+    private (long Revision, double Aspect, int ControlsStep)? _slotsPreviewKey;
     public SlotSnapshot SlotsState { get { lock (_gate) return _boardSession.SlotsState; } }
     public double SlotsPreviewAspect { get { lock (_gate) return PaintBoardAspect(); } }
 
@@ -81,12 +81,12 @@ public sealed partial class SceneCompositor
             ReserveBoardPixels(ds.Device, drawWidth * ds.Dpi / 96, drawHeight * ds.Dpi / 96);
             if (EnsureBoardRenderTarget(ref _slotsPreviewTarget, ds.Device)) _slotsPreviewKey = null;
             var game = _boardSession.SlotsState;
-            var key = (game.Revision, aspect, _boardSession.ButtonsVisible);
+            var key = (game.Revision, aspect, BoardControlsVisualStep);
             if (_slotsPreviewKey != key)
             {
                 using var surface = _slotsPreviewTarget!.CreateDrawingSession();
                 surface.Transform = BoardRasterTransform(_slotsPreviewTarget);
-                DrawSlotsMachine(surface, game, _boardSession.Buttons, aspect);
+                DrawSlotsMachine(surface, game, BoardControlsForRendering, aspect);
                 _slotsPreviewKey = key;
             }
             var rendered = _slotsPreviewTarget!;
