@@ -107,7 +107,6 @@ public sealed partial class MainWindow
         _handStatusTimer.Interval = TimeSpan.FromMilliseconds(100);
         _handStatusTimer.Tick += (_, _) =>
         {
-            UpdatePaintInputAvailability();
             var expired = false;
             lock (_handGate)
             {
@@ -165,13 +164,11 @@ public sealed partial class MainWindow
             ClearPhotoCopyFrames();
 #if DEBUG
             ClearHandAcquisitionSnapshots();
-            ClearPaintDiagnostics();
 #endif
             _handWorker.ResetCadence();
             _holdWorker.ResetCadence();
             _scene.ClearHandTips();
             _scene.InvalidatePhotoCopyCapture();
-            _scene.SetPaintInputAvailable(false);
             LogHandTrackingEvent("tracking_reset", new { reason });
             _handInputNotBefore = _handVideoNotBefore = MonotonicClock.UtcNow;
             _handVideoRecorder?.Stop("tracking_reset:" + reason);
@@ -313,7 +310,6 @@ public sealed partial class MainWindow
                                     inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, cursors, "accepted");
                                 QueuePhotoCopyObservation(frame, visibleHands);
                                 QueuePhotoCopyCapture(frame, visibleHands, cursors);
-                                QueuePaintSave(frame.Timestamp);
                                 QueueCrownDeedSave();
                             }
                         }
@@ -367,6 +363,7 @@ public sealed partial class MainWindow
                 (!_scene.HandDetectionRequired ? "Only the dotted control strip is being checked." :
                     _captionCheckError is { } captionError ? "Caption check failed: " + captionError :
                     "Watching EXIT and PLAY lettering.") :
+            _scene.CurrentBoardScreen == BoardScreen.Paint ? "Paint uses the double-bar marker. Caption buttons and bottom swipes remain active." :
             _handTrackingError ??
             (IsBoardScanMeasuring ? "Hand tracking pauses while the board is being scanned." :
              !_cameraWanted || !_camera.IsRunning ? "Start the webcam to track your fingers." :
@@ -427,7 +424,6 @@ public sealed partial class MainWindow
         if (_photoCopyTask is { } photoCopyTask) await photoCopyTask;
         if (_paintSaveTask is { } paintSaveTask) await paintSaveTask;
         if (_photoCopyObservationTask is { } observationTask) await observationTask;
-        await _paintWorker.WorkerTask;
         _handEngine?.Dispose();
         _handEngine = null;
         if (_handVideoRecorder is not null) await _handVideoRecorder.DisposeAsync();

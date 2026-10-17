@@ -7,15 +7,18 @@ internal sealed class HandAcquisitionTextPatterns
     internal sealed record Observation(int Region, bool Clean, bool StrongCorruption, double Correlation,
         IReadOnlyList<PixelPoint> ChangedBoardPixels, double OpticalBlur, int OffsetX, int OffsetY,
         double ScaleX = 1, double ScaleY = 1, IReadOnlyList<double>? SectorCorrelations = null,
-        double LocalDamageCoverage = 0, double ExposureGain = 1, double ExposureBackground = 0, bool Clipped = false);
+        double LocalDamageCoverage = 0, double ExposureGain = 1, double ExposureBackground = 0, bool Clipped = false,
+        bool LocalInkCorruption = false);
     private sealed record Template(int Region, int Left, int Top, int Width, int Height,
-        double[][] HighPass, double[][] Blurred, double Background, int[] Evidence, double InkBackground)
+        double[][] HighPass, double[][] Blurred, double Background, int[] Evidence, double InkBackground,
+        sbyte[] InkPolarity, InkWindow[] InkWindows)
     {
         public HashSet<int> EvidenceSupport { get; } = Evidence.ToHashSet();
         // Correlations read only the evidence pixels. Patterns compared with the
         // camera hold those values in Evidence order rather than the full raster.
         public double[][] EvidenceHighPass { get; } =
             HighPass.Select(pattern => Evidence.Select(index => pattern[index]).ToArray()).ToArray();
+        public double[] CurrentEvidence { get; } = new double[Evidence.Length];
         public Dictionary<int, double[]> ExposedHighPass { get; } = [];
         public double CleanCorrelation { get; set; }
         public int? RegisteredVariant { get; set; }
@@ -35,6 +38,7 @@ internal sealed class HandAcquisitionTextPatterns
         public double[]? ExposureHighPass { get; set; }
         public int ExposureVariant { get; set; }
     }
+    private sealed record InkWindow(int Center, int[] Evidence, int[] Ink);
     private readonly HandAcquisitionSceneImage _scene;
     private readonly double[] _inverse;
     private readonly List<Template> _templates = [];
@@ -61,6 +65,7 @@ internal sealed class HandAcquisitionTextPatterns
                 expected[y * width + x] = SceneLuminance(left + x, top + y);
             double[] highPass = HighPass(expected, width, height);
             bool[] halo = new bool[expected.Length];
+            bool[] ink = new bool[expected.Length];
             int inkCount = 0, interior = 0;
             double background = expected.Order().ElementAt(expected.Length / 2);
             for (int y = 0; y < height; y++)
@@ -71,6 +76,7 @@ internal sealed class HandAcquisitionTextPatterns
                 interior++;
                 int index = y * width + x;
                 if (Math.Abs(expected[index] - background) <= 24 || Math.Abs(highPass[index]) <= 6) continue;
+                ink[index] = true;
                 inkCount++;
                 for (int dy = -2; dy <= 2; dy++)
                 for (int dx = -2; dx <= 2; dx++)
@@ -86,8 +92,11 @@ internal sealed class HandAcquisitionTextPatterns
             if (evidence.Length < 40) continue;
             var blurred = Blurs.Select(blur => blur == 0 ? expected : Blur(expected, width, height, blur)).ToArray();
             var variants = blurred.Select(image => HighPass(image, width, height)).ToArray();
+            sbyte[] polarity = evidence.Select(index => ink[index] ? (sbyte)Math.Sign(expected[index] - background) : (sbyte)0).ToArray();
             _templates.Add(new(region, left, top, width, height, variants, blurred,
-                expected.Order().ElementAt(expected.Length / 10), evidence, background));
+                expected.Order().ElementAt(expected.Length / 10), evidence, background,
+                polarity, scene.BoardVectorGlyphRegions?.Contains(region) == true
+                    ? BuildInkWindows(width, height, evidence, polarity) : []));
         }
     }
 
@@ -304,6 +313,7 @@ internal sealed class HandAcquisitionTextPatterns
                     double expected = bestGain * (bestExpected[k] - bestMeanExpected) + bestMeanCurrent;
                     double actual = bestScaleX == 1 && bestScaleY == 1 ? cameraHighPass[index + bestDy * template.Width + bestDx]
                         : AffineSample(cameraHighPass, template.Width, template.Height, index, bestDx, bestDy, bestScaleX, bestScaleY);
+                    template.CurrentEvidence[k] = actual;
                     if (Math.Abs(actual - expected) <= threshold) continue;
                     changedIndices.Add(index);
                     changed.Add(new((template.Left + index % template.Width) / (double)LogicalSize,
@@ -422,6 +432,17 @@ internal sealed class HandAcquisitionTextPatterns
                 Enumerable.Range(0, sectors.Length).Where(sector => informative[sector])
                     .All(sector => sectors[sector] >= .65))
                 stronglyCorrupted = false;
+            // An explicitly identified vector symbol can keep a strong whole-
+            // glyph match while one stroke is broken at a finger seam. Sectors dilute
+            // that loss. Compare precomputed ink-centered windows at the ONE
+            // global registration; never fit or move each window separately.
+            // Low local correlation alone also catches harmless ink spreading.
+            // Require original ink to reverse local contrast at two pixels in
+            // two overlapping windows, so an intact expanded stroke, plate,
+            // border, colour shift or lost edge contrast cannot qualify.
+            bool localInkCorruption = !stronglyCorrupted && best >= .80 && bestStd >= 3 &&
+                HasLocalInkLoss(template, bestExpected);
+            if (localInkCorruption) clean = false;
             if (best >= .82 && clean)
             {
                 template.CleanCorrelation = Math.Max(template.CleanCorrelation, best);
@@ -433,13 +454,66 @@ internal sealed class HandAcquisitionTextPatterns
             }
             observations.Add(new(template.Region, clean, stronglyCorrupted, best, changed,
                 Blurs[bestVariant], bestDx, bestDy, bestScaleX, bestScaleY, sectors, localCoverage,
-                bestExposureGain, bestExposureBackground, clipped));
+                bestExposureGain, bestExposureBackground, clipped, localInkCorruption));
         }
         for (int index = 0; index < observations.Count; index++)
             if (missingContrast.TryGetValue(observations[index].Region, out var missing) &&
                 observations.Any(other => other.Region != observations[index].Region && other.Clean && other.Correlation >= .82))
                 observations[index] = observations[index] with { ChangedBoardPixels = missing };
         return observations;
+    }
+
+    private static InkWindow[] BuildInkWindows(int width, int height, int[] evidence, sbyte[] polarity)
+    {
+        int[] positions = Enumerable.Repeat(-1, width * height).ToArray();
+        for (int k = 0; k < evidence.Length; k++) positions[evidence[k]] = k;
+        var windows = new List<InkWindow>();
+        for (int k = 0; k < evidence.Length; k++)
+        {
+            if (polarity[k] == 0) continue;
+            int center = evidence[k], x = center % width, y = center / width;
+            if (x < 8 || y < 8 || x >= width - 8 || y >= height - 8) continue;
+            var support = new List<int>(49);
+            var ink = new List<int>(49);
+            for (int dy = -3; dy <= 3; dy++)
+            for (int dx = -3; dx <= 3; dx++)
+            {
+                int at = positions[center + dy * width + dx];
+                if (at < 0) continue;
+                support.Add(at);
+                if (polarity[at] != 0) ink.Add(at);
+            }
+            if (support.Count >= 24 && ink.Count >= 8)
+                windows.Add(new(center, support.ToArray(), ink.ToArray()));
+        }
+        return windows.ToArray();
+    }
+
+    private static bool HasLocalInkLoss(Template template, double[] expected)
+    {
+        int previous = -1;
+        foreach (var window in template.InkWindows)
+        {
+            int missing = 0;
+            foreach (int k in window.Ink)
+                if (expected[k] * template.InkPolarity[k] > 6 &&
+                    template.CurrentEvidence[k] * template.InkPolarity[k] < -2 && ++missing == 2) break;
+            if (missing < 2) continue;
+            double sumA = 0, sumB = 0, sumAA = 0, sumBB = 0, sumAB = 0;
+            foreach (int k in window.Evidence)
+            {
+                double a = expected[k], b = template.CurrentEvidence[k];
+                sumA += a; sumB += b; sumAA += a * a; sumBB += b * b; sumAB += a * b;
+            }
+            double n = window.Evidence.Length, aa = sumAA - sumA * sumA / n;
+            if (aa / n < 9) continue;
+            double bb = sumBB - sumB * sumB / n, ab = sumAB - sumA * sumB / n;
+            if (bb <= 1e-8 || ab / Math.Sqrt(aa * bb) >= .40) continue;
+            if (previous >= 0 && Math.Abs(previous % template.Width - window.Center % template.Width) <= 3 &&
+                Math.Abs(previous / template.Width - window.Center / template.Width) <= 3) return true;
+            previous = window.Center;
+        }
+        return false;
     }
 
     private static double AffineSample(double[] pixels, int width, int height, int index,

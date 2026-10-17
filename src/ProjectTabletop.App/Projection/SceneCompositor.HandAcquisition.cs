@@ -85,6 +85,13 @@ public sealed partial class SceneCompositor
                 _acquisitionReferenceError = null;
                 _acquisitionReferenceRetryAt = default;
                 _acquisitionReason = "inactive";
+                // A null context permits the legacy full-camera fallback. Setup
+                // owns sensing, so an already queued hand frame gets an explicit
+                // empty search region even before its publication is rejected.
+                if (_markerSetup is not null)
+                    return new(_acquisitionRevision, false, [], null,
+                        StationarySearchCenters: [], RestrictAcquisitionToSearchRegions: true,
+                        AllowsSearchIllumination: false);
                 return null;
             }
             var blackjack = _boardSession.Screen == BoardScreen.Blackjack;
@@ -121,6 +128,9 @@ public sealed partial class SceneCompositor
                 var centers = boardCenters.Select(point =>
                     _boardCameraMap!.InverseTransform(_boardSurfaceMap!.Transform(point)))
                     .Select(point => new PixelPoint(point.X, point.Y)).ToArray();
+                // The tester must acquire anywhere on the calibrated grid,
+                // without first covering Back to settings. Reuse the bounded
+                // field crops and their existing projection-normalized retry.
                 // Photo Copy must see hands beside the subject for its field
                 // shutter and to keep a hand from being acquired as an object.
                 // This known capture area is separate from button lighting.
@@ -130,7 +140,7 @@ public sealed partial class SceneCompositor
                 var field = footballSearch
                     ? new BoardRect(footballField.X, footballField.Y, footballField.Width, footballField.Height)
                     : BoardSession.PhotoCopyShutterBounds;
-                var capturePolygon = footballSearch ||
+                var capturePolygon = _boardSession.Screen == BoardScreen.HandTracking ? polygon : footballSearch ||
                     _boardSession.Screen == BoardScreen.PhotoCopy && !_boardSession.PhotoCopyHasSwirl
                     ? new[] { new Point2(field.X, field.Y), new Point2(field.X + field.Width, field.Y),
                         new Point2(field.X + field.Width, field.Y + field.Height), new Point2(field.X, field.Y + field.Height) }
@@ -174,7 +184,7 @@ public sealed partial class SceneCompositor
         (_boardSession.Buttons.Count > 0 || !_boardSession.ButtonsVisible || BoardControlsAnimating ||
             _boardSession.Screen is BoardScreen.Football or BoardScreen.StrykersRun);
 
-    private bool MappedBoardInputReady => !_disposed && CurrentBoardArtworkReady && !_boardSession.MenuScrolling &&
+    private bool MappedBoardInputReady => !_disposed && _markerSetup is null && CurrentBoardArtworkReady && !_boardSession.MenuScrolling &&
         (_boardSession.Screen is not (BoardScreen.Menu or BoardScreen.Settings) || _menuPreviewReady) &&
         !_blackOutput && !_boardSetup && !IsBoardRevealActive && _calibrationTarget < 0 &&
         _boardMediaClip is not null && _boardCameraMap is not null && _boardSurfaceMap is not null;
@@ -204,42 +214,50 @@ public sealed partial class SceneCompositor
                 _acquisitionQuietUntil = now + AcquisitionSettle;
                 return;
             }
+            HandAcquisitionHint? higherCaption = null;
             if (current.IlluminatedHint is not null && requested.IlluminatedHint is not null &&
                 current.IlluminationStartedAt == requested.IlluminationStartedAt && frameTime <= now &&
                 now - frameTime <= TimeSpan.FromMilliseconds(350))
             {
-                // A clipped frame cannot show the hand. Restart the dimmer light
-                // so its own camera settling frames are skipped again.
-                if (illuminatedWhite >= HandAcquisitionPresenceTracker.SaturatedIlluminatedWhite &&
-                    _lightLevel > MinimumLightLevel)
+                // A reaching arm can cover a lower caption before the fingers
+                // reach their target. Fresh broken text farther up the board
+                // takes priority over renewing a light on that arm or wrist.
+                higherCaption = hands.Count == 0
+                    ? HighestQualifiedAcquisitionHint(hints, frameTime, current.IlluminatedHint) : null;
+                if (higherCaption is null)
                 {
-                    _lightLevel = Math.Max(MinimumLightLevel, _lightLevel * LightLevelStep);
-                    _acquisitionLightStarted = now;
-                    _acquisitionLightUntil = now + AcquisitionLightDuration;
-                    _acquisitionReason = "dimming-saturated-search-light";
+                    // A clipped frame cannot show the hand. Restart the dimmer light
+                    // so its own camera settling frames are skipped again.
+                    if (illuminatedWhite >= HandAcquisitionPresenceTracker.SaturatedIlluminatedWhite &&
+                        _lightLevel > MinimumLightLevel)
+                    {
+                        _lightLevel = Math.Max(MinimumLightLevel, _lightLevel * LightLevelStep);
+                        _acquisitionLightStarted = now;
+                        _acquisitionLightUntil = now + AcquisitionLightDuration;
+                        _acquisitionReason = "dimming-saturated-search-light";
+                        return;
+                    }
+                    if (illuminatedWhite < UnclippedLightWhite) _lightLevel = Math.Min(1, _lightLevel / LightLevelStep);
+                    // Keep searching a stationary foreground object using current
+                    // camera evidence. The projected white disk alone cannot renew it.
+                    if (illuminatedPresence == true && hints.Any(hint =>
+                        HasCurrentControlObstruction(hint, frameTime) && hint.Center == current.IlluminatedHint.Center))
+                    {
+                        _acquisitionLightUntil = frameTime + TimeSpan.FromMilliseconds(800);
+                        if (_boardSession.Screen == BoardScreen.Paint) NotePaintUserActivity();
+                    }
+                    else if (illuminatedPresence is not null)
+                    {
+                        ClearAcquisitionLight();
+                        _acquisitionQuietUntil = now + AcquisitionLightOffSettle;
+                        _acquisitionReason = illuminatedPresence == false ? "foreground-left" : "insufficient-control-obstruction";
+                    }
                     return;
                 }
-                if (illuminatedWhite < UnclippedLightWhite) _lightLevel = Math.Min(1, _lightLevel / LightLevelStep);
-                // Keep searching a stationary foreground object using current
-                // camera evidence. The projected white disk alone cannot renew it.
-                if (illuminatedPresence == true && hints.Any(hint =>
-                    HasCurrentControlObstruction(hint, frameTime) && hint.Center == current.IlluminatedHint.Center))
-                {
-                    _acquisitionLightUntil = frameTime + TimeSpan.FromMilliseconds(800);
-                    RetainPaintButtonLightExclusion();
-                    if (_boardSession.Screen == BoardScreen.Paint) NotePaintUserActivity();
-                }
-                else if (illuminatedPresence is not null)
-                {
-                    ClearAcquisitionLight();
-                    _acquisitionQuietUntil = now + AcquisitionLightOffSettle;
-                    _acquisitionReason = illuminatedPresence == false ? "foreground-left" : "insufficient-control-obstruction";
-                }
-                return;
             }
-            if (!current.ObserveMotion || _acquisitionHint is not null || hints.Count == 0) return;
+            if (higherCaption is null && (!current.ObserveMotion || _acquisitionHint is not null || hints.Count == 0)) return;
             // Hold buttons act on caption evidence alone and must stay unlit.
-            var hint = hints.FirstOrDefault(hint => HasCurrentControlObstruction(hint, frameTime) && !OnHoldButton(hint.Center));
+            var hint = higherCaption ?? HighestQualifiedAcquisitionHint(hints, frameTime);
             if (hint is null) return;
             if (!double.IsFinite(hint.RadiusPixels) || hint.RadiusPixels <= 0) return;
             var anchor = _boardCameraMap!.Transform(new(hint.Center.X, hint.Center.Y));
@@ -260,6 +278,7 @@ public sealed partial class SceneCompositor
                     Math.Pow(point.Y - center.Y, 2)));
             }
             if (!double.IsFinite(radius) || radius <= 0 || !double.IsFinite(center.X) || !double.IsFinite(center.Y)) return;
+            if (higherCaption is not null) ClearAcquisitionLight();
             _acquisitionHint = hint;
             // A darker gray at night also avoids a large auto-exposure swing.
             if (projectedWhiteClipped is { } clipped && clipped != _lightStartClipped)
@@ -272,9 +291,46 @@ public sealed partial class SceneCompositor
             _acquisitionLight = new(new(center.X, center.Y), Math.Min(radius, hint.ValidatedCandidateBounds is null ? .24 : .32));
             _acquisitionLightUntil = now + AcquisitionLightDuration;
             _acquisitionLightStarted = now;
-            RetainPaintButtonLightExclusion();
             _acquisitionLightCount++;
             _acquisitionReason = "illuminated-search";
+        }
+    }
+
+    private HandAcquisitionHint? HighestQualifiedAcquisitionHint(IReadOnlyList<HandAcquisitionHint> hints,
+        DateTimeOffset frameTime, HandAcquisitionHint? current = null)
+    {
+        double highest = current is null ? double.PositiveInfinity : CaptionHeight(current);
+        HandAcquisitionHint? selected = null;
+        foreach (var hint in hints)
+        {
+            if (!HasCurrentControlObstruction(hint, frameTime) ||
+                !double.IsFinite(hint.Center.X) || !double.IsFinite(hint.Center.Y) ||
+                !double.IsFinite(hint.RadiusPixels) || hint.RadiusPixels <= 0) continue;
+            // Our own white light cannot supply a new caption target. Match
+            // the text detector's excluded illumination footprint.
+            if (current is not null && Math.Sqrt(
+                    Math.Pow(hint.Center.X - current.IlluminationCenter.X, 2) +
+                    Math.Pow(hint.Center.Y - current.IlluminationCenter.Y, 2)) <= current.IlluminationRadiusPixels * 1.4)
+                continue;
+            double height = CaptionHeight(hint);
+            if (height >= highest - 1e-6) continue;
+            highest = height;
+            selected = hint;
+        }
+        return selected;
+
+        double CaptionHeight(HandAcquisitionHint hint)
+        {
+            var anchor = _boardCameraMap!.Transform(new(hint.Center.X, hint.Center.Y));
+            var board = _boardSurfaceMap!.InverseTransform(anchor);
+            for (int index = 0; index < _boardSession.Buttons.Count; index++)
+            {
+                var button = _boardSession.Buttons[index];
+                if (button.IsHold || !button.Bounds.Contains(board.X, board.Y)) continue;
+                var caption = _acquisitionExpectedScene?.BoardTriggerRegions?[index];
+                return caption is { } bounds ? bounds.Y + bounds.Height / 2 : button.Bounds.Y + button.Bounds.Height / 2;
+            }
+            return double.PositiveInfinity;
         }
     }
 
@@ -340,7 +396,6 @@ public sealed partial class SceneCompositor
 
     private void ClearAcquisitionLight()
     {
-        RetainPaintButtonLightExclusion();
         _acquisitionHint = null;
         _acquisitionLight = null;
         _acquisitionLightUntil = DateTimeOffset.MinValue;
@@ -359,7 +414,7 @@ public sealed partial class SceneCompositor
         bool roulette = _boardSession.Screen == BoardScreen.Roulette;
         if (_boardApplicationTarget is null || _renderedBoardState is not { } rendered ||
             rendered.Screen != _boardSession.Screen || rendered.ControlsVisualStep != BoardControlsVisualStep) return null;
-        if (!photoCopy && !globe && !roulette && !water && !football && !strykersRun &&
+        if (!photoCopy && !paint && !globe && !roulette && !water && !football && !strykersRun &&
             (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
         if (_boardSession.Screen == BoardScreen.Blackjack &&
             (rendered.BlackjackRevision != _boardSession.BlackjackState.Revision ||
@@ -374,6 +429,8 @@ public sealed partial class SceneCompositor
         if (slots && rendered.SlotsRevision != _boardSession.SlotsState.Revision) return null;
         if (photoCopy && (rendered.PhotoUiRevision != _boardSession.Revision ||
             HasPhotoCopyDrawerAnimation(_blackjackClock()))) return null;
+        if (paint && (rendered.PaintUiRevision != _boardSession.Revision ||
+            HasPaintDrawerAnimation(_paintClock()))) return null;
         if (roulette && rendered.RouletteRevision != _boardSession.RouletteState.Revision) return null;
         if (_boardSession.Screen == BoardScreen.Menu &&
             (_boardSession.MenuScrolling || rendered.MenuFrame != MenuVisualFrame(_blackjackClock()))) return null;
@@ -448,7 +505,7 @@ public sealed partial class SceneCompositor
                     // and must never look like an arriving hand.
                     drawing.Clear(paint ? PaintColor(3, 5, 12) : AppPalette.PhotoCopyBackground);
                     if (photoCopy) DrawPhotoCopyControls(drawing, _boardSession.Buttons, [], [], _blackjackClock());
-                    else foreach (var button in _boardSession.Buttons) DrawPaintButton(drawing, button, false, []);
+                    else DrawPaintControls(drawing, _boardSession.Buttons, [], [], _paintClock());
                 }
                 else
                 {
@@ -461,13 +518,17 @@ public sealed partial class SceneCompositor
             }
             var pixels = _acquisitionReferenceTarget.GetPixelBytes();
             _acquisitionReferenceError = null;
-            var regions = _boardSession.Buttons.Select(BoardButtonSearchRegion).ToArray();
-            // Arrow damage is normalized to its compact glyph neighbourhood.
-            // The original full, opaque pill independently constrains exposure
-            // and camera colour; those extra reference pixels cannot qualify
-            // an arriving hand or extend the arrow's optical search region.
-            var controlReferences = _boardSession.Buttons.Select((button, index) =>
-                IsVectorArrowHandle(button) ? BoardButtonPlateRegion(button) : regions[index]).ToArray();
+            var triggers = _boardSession.Buttons
+                .Select(button => BoardButtonTextRegion(_acquisitionReferenceTarget.Device, button)).ToArray();
+            var regions = _boardSession.Buttons.Select((button, index) =>
+                BoardButtonSearchRegion(button, triggers[index])).ToArray();
+            // Caption and arrow damage is measured against the generated ink.
+            // Full opaque plates independently constrain exposure and colour;
+            // their artwork cannot qualify an arriving hand. Roulette chips
+            // retain their shaped reference inside the circular control.
+            var controlReferences = _boardSession.Buttons.Select(button =>
+                _boardSession.Screen == BoardScreen.Roulette && button.Id.StartsWith("roulette-chip-", StringComparison.Ordinal)
+                    ? RouletteChipSearchRegion(button) : BoardButtonPlateRegion(button)).ToArray();
             // One Back button is not enough to fit the camera's color response
             // when fingers cover most of it. Include fixed, opaque UI nearby as
             // a lighting reference, without allowing it to suggest a search light.
@@ -491,15 +552,16 @@ public sealed partial class SceneCompositor
                 BoardScreen.CrownDeed => [.. controlReferences,
                     new(.18, .045, .64, .12), new(.18, .835, .64, .12)],
                 BoardScreen.Blackjack => [new(.05, .24, .90, .50), new(.31, .05, .63, .095)],
-                _ => _boardSession.Buttons.Any(IsVectorArrowHandle) ? controlReferences : null
+                _ => controlReferences
             };
             return new((int)BoardSurfaceSize, (int)BoardSurfaceSize, pixels, cameraToBoard,
                 BoardSearchRegions: regions, BoardReferenceRegions: referenceRegions,
-                BoardTriggerRegions: _boardSession.Buttons
-                    .Select(button => BoardButtonTextRegion(_acquisitionReferenceTarget.Device, button)).ToArray(),
+                BoardTriggerRegions: triggers,
                 AllowsLocalForegroundContext: _boardSession.Screen is BoardScreen.Menu or BoardScreen.Settings or
                     BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.CrownDeed,
-                BoardControlReferenceRegions: controlReferences);
+                BoardControlReferenceRegions: controlReferences,
+                BoardVectorGlyphRegions: _boardSession.Buttons.Select((button, index) =>
+                    IsVectorArrowHandle(button) ? index : -1).Where(index => index >= 0).ToArray());
         }
         catch (Exception error) when (error is System.Runtime.InteropServices.COMException or
             InvalidOperationException or ObjectDisposedException)

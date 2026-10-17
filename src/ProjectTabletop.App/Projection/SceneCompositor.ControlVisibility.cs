@@ -11,6 +11,7 @@ public sealed partial class SceneCompositor
     {
         get
         {
+            if (_markerSetup is not null) return [];
             var now = _blackjackClock();
             _boardSession.TickControlVisibility(now);
             return _boardSession.GetVisibleButtons(now);

@@ -12,7 +12,7 @@ public sealed partial class SceneCompositor
 
     private static bool IsMenuScrollHandle(BoardButton button) => button.Id is "menu-scroll-down" or "menu-scroll-up";
 
-    // Reuse the Globe chevron silhouette and physical aspect correction for
+    // Reuse the shared layered arrow and physical aspect correction for
     // both the visible arrow and camera caption-ink bounds.
     private static BoardButton MenuArrowAppearance(BoardButton button) =>
         button with { Id = button.Id == "menu-scroll-up" ? "globe-drawer-open" : "globe-drawer-close" };

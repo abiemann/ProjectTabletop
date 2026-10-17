@@ -49,25 +49,9 @@ internal sealed partial class StrykersRunRenderer
         catch { target.Dispose(); throw; }
     }
 
-    private void DrawStreet(CanvasDrawingSession ds, float distance, float clock, float ambient)
+    private void DrawStreet(CanvasDrawingSession ds, float distance, float clock)
     {
-        ds.FillRectangle(new Rect(0, 0, Width, RailTop), Ink(9, 17, 25));
-        // Distant buildings stay outside the projected road plane. Their lights
-        // and steam provide parallax without changing any gameplay coordinates.
-        for (int side = 0; side < 2; side++)
-        for (int i = 0; i < 9; i++)
-        {
-            float w = 24 + Noise(i + side * 13) * 35;
-            float x = side == 0 ? i * 27 - 12 : Width - i * 27 - w + 12;
-            float top = 91 + Noise(i * 11 + side) * 93;
-            ds.FillRectangle(new Rect(x, top, w, 760), Ink((byte)(12 + i), (byte)(23 + i), (byte)(32 + i)));
-            for (int row = 0; row < 9; row++)
-            {
-                if (Noise(i * 73 + row * 7 + side) < .38f) continue;
-                byte strength = (byte)(60 + 43 * (.5f + .5f * MathF.Sin(ambient * .8f + i * 3 + row)));
-                ds.FillRectangle(new Rect(x + 7, top + 17 + row * 31, 4, 10), Ink(240, 169, 91, strength));
-            }
-        }
+        DrawCityBackground(ds, distance);
         var road = _images!.Image("road.png")!;
         _road.ConstantBuffer = new StrykersRunRoadShader(new Float2((float)road.Size.Width, (float)road.Size.Height), distance);
         ds.DrawImage(_road, new Rect(0, 0, Width, Height), new Rect(0, 0, road.Size.Width, road.Size.Height));
@@ -130,9 +114,7 @@ internal sealed partial class StrykersRunRenderer
         float left = point.X - width / 2, top = point.Y - height;
         bool harmful = gate.Kind == StrykersRunGateKind.Subtract;
         var color = harmful ? Ink(255, 83, 70) : Ink(65, 221, 255);
-        // Draw the supports behind one closed frame so they cannot erase its corners.
-        ds.FillRectangle(new Rect(left - 5 * depth, top - 5 * depth, 11 * depth, height + 10 * depth), Ink(42, 48, 54));
-        ds.FillRectangle(new Rect(left + width - 6 * depth, top - 5 * depth, 11 * depth, height + 10 * depth), Ink(42, 48, 54));
+        // One closed coloured frame keeps the corners joined without dark supports outside it.
         ds.FillRoundedRectangle(new Rect(left, top, width, height), 8 * depth, 8 * depth,
             harmful ? Ink(67, 20, 23, 231) : Ink(13, 56, 74, 233));
         ds.DrawRoundedRectangle(new Rect(left, top, width, height), 8 * depth, 8 * depth, color, 3 * depth);

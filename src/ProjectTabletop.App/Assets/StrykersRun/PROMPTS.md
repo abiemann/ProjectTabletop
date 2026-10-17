@@ -329,3 +329,141 @@ Use case: background-extraction. Edit target: the provided eight-frame flame atl
 ```text
 Use case: background-extraction. Production sprite alpha cleanup only. Input is an eight-frame fire atlas: keep all eight fire shapes, colors, texture, grid arrangement and scale unchanged. Eliminate the entire brown-orange backdrop and diffuse glow; deliver isolated flame tongues and sparse sparks on truly empty RGBA background. Background alpha must equal ZERO everywhere outside actual flame/sparks, including alpha1 residue. No broad semitransparent atmosphere or rectangular fog anywhere. Retain fine antialiased edges only immediately along real fire contours. Keep transparent holes between tongues. Four columns, two rows, 1536x1024, each flame entirely within its cell. No checkerboard, labels, borders, shadows or matte.
 ```
+
+## Storm clouds, electric spiders and persistent craters (2026-10-15)
+
+Generated with the built-in `image_gen` tool and `transparent_background: true`. Cloud style reference: `bosses.png`; spider style references: `bosses.png` and `actors.png`; crater material reference: `road.png`. Each second and third call edited the preceding result. The user explicitly approved background-only script cleanup after all three attempts retained faint residue. Exact prompts follow.
+
+### Storm cloud, attempt 1
+
+```text
+Use case: stylized-concept. Asset type: premium animated storm cloud sprite atlas for Stryker's Run, a gritty elevated-camera arcade road shooter. Reference image supplies STYLE and electric-blue storm lighting only, specifically the electrical zombie in the top-right cell. Draw NO characters. Generate exactly EIGHT consecutive animation frames of one compact floating thundercloud in a precise FOUR-column TWO-row grid. Each frame shows the same low broad three-dimensional storm cloud with an irregular cauliflower billowing silhouette, beautifully detailed charcoal/navy smoke folds, cold silver rim light and intense cyan-white lightning glowing from deep cracks inside. Different lobes roll and reform across the 8 frames in a seamless loop, internal lightning pulses travel through the underside; natural curling transparent wisps at sides. Show the top and the dark underside from an elevated frontal viewpoint, cloud floats above the road toward the camera/downscreen. Cloud width about1.8timesheight, common center and scale in everycell. Rich painterly realistic arcade VFX, mature dramatic threatening storm, not cartoon weather icon, not flat oval, not blurredblob. Only internal sheet-lightning and a few short downward roots close to underside; long downward rain bolts will be added by the game. No ground, ground shadow, road, sky, background, horizon, rain streaks across canvas, characters, text, labels or frameborder. Each cloud wholly inside its equal cell with at least40pixels truly emptyspace aroundallwisps; no bridges between cells, no fogsheet or broad rectangular opacity fade. Landscape atlas preferably2048x1024 with4x2equal512cells. Real RGBA PNG; EVERY exterior background, gutter and border pixel must be alpha exactlyZERO, notalpha1; transparent holes betweenwisps; preserve only meaningful antialiasing at cloudcontours. No checkerboard, matte, backdrop, vignette, aura or baked background gradient. Keep the cloud visually readable over dark asphalt using intricate luminous innerlight and rimlight, not a rectangle of glow.
+```
+
+### Storm cloud, attempt 2
+
+```text
+Use case: precise-object-edit. Edit target is the supplied eight storm-cloud frames, 1774x887 RGBA, four columns and two rows. Preserve all eight detailed cloud paintings and their distinct billowing/lightning phases, dark blue charcoal texture and cyan-white inner lightning. Fix spacing and background only: uniformly SHRINK each cloud to 70 percent of its present width and height INSIDE its current cell, center every cloud at the same cell-local coordinate (50% width,52% height). Keep every wisp and lightning root at least45pixels away from every cell edge; currently clouds touch the sides and cross cell boundaries. No clipping. Keep complete natural silhouettes; do not trim them with a rectangle. Remove the blue speckles/glow film outside true cloud contours. Every empty exterior, corner and gutter must be alpha EXACTLY0, not1or2residue. Smooth antialiasing along real contours and real thin cloudwisps only. No background gradient, coloredmatte, checkerboard, text,labels,shadow,scene,newobjects. Exact4x2layout and1774x887canvas.
+```
+
+### Storm cloud, attempt 3
+
+```text
+Use case: background-extraction. Edit only technical transparency and frame anchoring in this eight-frame storm cloud atlas. Preserve exactly1774x887canvas,4columns2rows, all8cloudshapes, theirintricatedetails, colors and internal lightning. Empty background still has35240pixels atalpha1. Set everybackgroundpixeloutside actualcloudwisps toalphaexactly0, especiallyouterborders,gutters,corners. No faint blue film or isolated nearlyinvisible speckles. Keep actual softly translucent cloudedges smooth and natural. Align all8 cloudbodycenters at the same celllocalpoint x=222,y=244; secondrowcurrentlya little higher, shift thoseclouds downward20pixels WITHOUTchangingcloudsize. Everycloudandwisp mustretain at least40pixelsclearspacefromeverycelledge. Do not addglow, fog, scene, checkerboard, labels, borders, shadows or any newart. GenuineRGBAtransparentPNG.
+```
+
+### Electric spider, attempt 1
+
+```text
+Use case: stylized-concept. Asset type: production WALKING animation sprite atlas for an electric undead spider enemy in a premium arcade road shooter. Input images are STYLE references only: image1 bosses and image2 actors establish realistic hand-painted arcade lighting, rich textured surfaces, elevated camera. Create one original terrifying eight-legged spider with black/charcoal organic chitin, cracked armored abdomen containing brilliant blue-white electric energy, pale cyan eye cluster, copperlike cable details, and small electric arcs between its legs. No human features. Its low slung heavy body looks physical, mature, fierce, richly detailed, not cute or cartoony. EXACTLY eight successive poses of the SAME spider, in an exact equal FOUR-COLUMN by TWO-ROW atlas, canvas 1536x1024, cells384x512. Camera elevated in front, seeing tops of body and legs, spider facing toward camera/downscreen. Every frame has the body center at EXACTLY relative cell(192,250), matching angle, size and lighting. Walking cycle in place: alternate four legs lifting/reaching while other four push, joint angles visibly change across frames1-8, slight natural body bob but no turning; frame8 loops back to1. Keep all legs and arcs inside each cell with at least40px genuinely empty padding on all sides; target complete silhouette roughly290px wide and300px tall, baseline aroundy410. Detailed sharp painted highlights, crisp dark contours, convincing leg anatomy, eight legs each with several joints, blue electricity flickering differently per pose but never swallowing the physical body. No floor shadow or ground, no scenery, no text/numbers/grid/labels/watermark, no human, no broad glow haze. Real RGBA transparency: ALL exterior background, inter-leg holes, gutters and borders must be alpha exactly0, NOT1. Do not paint a checkerboard. Preserve clean antialiased silhouette edges. Draw only eight isolated spiders on completely transparent background.
+```
+
+### Electric spider, attempt 2
+
+```text
+Use case: precise-object-edit/background-extraction. Edit this existing eight-frame electric spider atlas. Preserve this excellent spider design, rich surface detail, colors, eight walking poses and 4 columns by 2 rows arrangement. Keep output canvas EXACTLY1536x1024 and equal cells384x512. Correct ONLY sprite registration/padding and transparent background. Keep each spider's head center at local(x192,y270), abdomen center at local(x192,y175), same body size in all cells. Place walking toes within y420. ALL eight spiders and every arc must fit wholly inside x40..344 and y60..452 of their own cell. Do not crop legs. MOST IMPORTANT: remove the entire surrounding gray/blue/black glow haze and near-invisible alpha film. Every pixel outside spiders and their thin connected blue electric arcs must be alpha EXACTLY0. All gutters, canvas border, cell corners and enclosed gaps between legs must be completely transparent alpha0, never alpha1/2/3. No shadow, no soft background glow. Preserve crisp subtle antialiasing ONLY at actual contour edges. Do not change the detailed black chitin/copper joint design or bright crackled abdomen, and do not paint a checkerboard. Actual RGBA PNG. No scene,text,labels,numbers.
+```
+
+### Electric spider, attempt 3
+
+```text
+Use case: background-extraction. Extract these eight existing electric spider sprites onto real alpha transparency. DO NOT REDRAW OR CHANGE THE SPIDERS. Keep exact1536x1024 image and exact4columns2rows cell grid. Remove the full diffuse gray/orange/blue haze and ALL near-invisible backdrop film from every cell, every gutter and every hole between legs. Treat the sprites as hard cutouts with delicate antialiasing only immediately adjacent to the solid contour and narrow attached lightning arcs. The backdrop must be absent, alpha exactlyZERO everywhere outside those silhouettes. No alpha1..10 blanket or low-opacity ambient haze. Do not add new halo, shadows, ground, glow, grid, checkerboard or replacement background. Keep the black armored bodies, copper joints and blue-white narrow electricity unchanged with their crisp painted detail. Result must be RGBA with transparent pixels carrying alpha0. Leave pose order, cell placement, body size and every joint bend unchanged.
+```
+
+### Charged crater, attempt 1
+
+```text
+Use case: stylized-concept. Asset type: four premium electrical blast crater ground decals for an elevated-camera arcade road shooter. Reference image provides ONLY the dark weathered cracked asphalt material and mature realistic painted game-art style; do not reproduce the whole road. Create exactly FOUR small DIFFERENT irregular craters in an exact TWO-column TWO-row atlas on a square canvas. Each is a shallow blasted depression in charcoal asphalt, with jagged upturned broken pavement, fine dark debris close to the edge, scorched center, metallic fragments, and vivid blue-cyan electrical fissures glowing inside the cracked rim. A few tiny frozen white-blue sparks tightly around the rim, no big lightning bolts. Different natural asymmetrical silhouettes and crack patterns, same overall size and viewpoint. Elevated overhead/front perspective, shallow elliptical footprint seen at35degreesdownward; strongconvincingdepth with darkerrecess andlitedge, not an outline ring. User wants permanent small electrified craters left behind exploded electric spiders. No spiderbody, no characters, no groundplane outside actualcrateredge, nooutershadow, nosmoke (smokeanimatedseparately), noflames/lava/red/orange, nocirculardamageindicator,no perfectcircle. Each entiredecal includingchips fits itsowncell withatleast60pixelsfullyemptytransparentpaddingallsides. GenuineRGBA PNG, ALLexteriorbackground andgutters alphaexactly0, notalpha1 haze, no paintedcheckerboard, matte, rectangle, vignette or broadgradient. Crisp rich hand-painted detail readableatsmallgamescale, restrainedglow confined torealcracks. No captions,borders,labels orwatermarks.
+```
+
+### Charged crater, attempt 2
+
+```text
+Use case: background-extraction. Keep the four detailed electrified asphalt crater decals unchanged in this1254x1254two-column two-row atlas. Preserve brokenrock/chippedasphalt detail, fragments, colors, textures, darkinteriors andtightblueelectricalcracks. Remove ALL emptybackgroundresidue: sourcehas62137alpha1pixels, bordershavealpha1. Everypixeloutside realcrater/debris mustbealphaEXACTLY0, preserving immediateantialiasededges. No haze, matte,groundpatch,checkerboard orrectangle. Uniformlyreduceeachdecalto85%currentsizeinitscell, centerit,soeverychipandarciswellinsideitsowncellwithatleast50pixeltransparentpadding. Do notaddsmoke/flames/largebolts/shadows/textornewobjects. RealRGBAtransparentPNG.
+```
+
+### Charged crater, attempt 3
+
+```text
+Use case: background-extraction. Technical transparency cleanup only. Preserve this1254x1254four-crateratlas exactly: identical positions, scale, crackshapes, colors, pixels of meaningful pavementandlightning,2x2layout. Set every nearlyinvisible backgroundresidue pixel outside the actual crater/debris/electricalcontours to alphaexactlyZERO. Especially remove alpha1film in corners/borders/gutters andisolatedlowalpha speckles. Keep smooth antialiasing immediatelyalong the irregularrealartwork. No matte, backgroundgradient, rectangularfade, checkerboard or newimagery. Real RGBA PNG with truly empty background.
+```
+
+## Independent hero scarf (2026-10-16)
+
+The built-in `image_gen` tool generated these two four-frame atlases with
+`transparent_background: true`. The first body call edited `hero.png`;
+the first scarf call used that original hero as its style reference. Each
+second and third call edited its preceding result. The final body is
+2172 × 724 and the scarf is 2048 × 768; requested dimensions and anchor
+coordinates in the prompts are design constraints, not measurements of the
+returned artwork. Measured registration appears in [ARTWORK.md](ARTWORK.md#independent-hero-scarf-2026-10-16).
+
+After three attempts per atlas retained faint background residue, the user
+explicitly approved setting only alpha-1 pixels to alpha 0. The cleanup
+preserved every RGB value and all other alpha values. The six tool prompts
+below are verbatim.
+
+### Hero body, attempt 1
+
+```text
+Use case: precise-object-edit.
+Asset type: four-frame game character animation atlas, PNG with real alpha transparency.
+Input image 1 is the exact edit target: the four rear-view walking poses of Stryker.
+Change only one thing: remove the long loose flowing red scarf tail from all four poses, reconstructing only the small shoulder/back regions previously hidden underneath the tail. KEEP the close-fitting red scarf wrapped around his neck, including its small knot. The separate long tail will be attached by the game renderer later.
+Preserve the exact hero identity, rear view, four existing walking poses, navy clothing, brass hardware, dark green tactical backpack, rifle aimed upscreen, hair, anatomy, lighting, painted mature arcade rendering, figure scale and original frame centers. Keep the same 2172x724 wide composition with four equal columns, one figure per column, no visible grid. Do not move or crop the figures. Do not create additional figures or accessories.
+Output actual transparent RGBA PNG. All exterior background pixels, including the spaces between characters, must have alpha exactly zero. No checkerboard pattern, backdrop, matte, floor, exterior shadow, muzzle flash, text or border. Preserve crisp antialiased character edges.
+```
+
+### Hero body, attempt 2
+
+```text
+Use case: background-extraction. Image 1 is the exact edit target. The character art is already correct: do not change any poses, body detail, collar, positions, colors, size or composition. Change only the alpha channel of empty background. The current PNG has 13,285 near-invisible alpha-1 pixels in the exterior and even border rows. Set every empty exterior/background pixel to alpha exactly0, including all canvas boundaries and inter-character gutters. Preserve every actual character pixel and smooth antialiased silhouette edges. Return the same four figures, same2172x724RGBA PNG, with genuine transparent exterior; no checkerboard, matte, halo, backdrop, floor, shadow or new artwork.
+```
+
+### Hero body, attempt 3
+
+```text
+Use case: background-extraction. This is a technical transparency correction only. Keep the supplied four-frame character sheet unchanged: same poses, painted details, colors, full dimensions2171x724and exact positions. Do not redraw the art. The PNG still has10,910pixels at alpha1, including149isolated background specks more than8pixels from the subject. Set ALL alpha1 pixels to fully transparent alpha0. Leave every RGBvalue and every alpha value2..255unchanged. Preserve trueRGBA, crisp antialiasing, transparent canvas/gutters. No replacement background, no checkerboard or halo.
+```
+
+### Scarf tail, attempt 1
+
+```text
+Use case: stylized-concept.
+Asset type: four-frame crimson scarf-tail animation atlas for a high quality painted arcade game, actual transparent RGBA PNG.
+Input image 1 is a style reference only: Stryker's original scarf. Create ONLY the loose red scarf tail as a separate compositing asset, no character, neck wrap, knot, body, arms, weapon or props.
+Canvas exactly 2048x768, four equal 512x768 columns in one horizontal row. In each cell place the identical cloth root at local coordinate (450,280); root is a narrow folded fabric end approximately 36 pixels high, intended to tuck under a character's collar. The entire tail extends LEFT of this root to local x=65..90. Every frame uses the exact same scale and root position. Keep substantial genuinely transparent space around each tail. No tail crosses a cell boundary.
+Show four successive flutter phases: a broad shallow wave, crest curling upward at the outer tip, a soft S-shaped ripple, and a low flowing wave. Keep all tails trailing toward screen-left, never changing side. Cloth length approximately375pixels, vertical envelope roughly180pixels. Long tattered outer edge but intact connected fabric. Folded deep crimson woven cloth with strong vermilion ridge highlights, deep burgundy fold shadows, fine cloth texture, hand-painted mature premium arcade sprite detail matching the reference. Readable strong silhouette at small game scale. Rear-view perspective matches a soldier seen from above and behind, running upscreen.
+Actual alpha transparency: all intended background pixels must have alpha exactly0. No checkerboard, matte, gradient, floor, outside shadow, background, text, labels, borders or visible cell guides. Do not paint translucent background residue. Only antialiasing attached to the cloth edges may use intermediate alpha.
+```
+
+### Scarf tail, attempt 2
+
+```text
+Use case: background-extraction. Image1 is the exact edit target. Preserve the four crimson cloth tails, their fine painted detail, shapes, same common root positions and 4-column composition. Remove the ENTIRE glowing red haze surrounding them. Cloth does not emit light. The tails must be clean cutouts on genuine alpha transparency, with no glow, shadow or halo of any kind outside the actual fabric. Every exterior pixel outside the actual fabric silhouette must be alpha0, including inter-frame gaps and all canvas edges. Preserve crisp antialiased cloth edges. Same 2048x768 canvas, four equal columns. No checkerboard, no matte, no background color, no text. Only the actual red fabric is visible. Do not add cloth or change its length.
+```
+
+### Scarf tail, attempt 3
+
+```text
+Use case: background-extraction. This is a technical transparency correction only. Keep the supplied four-frame scarf sheet unchanged: same painted cloth details, colors, exact positions, common roots, and full2048x768dimensions. Do not redraw it. The PNG still has7,912pixels at alpha1, including221isolated background specks more than8pixels from the fabric. Set ALL alpha1 pixels to fully transparent alpha0. Leave every RGBvalue and every alpha value2..255unchanged. Preserve trueRGBA, crisp antialiasing and transparent canvas/gutters. No replacement background, no checkerboard, glow or halo. The actual cloth is the only visible artwork.
+```
+
+## Devastated-city parallax backdrop (2026-10-16)
+
+Built-in `image_gen`; one original generation and one edge-region edit. The
+selected opaque 948 × 1659 PNG is `city-ruins.png`. The edit replaces boundary
+building cuts with rubble; it does not establish pixel-perfect seamless tiling.
+Native inspection of the repeated join is recorded in ARTWORK.md.
+
+### Original generation
+
+```text
+Use case: stylized-concept. Asset type: polished opaque vertical environment texture for a portrait arcade survival shooter, a slow parallax backdrop BEHIND an existing road. Create a high-quality, richly painted devastated modern city seen from a steep elevated camera looking down and forward, matching a mature hand-painted arcade action game with crisp tactile detail and realistic proportions. Tall damaged concrete and brick buildings, roof slabs broken open, exposed floors, twisted structural steel, collapsed stairwells, shattered windows, rubble and sparse small orange fires. Deep blue-grey shadows, desaturated warm concrete, subtle rust and amber firelight. Distinct readable broken silhouettes and architecture, not flat rectangles with dotted window lights. Composition: 1024 by 1792 portrait or similar tall aspect. Buildings and destruction concentrated in both left and right thirds, with a darker unobtrusive open corridor through the middle that will be covered by the separate road. Full image is an aerial urban environment; NO sky, NO horizon, NO people, NO text, NO UI, NO road lane markings. Do not paint the playable road. Maintain similar scale and lighting all the way from top to bottom so the texture scrolls vertically. Crucial: seamless vertical tile, top and bottom image edges join naturally into continuous ruined city blocks with no seam, no dark border, no vignette, no gradient fade, no frame. All pixels opaque, not a cutout. Detailed dimensional rooftops and wall faces visible from above, long irregular collapsed edges, a convincing ruined city rather than a dark empty background.
+```
+
+### Top/bottom edge edit
+
+```text
+Edit this game environment texture for seamless vertical scrolling. Keep its mature painted arcade style, palette, buildings, fire, all central 70% of artwork and vertical aerial perspective. Correct ONLY the TOP and BOTTOM edge regions so they join as one continuous texture when identical copies are stacked vertically. Both edges should cross the SAME low-detail ruined cross-street area with irregular asphalt rubble and scattered broken concrete, not through recognizable tall building facades or rooftops. Match the exact top and bottom pixel colours and features for true vertical tiling. Preserve detailed ruined architecture away from those boundary regions. Do not fade to black, add borders, blur a rectangular strip, or mirror any buildings. No skyline, no text, no UI, all pixels opaque. Keep overall tall aspect and central unobtrusive corridor for the existing road to cover.
+```

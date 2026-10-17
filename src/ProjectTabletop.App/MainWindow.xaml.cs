@@ -90,14 +90,13 @@ public sealed partial class MainWindow : Window
         StartHandTrackingStatus();
         InitializeEyeTipTracking();
         InitializeFootballInput();
+        InitializeMarkerSetup();
         RefreshDisplays();
         InitializeProjectionSettings();
         InitializeDisplayAudio();
         InitializeCameraFrameRates();
         _ = RefreshCamerasAsync();
-        UpdateTrainingStatus();
-        SyncVisionSettingsControls();
-        _visionAutosaveLoad = TryLoadAutosavedVisionAsync();
+        _ = TryLoadAutosavedVisionAsync();
         _ = InitializeCrownDeedSaveAsync();
         _ = WarmMenuPreviewResourcesAsync();
         _ = WarmGlobeResourcesAsync();
@@ -248,6 +247,8 @@ public sealed partial class MainWindow : Window
     {
         if (_closing) return;
         _closing = true;
+        _markerSetupTimer?.Stop();
+        CancelMarkerSetup(null);
         ApplyProjectionPreviewState();
         Interlocked.Increment(ref _boardSetupGeneration);
         Volatile.Write(ref _boardSetupActive, false);
@@ -266,6 +267,7 @@ public sealed partial class MainWindow : Window
         _waterGardenSwishSound.Dispose();
         _statusTimer.Stop();
         await _cameraInputWorker.StopAsync();
+        await _markerSetupWorker.WorkerTask;
         await DisposeEyeTipTrackingAsync();
         await DisposeFootballInputAsync();
         await DisposeStrykersRunInputAsync();

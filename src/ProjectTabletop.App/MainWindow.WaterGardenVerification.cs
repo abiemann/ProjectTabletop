@@ -51,6 +51,7 @@ public sealed partial class MainWindow
         var perspectiveTouches = new List<object>();
         var sandAppearance = new List<object>();
         var waterDepthAppearance = new List<object>();
+        int markerMappingChecks = VerifyWholeBoardMarkerMapping();
         int perspectiveRoundTrips = 0;
         foreach (float aspect in new[] { 1f, 16f / 9, 9f / 16 })
         foreach (var surface in new Vector2[] { new(.08f, .08f), new(.83f, .17f), new(.5f, .5f), new(.17f, .83f), new(.91f, .89f) })
@@ -366,15 +367,14 @@ public sealed partial class MainWindow
         now += TimeSpan.FromSeconds(1.0 / 60);
         Require(scene.SetWaterStickTip(CameraPoint(.5, .5, inset), now),
             "The calibrated eye-tip fixture was not accepted.");
-        Require(scene.CurrentBoardButtons.All(button => !button.Enabled) &&
-                scene.GetHoldButtonContext(now) is null &&
+        Require(scene.CurrentBoardButtons[0].Enabled && scene.CurrentBoardButtons.Skip(1).All(button => !button.Enabled) &&
+                scene.GetHoldButtonContext(now) is { EnabledHoldIds.Count: 1 } &&
                 !scene.ActivateWaterGardenButton("water-garden-reset") &&
                 !scene.ActivateWaterGardenButton("water-garden-exit") &&
                 !scene.ActivateWaterGardenButton("water-garden-duck-add") &&
-                !scene.ActivateWaterGardenAt(.1, .93) &&
                 scene.ObserveHoldButtons(beforeStickHoldContext, ["water-garden-reset"], now, []).Count == 0 &&
                 scene.WaterGardenDrawerOpen,
-            "A detected water stick failed to disarm every action and the drawer handle.");
+            "A detected water stick failed to disarm pond actions or disabled independent drawer navigation.");
         Draw(scene, target);
         var injected = Statistics(water);
         Require(IsFinite(injected) && injected.MinimumHeight < -.007 &&
@@ -1152,7 +1152,7 @@ public sealed partial class MainWindow
 
         // Returning to the same board can expose identical caption IDs. An
         // in-flight worker from the previous visit must not arm this new visit.
-        using (var captions = NewScene(1, out _))
+        using (var captions = NewScene(1, out double captionInset))
         {
             await captions.EnsureBoardArtworkResourcesAsync(device, BoardScreen.WaterGarden);
             Draw(captions, target);
@@ -1160,6 +1160,24 @@ public sealed partial class MainWindow
             Draw(captions, target);
             var oldContext = captions.GetHoldButtonContext(now)
                 ?? throw new InvalidOperationException("The caption navigation fixture has no arrow reference.");
+            captions.ObserveHoldButtons(oldContext, [], now, ["water-drawer-open"]);
+            for (int sample = 0; sample < 5; sample++)
+            {
+                now += TimeSpan.FromMilliseconds(100);
+                captions.SetWaterStickTip(sample % 2 == 0 ? CameraPoint(.5, .5, captionInset) : null, now);
+                var current = captions.GetHoldButtonContext(now);
+                Require(current is not null && current.Revision == oldContext.Revision &&
+                        ReferenceEquals(current.ExpectedScene, oldContext.ExpectedScene) &&
+                        captions.ObserveHoldButtons(current, ["water-drawer-open"], now, []).Count == 0,
+                    "Wand contact replaced the closed arrow's unchanged optical reference or interrupted its hold.");
+            }
+            Require(captions.CurrentHoldProgress.Single().Progress > .3,
+                "Wand transitions discarded the navigation arrow's partial caption hold.");
+            now += TimeSpan.FromMilliseconds(20);
+            captions.SetWaterStickTip(null, now);
+            captions.ObserveHoldButtons(oldContext, [], now, ["water-drawer-open"]);
+            Require(captions.CurrentHoldProgress.Count == 0 && !captions.WaterGardenDrawerOpen,
+                "Intact arrow lettering did not cancel navigation progress after wand use.");
             var beforeNavigation = now;
             now += TimeSpan.FromMilliseconds(10);
             captions.ShowBoardMenu();
@@ -1238,6 +1256,7 @@ public sealed partial class MainWindow
             sameClockDuckStateStable = true,
             sameClockFountainStable = true,
             perspectiveRoundTrips, perspectiveTouches, outsideWaterRejectedAndNearEdgeAccepted = true,
+            markerMappingChecks, wholeBoardMarkerMappingAndInvalidation = true,
             boundedEyeProjectionReference = true,
             sameClockDrawStable = true, stationaryCaptionPixelsStable = true, freshCalibratedStickMapping = true,
             rawPreviewSameClockStable = true, uncalibratedPreviewControls = true,
@@ -1248,6 +1267,84 @@ public sealed partial class MainWindow
             sandAppearance, waterDepthAppearance, titleSequence, verticalWaterSideInputRejected = true,
             timingScope = "Isolated GPU draw submission and explicit field/pixel readbacks; PNG encoding excluded; not projector frame pacing.",
             directory, images };
+
+        int VerifyWholeBoardMarkerMapping()
+        {
+            using var markerScene = NewScene(1, out double markerInset);
+            int checks = 0;
+            foreach (int facing in new[] { 0, 90, 180, 270 })
+            {
+                long beforeTurn = markerScene.WaterMarkerInputRevision;
+                markerScene.SetBoardFacingDegrees(facing);
+                long revision = markerScene.WaterMarkerInputRevision;
+                Require(facing == 0 || revision > beforeTurn,
+                    "Rotating Water Garden did not invalidate the old marker association.");
+                var polygon = markerScene.GetWaterMarkerCameraPolygon();
+                Require(polygon is { Count: 4 } && ReferenceEquals(polygon, markerScene.GetWaterMarkerCameraPolygon()),
+                    "Water Garden did not cache a calibrated whole-board marker search polygon.");
+                PixelPoint CameraAt(double u, double v)
+                {
+                    (u, v) = facing switch { 90 => (1 - v, u), 180 => (1 - u, 1 - v), 270 => (v, 1 - u), _ => (u, v) };
+                    return CameraPoint(u, v, markerInset);
+                }
+                PixelPoint[] corners = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
+                for (int index = 0; index < corners.Length; index++)
+                    Require(MarkerTipGeometry.Distance(polygon![index], CameraAt(corners[index].X, corners[index].Y)) < .001,
+                        $"The {facing}-degree marker search polygon did not follow the calibrated board corners.");
+                // Detection covers the entire board, including sand and the control row.
+                // SetWaterStickTip independently decides which mapped positions disturb water.
+                foreach (var point in new PixelPoint[] { new(.05, .05), new(.95, .05), new(.2, .5), new(.8, .5), new(.05, .95), new(.95, .95) })
+                {
+                    Require(markerScene.TryMapWaterMarkerCameraPoint(CameraAt(point.X, point.Y), out var mapped) &&
+                            MarkerTipGeometry.Distance(mapped, point) < 1e-5,
+                        $"The {facing}-degree whole-board marker mapping rejected or displaced {point}.");
+                    checks++;
+                }
+                foreach (var outside in new[] { CameraAt(-.02, .5), CameraAt(1.02, .5), CameraAt(.5, -.02),
+                    CameraAt(.5, 1.02), new PixelPoint(double.NaN, 500), new PixelPoint(500, double.PositiveInfinity) })
+                    Require(!markerScene.TryMapWaterMarkerCameraPoint(outside, out _),
+                        "Water Garden accepted an outside or non-finite marker position.");
+                Require(markerScene.WaterMarkerInputRevision == revision,
+                    "Reading an unchanged marker mapping invalidated its temporal association.");
+            }
+            markerScene.SetBoardFacingDegrees(0);
+            var originalPolygon = markerScene.GetWaterMarkerCameraPolygon()!;
+            long beforeCalibration = markerScene.WaterMarkerInputRevision;
+            markerScene.SetBoardSetup(true);
+            Require(markerScene.GetWaterMarkerCameraPolygon() is null &&
+                    !markerScene.TryMapWaterMarkerCameraPoint(CameraPoint(.5, .5, markerInset), out _) &&
+                    markerScene.WaterMarkerInputRevision > beforeCalibration,
+                "Calibration setup retained an active Water Garden marker mapping.");
+            Vector2[] projector = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
+            Point2[] unit = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
+            Point2[] movedCamera = [new(100, 150), new(2100, 150), new(2100, 2150), new(100, 2150)];
+            markerScene.SetDetectedBoardGrid(projector, Homography.FromFourPoints(movedCamera, unit));
+            markerScene.SetBoardSetup(false);
+            var movedPolygon = markerScene.GetWaterMarkerCameraPolygon();
+            var oldPoint = CameraPoint(.2, .8, markerInset);
+            Require(movedPolygon is { Count: 4 } && !ReferenceEquals(originalPolygon, movedPolygon) &&
+                    MarkerTipGeometry.Distance(movedPolygon[0], new(originalPolygon[0].X * 2 + 100, originalPolygon[0].Y * 2 + 150)) < .001 &&
+                    markerScene.TryMapWaterMarkerCameraPoint(new(oldPoint.X * 2 + 100, oldPoint.Y * 2 + 150), out var moved) &&
+                    MarkerTipGeometry.Distance(moved, new(.2, .8)) < 1e-5,
+                "Recalibration reused the previous marker polygon or camera coordinate mapping.");
+            long beforeLeaving = markerScene.WaterMarkerInputRevision;
+            markerScene.ShowBoardMenu();
+            Require(markerScene.GetWaterMarkerCameraPolygon() is null &&
+                    !markerScene.TryMapWaterMarkerCameraPoint(new(1100, 1150), out _) &&
+                    markerScene.WaterMarkerInputRevision > beforeLeaving,
+                "Leaving Water Garden retained its marker search area or association revision.");
+            long departed = markerScene.WaterMarkerInputRevision;
+            markerScene.ShowWaterGarden();
+            Require(markerScene.GetWaterMarkerCameraPolygon() is { Count: 4 } returned &&
+                    !ReferenceEquals(returned, movedPolygon) && markerScene.WaterMarkerInputRevision > departed,
+                "Re-entering Water Garden retained the departed marker association.");
+            using var uncalibratedMarker = new SceneCompositor(waterClock: () => now);
+            uncalibratedMarker.ShowWaterGarden();
+            Require(uncalibratedMarker.GetWaterMarkerCameraPolygon() is null &&
+                    !uncalibratedMarker.TryMapWaterMarkerCameraPoint(new(500, 500), out _),
+                "An uncalibrated Water Garden supplied a marker search area or board position.");
+            return checks;
+        }
 
         SceneCompositor NewScene(double aspect, out double safetyInset)
         {

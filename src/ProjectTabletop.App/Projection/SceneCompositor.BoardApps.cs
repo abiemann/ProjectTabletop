@@ -19,15 +19,18 @@ public sealed partial class SceneCompositor
     private readonly BoardSession _boardSession;
     private CanvasRenderTarget? _boardApplicationTarget;
     private BoardSurfaceState? _renderedBoardState;
+    private long _licensesNoticeNavigationRevision = -1;
 
     private readonly record struct BoardSurfaceState(BoardScreen Screen, int ControlsVisualStep, int HoverMask, int FingerSelectionStep, int HandStatus,
+        bool ShowLicensesNotice,
         int PhotoStampCount, string? PhotoStatus, long PhotoRevision, long PhotoUiRevision, int PhotoDrawerFrame, double PhotoAspect,
         long BlackjackRevision, long BlackjackFlightRevision,
-        long PaintRevision, string? PaintStatus, bool PaintSaveEnabled, long CrownDeedRevision, long CrownDeedDiceRevision,
+        long PaintRevision, long PaintUiRevision, int PaintDrawerFrame, string? PaintStatus, bool PaintSaveEnabled,
+        long CrownDeedRevision, long CrownDeedDiceRevision,
         long CrownDeedSessionRevision, int CrownDeedDrawerFrame, long CrownDeedEntranceRevision, int CrownDeedEntranceFrame, long CrownDeedDevelopmentFrame,
         long GlobeRevision, long GlobeFrame, long GlobeSessionRevision, long SlotsRevision, double SlotsAspect, int MenuFrame,
         long RouletteRevision, double RouletteAspect, string? RouletteHover, long WaterRevision, long FootballRevision,
-        long StrykersRunRevision);
+        long StrykersRunRevision, long MarkerSetupVisualRevision);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
         Func<DateTimeOffset>? boardRevealClock = null, Func<DateTimeOffset>? paintClock = null,
@@ -51,7 +54,11 @@ public sealed partial class SceneCompositor
         _boardSession.CrownDeedRollOccurred += OnCrownDeedRoll;
         _boardSession.CrownDeedDevelopmentOccurred += OnCrownDeedDevelopment;
         _boardSession.BoardOpened += OnBoardOpened;
-        _boardSession.LicensesRequested += () => LicensesRequested?.Invoke();
+        _boardSession.LicensesRequested += () =>
+        {
+            _licensesNoticeNavigationRevision = _boardSession.NavigationRevision;
+            LicensesRequested?.Invoke();
+        };
     }
 
     public event Action? LicensesRequested;
@@ -174,6 +181,7 @@ public sealed partial class SceneCompositor
         var waterNow = _waterClock();
         if (water) _boardSession.TickWaterGarden(waterNow);
         var paintNow = _paintClock();
+        if (paint) _boardSession.TickPaint(paintNow);
         var globeNow = _globeClock();
         var globe = _boardSession.Screen == BoardScreen.Globe;
         if (globe) _boardSession.TickGlobe(globeNow);
@@ -197,6 +205,8 @@ public sealed partial class SceneCompositor
         var controls = BoardControlsForRendering;
         var state = new BoardSurfaceState(_boardSession.Screen, BoardControlsVisualStep, hoverMask, FingerSelectionRenderStep(selectionFeedback),
             handStatus,
+            _boardSession.Screen == BoardScreen.Settings &&
+                _licensesNoticeNavigationRevision == _boardSession.NavigationRevision,
             photoCopy ? PhotoCopyStampCount(now) : 0,
             photoCopy ? PhotoCopyDisplayStatus(now) : null,
             photoCopy ? _photoCopyRevision : 0,
@@ -205,6 +215,7 @@ public sealed partial class SceneCompositor
             photoCopy ? PaintBoardAspect() : 0,
             _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision : 0,
             _blackjackFlightRevision, paint ? PaintVisualRevision(paintNow) : 0,
+            paint ? _boardSession.Revision : 0, paint ? PaintDrawerVisualFrame(paintNow) : 0,
             paint ? GetPaintSaveStatus(paintNow) : null, paint && _boardSession.PaintSaveEnabled,
             _boardSession.Screen == BoardScreen.CrownDeed ? _boardSession.CrownDeedState.Revision : 0,
             _boardSession.Screen == BoardScreen.CrownDeed ? CrownDeedDicePresentationRevision : 0,
@@ -222,7 +233,7 @@ public sealed partial class SceneCompositor
             water ? preview && CanReuseWaterGardenProjectorFrame(ds.Device, waterNow)
                 ? _waterRenderedFrame!.Value.Visual : WaterGardenVisualRevision(waterNow) : 0,
             football ? FootballVisualRevision() : 0,
-            strykersRun ? StrykersRunVisualRevision() : 0);
+            strykersRun ? StrykersRunVisualRevision() : 0, _markerSetupVisualRevision);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
@@ -312,16 +323,15 @@ public sealed partial class SceneCompositor
                 if (photoCopy)
                     DrawPhotoCopyControls(surface, controls,
                         handsFresh ? _boardSession.HoveredButtonIds : [], selectionFeedback, blackjackNow);
-                if (controls.Count > 0)
+                else if (paint)
+                    DrawPaintControls(surface, controls,
+                        handsFresh ? _boardSession.HoveredButtonIds : [], selectionFeedback, paintNow);
+                if (!photoCopy && !paint && controls.Count > 0)
                 using (CreateBoardControlsFadeLayer(surface))
                 foreach (var button in controls)
                     if (_boardSession.Screen == BoardScreen.Settings && button.Destination == BoardScreen.HandTracking)
                         DrawMenuButton(surface, button, handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id),
                             label, small, selectionFeedback);
-                    else if (photoCopy) continue;
-                    else if (paint)
-                        DrawPaintButton(surface, button, handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id),
-                            selectionFeedback);
                     else
                         DrawBoardButton(surface, button,
                             handsFresh && _boardSession.HoveredButtonIds.Contains(button.Id), label, small, selectionFeedback);
@@ -371,6 +381,19 @@ public sealed partial class SceneCompositor
                     surface.DrawText("Settings", 414, 69, AppPalette.Text, body);
                     surface.DrawText("Tools for checking and tuning the table", 414, 113, AppPalette.IndicatorOn, small);
                     surface.DrawText("License documents open on the laptop.", 540, 430, AppPalette.MutedText, small);
+                    if (state.ShowLicensesNotice)
+                    {
+                        using var notice = new CanvasTextFormat
+                        {
+                            FontFamily = "Segoe UI", FontSize = 28,
+                            HorizontalAlignment = CanvasHorizontalAlignment.Center,
+                            VerticalAlignment = CanvasVerticalAlignment.Center,
+                            WordWrapping = CanvasWordWrapping.Wrap
+                        };
+                        DrawGlassPanel(surface, new Rect(80, 510, 840, 160));
+                        DrawBoardAspectText(surface, "Please view the licenses\nin the main app window.",
+                            new Rect(110, 530, 780, 120), AppPalette.Text, notice);
+                    }
                 }
                 else if (_boardSession.Screen == BoardScreen.HandTracking)
                 {
@@ -396,13 +419,12 @@ public sealed partial class SceneCompositor
                     surface.DrawText("YOUR TABLE. MORE POSSIBILITIES.", 120, 660, muted, small);
                 }
             }
+            DrawMarkerSetupPresentation(surface);
             _renderedBoardState = state;
 #if DEBUG
             if (strykersRun) CaptureStrykersRunTextureTiming();
 #endif
         }
-
-        if (paint && !preview) CapturePaintExpectedFrame(ds.Device, paintNow);
 
         var h = _boardSurfaceMap.ToMatrix();
         var pixels = _boardApplicationTarget!.SizeInPixels;
@@ -514,41 +536,11 @@ public sealed partial class SceneCompositor
         ds.DrawText(title, 61, 18, AppPalette.MutedText, format);
     }
 
-    private static void DrawPaintButton(CanvasDrawingSession ds, BoardButton button, bool hovered,
-        IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback)
-    {
-        var bounds = button.Bounds;
-        var rect = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
-            bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
-        DrawButtonSurface(ds, rect, hovered && button.Enabled);
-        using var text = PaintButtonTextFormat();
-        ds.DrawText(button.Label, new Rect(rect.X + 20, rect.Y + 6, rect.Width - 40, rect.Height - 18),
-            button.Enabled ? AppPalette.ButtonText : AppPalette.MutedText, text);
-        DrawButtonFingerSelectionFeedback(ds, button, selectionFeedback, AppPalette.IndicatorOn);
-    }
-
-    private static CanvasTextFormat PaintButtonTextFormat() => new()
-    {
-        FontFamily = "Segoe UI", FontSize = 36, FontWeight = FontWeights.SemiBold,
-        HorizontalAlignment = CanvasHorizontalAlignment.Center,
-        VerticalAlignment = CanvasVerticalAlignment.Center,
-        WordWrapping = CanvasWordWrapping.NoWrap
-    };
-
     private static CanvasTextFormat BoardButtonTextFormat() => new()
     {
         FontFamily = "Segoe UI", FontSize = 32, FontWeight = FontWeights.SemiBold,
         WordWrapping = CanvasWordWrapping.NoWrap
     };
-
-    private static HandTrackingBounds PaintButtonTextRegion(CanvasDevice device, BoardButton button)
-    {
-        var b = button.Bounds;
-        using var format = PaintButtonTextFormat();
-        using var layout = new CanvasTextLayout(device, button.Label, format,
-            (float)(b.Width * BoardSurfaceSize - 40), (float)(b.Height * BoardSurfaceSize - 18));
-        return ButtonInkRegion(button, layout.DrawBounds, b.X * BoardSurfaceSize + 20, b.Y * BoardSurfaceSize + 6);
-    }
 
     private static void DrawBoardButton(CanvasDrawingSession ds, BoardButton button,
         bool hovered, CanvasTextFormat label, CanvasTextFormat small, IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback,

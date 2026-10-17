@@ -19,6 +19,7 @@ public sealed partial class BoardSession
     private readonly BottomDrawerState _globeDrawer = new();
     private readonly BottomDrawerState _photoCopyDrawer = new();
     private readonly BottomDrawerState _waterGardenDrawer = new();
+    private readonly BottomDrawerState _paintDrawer = new();
 
     private double BottomDrawerProgress(BottomDrawerState drawer, BoardScreen screen, DateTimeOffset now) =>
         Screen == screen && drawer.Open && drawer.OpenedAt is { } opened
@@ -56,6 +57,7 @@ public sealed partial class BoardSession
         AdvanceBottomDrawer(_globeDrawer, BoardScreen.Globe, now);
         AdvanceBottomDrawer(_photoCopyDrawer, BoardScreen.PhotoCopy, now);
         AdvanceBottomDrawer(_waterGardenDrawer, BoardScreen.WaterGarden, now);
+        AdvanceBottomDrawer(_paintDrawer, BoardScreen.Paint, now);
     }
 
     private bool BottomDrawerHoldFrameIsCurrent(DateTimeOffset frameTime) => Screen switch
@@ -63,6 +65,7 @@ public sealed partial class BoardSession
         BoardScreen.Globe => frameTime > _globeDrawer.InputReadyAfter,
         BoardScreen.PhotoCopy => frameTime > _photoCopyDrawer.InputReadyAfter,
         BoardScreen.WaterGarden => frameTime > _waterGardenDrawer.InputReadyAfter,
+        BoardScreen.Paint => frameTime > _paintDrawer.InputReadyAfter,
         _ => true
     };
 
@@ -76,7 +79,7 @@ public sealed partial class BoardSession
 
     private void ClearBottomDrawers(DateTimeOffset now)
     {
-        foreach (var drawer in new[] { _globeDrawer, _photoCopyDrawer, _waterGardenDrawer })
+        foreach (var drawer in new[] { _globeDrawer, _photoCopyDrawer, _waterGardenDrawer, _paintDrawer })
         {
             ClearBottomDrawerUi(drawer);
             drawer.ObservedAt = Later(drawer.ObservedAt, now);

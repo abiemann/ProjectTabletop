@@ -21,6 +21,7 @@ public sealed partial class SceneCompositor
         {
             lock (_gate)
             {
+                if (_markerSetup is not null) return [];
                 _boardSession.TickControlVisibility(_blackjackClock());
                 RefreshWaterStickPresence();
                 return _boardSession.Buttons.ToArray();

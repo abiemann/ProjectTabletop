@@ -44,7 +44,13 @@ internal static class HandAcquisitionShortLabelRegression
                 second.Hints.Count == 1 && second.Hints[0].ControlCoverage >= .07 && second.Hints[0].ControlTriggerCoverage >= .07 &&
                 Math.Abs(second.Hints[0].Center.X - 1920) < 15 && Math.Abs(second.Hints[0].Center.Y - 1481) < 15,
                 "A broad obstruction on the short gold caption trained away its own measured foreground.");
-            Require(Feed(occupied, 300).Hints.Count == 1 && Feed(empty, 400).Hints.Count == 0,
+            Require(glyph.CaptionHoldEvidence &&
+                (glyph with { ControlCoverage = 0, ConfirmationFrames = 0 }).CaptionHoldEvidence,
+                "A structurally broken short caption required extra area or hand-acquisition evidence for its hold.");
+            Require(Feed(occupied, 300).Hints.Count == 1,
+                "A stationary short-caption obstruction was absorbed.");
+            var removed = Feed(empty, 400);
+            Require(removed.Hints.Count == 0 && removed.TextPatterns!.All(pattern => !pattern.CaptionHoldEvidence),
                 "A stationary short-caption obstruction was absorbed or left a ghost after removal.");
             HandAcquisitionPresenceResult Feed(byte[] pixels, int milliseconds)
             {

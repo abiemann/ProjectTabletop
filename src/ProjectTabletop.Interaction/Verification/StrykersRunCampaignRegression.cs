@@ -2,7 +2,7 @@ using System.Collections;
 using System.Reflection;
 using ProjectTabletop.Interaction;
 
-internal static class StrykersRunCampaignRegression
+internal static partial class StrykersRunCampaignRegression
 {
     private static readonly DateTimeOffset Epoch = new(2026, 10, 12, 12, 0, 0, TimeSpan.Zero);
 
@@ -13,7 +13,7 @@ internal static class StrykersRunCampaignRegression
         CheckBarrelThrowPresentation();
         CheckBarrelFuse();
         CheckCommanderWaves();
-        CheckLightningAndDodging();
+        CheckStormEncounter();
         CheckSkinWalker();
         CheckColossusAndNearestHit();
         CheckSurvivorsAndVictory();
@@ -21,7 +21,7 @@ internal static class StrykersRunCampaignRegression
         CheckBossBalanceAndBounds();
         CheckPlayableBossFights();
         Console.WriteLine("Stryker's five-level campaign passed: exact active minutes, pausable three-second boss entrances, stationary arenas, " +
-            "pausable barrel windup/release/recovery, three-second barrel fuses, commanded minions, dodgeable lightning, fungal transformation and poison, " +
+            "pausable barrel windup/release/recovery, three-second barrel fuses, commanded minions, travelling storm clouds and shootable spiders with returned lightning, fungal transformation and poison, " +
             "separate giant legs and warning stomps, survivor carryover, victory/reset, input pauses and bounded hazards.");
     }
 
@@ -262,41 +262,18 @@ internal static class StrykersRunCampaignRegression
             "Commanded minions must share the existing bounded enemy collection.");
     }
 
-    private static void CheckLightningAndDodging()
-    {
-        var fixture = new Fixture(3, 10);
-        fixture.Attack();
-        var game = fixture.Game;
-        var warning = game.Snapshot.Hazards.Single();
-        Require(warning is { Kind: StrykersRunHazardKind.Lightning, IsWarning: true, WarningSeconds: 1.2f },
-            "The lightning boss must charge before striking.");
-        Put(game, "_targetX", .86f);
-        fixture.Advance(1300);
-        Require(game.Snapshot.SoldierCount == 10 && game.Snapshot.Hazards.Single().TargetX == warning.TargetX,
-            "Lightning must lock its aim during the warning so lateral movement can dodge it.");
-        fixture = new Fixture(3, 10);
-        fixture.Attack();
-        Put(Hazards(fixture.Game)[0]!, "Ticks", 143);
-        fixture.OneStep();
-        Require(fixture.Game.Snapshot.SoldierCount == 5, "An undodged lightning strike did not damage the squad.");
-        fixture.Advance(200);
-        Require(fixture.Game.Snapshot.SoldierCount == 5, "A single lightning strike damaged repeatedly.");
-        foreach (int level in new[] { 3, 4 })
-        foreach (float edge in new[] { StrykersRunGame.RoadLeft, StrykersRunGame.RoadRight })
-        {
-            fixture = new Fixture(level, 10);
-            Put(fixture.Game, "_squadX", edge); Put(fixture.Game, "_targetX", edge);
-            fixture.Attack();
-            var beam = Hazards(fixture.Game)[0]!;
-            Put(beam, "Ticks", Get<int>(beam, "WarningTicks") - 1);
-            fixture.OneStep();
-            Require(fixture.Game.Snapshot.SoldierCount == (level == 3 ? 5 : 6),
-                "A locked lightning or tongue attack must actually reach a stationary hero at either road edge.");
-        }
-    }
-
     private static void CheckSkinWalker()
     {
+        foreach (float edge in new[] { StrykersRunGame.RoadLeft, StrykersRunGame.RoadRight })
+        {
+            var edgeFixture = new Fixture(4, 10);
+            Put(edgeFixture.Game, "_squadX", edge); Put(edgeFixture.Game, "_targetX", edge);
+            edgeFixture.Attack();
+            Put(Hazards(edgeFixture.Game)[0]!, "Ticks", 89);
+            edgeFixture.OneStep();
+            Require(edgeFixture.Game.Snapshot.SoldierCount == 6,
+                "A locked tongue attack must reach a stationary hero at either road edge.");
+        }
         var fixture = new Fixture(4, 20);
         fixture.Attack();
         var game = fixture.Game;
@@ -502,7 +479,7 @@ internal static class StrykersRunCampaignRegression
             var squad = new Fixture(level, 64);
             int loneHealth = lone.Game.Snapshot.Boss!.Value.MaxHealth;
             int squadHealth = squad.Game.Snapshot.Boss!.Value.MaxHealth;
-            Require(loneHealth is >= 100 and <= 200 && squadHealth == loneHealth * 13 / 2,
+            Require((level == 3 ? loneHealth == 360 : loneHealth is >= 100 and <= 200) && squadHealth == loneHealth * 13 / 2,
                 "Boss health must be beatable by a lone hero and scale once to a large incoming squad.");
             Put(squad.Game, "_soldiers", 1);
             squad.OneStep();
@@ -527,6 +504,8 @@ internal static class StrykersRunCampaignRegression
             var game = fixture.Game;
             Put(game, "_fireRemaining", 0f);
             bool sawAttack = false, sawFungal = false;
+            var stormClouds = new HashSet<int>();
+            int spiderKills = 0;
             float started = game.Snapshot.RunSeconds;
             for (int frame = 0; frame < 12000 && game.Snapshot.Stage == StrykersRunStage.Boss &&
                 game.Snapshot.Phase != StrykersRunPhase.GameOver; frame++)
@@ -534,6 +513,9 @@ internal static class StrykersRunCampaignRegression
                 var state = game.Snapshot;
                 sawAttack |= state.Hazards.Count > 0 || state.Enemies.Count > 0;
                 sawFungal |= state.Boss is { Phase: 2 };
+                foreach (var cloud in state.Hazards.Where(hazard => hazard.Kind == StrykersRunHazardKind.StormCloud))
+                    stormClouds.Add(cloud.Id);
+                spiderKills = Math.Max(spiderKills, state.Craters.Count);
                 float target = ChooseBossLane(state);
                 fixture.Milliseconds += 10;
                 var now = Epoch.AddMilliseconds(fixture.Milliseconds);
@@ -551,8 +533,11 @@ internal static class StrykersRunCampaignRegression
                 $"stage={end.Stage}, phase={end.Phase}, bossHP={end.Boss?.Health}, squad={end.SoldierCount}.");
             Require(sawAttack && (level != 4 || sawFungal),
                 "A full-strength squad skipped a boss's defining attack or the fungal phase.");
+            Require(level != 3 || stormClouds.Count >= 3 && spiderKills is >= 2 and <= 10,
+                "A public storm fight must allow several cloud/spider cycles and keep permanent craters naturally bounded by boss health.");
             Console.WriteLine($"Boss {level}: {soldiers} initial soldiers, {end.RunSeconds - started:F1}s, " +
-                $"{end.SoldierCount} survivors, steering-only victory.");
+                $"{end.SoldierCount} survivors, steering-only victory." +
+                (level == 3 ? $" {stormClouds.Count} clouds, {spiderKills} spider kills." : ""));
         }
     }
 
@@ -560,6 +545,9 @@ internal static class StrykersRunCampaignRegression
     {
         float aim = state.Boss is { Kind: StrykersRunBossKind.Colossus } boss ?
             boss.LeftLegHealth > 0 ? StrykersRunGame.BossLeftLegX : StrykersRunGame.BossRightLegX : .5f;
+        var spider = state.Enemies.Where(enemy => enemy.Kind == StrykersRunEnemyKind.ElectricSpider && enemy.Y < .76f)
+            .OrderByDescending(enemy => enemy.Y).FirstOrDefault();
+        if (spider.Kind == StrykersRunEnemyKind.ElectricSpider) aim = spider.X;
         float best = aim, bestCost = float.PositiveInfinity;
         for (int candidate = -1; candidate <= 40; candidate++)
         {
@@ -573,6 +561,8 @@ internal static class StrykersRunCampaignRegression
                     StrykersRunHazardKind.Barrel => hazard.Age >= 2.35f,
                     StrykersRunHazardKind.BarrelBlast => true,
                     StrykersRunHazardKind.PoisonGas => hazard.Age >= 2.05f,
+                    StrykersRunHazardKind.StormCloud => !hazard.IsWarning && hazard.Y is > .56f and < 1.02f,
+                    StrykersRunHazardKind.ReturnLightning => false,
                     _ => hazard.Age >= hazard.WarningSeconds - .50f
                 };
                 float radius = hazard.Kind == StrykersRunHazardKind.Barrel ? .14f : hazard.Radius;
@@ -580,12 +570,14 @@ internal static class StrykersRunCampaignRegression
                     bounds.Right > hazard.TargetX - radius - .005f) cost += 100;
                 // A safe destination is not a safe dodge if reaching it crosses
                 // a lingering cloud. Stay on the current side of live poison.
-                if (hazard.Kind == StrykersRunHazardKind.PoisonGas && hazard.Y > .61f &&
+                if ((hazard.Kind == StrykersRunHazardKind.PoisonGas && hazard.Y > .61f ||
+                     hazard.Kind == StrykersRunHazardKind.StormCloud && hazard.Y is > .64f and < 1.02f) &&
                     (state.SquadX < hazard.X - radius && x > hazard.X - radius ||
                      state.SquadX > hazard.X + radius && x < hazard.X + radius)) cost += 1000;
             }
             foreach (var enemy in state.Enemies)
-                if (enemy.Y is > .56f and < .81f && bounds.Left < enemy.X + .045f && bounds.Right > enemy.X - .045f)
+                if (enemy.Y > (enemy.Kind == StrykersRunEnemyKind.ElectricSpider ? .70f : .56f) &&
+                    enemy.Y < .81f && bounds.Left < enemy.X + .045f && bounds.Right > enemy.X - .045f)
                     cost += 20;
             if (cost < bestCost) { bestCost = cost; best = x; }
         }
@@ -647,6 +639,7 @@ internal static class StrykersRunCampaignRegression
         a.LevelSeconds == b.LevelSeconds && a.Stage == b.Stage && a.StageSeconds == b.StageSeconds &&
         a.RunSeconds == b.RunSeconds && a.Distance == b.Distance && a.SoldierCount == b.SoldierCount &&
         a.SquadX == b.SquadX && a.Boss == b.Boss && a.Ally == b.Ally &&
-        a.Hazards.SequenceEqual(b.Hazards) && a.Enemies.SequenceEqual(b.Enemies) && a.Bullets.SequenceEqual(b.Bullets);
+        a.Hazards.SequenceEqual(b.Hazards) && a.Enemies.SequenceEqual(b.Enemies) && a.Bullets.SequenceEqual(b.Bullets) &&
+        a.Craters.SequenceEqual(b.Craters);
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 }

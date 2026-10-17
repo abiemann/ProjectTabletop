@@ -34,54 +34,57 @@ public sealed partial class MainWindow
             scene.SetBoardFacingDegrees(facing);
             scene.ShowSettings();
             var ids = scene.CurrentBoardButtons.Select(button => button.Id).ToArray();
-            var before = Cross(hide: true);
-            Require(before.Top == .04 && before.Bottom == .20, "Settings did not use its top control row.");
-            Require(!session.ButtonsVisible && scene.CurrentBoardButtons.Count == 0,
-                $"The {facing}-degree board did not hide its controls.");
-            Require(scene.GetControlSwipeContext(now) is null, "A redraw discarded the command cooldown.");
-            Cross(hide: false);
-            Require(session.ButtonsVisible && scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(ids),
-                $"The hidden {facing}-degree board could not restore controls.");
-            now += TimeSpan.FromMilliseconds(10);
-            Require(!scene.CompleteControlSwipe(before, BoardControlSwipe.Hide, false, now),
-                "A pre-hide completion survived an identical hide/show round trip.");
+            foreach (bool rightToLeft in new[] { true, false })
+            {
+                var before = Cross(rightToLeft);
+                Require(before.Top == .04 && before.Bottom == .20, "Settings did not use its top control row.");
+                Require(!session.ButtonsVisible && scene.CurrentBoardButtons.Count == 0,
+                    $"The {facing}-degree board did not hide its controls.");
+                Require(scene.GetControlSwipeContext(now) is null, "A redraw discarded the command cooldown.");
+                Cross(rightToLeft);
+                Require(session.ButtonsVisible && scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(ids),
+                    $"A second swipe in the same direction did not restore the {facing}-degree board's controls.");
+                now += TimeSpan.FromMilliseconds(10);
+                Require(!scene.CompleteControlSwipe(before, BoardControlSwipe.Toggle, false, now),
+                    "A pre-hide completion survived an identical hide/show round trip.");
+            }
         }
 
         scene.ShowSettings();
         var stale = Context();
         var captured = now;
         now += TimeSpan.FromMilliseconds(400);
-        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Hide, false, captured),
+        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Toggle, false, captured),
             "A stale camera result changed controls.");
-        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Hide, false, now.AddMilliseconds(1)),
+        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Toggle, false, now.AddMilliseconds(1)),
             "A future camera result changed controls.");
         Require(!scene.CompleteControlSwipe(stale, null, false, now), "Empty motion changed visibility.");
-        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Hide, false, now),
+        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Toggle, false, now),
             "A repeated source frame changed controls.");
         scene.ClearHandTips();
         now += TimeSpan.FromMilliseconds(10);
-        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Hide, false, now),
+        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Toggle, false, now),
             "A camera/reset barrier accepted old motion history.");
         stale = Context();
         scene.SetBlackOutput(true);
         scene.SetBlackOutput(false);
         now += TimeSpan.FromMilliseconds(10);
-        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Hide, false, now),
+        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Toggle, false, now),
             "A transient black calibration field retained an old baseline.");
         stale = Context();
         scene.ShowBlackjack();
         scene.ShowSettings();
         now += TimeSpan.FromMilliseconds(10);
-        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Hide, false, now),
+        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Toggle, false, now),
             "Leaving and returning to a board retained an old context.");
         stale = Context();
         scene.SetBoardSetup(true);
         Require(scene.GetControlSwipeContext(now) is null &&
-                !scene.CompleteControlSwipe(stale, BoardControlSwipe.Hide, false, now),
+                !scene.CompleteControlSwipe(stale, BoardControlSwipe.Toggle, false, now),
             "Calibration accepted swipe input.");
         Calibrate();
         now += TimeSpan.FromMilliseconds(10);
-        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Hide, false, now),
+        Require(!scene.CompleteControlSwipe(stale, BoardControlSwipe.Toggle, false, now),
             "Recalibration accepted the old mapping.");
         scene.ShowBoardMenu();
         Require(scene.GetControlSwipeContext(now) is null && session.ButtonsVisible,
@@ -91,14 +94,14 @@ public sealed partial class MainWindow
 
         scene.ShowCrownDeed();
         scene.ClearHandTips();
-        var crownContext = Cross(hide: true);
+        var crownContext = Cross(rightToLeft: true);
         Require(crownContext.Top == .60 && crownContext.Bottom == .83,
             "Crown & Deed did not use its central action row.");
-        Cross(hide: false);
+        Cross(rightToLeft: false);
 
         scene.ShowFootball();
-        Cross(hide: true);
-        Cross(hide: false);
+        Cross(rightToLeft: true);
+        Cross(rightToLeft: false);
         Require(session.ActivateButton("football-play", now), "Football PLAY fixture failed.");
         now += TimeSpan.FromMilliseconds(10);
         session.SetFootballInput(0, new(-.4f, 0), now);
@@ -118,24 +121,30 @@ public sealed partial class MainWindow
         string handle = scene.CurrentBoardButtons.Single(button => button.IsHold).Id;
         scene.ObserveHoldButtons(holdContext, [], now, [handle]);
         var path = new BoardControlSwipeTracker();
-        double[] slow = [.90, .65, .55, .53, .51, .49, .47, .45, .43, .41, .39,
-            .37, .35, .33, .31, .29, .27, .25, .23, .21, .19, .17, .15];
+        double[] crossing = [.90, .65, .45, .25, .15];
         bool hid = false;
-        foreach (double u in slow)
+        int observation = 0;
+        foreach (double u in crossing)
         {
             now += TimeSpan.FromMilliseconds(150);
-            var command = path.Update([new(7, u, .91)], now, now);
+            // Missing/reassigned identities do not interrupt spatial progress.
+            var command = path.Update([new(observation++ % 2 == 0 ? 0 : observation, u, .91)], now, now);
             hid |= scene.CompleteControlSwipe(movementContext, command, path.HasTraversalInProgress, now);
             var currentHold = scene.GetHoldButtonContext(now);
             Require(scene.ObserveHoldButtons(currentHold, [handle], now, []).Count == 0 &&
                     !scene.WaterGardenDrawerOpen,
-                "A slow swipe completed a caption hold while crossing it.");
+                "A coordinate swipe completed a caption hold while crossing it.");
             Draw();
         }
-        Require(hid && !session.ButtonsVisible, "The slow motion crossing did not hide controls.");
+        Require(hid && !session.ButtonsVisible, "The one-second coordinate crossing did not hide controls.");
+        // The shorter crossing ends during the hide fade. Settle that transition
+        // before preparing the next independent swipe's camera context.
+        now += BoardSession.ControlFadeDuration;
+        session.TickControlVisibility(now);
+        Draw();
         Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null },
             "Hidden controls enabled hand-search illumination.");
-        Cross(hide: false);
+        Cross(rightToLeft: false);
         var restoredHold = scene.GetHoldButtonContext(now);
         Require(restoredHold is not null && restoredHold.Revision != holdContext!.Revision,
             "Restored captions reused their previous evidence.");
@@ -199,32 +208,35 @@ public sealed partial class MainWindow
         VerifyFade("Blackjack", DrawPreview, scene.CurrentBoardButtons.ToArray(),
             bounds => new Rect(bounds.X * size, bounds.Y * size, bounds.Width * size, bounds.Height * size));
         return new { passed = true, playerFacingAngles = new[] { 0, 90, 180 },
-            disturbanceOnly = true, hiddenBandRetained = true, excludedMenuAndStryker = true,
+            disturbanceOnly = true, eitherDirectionTogglesVisibility = true,
+            hiddenBandRetained = true, excludedMenuAndStryker = true,
             excludedFootballPlay = true, cameraNavigationCalibrationAndVisibilityBarriers = true,
-            slowSwipeSuppressesHolds = true, restoredCaptionRequiresClear = true,
+            coordinateSwipeSuppressesHolds = true, restoredCaptionRequiresClear = true,
             introAndDrawerAnimationExcluded = true, simultaneousFadeMilliseconds = BoardSession.ControlFadeDuration.TotalMilliseconds,
             fadeBoards = new[] { "WaterGarden", "Blackjack" }, fadingControlsExcludedFromInput = true,
             worldPixelsUnaffected = true, liveHardwareUntouched = true };
 
-        SceneCompositor.ControlSwipeContext Cross(bool hide)
+        SceneCompositor.ControlSwipeContext Cross(bool rightToLeft)
         {
             var context = Context();
+            bool expectedVisible = !session.ButtonsVisible;
             var camera = Field<Homography>("_boardCameraMap");
             var surface = Field<Homography>("_boardSurfaceMap");
             var band = Homography.FromFourPoints(context.SearchPolygon.Select(point => new Point2(point.X, point.Y)).ToArray(),
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]);
             var tracker = new BoardControlSwipeTracker();
             bool applied = false;
+            int observation = 0;
             foreach (double position in new[] { .88, .66, .45, .12 })
             {
                 now += TimeSpan.FromMilliseconds(110);
-                double u = hide ? position : 1 - position;
+                double u = rightToLeft ? position : 1 - position;
                 double v = (context.Top + context.Bottom) / 2;
                 var pixel = camera.InverseTransform(surface.Transform(new(u, v)));
                 var normalized = band.Transform(pixel);
                 Require(Math.Abs(normalized.X - u) < 1e-6 && Math.Abs(normalized.Y - .5) < 1e-6,
                     "The control band did not map the player's facing correctly.");
-                var command = tracker.Update([new(1, normalized.X,
+                var command = tracker.Update([new(observation++, normalized.X,
                     context.Top + (context.Bottom - context.Top) * normalized.Y)], now, now);
                 applied |= scene.CompleteControlSwipe(context, command, tracker.HasTraversalInProgress, now);
                 Draw();
@@ -235,8 +247,9 @@ public sealed partial class MainWindow
             now += BoardSession.ControlFadeDuration;
             session.TickControlVisibility(now);
             Draw();
-            Require(!session.ControlVisibilityAnimating(now) && session.GetButtonsOpacity(now) == (hide ? 0 : 1),
-                "A swipe fade failed to reach its requested endpoint.");
+            Require(!session.ControlVisibilityAnimating(now) && session.ButtonsVisible == expectedVisible &&
+                    session.GetButtonsOpacity(now) == (expectedVisible ? 1 : 0),
+                "A swipe fade failed to toggle its previous visibility.");
             return context;
         }
 

@@ -321,15 +321,25 @@ internal readonly partial struct FluidSurfaceShader(Float2 size, float aspect) :
         Float3 normal = Hlsl.Normalize(new Float3(gradient * 32, 1));
         float coverage = Hlsl.SmoothStep(0.006f, 0.065f, height);
         Float3 pigment = Hlsl.Saturate(D2D.SampleInputAtPosition(1, p).XYZ);
+        // Height spreads slightly beyond the transported colour. Let that
+        // colour-starved fringe reveal the canvas instead of forming a broad
+        // black rim; the saturated coats keep their height-derived shading.
+        float pigmentStrength = Hlsl.Max(pigment.X, Hlsl.Max(pigment.Y, pigment.Z));
+        coverage *= Hlsl.SmoothStep(0.10f, 0.45f, pigmentStrength);
         // Intrinsic surface colour is independent of total thickness. Thin rims
         // reveal the underlay once, while piled coats retain their visible hue.
-        Float3 underlay = new Float3(0.018f, 0.028f, 0.036f);
+        // Neutral reflected light lets the webcam resolve the physical black
+        // bars even before the first pigment reaches this part of the canvas.
+        Float3 underlay = new Float3(0.28f, 0.28f, 0.28f);
         float vignette = Hlsl.Saturate(1 - Hlsl.Length((uv - 0.5f) * new Float2(aspect, 1)) * 0.28f);
         underlay *= vignette;
         Float3 light = Hlsl.Normalize(new Float3(-0.28f, -0.20f, 1));
-        float diffuse = 0.64f + 0.36f * Hlsl.Saturate(Hlsl.Dot(normal, light));
+        float diffuse = 0.76f + 0.24f * Hlsl.Saturate(Hlsl.Dot(normal, light));
         float specular = Specular(normal, light, 0.24f);
-        Float3 color = Hlsl.Lerp(underlay, pigment * diffuse, coverage);
+        // A little reflected canvas light softens steep, near-black rims without
+        // washing out the flat pigment or changing the simulated paint fields.
+        Float3 shadedPigment = Hlsl.Max(pigment * diffuse, underlay * (0.30f * (1 - normal.Z)));
+        Float3 color = Hlsl.Lerp(underlay, shadedPigment, coverage);
         float wetness = Hlsl.SmoothStep(0.005f, 0.04f, height);
         color += new Float3(1.0f, 0.96f, 0.87f) * Hlsl.Min(specular * 1.1f, 0.10f) * wetness;
         // Broad studio softbox reflected in the local height-derived normal.

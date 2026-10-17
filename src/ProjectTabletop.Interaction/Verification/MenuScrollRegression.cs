@@ -10,6 +10,7 @@ internal static class MenuScrollRegression
         CheckCaptionOnlyArrow();
         CheckScrollAndInputBarriers();
         CheckArrowReleaseAndReverse();
+        CheckReturnPage();
         CheckReset();
     }
 
@@ -92,6 +93,7 @@ internal static class MenuScrollRegression
             !board.TickMenu(At(1949)), "Menu settlement repeated or moved backward in time.");
         Require(board.Buttons.Select(button => button.Id).SequenceEqual(["roulette", "paint", "photo-copy", "blackjack", "settings", "menu-scroll-up"]),
             "The second page did not expose Roulette, Paint, Photo Copy, Blackjack and the fixed navigation controls.");
+        var secondPage = board.Buttons.Select(button => (button.Id, button.Bounds)).ToArray();
         Require(Near(Button(board, "roulette").Bounds.Y, .25) && Near(Button(board, "paint").Bounds.Y, .25) &&
             Near(Button(board, "roulette").Bounds.X, .08) && Near(Button(board, "paint").Bounds.X, .52) &&
             Near(Button(board, "photo-copy").Bounds.X, .08) && Near(Button(board, "photo-copy").Bounds.Y, .45) &&
@@ -108,10 +110,25 @@ internal static class MenuScrollRegression
             "A pre-settlement pointing anchor selected the new card.");
         Require(board.Update([Pinch(roulette, 6, 2100)], At(2100), At(2100)) is
             { ButtonId: "roulette", Current: BoardScreen.Roulette }, "A fresh Roulette card selection failed.");
-        board.ShowMenu(At(2200));
-        Require(!board.MenuScrolled && !board.MenuScrolling &&
+        Require(Hold(board, "roulette-exit", 2150).Count == 0,
+            "Roulette EXIT armed without a fresh clear-caption observation.");
+        Clear(board, "roulette-exit", 2200);
+        for (int time = 2300; time < 3300; time += 100)
+            Require(Hold(board, "roulette-exit", time).Count == 0, "Roulette EXIT completed early.");
+        Require(Hold(board, "roulette-exit", 3300).SequenceEqual(["roulette-exit"]) &&
+            board.Screen == BoardScreen.Menu && board.MenuScrolled && !board.MenuScrolling &&
+            Near(board.GetMenuScrollOffset(At(3300)), .6) &&
+            board.Buttons.Select(button => (button.Id, button.Bounds)).SequenceEqual(secondPage),
+            "Holding Roulette EXIT did not restore the settled second menu page and its hit targets.");
+        Require(Hold(board, "menu-scroll-up", 3400).Count == 0 && board.HoldProgress(At(3400)).Count == 0,
+            "Returning to the menu carried caption readiness onto the paging arrow.");
+        Clear(board, "menu-scroll-up", 3500);
+        for (int time = 3600; time < 4600; time += 100)
+            Require(Hold(board, "menu-scroll-up", time).Count == 0, "The returned paging arrow completed early.");
+        Require(Hold(board, "menu-scroll-up", 4600).SequenceEqual(["menu-scroll-up"]) &&
+            board.TickMenu(At(5250)) && !board.MenuScrolled &&
             board.Buttons.Select(button => (button.Id, button.Bounds)).SequenceEqual(firstPage),
-            "Returning to the menu did not restore the six first-page cards and their positions.");
+            "Returning from Roulette prevented a fresh paging hold from reaching the first page.");
     }
 
     private static void CheckArrowReleaseAndReverse()
@@ -148,15 +165,45 @@ internal static class MenuScrollRegression
                 "The restored down arrow repeated under the same covered caption.");
     }
 
+    private static void CheckReturnPage()
+    {
+        foreach (bool secondPage in new[] { false, true })
+        {
+            var board = new BoardSession();
+            if (secondPage)
+                Require(board.ActivateButton("menu-scroll-down", At(100)) && board.TickMenu(At(750)),
+                    "The round-trip fixture could not settle the second menu page.");
+            var original = board.Buttons.Select(button => (button.Id, button.Bounds)).ToArray();
+            var launchers = board.Buttons.Where(button => button.Destination != BoardScreen.Menu).ToArray();
+            int time = 1000;
+            foreach (var launcher in launchers)
+            {
+                Require(board.ActivateButton(launcher.Id, At(time)) && board.Screen == launcher.Destination,
+                    $"The round-trip fixture could not open {launcher.Id}.");
+                board.ShowMenu(At(time + 100));
+                Require(board.MenuScrolled == secondPage && !board.MenuScrolling &&
+                    board.Buttons.Select(button => (button.Id, button.Bounds)).SequenceEqual(original),
+                    $"Returning from {launcher.Id} lost its launcher page or changed the hit targets.");
+                time += 1000;
+            }
+        }
+    }
+
     private static void CheckReset()
     {
         var board = new BoardSession();
         Require(board.ActivateButton("menu-scroll-down", At(100)), "Pointer preview could not scroll the menu.");
         board.ResetInput(At(200));
-        Require(!board.MenuScrolling && !board.MenuScrolled && board.HoldProgress(At(200)).Count == 0,
-            "Calibration/input reset left a moving menu or a stale hold.");
-        Require(board.Update([Pinch(Button(board, "slots"), 1, 150)], At(250), At(250)) is null,
+        Require(!board.MenuScrolling && board.MenuScrolled && Near(board.GetMenuScrollOffset(At(200)), .6) &&
+            board.HoldProgress(At(200)).Count == 0,
+            "Calibration/input reset lost the selected page or left a moving menu or stale hold.");
+        Require(board.Update([Pinch(Button(board, "roulette"), 1, 150)], At(250), At(250)) is null,
             "An execution from before reset crossed the restored menu.");
+        Require(board.ActivateButton("roulette", At(300)), "The reset fixture could not open Roulette.");
+        board.ResetInput(At(400));
+        board.ShowMenu(At(500));
+        Require(board.MenuScrolled && !board.MenuScrolling && Button(board, "roulette").Enabled,
+            "A camera/input reset while away discarded the remembered launcher page.");
 
         board = new BoardSession();
         Clear(board, "menu-scroll-down", 10);

@@ -69,6 +69,9 @@ public sealed partial class SceneCompositor
         _renderedBoardState = null;
         _acquisitionScene = null;
         _acquisitionExpectedScene = null;
+        // Menu arrow holds now compare artwork outside the caption too.
+        _holdSceneKey = null;
+        _holdExpectedScene = null;
     }
 
     private void DrawMenuPreview(CanvasDrawingSession ds, Rect rect, Rect inside, float radius, BoardScreen screen)

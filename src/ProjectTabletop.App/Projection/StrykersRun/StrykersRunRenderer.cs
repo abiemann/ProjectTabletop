@@ -28,7 +28,10 @@ internal sealed partial class StrykersRunRenderer : IDisposable
     private readonly Rect[] _barrelCells = new Rect[4];
     private readonly Rect[] _barrelFlameCells = new Rect[8];
     private readonly Rect[] _explosionCells = new Rect[8];
-    private CanvasBitmap? _bossThrow, _barrels, _barrelFlames;
+    private readonly Rect[] _stormCloudCells = new Rect[8];
+    private readonly Rect[] _electricSpiderCells = new Rect[8];
+    private readonly Rect[] _stormCraterCells = new Rect[4];
+    private CanvasBitmap? _bossThrow, _barrels, _barrelFlames, _stormCloud, _electricSpider, _stormCraters;
     private float _barrelFrameHeight;
     private readonly Dictionary<(StrykersRunGateKind, int), string> _gateLabels = new();
     private readonly CanvasTextFormat _title = TextFormat(51);
@@ -55,7 +58,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             if (_loading is null)
             {
                 _images = new(_device, Path.Combine(AppContext.BaseDirectory, "Assets", "StrykersRun"),
-                    ["actors.png", "hero.png", "ally.png", "bosses.png", "boss-walk.png", "boss-throw.png", "barrels.png", "barrel-flames.png", "explosion.png", "road.png", "game-over-wall.png"]);
+                    ["actors.png", "hero-body.png", "hero-scarf.png", "city-ruins.png", "ally.png", "bosses.png", "boss-walk.png", "boss-throw.png", "barrels.png", "barrel-flames.png", "explosion.png", "storm-cloud.png", "electric-spider.png", "storm-craters.png", "road.png", "game-over-wall.png"]);
                 _loading = LoadAsync(_images);
                 _ = _loading.ContinueWith(task => _ = task.Exception, CancellationToken.None,
                     TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
@@ -70,26 +73,35 @@ internal sealed partial class StrykersRunRenderer : IDisposable
         lock (_resourceGate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            foreach (string file in new[] { "actors.png", "hero.png", "ally.png", "bosses.png", "boss-walk.png", "boss-throw.png", "barrels.png", "barrel-flames.png", "explosion.png", "road.png", "game-over-wall.png" })
+            foreach (string file in new[] { "actors.png", "hero-body.png", "hero-scarf.png", "city-ruins.png", "ally.png", "bosses.png", "boss-walk.png", "boss-throw.png", "barrels.png", "barrel-flames.png", "explosion.png", "storm-cloud.png", "electric-spider.png", "storm-craters.png", "road.png", "game-over-wall.png" })
                 if (images.Image(file) is null)
                     throw new InvalidDataException("Stryker's Run artwork: " + file + ": " +
                         images.Errors.GetValueOrDefault(file, "not loaded"));
             var actors = images.Image("actors.png")!;
-            var hero = images.Image("hero.png")!;
+            var hero = images.Image("hero-body.png")!;
             if (actors.SizeInPixels.Width < 16 || actors.SizeInPixels.Height < 16 || hero.SizeInPixels.Width < 16)
                 throw new InvalidDataException("Stryker's Run sprite atlas dimensions are invalid.");
             FindSpriteCells(actors, 4, _actorCells);
             FindSpriteCells(hero, 1, _heroCells);
+            LoadHeroScarf(images);
             FindSpriteCells(images.Image("ally.png")!, 1, _allyCells);
             FindSpriteCells(images.Image("bosses.png")!, 2, _bossCells, 3, sharedVerticalBounds: false);
             FindSpriteCells(images.Image("boss-walk.png")!, 4, _bossWalkCells);
             _bossThrow = images.Image("boss-throw.png")!;
             _barrels = images.Image("barrels.png")!;
             _barrelFlames = images.Image("barrel-flames.png")!;
+            _stormCloud = images.Image("storm-cloud.png")!;
+            _electricSpider = images.Image("electric-spider.png")!;
+            _stormCraters = images.Image("storm-craters.png")!;
             if (_bossThrow.SizeInPixels.Width != 1774 || _bossThrow.SizeInPixels.Height != 887)
                 throw new InvalidDataException("The Warden throw atlas must match its measured 1774 x 887 pose anchors.");
             FindUniformCells(_bossThrow, _bossThrowCells);
             FindUniformCells(_barrelFlames, _barrelFlameCells);
+            FindUniformCells(_stormCloud, _stormCloudCells);
+            FindUniformCells(_electricSpider, _electricSpiderCells);
+            if (_electricSpider.SizeInPixels.Width != 1536 || _electricSpider.SizeInPixels.Height != 1024)
+                throw new InvalidDataException("The electric spider atlas must match its measured 1536 x 1024 pose anchors.");
+            FindSpriteCells(_stormCraters, 2, _stormCraterCells, 2, sharedVerticalBounds: false);
             FindSpriteCells(_barrels, 2, _barrelCells, 2);
             foreach (var cell in _barrelCells)
                 _barrelFrameHeight = Math.Max(_barrelFrameHeight, (float)cell.Height);
@@ -97,6 +109,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             // its ink would enlarge ignition and make the fireball jump around.
             FindUniformCells(images.Image("explosion.png")!, _explosionCells);
             _road.Sources[0] = images.Image("road.png")!;
+            _city.Sources[0] = images.Image("city-ruins.png")!;
             _particles = CreateParticles();
             _ready = true;
         }
@@ -134,7 +147,8 @@ internal sealed partial class StrykersRunRenderer : IDisposable
                 }
                 try
                 {
-                    DrawStreet(ds, roadPresentationDistance ?? state.Distance, clock, ambient);
+                    DrawStreet(ds, roadPresentationDistance ?? state.Distance, clock);
+                    DrawStormCraters(ds, state, roadPresentationDistance ?? state.Distance);
                     DrawBossGround(ds, state);
                     DrawWorldObjects(ds, state, clock);
                     DrawBullets(ds, state);
@@ -153,7 +167,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
         finally { ds.Transform = before; }
     }
 
-    private enum ActorAtlas { TroopAndEnemy, Hero, Ally }
+    private enum ActorAtlas { TroopAndEnemy, Hero, Ally, ElectricSpider }
     private readonly record struct Actor(int Cell, ActorAtlas Atlas, float X, float Y, float Size, float Squash, float Health = -1);
     private enum PropKind { Gate, Objective, Boss }
     private readonly record struct WorldProp(int Index, PropKind Kind, float Y);
@@ -165,6 +179,13 @@ internal sealed partial class StrykersRunRenderer : IDisposable
         foreach (var enemy in state.Enemies)
         {
             if (count >= StrykersRunGame.MaximumEnemies || enemy.Y < -.15f || enemy.Y > .95f) continue;
+            if (enemy.Kind == StrykersRunEnemyKind.ElectricSpider)
+            {
+                actors[count++] = new(Math.Clamp((int)(enemy.AnimationPhase * 8), 0, 7),
+                    ActorAtlas.ElectricSpider, enemy.X, enemy.Y, 260,
+                    ForegroundSquash(state, enemy.Y), HealthFraction(enemy.Health, enemy.MaxHealth));
+                continue;
+            }
             int row = enemy.Kind switch { StrykersRunEnemyKind.Brute => 2, StrykersRunEnemyKind.Boss => 3, _ => 1 };
             float size = enemy.Kind switch { StrykersRunEnemyKind.Brute => 170, StrykersRunEnemyKind.Boss => 265, _ => 112 };
             float squash = ForegroundSquash(state, enemy.Y);
@@ -231,12 +252,13 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             props[insert] = prop;
         }
         var atlas = _images!.Image("actors.png")!;
-        var hero = _images.Image("hero.png")!;
+        var hero = _images.Image("hero-body.png")!;
         var defender = _images.Image("ally.png")!;
-        CanvasBitmap Bitmap(ActorAtlas kind) => kind switch { ActorAtlas.Hero => hero, ActorAtlas.Ally => defender, _ => atlas };
+        CanvasBitmap Bitmap(ActorAtlas kind) => kind switch
+        { ActorAtlas.Hero => hero, ActorAtlas.Ally => defender, ActorAtlas.ElectricSpider => _electricSpider!, _ => atlas };
         using (var shadows = ds.CreateSpriteBatch(CanvasSpriteSortMode.None, CanvasImageInterpolation.Linear))
             foreach (ref readonly var actor in actors[..count])
-                DrawActor(shadows, actor, Bitmap(actor.Atlas), shadow: true);
+                DrawActor(shadows, actor, Bitmap(actor.Atlas), shadow: true, state.ScarfSide);
         foreach (ref readonly var prop in props[..propCount])
             if (prop.Kind == PropKind.Objective) DrawObjectiveShadow(ds, state.Objectives[prop.Index]);
             else if (prop.Kind == PropKind.Gate) DrawGateShadow(ds, state.Gates[prop.Index]);
@@ -252,7 +274,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
                 while (nextActor < count && actors[nextActor].Y <= propY)
                 {
                     ref readonly var actor = ref actors[nextActor++];
-                    DrawActor(bodies, actor, Bitmap(actor.Atlas), shadow: false);
+                    DrawActor(bodies, actor, Bitmap(actor.Atlas), shadow: false, state.ScarfSide);
                 }
             }
             if (i >= propCount) continue;
@@ -263,28 +285,41 @@ internal sealed partial class StrykersRunRenderer : IDisposable
         }
     }
 
-    private void DrawActor(CanvasSpriteBatch batch, in Actor actor, CanvasBitmap bitmap, bool shadow)
+    private void DrawActor(CanvasSpriteBatch batch, in Actor actor, CanvasBitmap bitmap, bool shadow, float scarfSide = -1)
     {
         if (actor.Squash <= 0) return;
         Rect source = actor.Atlas switch { ActorAtlas.Hero => _heroCells[actor.Cell],
-            ActorAtlas.Ally => _allyCells[actor.Cell], _ => _actorCells[actor.Cell] };
+            ActorAtlas.Ally => _allyCells[actor.Cell], ActorAtlas.ElectricSpider => _electricSpiderCells[actor.Cell],
+            _ => _actorCells[actor.Cell] };
         Vector2 position = Point(actor.X, actor.Y);
         float depth = DepthScale(actor.Y), size = actor.Size * depth;
         float width = size * (float)(source.Width / source.Height), height = size * actor.Squash;
+        bool spider = actor.Atlas == ActorAtlas.ElectricSpider;
         Rect destination = shadow
             ? new(position.X - width * .30f, position.Y - 5, width, size * .29f)
             : new(position.X - width / 2, position.Y - height, width, height);
+        if (spider)
+        {
+            Vector2 anchor = ElectricSpiderEyes[actor.Cell] + new Vector2(0, 110);
+            float scaleX = width / (float)source.Width;
+            float scaleY = (shadow ? size * .29f : height) / (float)source.Height;
+            destination = new(position.X - anchor.X * scaleX, position.Y - anchor.Y * scaleY,
+                width, shadow ? size * .29f : height);
+        }
+        if (actor.Atlas == ActorAtlas.Hero)
+            DrawHeroScarf(batch, actor.Cell, destination, scarfSide, shadow);
         batch.DrawFromSpriteSheet(bitmap, destination, source,
             shadow ? new Vector4(0, 0, 0, .42f) : Vector4.One);
         if (shadow || actor.Health < 0) return;
         bool boss = actor.Cell >= 12;
-        float barWidth = (boss ? 136 : 73) * depth;
-        float x = position.X - barWidth / 2, y = position.Y - size * .92f;
+        float barWidth = (boss ? 136 : spider ? 105 : 73) * depth;
+        float x = position.X - barWidth / 2, y = position.Y - size * (spider ? .63f : .92f);
         batch.DrawFromSpriteSheet(_particles!, new Rect(x - 3, y - 3, barWidth + 6, 13), HealthCell,
             new Vector4(16 / 255f, 17 / 255f, 25 / 255f, 1));
         if (actor.Health > 0)
             batch.DrawFromSpriteSheet(_particles!, new Rect(x, y, barWidth * actor.Health, 7), HealthCell,
-                boss ? new Vector4(1, 73 / 255f, 56 / 255f, 1) : new Vector4(1, 188 / 255f, 62 / 255f, 1));
+                boss ? new Vector4(1, 73 / 255f, 56 / 255f, 1) : spider ? new Vector4(.32f, .85f, 1, 1)
+                    : new Vector4(1, 188 / 255f, 62 / 255f, 1));
     }
 
     private static float ForegroundSquash(StrykersRunSnapshot state, float y) =>
@@ -310,8 +345,9 @@ internal sealed partial class StrykersRunRenderer : IDisposable
         Text(ds, _squadLabel, new Rect(590, 80, 282, 34), Ink(251, 198, 101), _hud);
         DrawCampaignHud(ds, state);
         if (state.Phase is StrykersRunPhase.Ready or StrykersRunPhase.Starting or StrykersRunPhase.WaitingForInput)
-            Text(ds, state.Banner, new Rect(35, state.Phase == StrykersRunPhase.WaitingForInput ? 1356 : 1020,
-                Width - 70, 60), Ink(250, 235, 205), _message);
+            Text(ds, state.RecoveringInput ? "Paused · touch dots to resume" : state.Banner,
+                new Rect(35, state.Phase == StrykersRunPhase.WaitingForInput ? 1356 : 1020,
+                    Width - 70, 60), Ink(250, 235, 205), _message);
     }
 
     internal void DrawThumbnail(CanvasDrawingSession ds, Rect bounds)
@@ -330,7 +366,7 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             ds.DrawImage(road, new Rect(0, 0, width, 400), new Rect(0, road.Size.Height * .22,
                 road.Size.Width, road.Size.Width * 400 / width));
             var actors = _images.Image("actors.png")!;
-            var hero = _images.Image("hero.png")!;
+            var hero = _images.Image("hero-body.png")!;
             using (var batch = ds.CreateSpriteBatch(CanvasSpriteSortMode.None, CanvasImageInterpolation.Linear))
             {
                 var boss = _actorCells[13];
@@ -341,7 +377,9 @@ internal sealed partial class StrykersRunRenderer : IDisposable
                     170 * brute.Width / brute.Height, 170), brute);
                 var source = _heroCells[2];
                 float heroWidth = 316 * (float)(source.Width / source.Height);
-                batch.DrawFromSpriteSheet(hero, new Rect(width * .35f - heroWidth / 2, 94, heroWidth, 316), source);
+                var heroDestination = new Rect(width * .35f - heroWidth / 2, 94, heroWidth, 316);
+                DrawHeroScarf(batch, 2, heroDestination, -1);
+                batch.DrawFromSpriteSheet(hero, heroDestination, source);
             }
             for (int i = 0; i < 6; i++)
                 ds.DrawLine(width * .48f + i * 5, 180 - i * 13, width * .50f + i * 7, 119 - i * 13,
@@ -383,13 +421,15 @@ internal sealed partial class StrykersRunRenderer : IDisposable
             _ready = false;
             _images?.Dispose();
             _images = null;
-            _bossThrow = _barrels = _barrelFlames = null;
+            _bossThrow = _barrels = _barrelFlames = _stormCloud = _electricSpider = _stormCraters = null;
+            _heroScarf = null;
             _particles?.Dispose();
             _particles = null;
             _road.Dispose();
+            _city.Dispose();
             _title.Dispose(); _hud.Dispose(); _gateText.Dispose(); _message.Dispose();
             _objectiveTitle.Dispose(); _objectiveCount.Dispose(); _allyStatus.Dispose();
-            _bossTitle.Dispose(); _bossHint.Dispose(); _victoryTitle.Dispose();
+            _bossTitle.Dispose(); _bossDetail.Dispose(); _victoryTitle.Dispose();
         }
     }
 }

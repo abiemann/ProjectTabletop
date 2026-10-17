@@ -4,7 +4,7 @@ public enum FootballTipAction { Publish, Hold, Clear }
 
 /// <summary>Tip is in raw camera pixels. FieldPoint is the normalized pitch location
 /// supplied by the caller's mapping, present only for Publish.</summary>
-public sealed record FootballTipDecision(FootballTipAction Action, ColorTipObservation? Tip,
+public sealed record FootballTipDecision(FootballTipAction Action, MarkerTipObservation? Tip,
     PixelPoint? FieldPoint, string Reason)
 {
     public string Source { get; init; } = "none";
@@ -21,7 +21,7 @@ public static class FootballTipAssignment
     /// <param name="toField">Maps a raw camera point to normalized pitch coordinates, or null
     /// when it lies outside the calibrated grass surface. Grass behind a goal line can
     /// produce an X outside 0–1; its sign still identifies the owning half.</param>
-    public static FootballTipDecision Update(ColorTipTracker tracker, int player, ColorTipDetectionResult detection,
+    public static FootballTipDecision Update(MarkerTipTracker tracker, int player, MarkerTipDetectionResult detection,
         Func<PixelPoint, PixelPoint?> toField, DateTimeOffset frameTime, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(tracker);

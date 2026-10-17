@@ -410,22 +410,22 @@ internal static class BoardInteractionRegression
             Require(Update(session, 300, Over(target, 1, 300) with { SelectionFrameTime = Time(200) }) is null &&
                 session.HoveredButtonIds.Count == 0,
                 "Explicit navigation retained an old selection anchor.");
-            Require(Update(session, 400, Over(target, 2, 400) with { SelectionFrameTime = Time(350) }) is not null,
-                "Explicit navigation blocked a new selection anchor.");
+            var freshSelection = Update(session, 400, Over(target, 2, 400) with { SelectionFrameTime = Time(350) });
+            Require(target.IsHold ? freshSelection is null : freshSelection is not null,
+                "Explicit navigation blocked a new selection anchor or made a hold button gesture-selectable.");
         }
 
         session = new BoardSession();
-        session.ShowPaint(Time(100));
-        session.PaintSaveEnabled = true;
-        BoardButton save = session.Buttons.Single(button => button.Id == "paint-save");
-        Require(Update(session, 200, Over(save, 1, 200) with { SelectionFrameTime = Time(150) }) is
-            { Previous: BoardScreen.Paint, Current: BoardScreen.Paint, ButtonId: "paint-save" }, "An anchored Save failed.");
-        Require(Update(session, 260, Over(save, 2, 260) with { SelectionFrameTime = Time(180) }) is null,
-            "Save retained another hand's pre-action selection anchor.");
+        session.ShowSettings(Time(100));
+        BoardButton licenses = session.Buttons.Single(button => button.Id == "licenses");
+        Require(Update(session, 200, Over(licenses, 1, 200) with { SelectionFrameTime = Time(150) }) is
+            { Previous: BoardScreen.Settings, Current: BoardScreen.Settings, ButtonId: "licenses" }, "An anchored Licenses action failed.");
+        Require(Update(session, 260, Over(licenses, 2, 260) with { SelectionFrameTime = Time(180) }) is null,
+            "Licenses retained another hand's pre-action selection anchor.");
         session.ResetInput(Time(300));
-        Require(Update(session, 350, Over(save, 3, 350) with { SelectionFrameTime = Time(280) }) is null &&
+        Require(Update(session, 350, Over(licenses, 3, 350) with { SelectionFrameTime = Time(280) }) is null &&
             session.HoveredButtonIds.Count == 0, "Camera/calibration reset retained an old selection anchor.");
-        Require(Update(session, 420, Over(save, 4, 420) with { SelectionFrameTime = Time(380) }) is not null,
+        Require(Update(session, 420, Over(licenses, 4, 420) with { SelectionFrameTime = Time(380) }) is not null,
             "Camera/calibration reset blocked a fresh selection anchor.");
     }
 

@@ -1,0 +1,3 @@
+The Water Garden caption fixtures were recorded from the user's tabletop on 2026-10-16 during investigation of a rejected DUCK+ long press. The held image contains fingers visibly corrupting the caption; the other three controls remain clear. The matching clear frame was captured immediately beforehand.
+
+Only the camera control strip is retained; pixels outside that strip are black to keep unrelated surroundings out of the fixtures. The generated reference, calibrated camera mapping, control plates and caption bounds are unchanged. The regression checks that actual caption damage starts a hold even when it covers less than 7% of the larger button plate, while intact colour, brightness and border changes do not.

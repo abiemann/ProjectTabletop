@@ -539,6 +539,11 @@ public sealed partial class SceneCompositor
         float radius = button.Id == "mp-roll" || caret ? (float)rect.Height / 2 : (float)Math.Min(13, rect.Height / 3);
         Color top = !enabled ? ThemeColor(40, 56, 42) : primary ? ThemeColor(241, 216, 152) : danger ? ThemeColor(90, 42, 36) : hovered ? ThemeColor(47, 91, 65) : caret ? ThemeColor(22, 56, 39) : ThemeColor(31, 66, 47);
         Color bottom = !enabled ? ThemeColor(24, 39, 29) : primary ? ThemeColor(179, 139, 67) : danger ? ThemeColor(56, 24, 21) : ThemeColor(13, 36, 26);
+        if (caret)
+        {
+            top = ThemeColor(241, 234, 211);
+            bottom = ThemeColor(211, 205, 183);
+        }
         ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 4, rect.Width, rect.Height), radius, radius, ThemeColor(0, 12, 5, 140));
         using var surface = new CanvasLinearGradientBrush(ds.Device, top, bottom)
         { StartPoint = new((float)rect.X, (float)rect.Y), EndPoint = new((float)rect.X, (float)rect.Bottom) };

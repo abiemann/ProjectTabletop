@@ -35,6 +35,7 @@ public sealed partial class SceneCompositor
     {
         BoardScreen.Globe => HasGlobeDrawerAnimation(_globeClock()),
         BoardScreen.PhotoCopy => HasPhotoCopyDrawerAnimation(_blackjackClock()),
+        BoardScreen.Paint => HasPaintDrawerAnimation(_paintClock()),
         BoardScreen.WaterGarden => HasWaterGardenDrawerAnimation(_waterClock()),
         BoardScreen.Football => _boardSession.FootballControlsAnimating,
         _ => false

@@ -35,9 +35,10 @@ public sealed partial class SceneCompositor
     {
         get
         {
-            lock (_gate) return _boardSession.Screen != BoardScreen.StrykersRun ||
-                _boardSession.StrykersRunControlsVisible && !_boardSession.StrykersRunControlsAnimating &&
-                AcquisitionBoardReady;
+            lock (_gate) return _boardSession.Screen != BoardScreen.Paint &&
+                (_boardSession.Screen != BoardScreen.StrykersRun ||
+                    _boardSession.StrykersRunControlsVisible && !_boardSession.StrykersRunControlsAnimating &&
+                    AcquisitionBoardReady);
         }
     }
 
@@ -89,6 +90,11 @@ public sealed partial class SceneCompositor
 
     private void SyncStrykersRunSession()
     {
+        if (_boardSession.Screen == BoardScreen.StrykersRun)
+        {
+            var field = StrykersRunFieldBounds();
+            _boardSession.SetStrykersRunFieldBounds(new(field.X, field.Y, field.Width, field.Height), _strykersRunClock());
+        }
         bool active = !_disposed && _boardSession.Screen == BoardScreen.StrykersRun &&
             _boardSession.StrykersRunPhase is StrykersRunPhase.WaitingForInput or StrykersRunPhase.Playing &&
             !_boardSession.StrykersRunRailAnimating && _boardSession.StrykersRunRailProgress == 1 &&
@@ -118,8 +124,10 @@ public sealed partial class SceneCompositor
     internal Rect StrykersRunRailBounds()
     {
         var field = StrykersRunFieldBounds();
-        return new(field.X + field.Width * .08, field.Y + field.Height * .930,
-            field.Width * .84, field.Height * .04);
+        // Keep space at both ends for paused EXIT controls. The rail never
+        // resizes on pause, preserving its optical registration and steering.
+        return new(field.X + field.Width * .18, field.Y + field.Height * .930,
+            field.Width * .64, field.Height * .04);
     }
 
     public PatternRailGeometry? GetStrykersRunRailGeometry(DateTimeOffset? frameTime = null,

@@ -9,16 +9,10 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     private readonly AsyncResultGate _calibrationResults = new();
+    private double _pieceTopHeightMillimeters = 5;
+    private string CalibrationStatus { get; set; } = "Registration needed before overlays can align.";
 
     private string CalibrationPath => Path.Combine(_appDataDirectory, "calibration.json");
-
-    private void PieceHeightNumberBox_ValueChanged(object sender,
-        Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs args)
-    {
-        if (_initialized && (_calibration is not null || _boardCameraPoints.Count > 0 ||
-                             _topCameraPoints.Count > 0))
-            InvalidateCalibration("Piece height changed. Recalibrate board and raised top.");
-    }
 
     private void BoardCorners_Click(object sender, RoutedEventArgs e)
     {
@@ -28,7 +22,7 @@ public sealed partial class MainWindow
         _annotationMode = AnnotationMode.BoardCalibration;
         _frozenFrame = null;
         _scene.ShowCalibrationTarget(0, pieceTop: false);
-        CalibrationStatusText.Text = "Board target 1 of 4. Click its center in the live camera view. " +
+        CalibrationStatus = "Board target 1 of 4. Click its center in the live camera view. " +
             "Targets advance clockwise from top left.";
     }
 
@@ -38,7 +32,7 @@ public sealed partial class MainWindow
         if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
         if (_boardCameraPoints.Count != 4)
         {
-            CalibrationStatusText.Text = "Measure the four board-plane points first.";
+            CalibrationStatus = "Measure the four board-plane points first.";
             return;
         }
         _calibrationResults.Invalidate();
@@ -48,7 +42,7 @@ public sealed partial class MainWindow
         _annotationMode = AnnotationMode.TopCalibration;
         _frozenFrame = null;
         _scene.ShowCalibrationTarget(0, pieceTop: true);
-        CalibrationStatusText.Text = "Raised top target 1 of 4. Move a piece until the projected crosshair " +
+        CalibrationStatus = "Raised top target 1 of 4. Move a piece until the projected crosshair " +
             "lands on its top center, then click that center in the camera view.";
     }
 
@@ -56,22 +50,22 @@ public sealed partial class MainWindow
     {
         if (!_camera.IsRunning || _camera.LatestFrame is null || SelectedDisplay is null)
         {
-            CalibrationStatusText.Text = "Start the webcam, choose the projector display, and wait for a frame.";
+            CalibrationStatus = "Start the webcam, choose the projector display, and wait for a frame.";
             return false;
         }
         if (SelectedCamera is not { } selected || _camera.ActiveDeviceId != selected.Device.Id)
         {
-            CalibrationStatusText.Text = "Start the selected webcam before calibrating.";
+            CalibrationStatus = "Start the selected webcam before calibrating.";
             return false;
         }
         if (_output is null || !_output.IsFullScreen || _outputDisplayId != SelectedDisplay?.Id)
         {
-            CalibrationStatusText.Text = "Open the selected projection display in full screen before calibrating.";
+            CalibrationStatus = "Open the selected projection display in full screen before calibrating.";
             return false;
         }
         if (!_scene.HasBoardMediaClip)
         {
-            CalibrationStatusText.Text = "Complete a board scan before projecting calibration targets.";
+            CalibrationStatus = "Complete a board scan before projecting calibration targets.";
             return false;
         }
         return true;
@@ -83,7 +77,7 @@ public sealed partial class MainWindow
         if (count < 4)
         {
             _scene.ShowCalibrationTarget(count, pieceTop);
-            CalibrationStatusText.Text = $"{(pieceTop ? "Raised top" : "Board")} target {count + 1} of 4. " +
+            CalibrationStatus = $"{(pieceTop ? "Raised top" : "Board")} target {count + 1} of 4. " +
                 (pieceTop ? "Move the piece until the next target hits its top center, then click that center." :
                             "Click the next projected board target in the camera view.");
             return;
@@ -92,7 +86,7 @@ public sealed partial class MainWindow
         _scene.ShowCalibrationTarget(-1, pieceTop);
         _annotationMode = AnnotationMode.None;
         if (_boardCameraPoints.Count == 4 && _topCameraPoints.Count == 4) CreateCalibration();
-        else CalibrationStatusText.Text = "Board points recorded. Now measure four points on the raised piece top.";
+        else CalibrationStatus = "Board points recorded. Now measure four points on the raised piece top.";
     }
 
     private void CreateCalibration()
@@ -112,16 +106,16 @@ public sealed partial class MainWindow
                 display.Id, display.Width, display.Height,
                 new PlaneCalibration(CameraPoints(_boardCameraPoints), OutputPoints(boardTarget)),
                 new PlaneCalibration(CameraPoints(_topCameraPoints), OutputPoints(topTarget)),
-                PieceHeightNumberBox.Value);
+                _pieceTopHeightMillimeters);
             ApplyCalibration(session);
-            CalibrationStatusText.Text = "Board and raised top calibrated at " +
+            CalibrationStatus = "Board and raised top calibrated at " +
                 $"{session.PieceTopHeightMillimeters:F1} mm. Save calibration for later launches.";
         }
         catch (Exception ex)
         {
             _calibration = null;
             _scene.SetTopPlaneMap(null);
-            CalibrationStatusText.Text = "Calibration measurements rejected: " + ex.Message;
+            CalibrationStatus = "Calibration measurements rejected: " + ex.Message;
         }
     }
 
@@ -146,14 +140,14 @@ public sealed partial class MainWindow
         _topCameraPoints.Clear();
         _scene.SetTopPlaneMap(null);
         _scene.ShowCalibrationTarget(-1, pieceTop: false);
-        if (_initialized) CalibrationStatusText.Text = reason;
+        if (_initialized) CalibrationStatus = reason;
     }
 
     private async void SaveCalibration_Click(object sender, RoutedEventArgs e)
     {
         if (_calibration is null)
         {
-            CalibrationStatusText.Text = "Measure both the board and raised top before saving calibration.";
+            CalibrationStatus = "Measure both the board and raised top before saving calibration.";
             return;
         }
         var generation = _calibrationResults.Capture();
@@ -168,7 +162,7 @@ public sealed partial class MainWindow
         void CompleteStatus(string status) => _calibrationResults.TryApply(generation, () =>
         {
             if (_closing || !ReferenceEquals(calibration, _calibration)) return false;
-            CalibrationStatusText.Text = status;
+            CalibrationStatus = status;
             return true;
         });
     }
@@ -177,13 +171,13 @@ public sealed partial class MainWindow
     {
         if (_output is null || !_output.IsFullScreen || _outputDisplayId != SelectedDisplay?.Id)
         {
-            CalibrationStatusText.Text = "Open the selected projection display in full screen before loading calibration.";
+            CalibrationStatus = "Open the selected projection display in full screen before loading calibration.";
             return;
         }
         if (SelectedCamera is not { } camera || SelectedDisplay is not { } display ||
             _camera.ActiveDeviceId != camera.Device.Id || _camera.LatestFrame is not { } frame)
         {
-            CalibrationStatusText.Text = "Start the matching webcam and select the projector display before loading calibration.";
+            CalibrationStatus = "Start the matching webcam and select the projector display before loading calibration.";
             return;
         }
         _calibrationResults.Invalidate();
@@ -211,23 +205,23 @@ public sealed partial class MainWindow
                     _camera.ActiveDeviceId != currentCamera.Device.Id || _camera.LatestFrame is not { } currentFrame ||
                     _outputDisplayId != currentDisplay.Id || output.ActualDisplayId != currentDisplay.Id)
                 {
-                    CalibrationStatusText.Text = "Calibration was not loaded because the webcam or projector output " +
+                    CalibrationStatus = "Calibration was not loaded because the webcam or projector output " +
                         "changed while it was being read. Load it again.";
                     return false;
                 }
                 if (!session.MatchesHardware(currentCamera.Device.Id, currentFrame.Width, currentFrame.Height,
                         currentDisplay.Id, liveDisplay.OuterBounds.Width, liveDisplay.OuterBounds.Height))
                 {
-                    CalibrationStatusText.Text = "Saved calibration does not match camera or projector mode. Recalibrate.";
+                    CalibrationStatus = "Saved calibration does not match camera or projector mode. Recalibrate.";
                     return false;
                 }
-                PieceHeightNumberBox.Value = session.PieceTopHeightMillimeters;
+                _pieceTopHeightMillimeters = session.PieceTopHeightMillimeters;
                 ApplyCalibration(session);
                 _boardCameraPoints.Clear();
                 _boardCameraPoints.AddRange(session.BoardPlane.CameraPoints.Select(point => new PixelPoint(point.X, point.Y)));
                 _topCameraPoints.Clear();
                 _topCameraPoints.AddRange(session.PieceTopPlane.CameraPoints.Select(point => new PixelPoint(point.X, point.Y)));
-                CalibrationStatusText.Text = "Saved calibration loaded. Recalibrate if the camera, board, " +
+                CalibrationStatus = "Saved calibration loaded. Recalibrate if the camera, board, " +
                     "projector, lens correction, or piece height moved.";
                 return true;
             });
@@ -237,7 +231,7 @@ public sealed partial class MainWindow
             _calibrationResults.TryApply(generation, () =>
             {
                 if (_closing) return false;
-                CalibrationStatusText.Text = "Calibration load failed: " + ex.Message;
+                CalibrationStatus = "Calibration load failed: " + ex.Message;
                 return true;
             });
         }

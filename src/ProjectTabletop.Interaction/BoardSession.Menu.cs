@@ -95,9 +95,10 @@ public sealed partial class BoardSession
         ResetHoldCaptionEvidence();
     }
 
-    private void ClearMenuScroll(DateTimeOffset now)
+    private void ResetMenuScrollMotion(DateTimeOffset now)
     {
-        _menuScrolled = false;
+        // Navigation and camera resets discard in-flight motion, not the user's page.
+        // A new session starts at page one; subsequent returns settle on the last page.
         _menuScrollStartedAt = null;
         _menuScrollObservedAt = now;
         _menuInputReadyAfter = now;

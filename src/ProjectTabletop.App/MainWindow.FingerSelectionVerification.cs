@@ -1,4 +1,5 @@
 #if DEBUG
+using System.Reflection;
 using Microsoft.Graphics.Canvas;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
@@ -24,6 +25,15 @@ public sealed partial class MainWindow
         const int size = 1200;
         using var menuImage = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96);
         using var casinoImage = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96);
+        await scene.EnsureMenuPreviewResourcesAsync(menuImage.Device);
+        // Blackjack lives on the second launcher page. Settle that page before
+        // taking the baseline or aiming the gesture at its actual visible card.
+        var board = (BoardSession)typeof(SceneCompositor).GetField("_boardSession",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scene)!;
+        Require(board.ActivateButton("menu-scroll-down", MonotonicClock.UtcNow),
+            "The finger-selection fixture could not open the second menu page.");
+        await Task.Delay(BoardSession.MenuScrollDuration + TimeSpan.FromMilliseconds(20));
+        board.TickMenu(MonotonicClock.UtcNow);
         var menuBefore = Draw(menuImage);
         var menuHand = AtButton("blackjack");
         foreach (var middle in new[] { new PixelPoint(double.NaN, 0), PointAt(1.3, .5) })
@@ -31,7 +41,7 @@ public sealed partial class MainWindow
             await Send(menuHand with { FingerTips = Array.AsReadOnly(new[] { menuHand.Position, middle, middle, middle }) });
             Require(scene.CurrentFingerSelectionFeedback.Count == 0, "Invalid middle tip armed a button.");
         }
-        foreach (var time in new[] { DateTimeOffset.UtcNow.AddSeconds(-1), DateTimeOffset.UtcNow.AddSeconds(1) })
+        foreach (var time in new[] { MonotonicClock.UtcNow.AddSeconds(-1), MonotonicClock.UtcNow.AddSeconds(1) })
         {
             scene.SetHandCursors([menuHand], time);
             Require(scene.CurrentFingerSelectionFeedback.Count == 0, "A stale or future frame armed a button.");
@@ -106,16 +116,26 @@ public sealed partial class MainWindow
         Require(new[] { menuHand, chip, deal, hit }.All(hand => hand.ExecuteEventId == 0), "Selection generated a pinch event.");
         var lastHitSelection = scene.GetLastHandBoardSelection();
         scene.ShowPaint();
-        scene.SetHandCursors([], DateTimeOffset.UtcNow);
+        scene.SetHandCursors([], MonotonicClock.UtcNow);
         Require(ReferenceEquals(lastHitSelection, scene.GetLastHandBoardSelection()),
             "Programmatic navigation or an idle Paint frame overwrote the last successful hand selection.");
-        var exit = AtButton("menu") with { TrackingId = 812 };
-        await Arm(exit);
-        await Select(exit, "menu", () => scene.CurrentBoardScreen == BoardScreen.Menu);
-        var exitSelection = scene.GetLastHandBoardSelection();
-        for (int i = 0; i < 3; i++) await Send(Separate(exit));
-        Require(scene.CurrentBoardScreen == BoardScreen.Menu && ReferenceEquals(exitSelection, scene.GetLastHandBoardSelection()),
-            "Paint Exit lost its successful route or replayed a held gesture after returning to the menu.");
+        var paintArrow = AtButton("paint-drawer-open");
+        for (int i = 0; i < 3; i++) await Send(paintArrow);
+        for (int i = 0; i < 3; i++) await Send(Separate(paintArrow));
+        Require(scene.CurrentBoardScreen == BoardScreen.Paint && !scene.PaintDrawerOpen &&
+                scene.CurrentFingerSelectionFeedback.Count == 0 &&
+                ReferenceEquals(lastHitSelection, scene.GetLastHandBoardSelection()),
+            "A finger-selection gesture armed or opened Paint's long-press drawer.");
+        // Settings Back remains a gesture control. Keep the successful return
+        // route check here now that Paint's controls all use caption holds.
+        scene.ShowSettings();
+        var back = AtButton("menu") with { TrackingId = 812 };
+        await Arm(back);
+        await Select(back, "menu", () => scene.CurrentBoardScreen == BoardScreen.Menu);
+        var backSelection = scene.GetLastHandBoardSelection();
+        for (int i = 0; i < 3; i++) await Send(Separate(back));
+        Require(scene.CurrentBoardScreen == BoardScreen.Menu && ReferenceEquals(backSelection, scene.GetLastHandBoardSelection()),
+            "Settings Back lost its successful route or replayed a held gesture after returning to the menu.");
         string directory = Path.Combine(_appDataDirectory, "FingerSelectionSnapshots", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         string menuPath = Path.Combine(directory, "menu-ready.png"), casinoPath = Path.Combine(directory, "blackjack-ready.png");
@@ -127,7 +147,8 @@ public sealed partial class MainWindow
         return new { passed = true, middleAim = true, offProjectorIndexKeepsMiddleVisible = true,
             groupedHoldNeverExecutes = true, separationSelectsOnce = true, sameTargetRearms = true,
             readyFeedbackRendered = true, noPinchEvents = true, liveHardwareUnchanged = true,
-            exactIndexSelectionRouteRetained = true, paintExitRouteRetainedAcrossNavigation = true,
+            exactIndexSelectionRouteRetained = true, settingsBackRouteRetainedAcrossNavigation = true,
+            paintDrawerRejectsFingerSelection = true,
             rejectedAndHeldObservationsDoNotOverwriteSelection = true,
             directory, images = new[] { menuPath, casinoPath } };
 
@@ -157,7 +178,9 @@ public sealed partial class MainWindow
         }
         HandCursor AtButton(string id)
         {
-            var b = scene.CurrentBoardButtons.Single(button => button.Id == id).Bounds;
+            var button = scene.CurrentBoardButtons.SingleOrDefault(candidate => candidate.Id == id) ??
+                throw new InvalidOperationException($"The {scene.CurrentBoardScreen} fixture has no visible {id} control.");
+            var b = button.Bounds;
             double u = b.X + b.Width / 2, v = b.Y + b.Height / 2;
             var index = PointAt(u, b.Y - .02); // Index is deliberately outside the target.
             return new(index, DateTimeOffset.MinValue) { TrackingId = 811, HasFourExtendedFingers = true, FingersTogether = true,
@@ -168,7 +191,7 @@ public sealed partial class MainWindow
         async Task<DateTimeOffset> Send(HandCursor hand)
         {
             await Task.Delay(110);
-            var frameTime = DateTimeOffset.UtcNow;
+            var frameTime = MonotonicClock.UtcNow;
             scene.SetHandCursors([hand], frameTime);
             return frameTime;
         }

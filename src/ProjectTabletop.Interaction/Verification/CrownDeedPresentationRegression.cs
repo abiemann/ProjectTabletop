@@ -182,9 +182,9 @@ internal static class CrownDeedPresentationRegression
             reset.Update([Pinch(Button(reset, "mp-buy"), 10, 590)], Time(601), Time(601)) is null &&
             reset.Update([Pinch(Button(reset, "mp-buy"), 11, 620)], Time(620), Time(620)) is { ButtonId: "mp-buy" },
             "Projection cancellation retained the hold, replayed old input or rejected fresh input.");
-        reset.ShowPaint(Time(700)); long paintRevision = reset.Revision;
+        reset.ShowSettings(Time(700)); long settingsRevision = reset.Revision;
         reset.CancelCrownDeedPresentation(Time(710));
-        Require(reset.Screen == BoardScreen.Paint && reset.Revision == paintRevision &&
+        Require(reset.Screen == BoardScreen.Settings && reset.Revision == settingsRevision &&
             reset.Update([Pinch(Button(reset, "menu"), 12, 705)], Time(720), Time(720))?.Current == BoardScreen.Menu,
             "Cancelling an inactive CrownDeed presentation changed or invalidated the active board.");
     }

@@ -11,12 +11,15 @@ internal static class StrykersRunBoardRegression
     {
         CheckNavigationAndExplicitPlay();
         CheckRailPresentation();
+        CheckFooterLayout();
         CheckCaptionHolds();
         CheckInputResetAndExit();
+        CheckPausedExit();
         CheckReturningControls(victory: false);
         CheckReturningControls(victory: true);
         Console.WriteLine("Stryker's Run board passed: first-page launch and second-page Blackjack, lone-hero ready state, " +
-            "EXIT/PLAY caption holds, stationary control fades, delayed rail entry, rail reset barriers and fresh holds after defeat or campaign victory.");
+            "EXIT/PLAY caption holds, paired paused EXIT controls and fresh resume barriers, stationary control fades, delayed rail entry, " +
+            "rail reset barriers and fresh holds after defeat or campaign victory.");
     }
 
     private static void CheckRailPresentation()
@@ -65,9 +68,13 @@ internal static class StrykersRunBoardRegression
             board.Buttons.Select(button => button.Id).SequenceEqual(["strykers-run-exit", "strykers-run-play"]) &&
             board.Buttons.Select(button => button.Label).SequenceEqual(["EXIT", "PLAY"]) &&
             board.Buttons.All(button => button.Hold == BoardButtonHold.Once && button.Enabled &&
-                button.Bounds.Y >= .85 && button.Bounds.Y + button.Bounds.Height < .955) &&
+                Math.Abs(button.Bounds.Width - .98 * .32) < .000001 &&
+                Math.Abs(button.Bounds.Height - .98 * .085) < .000001 &&
+                Math.Abs(button.Bounds.Y + button.Bounds.Height / 2 - (.01 + .98 * .95)) < .000001 &&
+                button.Bounds.X >= 0 && button.Bounds.Y >= 0 &&
+                button.Bounds.X + button.Bounds.Width <= 1 && button.Bounds.Y + button.Bounds.Height <= 1) &&
             opened.SequenceEqual([BoardScreen.StrykersRun]),
-            "The ready board must show exactly two stationary caption controls clear of the bottom input rail.");
+            "The ready board must keep the two large caption controls inside the game footer, centred on the same row as paused EXIT.");
         board.SetStrykersRunInput(.8f, At(10));
         board.TickStrykersRun(At(10));
         Require(board.StrykersRunState.Phase == StrykersRunPhase.Ready,
@@ -91,6 +98,61 @@ internal static class StrykersRunBoardRegression
         Require(board.StrykersRunState is { Phase: StrykersRunPhase.Ready, SoldierCount: 1, RunSeconds: 0 } &&
             board.StrykersRunControlsProgress == 1 && opened[^1] == BoardScreen.StrykersRun,
             "The direct launch path must return to a clean lone-hero ready state.");
+    }
+
+    private static void CheckFooterLayout()
+    {
+        BoardRect[] fields = [new(.30, .02, .40, .96), new(.02, .12, .96, .76)];
+        var board = new BoardSession();
+        board.ShowStrykersRun(At(0));
+        for (int index = 0; index < fields.Length; index++)
+        {
+            var field = fields[index];
+            board.SetStrykersRunFieldBounds(field, At(10 + index));
+            var buttons = board.Buttons;
+            Require(buttons.Count == 2 && buttons.All(button =>
+                button.Bounds.X >= field.X && button.Bounds.X + button.Bounds.Width <= field.X + field.Width &&
+                button.Bounds.Y >= field.Y + field.Height * .90 &&
+                button.Bounds.Y + button.Bounds.Height <= field.Y + field.Height &&
+                Math.Abs(button.Bounds.Y + button.Bounds.Height / 2 - (field.Y + field.Height * .95)) < .000001 &&
+                Math.Abs(button.Bounds.Width - field.Width * .32) < .000001 &&
+                Math.Abs(button.Bounds.Height - field.Height * .085) < .000001) &&
+                Math.Abs((buttons[0].Bounds.X + buttons[1].Bounds.X + buttons[1].Bounds.Width) / 2 -
+                    (field.X + field.Width / 2)) < .000001,
+                "Narrow and wide game fields must contain a centred, equally sized EXIT/PLAY pair inside their black footer.");
+
+            var paused = Running();
+            paused.ClearStrykersRunInput(At(501));
+            var before = paused.StrykersRunState;
+            long inputRevision = paused.StrykersRunInputRevision, navigation = paused.NavigationRevision;
+            paused.SetStrykersRunFieldBounds(field, At(510));
+            Require(ReferenceEquals(before, paused.StrykersRunState) &&
+                paused.StrykersRunInputRevision == inputRevision && paused.NavigationRevision == navigation,
+                "Changing footer layout must not reset the paused run, navigation, or rail input epoch.");
+            Require(paused.Buttons.All(button => button.Bounds.Y == buttons[0].Bounds.Y &&
+                button.Bounds.Height == buttons[0].Bounds.Height && button.Bounds.Width == .12) &&
+                paused.Buttons[0].Bounds.X == .015 && paused.Buttons[1].Bounds.X == .865 &&
+                paused.Buttons[0].Bounds.X + paused.Buttons[0].Bounds.Width < field.X + field.Width * .18 &&
+                paused.Buttons[1].Bounds.X > field.X + field.Width * .82,
+                "Paused EXIT controls must share the ready controls' row and thickness while remaining beside the dot rail.");
+        }
+
+        const string play = "strykers-run-play";
+        Clear(board, play, 100);
+        for (int ms = 200; ms <= 600; ms += 100) Hold(board, play, ms);
+        Require(board.HoldProgress(At(600)).Count == 1, "The layout fixture did not establish a partial caption hold.");
+        board.SetStrykersRunFieldBounds(fields[0], At(650));
+        Require(board.HoldProgress(At(650)).Count == 0, "A changed footer retained its previous caption's partial hold.");
+        board.ObserveHeldButtons([], At(649), At(651), [play]);
+        for (int ms = 700; ms <= 1800; ms += 100)
+            Require(Hold(board, play, ms).Count == 0 && board.StrykersRunPhase == StrykersRunPhase.Ready,
+                "A layout change reused old clear evidence or accepted a delayed pre-layout clear frame.");
+        Clear(board, play, 1810);
+        for (int ms = 1900; ms < 2900; ms += 100)
+            Require(Hold(board, play, ms).Count == 0, "Repositioned PLAY accepted less than a fresh full caption hold.");
+        Require(Hold(board, play, 2900).SequenceEqual([play]) &&
+            board.StrykersRunPhase == StrykersRunPhase.Starting,
+            "A clear repositioned caption followed by a full hold failed to start the run.");
     }
 
     private static void CheckCaptionHolds()
@@ -138,12 +200,95 @@ internal static class StrykersRunBoardRegression
         board.TickStrykersRun(At(520));
         Require(board.StrykersRunState.Phase == StrykersRunPhase.Playing && board.StrykersRunState.RunSeconds == before.RunSeconds,
             "Fresh rail recovery replayed paused time.");
+        var game = (StrykersRunGame)typeof(BoardSession).GetField("_strykersRun", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(board)!;
+        var craters = (IList)typeof(StrykersRunGame).GetField("_stormCraters", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(game)!;
+        var craterType = typeof(StrykersRunGame).GetNestedType("StormCrater", BindingFlags.NonPublic)!;
+        craters.Add(Activator.CreateInstance(craterType, 900, .5f, .5f, before.RunSeconds, before.Distance)!);
         board.ShowMenu(At(530));
         float stopped = board.StrykersRunState.RunSeconds;
         board.SetStrykersRunInput(.1f, At(540));
         board.TickStrykersRun(At(550));
         Require(board.StrykersRunState.Phase == StrykersRunPhase.WaitingForInput &&
             board.StrykersRunState.RunSeconds == stopped, "Navigation retained active off-screen rail input.");
+        Require(board.StrykersRunState.Craters.Count == 0 && craters.Count == 0,
+            "Leaving Stryker's Run must discard persistent crater state from memory.");
+    }
+
+    private static void CheckPausedExit()
+    {
+        foreach (string source in new[] { "missing", "cleared", "stale" })
+        foreach (string exitId in new[] { "strykers-run-exit", "strykers-run-exit-right" })
+        {
+            var board = Running();
+            var before = board.StrykersRunState;
+            long inputRevision = board.StrykersRunInputRevision, navigation = board.NavigationRevision;
+            int pausedAt = Pause(500);
+            Require(board.StrykersRunState is { Phase: StrykersRunPhase.WaitingForInput, RecoveringInput: true } &&
+                board.StrykersRunControlsProgress == 1 && !board.StrykersRunControlsAnimating &&
+                board.StrykersRunRailProgress == 1 && !board.StrykersRunRailAnimating,
+                $"A {source} rail observation must reveal paired paused EXIT controls while keeping the settled rail available.");
+            Require(board.Buttons.Select(button => button.Id).SequenceEqual(["strykers-run-exit", "strykers-run-exit-right"]) &&
+                board.Buttons.All(button => button is { Label: "EXIT", Enabled: true, Hold: BoardButtonHold.Once }) &&
+                board.Buttons[0].Bounds == new BoardRect(.015, .01 + .98 * .9075, .12, .98 * .085) &&
+                board.Buttons[1].Bounds == new BoardRect(.865, .01 + .98 * .9075, .12, .98 * .085) &&
+                !board.ActivateButton("strykers-run-play", At(pausedAt + 1)),
+                "The paused run must expose matching EXIT holds beside both rail ends, without a restart button.");
+            var exit = board.Buttons.Single(button => button.Id == exitId);
+            var hand = new BoardHandSample(exit.Bounds.X + exit.Bounds.Width / 2,
+                exit.Bounds.Y + exit.Bounds.Height / 2, At(pausedAt + 1010), 1);
+            Require(board.Update([hand], At(pausedAt + 10), At(pausedAt + 10)) is null &&
+                board.Screen == BoardScreen.StrykersRun,
+                "A landmark or selection gesture activated the paused EXIT without corrupted lettering.");
+            for (int ms = pausedAt + 100; ms <= pausedAt + 1200; ms += 100)
+                Require(Hold(board, exit.Id, ms).Count == 0,
+                    "The newly visible paused caption armed before being observed clear.");
+            Clear(board, exit.Id, pausedAt + 1210);
+            for (int ms = pausedAt + 1300; ms <= pausedAt + 1700; ms += 100) Hold(board, exit.Id, ms);
+            Require(board.HoldProgress(At(pausedAt + 1700)).Count == 1,
+                "A clear-then-corrupted paused EXIT did not accumulate hold progress.");
+            Clear(board, exit.Id, pausedAt + 1710);
+            Require(board.HoldProgress(At(pausedAt + 1710)).Count == 0,
+                "Intact EXIT lettering must cancel the paused hold immediately.");
+            for (int ms = pausedAt + 1800; ms <= pausedAt + 2200; ms += 100) Hold(board, exit.Id, ms);
+            Require(board.HoldProgress(At(pausedAt + 2200)).Count == 1,
+                "The fixture did not establish a partial EXIT hold before rail recovery.");
+
+            int resumedAt = pausedAt + 2210;
+            board.SetStrykersRunInput(.7f, At(resumedAt));
+            board.TickStrykersRun(At(resumedAt));
+            var resumed = board.StrykersRunState;
+            Require(resumed.Phase == StrykersRunPhase.Playing && !resumed.RecoveringInput &&
+                board.Buttons.Count == 0 && !board.StrykersRunControlsVisible &&
+                board.HoldProgress(At(resumedAt)).Count == 0 &&
+                !board.ActivateButton(exit.Id, At(resumedAt)),
+                "Returning to the rail must immediately hide EXIT and discard its partial hold.");
+            Require(resumed.RunSeconds == before.RunSeconds && resumed.SquadX == before.SquadX &&
+                resumed.Distance == before.Distance && resumed.Score == before.Score &&
+                resumed.SoldierCount == before.SoldierCount && resumed.Level == before.Level &&
+                board.StrykersRunInputRevision == inputRevision && board.NavigationRevision == navigation,
+                "Pause and resume must preserve the run and rail registration without replaying paused time.");
+
+            int pausedAgainAt = Pause(resumedAt);
+            board.ObserveHeldButtons([], At(pausedAgainAt - 1), At(pausedAgainAt + 1), [exit.Id]);
+            for (int ms = pausedAgainAt + 100; ms <= pausedAgainAt + 1200; ms += 100)
+                Require(Hold(board, exit.Id, ms).Count == 0 && board.Screen == BoardScreen.StrykersRun,
+                    $"The {source} pause reused old clear evidence or a delayed pre-pause frame to exit.");
+            Clear(board, exit.Id, pausedAgainAt + 1210);
+            for (int ms = pausedAgainAt + 1300; ms < pausedAgainAt + 2300; ms += 100)
+                Require(Hold(board, exit.Id, ms).Count == 0, "Paused EXIT accepted less than a fresh full hold.");
+            Require(Hold(board, exit.Id, pausedAgainAt + 2300).SequenceEqual([exit.Id]) &&
+                board.Screen == BoardScreen.Menu,
+                $"A fresh clear caption followed by a full {exitId} hold did not return to the menu after {source} input.");
+
+            int Pause(int lastInputAt)
+            {
+                int at = lastInputAt + (source == "stale" ? 260 : 10);
+                if (source == "missing") board.SetStrykersRunInput(null, At(at));
+                else if (source == "cleared") board.ClearStrykersRunInput(At(at));
+                else board.TickStrykersRun(At(at));
+                return at;
+            }
+        }
     }
 
     private static void CheckReturningControls(bool victory)

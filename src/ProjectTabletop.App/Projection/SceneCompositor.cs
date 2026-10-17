@@ -172,7 +172,7 @@ public sealed partial class SceneCompositor : IDisposable
     {
         lock (_gate)
         {
-            if (BlockBoardRevealInput() || BlockBoardArtworkInput() || CrownDeedEntranceActive) return;
+            if (_markerSetup is not null || BlockBoardRevealInput() || BlockBoardArtworkInput() || CrownDeedEntranceActive) return;
             _handTips = [];
             var now = MonotonicClock.UtcNow;
             var acceptVisual = frameTime <= now && now - frameTime <= TimeSpan.FromMilliseconds(350) &&
@@ -266,21 +266,12 @@ public sealed partial class SceneCompositor : IDisposable
             _handFrameTime = acceptVisual ? frameTime : DateTimeOffset.MinValue;
             if (acceptVisual) _lastHandVisualFrameTime = frameTime;
             var shutterContext = PreparePhotoCopyGesture(cursors, frameTime, acceptVisual, photoCopyCaptureBusy);
-            if (_boardSession.Screen == BoardScreen.Paint && acceptVisual &&
-                boardSamples.Any(sample => sample.U is >= 0 and <= 1 && sample.V is >= 0 and <= 1 ||
-                    sample.FingerAim is { U: >= 0 and <= 1, V: >= 0 and <= 1 }))
-                NotePaintUserActivity();
             _boardSession.PaintSaveEnabled = CanSavePaint;
             var selectionResult = _boardSession.Update(boardSamples, frameTime, now);
             if (selectionResult is not null)
                 _lastHandBoardSelection = new { frameTime, observedAt = now,
                     previous = selectionResult.Previous.ToString(), current = selectionResult.Current.ToString(),
                     selectionResult.ButtonId, selectionResult.TrackingId, gesture = selectionResult.Gesture.ToString() };
-            if (selectionResult is { ButtonId: "paint-save" } && acceptVisual)
-            {
-                NotePaintUserActivity();
-                QueuePaintSaveRequest(frameTime);
-            }
             if (selectionResult is { ButtonId: "photo-save" } && acceptVisual && !photoCopyCaptureBusy &&
                 TryGetPhotoCopyMemoryImage(out var memoryImage))
                 _photoCopyMemorySaveRequest = new(frameTime, memoryImage);
@@ -364,6 +355,7 @@ public sealed partial class SceneCompositor : IDisposable
             _blackOutput = enabled;
             SyncWaterGardenSession();
             SyncFootballSession();
+            SyncPaintMarker();
             if (enabled) ClearHandSpotlights();
         }
     }
@@ -609,6 +601,7 @@ public sealed partial class SceneCompositor : IDisposable
 
             if (TryDrawBoardReveal(ds, output, preview)) return;
             DrawBoardScene(ds, output, preview);
+            if (isProjectorFrame && !preview) MarkMarkerSetupPresented();
             if (isProjectorFrame && !preview) MarkWaterGardenProjectorFrame();
 #if DEBUG
             if (strykersRunLockAcquired != 0)
@@ -636,7 +629,7 @@ public sealed partial class SceneCompositor : IDisposable
         if (_boardSession.Screen != BoardScreen.Media && _boardSurfaceMap is not null)
         {
             if (_boardSession.Screen == BoardScreen.HandTracking)
-                DrawTestGrid(ds, mediaRect);
+                DrawTestGrid(ds, mediaRect, AppPalette.HandTrackingBackground);
             DrawBoardApplication(ds, output, preview);
         }
         else
@@ -682,14 +675,14 @@ public sealed partial class SceneCompositor : IDisposable
                 DrawOverlay(ds, output, mediaRect, detection, frame, _topPlaneMap);
             }
         }
+        if (_markerSetup is not null) return;
         using (var holdClip = HoldButtonLightClip(ds, output))
         using (holdClip is null ? null : ds.CreateLayer(1, holdClip))
         {
             DrawHandAcquisitionLight(ds, output);
             DrawHandSpotlights(ds, output);
         }
-        if (_boardSession.Screen == BoardScreen.Paint) DrawPaintNavigationCursor(ds, output);
-        else DrawHandCursor(ds, output);
+        if (_boardSession.Screen != BoardScreen.Paint) DrawHandCursor(ds, output);
     }
 
     private void DrawHandCursor(CanvasDrawingSession ds, Rect output)
@@ -763,9 +756,9 @@ public sealed partial class SceneCompositor : IDisposable
             (float)(output.Y + point.Y * output.Height));
     }
 
-    private static void DrawTestGrid(CanvasDrawingSession ds, Rect stage)
+    private static void DrawTestGrid(CanvasDrawingSession ds, Rect stage, Color? background = null)
     {
-        ds.FillRectangle(stage, AppPalette.Background);
+        ds.FillRectangle(stage, background ?? AppPalette.Background);
         for (var i = 0; i <= 10; i++)
         {
             var x = (float)(stage.X + stage.Width * i / 10);
@@ -987,7 +980,6 @@ public sealed partial class SceneCompositor : IDisposable
             DisposeStrykersRunResources();
             DisposeWaterGardenArtwork();
             DisposeEyeProjectionReference();
-            DisposePaintReference();
         }
     }
 }

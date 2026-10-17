@@ -4,7 +4,6 @@ using System.Text.Json;
 using Microsoft.Graphics.Canvas;
 using Microsoft.UI;
 using Microsoft.UI.Dispatching;
-using Microsoft.UI.Xaml;
 using ProjectTabletop.App.Camera;
 using ProjectTabletop.Interaction;
 using ProjectTabletop.Vision;
@@ -27,7 +26,10 @@ public sealed partial class MainWindow
     private bool _eyeTipEnabled, _eyeTipLearning;
     private string? _eyeTipCameraId, _eyeTipSettingsError;
     private string _eyeTipReason = "tracking-off";
+    private string _eyeTipStatus = "Off. Use Marker setup to train the wand.";
     private long _eyeTipGeneration;
+    private long _eyeTipSceneRevision = -1;
+    private BoardScreen _eyeTipSceneBoard;
     private DateTimeOffset _eyeTipNotBefore, _eyeTipLastAssociated;
 
     private sealed record EyeTipSettings(int Version, Dictionary<string, double> Cameras);
@@ -37,7 +39,7 @@ public sealed partial class MainWindow
         public CameraFrameLease FrameLease { get; } = Frame.Retain();
     }
 
-    // Caller holds the shared eye/colour tracking gate.
+    // Caller holds the shared eye/wand tracking gate.
     private void SetEyeTipPreviewLocked(EyeTipPreview? preview)
     {
         var previous = _eyeTipPreview;
@@ -45,7 +47,7 @@ public sealed partial class MainWindow
         previous?.FrameLease.Dispose();
     }
     private string EyeTipSettingsPath => Path.Combine(_appDataDirectory, "stick-tip.json");
-    private bool IsLearningEyeTip { get { lock (_eyeTipGate) return _eyeTipLearning || _colorTipLearning; } }
+    private bool IsLearningEyeTip { get { lock (_eyeTipGate) return _eyeTipLearning || _wandMarkerLearning; } }
 
     private void InitializeEyeTipTracking()
     {
@@ -65,7 +67,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
         { _eyeTipSettingsError = "Eye-tip settings could not be loaded: " + ex.Message; }
-        InitializeColorTipTracking();
+        InitializeWandMarkerTracking();
         // Remember the measured scale, but require a deliberate opt-in each launch.
         _eyeTipTimer = DispatcherQueue.CreateTimer();
         _eyeTipTimer.Interval = TimeSpan.FromMilliseconds(100);
@@ -80,15 +82,17 @@ public sealed partial class MainWindow
                     _eyeTipReason = "waiting-for-fresh-camera-frame";
                     _eyeTipTracker.Reset();
                     _eyeTipLastAssociated = default;
-                    PublishWaterStickTipLocked();
+                    PublishStickTipLocked();
                     expired = true;
                 }
-                if (_colorTipPreview is { } colorPreview && !EyeTipFrameFresh(colorPreview.Frame, MonotonicClock.UtcNow))
+                if (_wandMarkerPreview is { } wandPreview && !EyeTipFrameFresh(wandPreview.Frame, MonotonicClock.UtcNow))
                 {
-                    SetColorTipPreviewLocked(null);
-                    _colorTipTracker.Reset();
+                    SetWandMarkerPreviewLocked(null);
+                    // Release stale pixels and stop wand input at 250 ms, but
+                    // preserve the tracker's separate 750 ms identity window.
+                    // Only a new measured pose can publish input again.
                     _eyeTipReason = "waiting-for-fresh-camera-frame";
-                    PublishWaterStickTipLocked();
+                    PublishStickTipLocked();
                     expired = true;
                 }
             }
@@ -110,64 +114,31 @@ public sealed partial class MainWindow
         lock (_eyeTipGate)
         {
             _eyeTipGeneration++;
+            _eyeTipSceneBoard = _scene.CurrentBoardScreen;
+            _eyeTipSceneRevision = CurrentWandMarkerInputRevision;
             _eyeTipNotBefore = MonotonicClock.UtcNow;
             _eyeTipLastAssociated = default;
             SetEyeTipPreviewLocked(null);
             _eyeTipTracker.Reset();
             _eyeTipLearning = false;
-            ResetColorTipTrackingLocked();
+            ResetWandMarkerTrackingLocked();
             if (cameraId is not null) _eyeTipCameraId = cameraId;
             _eyeTipReason = reason;
-            PublishWaterStickTipLocked();
+            PublishStickTipLocked();
         }
         QueueEyeTipStatusRefresh();
-    }
-
-    private void StickTrackingToggle_Toggled(object sender, RoutedEventArgs e)
-    {
-        if (_initialized) SetStickTrackingEnabled(StickTrackingToggle.IsOn);
     }
 
     private void SetStickTrackingEnabled(bool enabled)
     {
         lock (_eyeTipGate) _eyeTipEnabled = enabled;
-        ResetEyeTipTracking(enabled ? "searching-for-eye-marker" : "tracking-off");
-        if (StickTrackingToggle.IsOn != enabled) StickTrackingToggle.IsOn = enabled;
-        UpdateEyeTipStatus();
-    }
-
-    private void LearnEyeTip_Click(object sender, RoutedEventArgs e)
-    {
-        if (!_camera.IsRunning || !_cameraWanted || _camera.ActiveDeviceId != _selectedCameraId)
-        { SetStatus("Start the selected webcam before learning the eye tip."); return; }
-        CancelFootballLearning();
-        SetStickTrackingEnabled(true);
-        _frozenFrame = null;
-        lock (_eyeTipGate)
-        {
-            _eyeTipLearning = true;
-            _eyeTipReason = "click-the-black-pupil";
-        }
-        UpdateEyeTipStatus();
-        CameraCanvas.Invalidate();
-    }
-
-    private void ForgetEyeTip_Click(object sender, RoutedEventArgs e)
-    {
-        lock (_eyeTipGate)
-        {
-            if (_eyeTipCameraId is { } id) _eyeTipProfiles.Remove(id);
-            ForgetColorTipForCameraLocked();
-        }
-        ResetEyeTipTracking("eye-marker-not-learned");
-        SaveEyeTipSettings();
-        SaveColorTipSettings();
+        ResetEyeTipTracking(enabled ? "searching-for-wand-marker" : "tracking-off");
         UpdateEyeTipStatus();
     }
 
     private bool TryLearnEyeTipFromPreview(CameraFrame frame, PixelPoint point)
     {
-        if (TryLearnColorTipFromPreview(frame, point)) return true;
+        if (TryLearnWandMarkerFromPreview(frame, point)) return true;
         lock (_eyeTipGate) if (!_eyeTipLearning) return false;
         _ = LearnEyeTipFromPreviewAsync(frame, point);
         return true;
@@ -213,7 +184,7 @@ public sealed partial class MainWindow
             finally { _eyeTipDetectorGate.Release(); }
         });
         double elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-        bool colorModeChanged;
+        bool wandModeChanged;
         lock (_eyeTipGate)
         {
             if (_closing || generation != _eyeTipGeneration || cameraId != _eyeTipCameraId ||
@@ -230,9 +201,9 @@ public sealed partial class MainWindow
             if (normalizedRadius is < .0001 or > .1 || !double.IsFinite(normalizedRadius))
                 throw new InvalidOperationException("The eye marker is outside the supported camera scale.");
             _eyeTipProfiles[cameraId] = normalizedRadius;
-            // Only a learned eye replaces this camera's colour mode; an
-            // abandoned learning attempt leaves the saved colour tip active.
-            colorModeChanged = SelectEyeTipModeLocked();
+            // Only a learned eye replaces this camera's bar mode; an
+            // abandoned learning attempt leaves the saved wand marker active.
+            wandModeChanged = SelectEyeTipModeLocked();
             // Invalidate inference that started while the user-selected identity was being learned.
             _eyeTipGeneration++;
             _eyeTipTracker.Acquire(chosen, frame.Timestamp);
@@ -240,10 +211,10 @@ public sealed partial class MainWindow
             SetEyeTipPreviewLocked(new(frame, detection, new(chosen, false, "confirming-eye-marker"), elapsed));
             _eyeTipLearning = false;
             _eyeTipReason = "confirming-eye-marker";
-            PublishWaterStickTipLocked();
+            PublishStickTipLocked();
         }
         SaveEyeTipSettings();
-        if (colorModeChanged) SaveColorTipSettings();
+        if (wandModeChanged) SaveWandMarkerSettings();
         UpdateEyeTipStatus();
         CameraCanvas.Invalidate();
         return GetStickTipStatus();
@@ -269,33 +240,58 @@ public sealed partial class MainWindow
     {
         lock (_eyeTipGate)
         {
-            var colorProfile = ActiveColorTipProfileLocked();
-            if (_closing || !_eyeTipEnabled || _eyeTipWorker.IsBusy || _colorTipLearning ||
-                (!_eyeTipLearning && colorProfile is null && LearnedEyeTipRadiusLocked() is null) ||
+            var board = _scene.CurrentBoardScreen;
+            long sceneRevision = CurrentWandMarkerInputRevision;
+            if (board != _eyeTipSceneBoard || sceneRevision != _eyeTipSceneRevision)
+            {
+                // Disabled tracking has no association to invalidate. Preserve
+                // the queued board-entry opt-in generation until it can run.
+                if (_eyeTipEnabled) ResetEyeTipTracking("board-registration-changed");
+                else { _eyeTipSceneBoard = board; _eyeTipSceneRevision = sceneRevision; }
+            }
+            var wandProfile = ActiveWandMarkerProfileLocked();
+            if (_closing || !_eyeTipEnabled || _eyeTipWorker.IsBusy || _wandMarkerLearning ||
+                (wandProfile is not null && !WandMarkerBoardSelected) ||
+                (board == BoardScreen.Paint && wandProfile is null) ||
+                (!_eyeTipLearning && wandProfile is null && LearnedEyeTipRadiusLocked() is null) ||
                 _eyeTipCameraId != _cameraWantedDeviceId || frame.Timestamp < _eyeTipNotBefore ||
                 !EyeTipFrameFresh(frame, MonotonicClock.UtcNow) || _cameraHealthWarning) return;
+            if (wandProfile is not null && _wandMarkerFrameSize is { } previousSize &&
+                previousSize != (frame.Width, frame.Height))
+            {
+                // Preview expiry releases its frame lease; keep the dimension
+                // guard independently so old pixel coordinates cannot survive
+                // a capture-format change while that preview is absent.
+                _wandMarkerTracker.Reset();
+                SetWandMarkerPreviewLocked(null);
+                PublishStickTipLocked();
+            }
             // The single worker drops arrivals while busy; no second rate cap
             // should discard fresh 60/100 fps stick positions.
             long generation = _eyeTipGeneration;
             double? expectedRadius = LearnedEyeTipRadiusLocked() * frame.Width;
             PixelPoint? preferredCenter = _eyeTipPreview?.Track.Observation?.Center;
-            PixelPoint? colorCenter = _colorTipPreview?.Track.Observation?.Center;
+            var wandHint = _wandMarkerTracker.GetSearchHint(frame.Timestamp);
             _eyeTipWorker.TryRun(Stopwatch.GetTimestamp(), TimeSpan.Zero, frame, async _ =>
             {
                 try
                 {
                     await _eyeTipDetectorGate.WaitAsync();
-                    if (colorProfile is not null)
+                    if (wandProfile is not null)
                     {
-                        ColorTipDetectionResult colorDetection;
-                        var colorStarted = Stopwatch.GetTimestamp();
+                        MarkerTipDetectionResult wandDetection;
+                        var wandStarted = Stopwatch.GetTimestamp();
                         try
                         {
-                            colorDetection = ColorTipDetector.Detect(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-                                colorProfile, new(colorCenter, StickTipProjectionReference(frame), frame.Timestamp));
+                            var area = _scene.GetWandMarkerCameraPolygon();
+                            wandDetection = area is null ? new([], "waiting-for-projected-bat-reference") :
+                                BlackTipDetector.DetectEach(frame.Width, frame.Height, frame.Stride, frame.Bgra,
+                                    [wandProfile], new(ProjectionFrames: StickTipProjectionReference(frame), FrameTime: frame.Timestamp),
+                                    [wandHint], area)[0];
                         }
                         finally { _eyeTipDetectorGate.Release(); }
-                        PublishColorTipDetection(frame, colorDetection, Stopwatch.GetElapsedTime(colorStarted).TotalMilliseconds, generation);
+                        PublishWandMarkerDetection(frame, wandDetection, wandProfile, wandHint,
+                            Stopwatch.GetElapsedTime(wandStarted).TotalMilliseconds, generation);
                         return;
                     }
                     EyeTipDetectionResult detected;
@@ -318,7 +314,7 @@ public sealed partial class MainWindow
                             _eyeTipTracker.Reset();
                             _eyeTipLastAssociated = default;
                             _eyeTipReason = "waiting-for-fresh-camera-frame";
-                            PublishWaterStickTipLocked();
+                            PublishStickTipLocked();
                             return;
                         }
                         EyeTipTrackResult track = new(null, false, "click-the-black-pupil");
@@ -351,7 +347,7 @@ public sealed partial class MainWindow
                         }
                         SetEyeTipPreviewLocked(new(frame, detected, track, elapsed));
                         _eyeTipReason = track.Reason;
-                        PublishWaterStickTipLocked();
+                        PublishStickTipLocked();
                     }
                 }
                 catch (Exception ex)
@@ -361,11 +357,11 @@ public sealed partial class MainWindow
                         if (generation != _eyeTipGeneration) return;
                         SetEyeTipPreviewLocked(null);
                         _eyeTipTracker.Reset();
-                        SetColorTipPreviewLocked(null);
-                        _colorTipTracker.Reset();
+                        SetWandMarkerPreviewLocked(null);
+                        _wandMarkerTracker.Reset();
                         _eyeTipLastAssociated = default;
                         _eyeTipReason = "Detection failed: " + ex.Message;
-                        PublishWaterStickTipLocked();
+                        PublishStickTipLocked();
                     }
                 }
                 finally
@@ -394,7 +390,7 @@ public sealed partial class MainWindow
     {
         lock (_eyeTipGate)
         {
-            if (ColorTipModeActiveLocked()) return GetColorTipStatusLocked();
+            if (WandMarkerModeActiveLocked()) return GetWandMarkerStatusLocked();
             var now = MonotonicClock.UtcNow;
             var preview = _eyeTipPreview;
             bool fresh = preview is not null && EyeTipFrameFresh(preview.Frame, now);
@@ -415,7 +411,7 @@ public sealed partial class MainWindow
                 sourceFrameUtc = preview?.Frame.Timestamp, frameWidth = preview?.Frame.Width,
                 frameHeight = preview?.Frame.Height, inferenceMilliseconds = preview?.InferenceMilliseconds,
                 resultAgeMilliseconds = preview is null ? (double?)null : (now - preview.Frame.Timestamp).TotalMilliseconds,
-                reason = _eyeTipReason, status = EyeTipStatusText.Text,
+                reason = _eyeTipReason, status = _eyeTipStatus,
                 settingsPath = EyeTipSettingsPath, settingsError = _eyeTipSettingsError
             };
         }
@@ -425,9 +421,9 @@ public sealed partial class MainWindow
     {
         lock (_eyeTipGate)
         {
-            if (ColorTipModeActiveLocked())
+            if (WandMarkerModeActiveLocked())
             {
-                EyeTipStatusText.Text = ColorTipStatusTextLocked();
+                _eyeTipStatus = WandMarkerStatusTextLocked();
                 return;
             }
             bool learned = LearnedEyeTipRadiusLocked() is not null;
@@ -442,15 +438,15 @@ public sealed partial class MainWindow
                 _eyeTipReason == "waiting-for-projected-eye-reference" ? "Waiting for the current board image before tracking the eye." :
                 _eyeTipReason.StartsWith("Detection failed:", StringComparison.Ordinal) ? _eyeTipReason :
                     "Eye tip not visible. Keep the black pupil and white surround facing the camera.";
-            EyeTipStatusText.Text = _eyeTipSettingsError is null ? message : message + " " + _eyeTipSettingsError;
+            _eyeTipStatus = _eyeTipSettingsError is null ? message : message + " " + _eyeTipSettingsError;
         }
     }
 
     private void DrawEyeTipPreview(CanvasDrawingSession ds, CameraFrame frame, Rect rect)
     {
         lock (_eyeTipGate)
-            if (ColorTipModeActiveLocked())
-            { DrawColorTipPreview(ds, frame, rect); return; }
+            if (WandMarkerModeActiveLocked())
+            { DrawWandMarkerPreview(ds, frame, rect); return; }
         EyeTipPreview? preview;
         bool learning;
         lock (_eyeTipGate)
@@ -469,7 +465,7 @@ public sealed partial class MainWindow
             candidates ? preview.Detection.Candidates.Select(eye => (eye.Center, eye.RadiusPixels)) : [],
             preview.Track.Observation is { } tip ? (tip.Center, tip.RadiusPixels) : null, preview.Track.Confirmed);
 
-    // Shared by the eye and colour previews: gold candidates, then the
+    // Shared by the eye and bar previews: gold candidates, then the
     // associated tip, lime once confirmed across fresh frames.
     private static void DrawStickTipMarkers(CanvasDrawingSession ds, CameraFrame frame, Rect rect,
         IEnumerable<(PixelPoint Center, double Radius)> candidates, (PixelPoint Center, double Radius)? tip, bool confirmed)
@@ -525,17 +521,17 @@ public sealed partial class MainWindow
 
     private async Task<object> CaptureStickTipAsync()
     {
-        ColorTipPreview? colorPreview;
+        WandMarkerPreview? wandPreview;
         EyeTipPreview? preview;
         CameraFrameLease? selectedLease;
         lock (_eyeTipGate)
         {
-            colorPreview = _eyeTipEnabled && ActiveColorTipProfileLocked() is not null &&
-                _colorTipPreview is { } colorCurrent && EyeTipFrameFresh(colorCurrent.Frame, MonotonicClock.UtcNow) ? colorCurrent : null;
+            wandPreview = _eyeTipEnabled && ActiveWandMarkerProfileLocked() is not null &&
+                _wandMarkerPreview is { } wandCurrent && EyeTipFrameFresh(wandCurrent.Frame, MonotonicClock.UtcNow) ? wandCurrent : null;
             preview = _eyeTipEnabled && _cameraWanted && _camera.IsRunning &&
                 !_cameraHealthWarning && _camera.ActiveDeviceId == _eyeTipCameraId &&
                 _eyeTipPreview is { } current && EyeTipFrameFresh(current.Frame, MonotonicClock.UtcNow) ? current : null;
-            selectedLease = (colorPreview?.Frame ?? preview?.Frame)?.Retain();
+            selectedLease = (wandPreview?.Frame ?? preview?.Frame)?.Retain();
         }
         using var frameLease = selectedLease ?? AcquireLatestCameraFrame() ??
             throw new InvalidOperationException("Start the webcam before capturing the eye tip.");
@@ -547,19 +543,29 @@ public sealed partial class MainWindow
         using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), frame.Width, frame.Height, 96);
         using var bitmap = CanvasBitmap.CreateFromBytes(target, frame.Bgra, frame.Width, frame.Height,
             DirectXPixelFormat.B8G8R8A8UIntNormalized, 96, CanvasAlphaMode.Ignore);
+        string? rawPath = null;
+        if (wandPreview is not null)
+        {
+            // Save the exact inferred frame for replay; a later raw-frame command
+            // can already contain different projected texture on the marker.
+            rawPath = Path.ChangeExtension(path, ".raw.png");
+            await bitmap.SaveAsync(rawPath, CanvasBitmapFileFormat.Png);
+        }
         using (var ds = target.CreateDrawingSession())
         {
             ds.DrawImage(bitmap);
-            if (colorPreview is not null) DrawColorTipMarkers(ds, colorPreview, new(0, 0, frame.Width, frame.Height), candidates: true);
+            if (wandPreview is not null) DrawWandMarkerMarkers(ds, wandPreview, new(0, 0, frame.Width, frame.Height), candidates: true);
             else if (preview is not null) DrawEyeTipMarkers(ds, preview, new(0, 0, frame.Width, frame.Height), candidates: true);
         }
         await target.SaveAsync(path, CanvasBitmapFileFormat.Png);
         await File.WriteAllTextAsync(Path.ChangeExtension(path, ".json"), JsonSerializer.Serialize(new
         {
             sourceFrameUtc = frame.Timestamp, capturedAtUtc = MonotonicClock.UtcNow,
-            frame.Width, frame.Height, observation = colorPreview is not null ? (object)colorPreview.Track : preview?.Track, status
+            frame.Width, frame.Height, frame.Stride, rawPath, searchHint = wandPreview?.SearchHint,
+            detection = wandPreview?.Detection,
+            observation = wandPreview is not null ? (object)wandPreview.Track : preview?.Track, status
         }, new JsonSerializerOptions { WriteIndented = true }));
-        return new { path, sourceFrameUtc = frame.Timestamp, status };
+        return new { path, rawPath, sourceFrameUtc = frame.Timestamp, status };
     }
 
     private async Task DisposeEyeTipTrackingAsync()

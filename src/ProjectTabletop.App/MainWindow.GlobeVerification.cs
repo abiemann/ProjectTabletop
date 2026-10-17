@@ -513,6 +513,26 @@ public sealed partial class MainWindow
         void CheckIntactChevron(BoardButton button, int index, HandTrackingBounds trigger, byte[] clean,
             SceneCompositor.HandAcquisitionContext context)
         {
+            // The thin black / plate / black layers keep equal perpendicular
+            // widths. Check their tips and both arms, including the clear gap.
+            double centerX = button.Bounds.X + button.Bounds.Width / 2;
+            double centerY = button.Bounds.Y + button.Bounds.Height / 2;
+            double direction = button.Id == "globe-drawer-open" ? 1 : -1;
+            double band = .00335 * Math.Sqrt(1 + 22.0 * 22 / (27 * 27));
+            int RedAt(double x, double y)
+            {
+                var point = CameraPoint(x, y);
+                return clean[((int)point.Y * width + (int)point.X) * 4 + 2];
+            }
+            foreach (double arm in new[] { -.0135, 0, .0135 })
+            {
+                double x = centerX + arm / (width / (double)height);
+                double gapY = centerY - direction * (arm == 0 ? .011 : 0);
+                Require(gapY - band > trigger.Y && gapY + band < trigger.Y + trigger.Height &&
+                        RedAt(x, gapY - band) < 80 && RedAt(x, gapY + band) < 80 &&
+                        RedAt(x, gapY) > 140,
+                    "The stacked arrow lost a thin black stroke, its button-coloured gap, or its stationary glyph mask.");
+            }
             // The rasterized chevron must supply its actual ink/halo template;
             // obscuring an unrelated part of its pill must not illuminate it.
             var untouched = new HandAcquisitionPresenceTracker().Update(width, height, width * 4,
@@ -569,7 +589,7 @@ public sealed partial class MainWindow
             // qualification must come from genuinely changed arrow pixels.
             byte[] partial = (byte[])clean.Clone();
             var topLeft = CameraPoint(trigger.X, trigger.Y);
-            var bottomRight = CameraPoint(trigger.X + trigger.Width * .80, trigger.Y + trigger.Height);
+            var bottomRight = CameraPoint(trigger.X + trigger.Width * .55, trigger.Y + trigger.Height);
             int left = (int)Math.Ceiling(topLeft.X), top = (int)Math.Ceiling(topLeft.Y);
             int patchWidth = (int)Math.Floor(bottomRight.X) - left;
             int patchHeight = (int)Math.Floor(bottomRight.Y) - top;
@@ -591,8 +611,20 @@ public sealed partial class MainWindow
             }
             var tracker = new HandAcquisitionPresenceTracker();
             var clear = Observe(clean);
-            Require(clear.BaselineReady && hold.ClearedButtons(clear).Contains(button.Id) &&
-                    hold.HeldButtons(clear).Count == 0,
+            bool clearReference = clear.BaselineReady && hold.ClearedButtons(clear).Contains(button.Id) &&
+                hold.HeldButtons(clear).Count == 0;
+            if (!clearReference)
+            {
+                File.WriteAllText(Path.Combine(directory, button.Id + "-compact-clear-failure.json"),
+                    System.Text.Json.JsonSerializer.Serialize(new { width, height, clear, hold.ButtonIds,
+                        hold.SearchPolygon, expected.CameraToBoard, expected.BoardSearchRegions,
+                        expected.BoardReferenceRegions, expected.BoardTriggerRegions, expected.BoardControlReferenceRegions,
+                        expected.BoardVectorGlyphRegions },
+                        new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                File.WriteAllBytes(Path.Combine(directory, button.Id + "-compact-clean.bgra"), clean);
+                File.WriteAllBytes(Path.Combine(directory, button.Id + "-compact-expected.bgra"), expected.Bgra);
+            }
+            Require(clearReference,
                 "The compact 16:9 arrow does not provide a valid, readable native clear reference.");
             Require(Apply(clear).Count == 0, "A clear arrow activated a hold.");
             HandAcquisitionPresenceResult broken = clear;
@@ -718,6 +750,7 @@ public sealed partial class MainWindow
                             boardSearchRegions = expected.BoardSearchRegions,
                             boardReferenceRegions = expected.BoardReferenceRegions,
                             boardControlReferenceRegions = expected.BoardControlReferenceRegions,
+                            boardVectorGlyphRegions = expected.BoardVectorGlyphRegions,
                             boardTriggerRegions = expected.BoardTriggerRegions,
                             expected.AllowsLocalForegroundContext,
                             cleanImage = cameraPrefix + "-empty.png", occupiedImage = occupiedName + ".png",
@@ -728,6 +761,25 @@ public sealed partial class MainWindow
                         var detector = new HandAcquisitionPresenceTracker();
                         if (warm)
                             for (int frame = 0; frame < 3; frame++) Quiet(Feed(detector, clean), "Warm empty native-camera arrow");
+                        if (glyphPreserved)
+                        {
+                            // This fixture changes reflectance while preserving
+                            // every projected stroke. Optional hand-search hints
+                            // are not press evidence: intact glyphs must stay clear.
+                            var hold = cameraScene.GetHoldButtonContext(cameraNow)
+                                ?? throw new InvalidOperationException("The native-camera arrow lost its hold reference.");
+                            for (int frame = 0; frame < 3; frame++)
+                            {
+                                var readable = Feed(detector, occupied);
+                                Require(readable.TextPatterns?.Single(pattern => pattern.ControlRegion == index) is
+                                        { LabelIntact: true, ShapeCorrupted: false, CaptionHoldEvidence: false } &&
+                                        hold.ClearedButtons(readable).Contains(button.Id) &&
+                                        !hold.HeldButtons(readable).Contains(button.Id),
+                                    "Skin reflectance under an intact native-camera arrow qualified a press. " + Describe(readable));
+                            }
+                            Quiet(Feed(detector, clean), "Native-camera arrow after the fingers leave");
+                            continue;
+                        }
                         var first = Feed(detector, occupied);
                         Require(first.Hints.Count == 0 && first.TextPatterns?.Single(pattern => pattern.ControlRegion == index).ConfirmationFrames == 1,
                             "Broad native-camera skin fingers missed the arrow evidence or bypassed first-frame confirmation. " + Describe(first));

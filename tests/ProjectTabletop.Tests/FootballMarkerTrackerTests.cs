@@ -27,6 +27,35 @@ public sealed class FootballMarkerTrackerTests
     }
 
     [Theory]
+    [InlineData(258, true)]
+    [InlineData(323, true)]
+    [InlineData(750, true)]
+    [InlineData(751, false)]
+    public void WholeBoardWandIdentityOutlivesOutputButCannotPublishAStalePose(int gap, bool identityRetained)
+    {
+        var tracker = new FootballMarkerTracker();
+        FootballTipDecision Measure(MarkerTipDetectionResult detection, int frameTime, int now) =>
+            tracker.Update(Profile, detection, Field, Epoch.AddMilliseconds(frameTime), Epoch.AddMilliseconds(now));
+        Assert.Equal(FootballTipAction.Hold, Measure(Full(100, 100), 0, 0).Action);
+        Assert.Equal(FootballTipAction.Publish, Measure(Full(101, 100), 33, 33).Action);
+
+        int resumedAt = 33 + gap;
+        // These 258/323 ms gaps occurred in the live wand capture. The old
+        // output must expire even though its identity can still match a new pair.
+        var stale = Measure(Full(101, 100), 33, resumedAt);
+        Assert.Equal(FootballTipAction.Hold, stale.Action);
+        Assert.Equal("stale-frame", stale.Source);
+        Assert.Null(stale.Tip);
+
+        var resumed = Measure(Full(110, 102), resumedAt, resumedAt);
+        Assert.Equal(identityRetained ? FootballTipAction.Publish : FootballTipAction.Hold, resumed.Action);
+        Assert.Equal(identityRetained ? "full-marker" : "confirming", resumed.Source);
+        if (identityRetained) Assert.Equal(new PixelPoint(110, 102), resumed.Tip!.Center);
+        else Assert.Null(resumed.Tip);
+        Assert.Equal(FootballTipAction.Publish, Measure(Full(111, 102), resumedAt + 33, resumedAt + 33).Action);
+    }
+
+    [Theory]
     [InlineData(33, 80)]
     [InlineData(66, 120)]
     [InlineData(100, 170)]
@@ -65,7 +94,7 @@ public sealed class FootballMarkerTrackerTests
             var time = Epoch.AddMilliseconds(33 + gap);
             // Seven lengths exceeds the capped full-pair reach, even after a long gap.
             var target = new PixelPoint(gap == 751 ? 810 : 1122, 500);
-            var replacement = new ColorTipDetectionResult([Marker(target.X, target.Y)], "black-bar-pair-candidate");
+            var replacement = new MarkerTipDetectionResult([Marker(target.X, target.Y)], "black-bar-pair-candidate");
             var pending = tracker.Update(0, Profile, replacement, CameraField, time, time);
             Assert.Equal(FootballTipAction.Hold, pending.Action);
             Assert.Equal("confirming", pending.Source);
@@ -106,7 +135,7 @@ public sealed class FootballMarkerTrackerTests
         {
             Partial(100, 100), // Equidistant between the two possible sides.
             Partial(100, 92, 60),
-            new ColorTipDetectionResult([], "no-black-bar-pair")
+            new MarkerTipDetectionResult([], "no-black-bar-pair")
                 { SupportingBars = [Strip(94, 92), Strip(106, 92)] },
             Partial(100, 55)
         })
@@ -131,7 +160,7 @@ public sealed class FootballMarkerTrackerTests
     public void SupportingStripsAgreeingOnOnePoseDoNotClearTracking(bool reverse, double offset, double angle)
     {
         var tracker = Confirmed();
-        ColorTipObservation[] strips = [Strip(100, 92), Strip(100 + offset, 108, angle)];
+        MarkerTipObservation[] strips = [Strip(100, 92), Strip(100 + offset, 108, angle)];
         if (reverse) Array.Reverse(strips);
         var detection = Empty() with { SupportingBars = strips };
         var measured = Update(tracker, detection, 66);
@@ -166,7 +195,7 @@ public sealed class FootballMarkerTrackerTests
     [Fact]
     public void PartialPoseAgreementDoesNotHideExtraStripsOrIncompatibleSizes()
     {
-        ColorTipObservation[][] supporting =
+        MarkerTipObservation[][] supporting =
         [
             [Strip(100, 92), Strip(100, 108), Strip(101, 108)],
             [Strip(100, 92), Shape(100, 108, 46, 9.8, 450.8, 0)],
@@ -198,7 +227,7 @@ public sealed class FootballMarkerTrackerTests
         // strip. The previous pair's envelope was 101px long despite ~74px ink.
         var profile = new BlackTipProfile(1, .1450980392156863, .596078431372549,
             .0007806471836419753, 3.3998357117836475, 2, .45576511276587967);
-        var previous = new ColorTipObservation(new(1404.9136860286696, 469.17181592478994),
+        var previous = new MarkerTipObservation(new(1404.9136860286696, 469.17181592478994),
             30.71596494738128, 2964, .8334375561418049)
         {
             Bar = new(new(1399.9353992050808, 519.3090115675432),
@@ -206,7 +235,7 @@ public sealed class FootballMarkerTrackerTests
                 new(1377.359651770552, 466.4358853661423),
                 new(1432.4677202867874, 471.90774648343756))
         };
-        var strip = new ColorTipObservation(new(1383.5669929481107, 456.08893800652555),
+        var strip = new MarkerTipObservation(new(1383.5669929481107, 456.08893800652555),
             22.450917682180222, 1583.5, .9526150957537616)
         {
             Bar = new(new(1379.96728515625, 493.8459167480469),
@@ -240,7 +269,7 @@ public sealed class FootballMarkerTrackerTests
         double dx = (previous.Center.X - expected.X) * .033 / (.08 * .84);
         double dy = (previous.Center.Y - expected.Y) * .033 / (.08 * .84);
         PixelPoint Shift(PixelPoint point, int steps) => new(point.X + dx * steps, point.Y + dy * steps);
-        ColorTipObservation Preceding(int steps) => previous with
+        MarkerTipObservation Preceding(int steps) => previous with
         {
             Center = Shift(previous.Center, steps),
             Bar = new(Shift(previous.Bar.End1, steps), Shift(previous.Bar.End2, steps),
@@ -248,7 +277,7 @@ public sealed class FootballMarkerTrackerTests
         };
         PixelPoint? Field(PixelPoint point) => new(1 - point.X / 1920, point.Y / 1080);
         var tracker = new FootballMarkerTracker();
-        FootballTipDecision Observe(ColorTipDetectionResult result, double ms) => tracker.Update(0, profile,
+        FootballTipDecision Observe(MarkerTipDetectionResult result, double ms) => tracker.Update(0, profile,
             result, Field, Epoch.AddMilliseconds(ms), Epoch.AddMilliseconds(ms));
         Assert.Equal(FootballTipAction.Hold, Observe(new([Preceding(2)], "black-bar-pair-candidate"), 0).Action);
         Assert.Equal(FootballTipAction.Publish, Observe(new([Preceding(1)], "black-bar-pair-candidate"), 33).Action);
@@ -302,7 +331,7 @@ public sealed class FootballMarkerTrackerTests
         Assert.Empty(partial.Candidates);
         Assert.Single(partial.SupportingBars);
         var tracker = new FootballMarkerTracker();
-        FootballTipDecision Observe(ColorTipDetectionResult result, int ms) => tracker.Update(0, profile,
+        FootballTipDecision Observe(MarkerTipDetectionResult result, int ms) => tracker.Update(0, profile,
             result, Field, Epoch.AddMilliseconds(ms), Epoch.AddMilliseconds(ms));
         Assert.Equal(FootballTipAction.Hold, Observe(full, 0).Action);
         Assert.Equal(FootballTipAction.Publish, Observe(full, 33).Action);
@@ -333,7 +362,7 @@ public sealed class FootballMarkerTrackerTests
         // width and area enough that their partial reconstructions disagreed.
         var profile = new BlackTipProfile(1, .1450980392156863, .596078431372549,
             .0007806471836419753, 3.3998357117836475, 2, .45576511276587967);
-        var previous = new ColorTipObservation(new(1473.7963385953954, 439.91643928449474),
+        var previous = new MarkerTipObservation(new(1473.7963385953954, 439.91643928449474),
             33.65332933072042, 3558, .9110018317345157)
         {
             Bar = new(new(1474.1113730073787, 480.24131363437886),
@@ -359,9 +388,9 @@ public sealed class FootballMarkerTrackerTests
             ]
         };
         PixelPoint? RotatedField(PixelPoint point) => new(1 - point.X / 1920, point.Y / 1080);
-        var full = new ColorTipDetectionResult([previous], "black-bar-pair-candidate");
+        var full = new MarkerTipDetectionResult([previous], "black-bar-pair-candidate");
         var tracker = new FootballMarkerTracker();
-        FootballTipDecision Observe(ColorTipDetectionResult result, int ms) => tracker.Update(0, profile,
+        FootballTipDecision Observe(MarkerTipDetectionResult result, int ms) => tracker.Update(0, profile,
             result, RotatedField, Epoch.AddMilliseconds(ms), Epoch.AddMilliseconds(ms));
         Assert.Equal(FootballTipAction.Hold, Observe(full, 0).Action);
         Assert.Equal(FootballTipAction.Publish, Observe(full, 33).Action);
@@ -379,7 +408,7 @@ public sealed class FootballMarkerTrackerTests
     [Fact]
     public void AmbiguityClearsIdentityAndEachPlayerOwnsOnlyItsHalf()
     {
-        var detection = new ColorTipDetectionResult([Marker(100, 100), Marker(300, 100)], "multiple-black-bar-pairs");
+        var detection = new MarkerTipDetectionResult([Marker(100, 100), Marker(300, 100)], "multiple-black-bar-pairs");
         for (int player = 0; player < 2; player++)
         {
             var tracker = new FootballMarkerTracker();
@@ -463,6 +492,118 @@ public sealed class FootballMarkerTrackerTests
         Assert.NotEmpty(ambiguous.AmbiguousMarkerCenters);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WholeBoardWandAcquiresEitherSideAndCrossesTheMidpoint(bool startOnRight)
+    {
+        var tracker = new FootballMarkerTracker();
+        double[] positions = startOnRight ? [280, 230, 200, 170, 120] : [120, 170, 200, 230, 280];
+        Assert.Equal(FootballTipAction.Hold, UpdateWand(tracker, Full(positions[0], 100), 0).Action);
+        for (int i = 0; i < positions.Length; i++)
+        {
+            var result = UpdateWand(tracker, Full(positions[i], 100), 33 * (i + 1));
+            Assert.Equal(FootballTipAction.Publish, result.Action);
+            Assert.Equal(new PixelPoint(positions[i], 100), result.Tip!.Center);
+            Assert.Equal(new PixelPoint(positions[i] / 400, 100.0 / 300), result.FieldPoint);
+            Assert.Equal("full-marker", result.Source);
+        }
+    }
+
+    [Fact]
+    public void WholeBoardWandRejectsAmbiguityAcrossBothHalvesAndReconfirmsAfterwards()
+    {
+        foreach (var ambiguous in new[]
+        {
+            new MarkerTipDetectionResult([Marker(100, 100), Marker(300, 100)], "multiple-black-bar-pairs"),
+            Full(100, 100) with { AmbiguousMarkerCenters = [new(300, 100)] }
+        })
+        {
+            var tracker = new FootballMarkerTracker();
+            UpdateWand(tracker, Full(100, 100), 0);
+            Assert.Equal(FootballTipAction.Publish, UpdateWand(tracker, Full(100, 100), 33).Action);
+            var rejected = UpdateWand(tracker, ambiguous, 66);
+            Assert.Equal(FootballTipAction.Clear, rejected.Action);
+            Assert.Null(rejected.Tip);
+            Assert.Null(tracker.GetSearchHint(Epoch.AddMilliseconds(70)));
+            Assert.Equal(FootballTipAction.Hold, UpdateWand(tracker, Partial(100, 92), 99).Action);
+            Assert.Equal(FootballTipAction.Hold, UpdateWand(tracker, Full(100, 100), 132).Action);
+            Assert.Equal(FootballTipAction.Publish, UpdateWand(tracker, Full(100, 100), 165).Action);
+        }
+    }
+
+    [Fact]
+    public void WholeBoardWandAcceptsOnlyFiniteCalibratedPositions()
+    {
+        var tracker = new FootballMarkerTracker();
+        var outside = Full(450, 100) with { AmbiguousMarkerCenters = [new(450, 160)] };
+        Assert.Equal(FootballTipAction.Hold, UpdateWand(tracker, outside, 0).Action);
+        Assert.Null(tracker.GetSearchHint(Epoch.AddMilliseconds(1)));
+        var inside = new MarkerTipDetectionResult([Marker(300, 100), Marker(450, 100)], "test")
+            { AmbiguousMarkerCenters = [new(450, 160)] };
+        Assert.Equal(FootballTipAction.Hold, UpdateWand(tracker, inside, 33).Action);
+        var measured = UpdateWand(tracker, inside, 66);
+        Assert.Equal(FootballTipAction.Publish, measured.Action);
+        Assert.Equal(new PixelPoint(300, 100), measured.Tip!.Center);
+        var missing = UpdateWand(tracker, outside, 99);
+        Assert.Equal(FootballTipAction.Hold, missing.Action);
+        Assert.Null(missing.Tip);
+
+        PixelPoint? InvalidMap(PixelPoint _) => new(double.NaN, .5);
+        var invalid = tracker.Update(Profile, Full(300, 100), InvalidMap,
+            Epoch.AddMilliseconds(132), Epoch.AddMilliseconds(132));
+        Assert.Equal(FootballTipAction.Hold, invalid.Action);
+        Assert.Null(invalid.Tip);
+    }
+
+    [Fact]
+    public void WholeBoardWandDoesNotPublishOldStaleFutureOrMissingReferenceFrames()
+    {
+        var tracker = new FootballMarkerTracker();
+        UpdateWand(tracker, Full(300, 100), 0);
+        Assert.Equal(FootballTipAction.Publish, UpdateWand(tracker, Full(300, 100), 33).Action);
+        Assert.Equal("old-frame", UpdateWand(tracker, Full(300, 100), 33).Source);
+        foreach (var (frame, now) in new[] { (66, 500), (500, 66) })
+        {
+            var rejected = tracker.Update(Profile, Full(300, 100), Field,
+                Epoch.AddMilliseconds(frame), Epoch.AddMilliseconds(now));
+            Assert.Equal(FootballTipAction.Hold, rejected.Action);
+            Assert.Null(rejected.Tip);
+            Assert.Equal("stale-frame", rejected.Source);
+        }
+        var waiting = UpdateWand(tracker, new([], "waiting-for-projected-wand-reference"), 100);
+        Assert.Equal(FootballTipAction.Hold, waiting.Action);
+        Assert.Null(waiting.Tip);
+        Assert.Equal("waiting-reference", waiting.Source);
+        Assert.Equal(FootballTipAction.Publish, UpdateWand(tracker, Full(301, 100), 133).Action);
+    }
+
+    [Fact]
+    public void WholeBoardWandContinuesOneMeasuredStripOnlyWithinOriginalPairDeadline()
+    {
+        var tracker = new FootballMarkerTracker();
+        Assert.Equal(FootballTipAction.Hold, UpdateWand(tracker, Partial(300, 92), 0).Action);
+        Assert.Null(tracker.GetSearchHint(Epoch));
+        Assert.Equal(FootballTipAction.Hold, UpdateWand(tracker, Full(300, 100), 33).Action);
+        Assert.Equal(FootballTipAction.Publish, UpdateWand(tracker, Full(300, 100), 66).Action);
+        var partial = UpdateWand(tracker, Partial(302, 92), 99);
+        Assert.Equal(FootballTipAction.Publish, partial.Action);
+        Assert.Equal("single-strip", partial.Source);
+        Assert.Equal(new PixelPoint(302, 100), partial.Tip!.Center);
+        var gap = UpdateWand(tracker, Empty(), 132);
+        Assert.Equal(FootballTipAction.Hold, gap.Action);
+        Assert.Null(gap.Tip);
+        Assert.Equal(FootballTipAction.Publish, UpdateWand(tracker, Partial(302, 92), 400).Action);
+        var expired = UpdateWand(tracker, Partial(302, 92), 417);
+        Assert.Equal(FootballTipAction.Hold, expired.Action);
+        Assert.Null(expired.Tip);
+        Assert.Null(tracker.GetSearchHint(Epoch.AddMilliseconds(417)));
+        Assert.Equal(FootballTipAction.Publish, UpdateWand(tracker, Full(302, 100), 450).Action);
+    }
+
+    private static FootballTipDecision UpdateWand(FootballMarkerTracker tracker, MarkerTipDetectionResult detection, int milliseconds) =>
+        tracker.Update(Profile, detection, Field, Epoch.AddMilliseconds(milliseconds), Epoch.AddMilliseconds(milliseconds));
+
     private static FootballMarkerTracker Confirmed()
     {
         var tracker = new FootballMarkerTracker();
@@ -470,14 +611,14 @@ public sealed class FootballMarkerTrackerTests
         Assert.Equal(FootballTipAction.Publish, Update(tracker, Full(100, 100), 33).Action);
         return tracker;
     }
-    private static FootballTipDecision Update(FootballMarkerTracker tracker, ColorTipDetectionResult detection, int milliseconds) =>
+    private static FootballTipDecision Update(FootballMarkerTracker tracker, MarkerTipDetectionResult detection, int milliseconds) =>
         tracker.Update(0, Profile, detection, Field, Epoch.AddMilliseconds(milliseconds), Epoch.AddMilliseconds(milliseconds));
-    private static ColorTipDetectionResult Full(double x, double y, double angle = 0) => new([Marker(x, y, angle)], "black-bar-pair-candidate");
-    private static ColorTipDetectionResult Empty() => new([], "no-black-bar-pair");
-    private static ColorTipDetectionResult Partial(double x, double y, double angle = 0) => Empty() with { SupportingBars = [Strip(x, y, angle)] };
-    private static ColorTipObservation Marker(double x, double y, double angle = 0) => Shape(x, y, 46, 22, 552, angle);
-    private static ColorTipObservation Strip(double x, double y, double angle = 0) => Shape(x, y, 46, 6, 276, angle);
-    private static ColorTipObservation Shape(double x, double y, double length, double width, double area, double angle)
+    private static MarkerTipDetectionResult Full(double x, double y, double angle = 0) => new([Marker(x, y, angle)], "black-bar-pair-candidate");
+    private static MarkerTipDetectionResult Empty() => new([], "no-black-bar-pair");
+    private static MarkerTipDetectionResult Partial(double x, double y, double angle = 0) => Empty() with { SupportingBars = [Strip(x, y, angle)] };
+    private static MarkerTipObservation Marker(double x, double y, double angle = 0) => Shape(x, y, 46, 22, 552, angle);
+    private static MarkerTipObservation Strip(double x, double y, double angle = 0) => Shape(x, y, 46, 6, 276, angle);
+    private static MarkerTipObservation Shape(double x, double y, double length, double width, double area, double angle)
     {
         double ux = Math.Cos(angle * Math.PI / 180), uy = Math.Sin(angle * Math.PI / 180);
         return new(new(x, y), Math.Sqrt(area / Math.PI), area, .95)
@@ -486,7 +627,7 @@ public sealed class FootballMarkerTrackerTests
                 new(x + uy * width / 2, y - ux * width / 2), new(x - uy * width / 2, y + ux * width / 2))
         };
     }
-    private static ColorTipDetectionResult Detect(byte[] pixels, BlackTipProfile profile, BlackTipSearchHint hint, byte[]? projected = null)
+    private static MarkerTipDetectionResult Detect(byte[] pixels, BlackTipProfile profile, BlackTipSearchHint hint, byte[]? projected = null)
     {
         var time = Epoch.AddMilliseconds(33);
         IReadOnlyList<EyeTipProjectionFrame>? frames = projected is null ? null :

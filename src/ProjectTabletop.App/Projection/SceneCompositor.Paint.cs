@@ -16,10 +16,13 @@ public sealed partial class SceneCompositor
     private CanvasDevice? _paintFluidDevice;
     private DateTimeOffset _paintAdvancedAt;
     private long _paintSessionRevision = -1, _paintRevision, _paintDropCount;
+    private long _paintResetRevision = -1;
     private BoardScreen _paintPreviousScreen;
     private DateTimeOffset _paintLastDropAt;
+#if DEBUG
     private readonly List<(Point2 Center, DateTimeOffset Time)> _paintRecentDrops = [];
     private int _paintDropsAtLastTimestamp;
+#endif
 
     private sealed record PaintDrop(Point2 Center, float Radius, Vector3 Pigment, int Seed);
 
@@ -67,14 +70,15 @@ public sealed partial class SceneCompositor
         }
     }
 
-    /// <summary>Add a fresh camera obstruction in calibrated board coordinates.</summary>
-    public bool AddPaintDrop(Point2 boardUv, double radiusUv, DateTimeOffset sourceTime)
+#if DEBUG
+    /// <summary>Inject a drop into isolated rendering verification.</summary>
+    internal bool AddPaintDrop(Point2 boardUv, double radiusUv, DateTimeOffset sourceTime)
     {
         lock (_gate)
         {
             SyncPaintSession();
             var now = _paintClock();
-            if (_disposed || _boardSession.Screen != BoardScreen.Paint || _blackOutput || _boardSetup ||
+            if (_disposed || _boardSession.Screen != BoardScreen.Paint || _blackOutput || _boardSetup || _markerSetup is not null ||
                 _calibrationTarget >= 0 || IsBoardRevealActive || _boardSurfaceMap is null ||
                 _paintPendingDrops.Count >= 48 ||
                 !double.IsFinite(boardUv.X) || !double.IsFinite(boardUv.Y) || !double.IsFinite(radiusUv) || radiusUv <= 0 ||
@@ -98,6 +102,7 @@ public sealed partial class SceneCompositor
             return true;
         }
     }
+#endif
 
     public void ResetPaint()
     {
@@ -107,13 +112,14 @@ public sealed partial class SceneCompositor
             CancelPaintIntroduction();
             ResetPaintAutomatic();
             DisposePaintResources();
-            DisposePaintReference();
             _paintDropCount = 0;
             _paintLastDropAt = default;
+#if DEBUG
             _paintRecentDrops.Clear();
-            _paintButtonLightIgnoreRegion = null;
-            _paintButtonLightIgnoreUntil = default;
             _paintDropsAtLastTimestamp = 0;
+#endif
+            ResetPaintMarker();
+            _boardSession.PaintSaveEnabled = false;
             _paintRevision++;
             _renderedBoardState = null;
         }
@@ -121,11 +127,13 @@ public sealed partial class SceneCompositor
 
     private void SyncPaintSession()
     {
-        if (_paintSessionRevision == _boardSession.NavigationRevision && _paintPreviousScreen == _boardSession.Screen) return;
+        bool visitChanged = _paintSessionRevision != _boardSession.NavigationRevision || _paintPreviousScreen != _boardSession.Screen;
+        if (!visitChanged && _paintResetRevision == _boardSession.PaintResetRevision) return;
         if (_paintPreviousScreen == BoardScreen.Paint || _boardSession.Screen == BoardScreen.Paint) ResetPaint();
         _paintSessionRevision = _boardSession.NavigationRevision;
+        _paintResetRevision = _boardSession.PaintResetRevision;
         _paintPreviousScreen = _boardSession.Screen;
-        if (_boardSession.Screen == BoardScreen.Paint) SchedulePaintIntroduction();
+        if (visitChanged && _boardSession.Screen == BoardScreen.Paint) SchedulePaintIntroduction();
     }
 
     private void DisposePaintResources()

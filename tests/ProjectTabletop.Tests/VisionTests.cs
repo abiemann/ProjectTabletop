@@ -23,6 +23,7 @@ public class VisionTests
     [Fact] public void AmbientBoardEdgeSupport() => AmbientBoardEdgeSupportRegression.Run();
     [Fact] public void HandAcquisitionMotion() => HandAcquisitionMotionRegression.Run();
     [Fact] public void HandAcquisitionPresence() => HandAcquisitionPresenceRegression.Run();
+    [Fact] public void HandAcquisitionBoardDisturbance() => HandAcquisitionBoardDisturbanceRegression.Run();
     [Fact] public void HandAcquisitionExposureSearch() => HandAcquisitionExposureSearchRegression.Run();
     [Fact] public void HandTrackingSearchRegions() => HandTrackingSearchRegionsRegression.Run();
     [Fact] public void HandPalmColorCorrection() => HandPalmColorCorrectionRegression.Run();
@@ -33,9 +34,7 @@ public class VisionTests
     [Fact] public void HandVisualSmoothing() => HandVisualSmoothingRegression.Run();
     [Fact] public void HandSpotlight() => HandSpotlightRegression.Run();
     [Fact] public void HandSpotlightSmoothing() => HandSpotlightSmoothingRegression.Run();
-    [Fact] public void PaintDisturbance() => PaintDisturbanceRegression.Run();
     [Fact] public void EyeTipDetectionAndTracking() => EyeTipRegression.Run();
-    [Fact] public void ColorTipDetectionAndTracking() => ColorTipRegression.Run();
     [Fact] public void PhotoCopy() => PhotoCopyRegression.Run();
     [Fact] public void PhotoObject() => PhotoObjectRegression.Run();
     [Fact] public void PhotoObjectTarget() => PhotoObjectTargetRegression.Run();

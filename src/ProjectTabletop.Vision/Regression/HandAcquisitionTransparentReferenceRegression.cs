@@ -13,9 +13,11 @@ internal static class HandAcquisitionTransparentReferenceRegression
     public static void Run()
     {
         BilinearOpacity();
-        AnimatedCutoutsAndCaptionCorruption();
+        AnimatedCutoutsAndCaptionCorruption(sparse: false);
+        AnimatedCutoutsAndCaptionCorruption(sparse: true);
         Console.WriteLine("Transparent acquisition reference regression: bilinear alpha exclusion, opaque black " +
-            "retention, animated cutouts, unchanged clean captions and genuine caption obstruction passed.");
+            "retention, sparse UI references, unchanged mapping/sample floors, animated cutouts, " +
+            "unchanged clean captions and genuine caption obstruction passed.");
     }
 
     private static void BilinearOpacity()
@@ -45,7 +47,7 @@ internal static class HandAcquisitionTransparentReferenceRegression
         }
     }
 
-    private static void AnimatedCutoutsAndCaptionCorruption()
+    private static void AnimatedCutoutsAndCaptionCorruption(bool sparse)
     {
         using var image = Cv2.ImRead(Path.Combine(AppContext.BaseDirectory, "Fixtures", "paint-compact-controls-expected.png"),
             ImreadModes.Unchanged);
@@ -70,6 +72,17 @@ internal static class HandAcquisitionTransparentReferenceRegression
         scene = scene with { Bgra = (byte[])pixels.Clone() };
         for (int window = 0; window < 8; window++)
             Fill(scene.Bgra, 133 + window * 100, 145, 34, 90, 0, 0, 0, 0);
+        if (sparse)
+        {
+            // Like the gesture tester, the reference contains only opaque UI;
+            // the camera sees unrelated scenery over more than 75% of the board.
+            for (int y = 0; y < Size; y++)
+            for (int x = 0; x < Size; x++)
+                if (!(x >= 100 && x < 900 && y >= 100 && y < 320) &&
+                    !(x >= 432 && x < 548 && y >= 692 && y < 743))
+                    scene.Bgra[(y * Size + x) * 4 + 3] = 0;
+            VerifySparseSafetyFloors(scene, camera);
+        }
         var tracker = new HandAcquisitionPresenceTracker();
         for (int frame = 0; frame < 8; frame++)
         {
@@ -80,6 +93,7 @@ internal static class HandAcquisitionTransparentReferenceRegression
                     (byte)((frame + window) % 3 == 0 ? 230 : 8),
                     (byte)((frame + window) % 3 == 1 ? 180 : 10),
                     (byte)((frame + window) % 3 == 2 ? 245 : 12));
+            if (sparse) Fill(camera, 0, 350, Size, 250, (byte)(frame % 2 == 0 ? 240 : 5), 80, 130);
             var result = Feed(tracker, camera, scene, frame * 100);
             Require(result.BaselineReady && result.Hints.Count == 0 && result.TextPatterns is [{ LabelIntact: true, ShapeCorrupted: false }],
                 "Animation behind reference cutouts polluted an intact caption: " + result.Reason + ".");
@@ -96,6 +110,31 @@ internal static class HandAcquisitionTransparentReferenceRegression
             "Excluding animated apertures suppressed real broken-letter evidence: " + confirmed.Reason + ".");
         Require(Feed(tracker, camera, scene, 1000).TextPatterns is [{ LabelIntact: true, ShapeCorrupted: false }],
             "Removing a real obstruction did not restore intact-caption evidence.");
+    }
+
+    private static void VerifySparseSafetyFloors(HandAcquisitionSceneImage scene, byte[] camera)
+    {
+        // Transparency must not weaken either independent opaque-sample floor.
+        var missingControl = scene with { Bgra = (byte[])scene.Bgra.Clone() };
+        Fill(missingControl.Bgra, 432, 692, 116, 51, 0, 0, 0, 0);
+        Fill(missingControl.Bgra, 470, 708, 2, 2, 40, 50, 60);
+        Reject(missingControl, "too few opaque control samples");
+        var missingReference = scene with { Bgra = (byte[])scene.Bgra.Clone() };
+        Fill(missingReference.Bgra, 100, 100, 800, 220, 0, 0, 0, 0);
+        Fill(missingReference.Bgra, 110, 110, 2, 2, 40, 50, 60);
+        Reject(missingReference, "too few opaque reference samples");
+        Reject(scene with { CameraToBoard = [1.0 / 999, 0, -.5, 0, 1.0 / 999, 0, 0, 0, 1] },
+            "less than 75% geometric board coverage");
+        Reject(scene with { BoardSearchRegions = null, BoardTriggerRegions = null },
+            "sparse imagery without explicit UI search masks");
+
+        void Reject(HandAcquisitionSceneImage invalid, string description)
+        {
+            var result = Feed(new(), camera, invalid, 0);
+            Require(!result.BaselineReady && result.Hints.Count == 0 && result.TextPatterns is null &&
+                    result.Reason == "invalid-rendered-scene",
+                "Sparse UI accepted " + description + ".");
+        }
     }
 
     private static HandAcquisitionPresenceResult Feed(HandAcquisitionPresenceTracker tracker, byte[] pixels,

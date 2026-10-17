@@ -17,6 +17,7 @@ internal static class WaterGardenBoardRegression
         CheckCaptionHolds();
         CheckDuckAddHold();
         CheckGestureIsolation();
+        CheckStickNavigationIndependence();
         CheckStickControlInterlock();
         Console.WriteLine("Water Garden interaction verification passed: hidden action row, drawer timing, " +
             "RESET and repeating DUCK+ revisions, stick control interlock, long-press safety, gesture isolation and menu navigation.");
@@ -239,12 +240,15 @@ internal static class WaterGardenBoardRegression
         var board = new BoardSession();
         board.ShowWaterGarden(At(0));
         Require(board.SetWaterGardenStickPresent(true, At(10)) && board.WaterGardenStickPresent &&
-            !board.Buttons.Single().Enabled && !board.ActivateButton("water-drawer-open", At(20)),
-            "A stick in the water left the bottom-left arrow armed.");
+            board.Buttons.Single().Enabled,
+            "A stick in the water disabled independent drawer navigation.");
         Clear(board, "water-drawer-open", 30);
         for (int ms = 100; ms <= 1200; ms += 100)
-            Require(Hold(board, "water-drawer-open", ms).Count == 0 && !board.WaterGardenDrawerOpen,
-                "Covered arrow lettering opened the drawer while the stick was present.");
+        {
+            Clear(board, "water-drawer-open", ms);
+            Require(!board.WaterGardenDrawerOpen && board.HoldProgress(At(ms)).Count == 0,
+                "An intact arrow opened the drawer while the stick was present.");
+        }
         Require(board.SetWaterGardenStickPresent(false, At(1250)) && !board.WaterGardenStickPresent &&
             board.Buttons.Single().Enabled && board.ActivateButton("water-drawer-open", At(1300)) &&
             board.TickWaterGarden(At(1600)),
@@ -259,9 +263,9 @@ internal static class WaterGardenBoardRegression
                 "The interlock fixture completed its RESET hold prematurely.");
         Require(board.HoldProgress(At(2300)).Single().Progress > 0 &&
             board.SetWaterGardenStickPresent(true, At(2350)) && board.HoldProgress(At(2350)).Count == 0 &&
-            board.WaterGardenDrawerOpen && board.Buttons.All(button => !button.Enabled),
+            board.WaterGardenDrawerOpen && board.Buttons[0].Enabled && board.Buttons.Skip(1).All(button => !button.Enabled),
             "Detecting the stick failed to cancel an in-progress hold or changed the drawer position.");
-        foreach (string id in board.Buttons.Select(button => button.Id).ToArray())
+        foreach (string id in board.Buttons.Skip(1).Select(button => button.Id).ToArray())
             Require(!board.ActivateButton(id, At(2400)), "A disarmed pointer control still acted: " + id);
         for (int ms = 2400; ms <= 3500; ms += 100)
             Require(board.ObserveHeldButtons(["water-garden-reset"], At(ms), At(ms),
@@ -314,5 +318,37 @@ internal static class WaterGardenBoardRegression
         board.ShowWaterGarden(At(6400));
         Require(!board.WaterGardenStickPresent && board.Buttons.Single().Enabled,
             "Reopening Water Garden retained a stale stick interlock.");
+    }
+
+    private static void CheckStickNavigationIndependence()
+    {
+        var board = new BoardSession();
+        board.ShowWaterGarden(At(0));
+        Clear(board, "water-drawer-open", 10);
+        for (int ms = 100; ms < 1100; ms += 100)
+        {
+            board.SetWaterGardenStickPresent(ms % 200 == 0, At(ms - 1));
+            Require(Hold(board, "water-drawer-open", ms).Count == 0,
+                "The drawer opened before a full caption hold.");
+        }
+        board.SetWaterGardenStickPresent(true, At(1090));
+        Require(Hold(board, "water-drawer-open", 1100).SequenceEqual(["water-drawer-open"]) &&
+            board.WaterGardenDrawerOpen && board.WaterGardenStickPresent && board.TickWaterGarden(At(1400)) &&
+            board.Buttons[0].Enabled && board.Buttons.Skip(1).All(button => !button.Enabled),
+            "Wand transitions interrupted the arrow hold or enabled protected pond actions.");
+        for (int ms = 1500; ms <= 1900; ms += 100) Clear(board, "water-drawer-close", ms);
+        for (int ms = 2000; ms < 2400; ms += 100) Hold(board, "water-drawer-close", ms);
+        Clear(board, "water-drawer-close", 2400);
+        Require(board.HoldProgress(At(2400)).Count == 0 && board.WaterGardenDrawerOpen,
+            "Intact arrow lettering retained partial progress while the wand was present.");
+        for (int ms = 2500; ms < 3500; ms += 100)
+        {
+            board.SetWaterGardenStickPresent(ms % 200 == 0, At(ms - 1));
+            Require(Hold(board, "water-drawer-close", ms).Count == 0,
+                "The returning close hold reused progress from before the clear caption.");
+        }
+        Require(Hold(board, "water-drawer-close", 3500).SequenceEqual(["water-drawer-close"]) &&
+            !board.WaterGardenDrawerOpen,
+            "The close arrow could not complete its independent caption hold.");
     }
 }

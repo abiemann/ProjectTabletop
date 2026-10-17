@@ -106,13 +106,11 @@ public sealed partial class MainWindow
             documentPane.Children.Add(text);
             documentPane.Children.Add(formattedText);
             var status = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
-            var openFile = new Button { Content = "Open selected file" };
             var openFolder = new Button
             {
                 Content = hasDependencyNotices ? "Open all dependency notices" : "Open hand-model notices"
             };
             var actions = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Left };
-            actions.Children.Add(openFile);
             actions.Children.Add(openFolder);
             var footer = new StackPanel { Spacing = 8 };
             if (!hasDependencyNotices)
@@ -160,7 +158,6 @@ public sealed partial class MainWindow
                 formattedText.Visibility = Visibility.Collapsed;
                 text.Text = "Loading document…";
                 status.Text = string.Empty;
-                openFile.IsEnabled = File.Exists(document.Path);
                 try
                 {
                     string extension = Path.GetExtension(document.Path).ToLowerInvariant();
@@ -176,7 +173,7 @@ public sealed partial class MainWindow
                         return;
                     }
                     string contents = extension is ".html" or ".htm" or ".pdf"
-                        ? "This document uses its original formatted file. Choose Open selected file to read it in your Windows viewer."
+                        ? $"This document uses its original formatted file. Choose {openFolder.Content}, then open {Path.GetRelativePath(folderPath, document.Path)}."
                         : await File.ReadAllTextAsync(document.Path);
                     if (closed || version != readVersion) return;
                     text.Text = contents;
@@ -190,17 +187,6 @@ public sealed partial class MainWindow
                     status.Text = error.Message;
                     AppLog.Write("Read license document", error);
                 }
-            };
-            openFile.Click += async (_, _) =>
-            {
-                if (selector.SelectedItem is not LicenseDocument document) return;
-                try
-                {
-                    var file = await StorageFile.GetFileFromPathAsync(document.Path);
-                    if (!await Launcher.LaunchFileAsync(file))
-                        status.Text = "Windows could not open this file. You can read its text in this dialog.";
-                }
-                catch (Exception error) { status.Text = "Could not open the file: " + error.Message; }
             };
             openFolder.Click += async (_, _) =>
             {

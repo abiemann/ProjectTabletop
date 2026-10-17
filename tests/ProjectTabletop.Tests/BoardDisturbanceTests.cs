@@ -22,7 +22,6 @@ public sealed class BoardDisturbanceTests(ITestOutputHelper output)
             double center = .87 - i * .025;
             byte[] frame = Hand(clear, center, .55);
             IReadOnlyList<BoardMotionObservation> found = Update(tracker, frame, ref time);
-            if (i == 0) { Assert.Empty(found); continue; }
             BoardMotionObservation hand = Assert.Single(found);
             if (id == 0) id = hand.TrackingId;
             Assert.Equal(id, hand.TrackingId);
@@ -69,8 +68,10 @@ public sealed class BoardDisturbanceTests(ITestOutputHelper output)
         Assert.Empty(Update(tracker, clear, ref time));
     }
 
-    [Fact]
-    public void CameraDisturbancesProduceSingleSlowHideAndShowAcrossVisibilityReset()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CameraDisturbancesToggleOncePerSwipeAcrossVisibilityReset(bool repeatDirection)
     {
         var vision = new BoardDisturbanceTracker();
         var gestures = new BoardControlSwipeTracker();
@@ -86,18 +87,19 @@ public sealed class BoardDisturbanceTests(ITestOutputHelper output)
                 samples.Add(new(found[i].TrackingId, found[i].U, .82 + .18 * found[i].V));
             if (gestures.Update(samples, time, time) is { } command) commands.Add(command);
         }
-        // 4.6 seconds, including the starting edge. Changing captions can reset the camera
+        // A deliberate crossing within one second. Changing captions can reset the camera
         // baseline while the same hand still covers the destination edge.
-        for (int i = 0; i < 140; i++) Process(Hand(clear, .88 - i * .00465, .55));
-        Assert.Equal(new[] { BoardControlSwipe.Hide }, commands);
+        for (int i = 0; i < 31; i++) Process(Hand(clear, .88 - i * .025, .55));
+        Assert.Equal(new[] { BoardControlSwipe.Toggle }, commands);
         vision.Reset();
         gestures.Reset();
         byte[] endpoint = Hand(clear, .23, .55);
         time = Warm(vision, endpoint, time);
         for (int i = 0; i < 30; i++) Process(clear);
-        for (int i = 0; i < 140; i++) Process(Hand(clear, .12 + i * .00545, .55));
-        Assert.Equal(new[] { BoardControlSwipe.Hide, BoardControlSwipe.Show }, commands);
-        for (int i = 0; i < 60; i++) Process(Hand(clear, .88, .55));
+        for (int i = 0; i < 31; i++)
+            Process(Hand(clear, repeatDirection ? .88 - i * .025 : .12 + i * .025, .55));
+        Assert.Equal(new[] { BoardControlSwipe.Toggle, BoardControlSwipe.Toggle }, commands);
+        for (int i = 0; i < 60; i++) Process(Hand(clear, repeatDirection ? .23 : .88, .55));
         Assert.Equal(2, commands.Count);
     }
 
@@ -141,6 +143,81 @@ public sealed class BoardDisturbanceTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void DimSurfaceCrossingKeepsIdentityThroughBrightControlsAndToggles()
+    {
+        var tracker = new BoardDisturbanceTracker();
+        var gestures = new BoardControlSwipeTracker();
+        byte[] clear = new byte[Stride * Height];
+        for (int x = 0; x < Width; x++)
+        {
+            byte shade = (byte)(26 + 84 * Math.Clamp((.60 - x / (double)Width) / .20, 0, 1));
+            Paint(clear, x, 0, 1, Height, shade, shade, shade);
+        }
+        DateTimeOffset time = Warm(tracker, clear);
+        for (int i = 0; i < 45; i++) Update(tracker, clear, ref time);
+        long id = 0;
+        var commands = new List<BoardControlSwipe>();
+        for (int i = 0; i < 31; i++)
+        {
+            double center = .88 - i * .025;
+            byte[] frame = (byte[])clear.Clone();
+            int left = (int)(center * Width) - 25;
+            for (int x = left; x < left + 50; x++)
+            {
+                byte shade = (byte)(clear[x * 4] * .12);
+                Paint(frame, x, 26, 1, 54, shade, shade, shade);
+            }
+            IReadOnlyList<BoardMotionObservation> found = Update(tracker, frame, ref time);
+            BoardMotionObservation hand = Assert.Single(found);
+            if (id == 0) id = hand.TrackingId;
+            Assert.Equal(id, hand.TrackingId);
+            Assert.InRange(hand.U, center - .02, center + .02);
+            BoardSwipeSample[] samples = [new(hand.TrackingId, hand.U, .82 + .18 * hand.V)];
+            if (gestures.Update(samples, time, time) is { } command) commands.Add(command);
+        }
+        Assert.Equal(new[] { BoardControlSwipe.Toggle }, commands);
+    }
+
+    [Theory]
+    [InlineData(26)]
+    [InlineData(8)]
+    public void DimSurfaceNoiseExposureAndSmallMovingObjectsRemainRejected(byte brightness)
+    {
+        var tracker = new BoardDisturbanceTracker();
+        byte[] clear = new byte[Stride * Height];
+        Paint(clear, 0, 0, Width, Height, brightness, brightness, brightness);
+        DateTimeOffset time = Warm(tracker, clear);
+        for (int i = 0; i < 150; i++)
+        {
+            byte[] frame = (byte[])clear.Clone();
+            for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width; x++)
+            {
+                int noise = (x * 13 + y * 11 + i * 7) % 7 - 3;
+                byte shade = (byte)Math.Clamp(brightness + noise + (i % 30 < 15 ? 5 : -3), 0, 255);
+                Paint(frame, x, y, 1, 1, shade, shade, shade);
+            }
+            Paint(frame, 20 + i % 250, 70, 12, 8, 70, 70, 70);
+            Assert.Empty(Update(tracker, frame, ref time));
+        }
+    }
+
+    [Fact]
+    public void BrightSurfaceRetainsItsOriginalLuminanceThreshold()
+    {
+        var tracker = new BoardDisturbanceTracker();
+        byte[] clear = new byte[Stride * Height];
+        Paint(clear, 0, 0, Width, Height, 100, 100, 100);
+        DateTimeOffset time = Warm(tracker, clear);
+        for (int i = 0; i < 30; i++)
+        {
+            byte[] frame = (byte[])clear.Clone();
+            Paint(frame, 30 + i * 6, 26, 50, 54, 65, 65, 65);
+            Assert.Empty(Update(tracker, frame, ref time));
+        }
+    }
+
+    [Fact]
     public void SceneRedrawAndFreshnessBarriersCannotCarryAnIdentityAcrossScenes()
     {
         var tracker = new BoardDisturbanceTracker();
@@ -178,7 +255,7 @@ public sealed class BoardDisturbanceTests(ITestOutputHelper output)
         Update(tracker, left, ref time);
         long leftId = Assert.Single(Update(tracker, left, ref time)).TrackingId;
         byte[] right = Hand(clear, .85, .5);
-        Assert.Empty(Update(tracker, right, ref time));
+        Assert.NotEqual(leftId, Assert.Single(Update(tracker, right, ref time)).TrackingId);
         Assert.NotEqual(leftId, Assert.Single(Update(tracker, right, ref time)).TrackingId);
         for (int i = 0; i < 8; i++) Update(tracker, clear, ref time);
         byte[] two = Hand(Hand(clear, .2, .5), .8, .5);
@@ -187,6 +264,46 @@ public sealed class BoardDisturbanceTests(ITestOutputHelper output)
         Assert.Equal(2, both.Count);
         Assert.NotEqual(both[0].TrackingId, both[1].TrackingId);
         Assert.True(Math.Abs(both[0].U - both[1].U) > .5);
+    }
+
+    [Fact]
+    public void CompactDisturbancesArePublishedImmediatelyWithoutAvailableProtectionTracks()
+    {
+        var tracker = new BoardDisturbanceTracker();
+        byte[] clear = Frame();
+        DateTimeOffset time = Warm(tracker, clear);
+        byte[] four = Hand(Hand(Hand(Hand(clear, .12, .5), .36, .5), .62, .5), .87, .5);
+        IReadOnlyList<BoardMotionObservation> found = Update(tracker, four, ref time);
+        Assert.Equal(4, found.Count);
+        Assert.Equal(2, found.Count(observation => observation.TrackingId == 0));
+        Assert.All(found, observation => Assert.InRange(observation.V, .47, .53));
+        Assert.Equal(4, Update(tracker, four, ref time).Count);
+    }
+
+    [Fact]
+    public void SpatialCrossingCanUseDisconnectedCompactDisturbances()
+    {
+        var tracker = new BoardDisturbanceTracker();
+        var gestures = new BoardControlSwipeTracker();
+        byte[] clear = Frame();
+        DateTimeOffset time = Warm(tracker, clear);
+        var commands = new List<BoardControlSwipe>();
+        var ids = new HashSet<long>();
+        foreach (double center in new[] { .88, .73, .55, .37, .12 })
+        {
+            // Brief, separate disturbances need not survive the vision tracker's expiry.
+            for (int i = 0; i < 5; i++)
+            {
+                Update(tracker, clear, ref time);
+                gestures.Update([], time, time);
+            }
+            BoardMotionObservation current = Assert.Single(Update(tracker, Hand(clear, center, .55), ref time));
+            ids.Add(current.TrackingId);
+            BoardSwipeSample[] samples = [new(current.TrackingId, current.U, .82 + .18 * current.V)];
+            if (gestures.Update(samples, time, time) is { } command) commands.Add(command);
+        }
+        Assert.True(ids.Count > 1);
+        Assert.Equal(new[] { BoardControlSwipe.Toggle }, commands);
     }
 
     [Fact]

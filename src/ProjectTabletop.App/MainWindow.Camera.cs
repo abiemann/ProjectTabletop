@@ -399,6 +399,7 @@ public sealed partial class MainWindow
 
     private void ScheduleCameraInputFrame(CameraFrame frame, CameraInputArrival arrival)
     {
+        if (!arrival.BoardSetupActive && QueueMarkerSetupFrame(frame)) return;
         var now = Stopwatch.GetTimestamp();
         // This board needs only its rail and stationary captions. Do not queue
         // unrelated full-frame detectors or the hand model behind its artwork.
@@ -419,7 +420,6 @@ public sealed partial class MainWindow
             return;
         }
 
-        QueuePaintDetection(frame, now);
         QueueHandDetection(frame, now);
         QueuePieceDetection(frame, arrival.PieceGeneration);
     }

@@ -33,7 +33,7 @@ public sealed partial class MainWindow
         var game = new BlackjackGame(41, new[] { 2, 6, 2, 10, 2, 2, 3, 4 }
             .Select(rank => new BlackjackCard(rank, BlackjackSuit.Clubs)));
         using var scene = new SceneCompositor(game, blackjackClock: () => now, globeClock: () => globeNow,
-            waterClock: () => now, footballClock: () => now);
+            waterClock: () => now, footballClock: () => now, paintClock: () => now);
         await scene.EnsureGlobeResourcesAsync(CanvasDevice.GetSharedDevice());
         await scene.EnsureMenuPreviewResourcesAsync(CanvasDevice.GetSharedDevice());
         foreach (var screen in new[] { BoardScreen.Slots, BoardScreen.Roulette, BoardScreen.CrownDeed,
@@ -77,7 +77,18 @@ public sealed partial class MainWindow
             Require(scene.CurrentBoardTitle == title, "The acquisition fixture could not open " + title + ".");
             scene.ClearHandTips();
             VerifyButtons(title);
-            if (id == "globe")
+            if (id == "paint")
+            {
+                Require(scene.ActivatePaintButton("paint-drawer-open"), "The Paint drawer fixture could not open.");
+                now += BoardSession.PaintDrawerOpeningDuration;
+                scene.TickPaint(now);
+                Require(scene.PaintDrawerOpen && scene.CurrentBoardButtons.All(button => button.IsHold) &&
+                        scene.CurrentBoardButtons.Any(button => button.Id == "menu" && button.Label == "EXIT") &&
+                        scene.CurrentBoardButtons.Any(button => button.Id == "paint-save" && button.Label == "SAVE"),
+                    "Paint did not expose its shared arrow and uppercase caption-hold actions.");
+                VerifyButtons("Paint drawer");
+            }
+            else if (id == "globe")
             {
                 globeNow = now;
                 Require(scene.ActivateGlobeButton("globe-drawer-open"), "The Globe drawer fixture could not open.");
@@ -111,6 +122,10 @@ public sealed partial class MainWindow
         scene.SetBackground(null);
         Require(scene.CurrentBoardScreen == BoardScreen.Media && scene.GetHandAcquisitionContext(now) is null,
             "A media-only scene with no buttons started acquisition lighting.");
+        if (selectedBoard is null or BoardScreen.HandTracking)
+            Require(PixelMatches(Draw(), CameraPoint(.55, .55), AppPalette.Background.R,
+                AppPalette.Background.G, AppPalette.Background.B),
+                "The gesture tester's neutral lighting changed the ordinary media test grid.");
         scene.ShowBoardMenu(); Draw(); scene.GetHandAcquisitionContext(now);
         now += TimeSpan.FromMilliseconds(600);
         var previous = scene.GetHandAcquisitionContext(now)!;
@@ -131,15 +146,19 @@ public sealed partial class MainWindow
             noBlindButtonSweepOrWholeBoardMotionFallback = true,
             resetClearsForegroundQueryHistory = true,
             boundedPhotoCopyFieldAndUnrestrictedGestureTesterPreserved = true,
+            gestureTesterGridCropsAndNeutralLightingChecked = selectedBoard is null or BoardScreen.HandTracking,
             rectangularPhotoCopyFieldCoveredWithoutStretching = true,
-            paintControlTextCorruptionRequiredBeforeSpotlight = true,
+            paintCaptionHoldsNeedNoSpotlight = true,
             renderedLabelMasksContainLightAndDarkInkAcrossBoards = true,
+            gestureSearchUsesCaptionAreaWithSeparatePlateReference = true,
+            ordinaryHoldSearchGeometryPreserved = true,
             foregroundFixturesCoverActualLabels = true,
             untouchedLabelRejectsControlEdgeDisturbanceAcrossBoards = true,
             blackjackExitAndYourChipsIncluded = true, yourChipsAcquiresHeadingInsteadOfBalance = true,
             mediaAndCalibrationInactive = true,
             globeClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Globe", StringComparison.Ordinal)) == 5,
             photoCopyClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Photo Copy", StringComparison.Ordinal)) == 5,
+            paintClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Paint", StringComparison.Ordinal)) == 4,
             rouletteBetsChipsAndHoldsCovered = selectedBoard is null or BoardScreen.Roulette,
             menuScrollArrowUsesSharedCaptionEvidence = selectedBoard is null or BoardScreen.Menu,
             groupedMenuArrivalAndIntactCaptionRecovery = selectedBoard is null or BoardScreen.Menu,
@@ -163,10 +182,13 @@ public sealed partial class MainWindow
             var screen = scene.CurrentBoardScreen;
             Require(context.RestrictAcquisitionToSearchRegions == (screen != BoardScreen.HandTracking) &&
                     context.AllowsSearchIllumination &&
-                    (context.ContinuousSearchPolygon is not null) == (screen is BoardScreen.PhotoCopy or BoardScreen.Football),
+                    (context.ContinuousSearchPolygon is not null) ==
+                        (screen is BoardScreen.PhotoCopy or BoardScreen.Football or BoardScreen.HandTracking),
                 label + " did not preserve its intended acquisition policy.");
             Require(context.ExpectedScene!.BoardTriggerRegions?.Count == scene.CurrentBoardButtons.Count,
                 label + " omitted its generated control-label trigger masks.");
+            Require(context.ExpectedScene.BoardControlReferenceRegions?.Count == scene.CurrentBoardButtons.Count,
+                label + " omitted its separate optical control references.");
             long gameRevision = scene.BlackjackState.Revision;
             long rouletteRevision = scene.RouletteState.Revision;
             var ids = scene.CurrentBoardButtons.Select(button => button.Id).ToArray();
@@ -178,6 +200,21 @@ public sealed partial class MainWindow
                     button.Bounds.Y + button.Bounds.Height / 2);
                 var trigger = context.ExpectedScene!.BoardTriggerRegions![index];
                 var control = context.ExpectedScene.BoardSearchRegions![index];
+                var reference = context.ExpectedScene.BoardControlReferenceRegions![index];
+                var plate = new HandTrackingBounds(button.Bounds.X + .012, button.Bounds.Y + .012,
+                    button.Bounds.Width - .024, button.Bounds.Height - .024);
+                bool vectorGlyph = context.ExpectedScene.BoardVectorGlyphRegions?.Contains(index) == true;
+                bool rouletteChip = screen == BoardScreen.Roulette &&
+                    button.Id.StartsWith("roulette-chip-", StringComparison.Ordinal);
+                bool captionSearch = !button.IsHold && !vectorGlyph && !rouletteChip;
+                if (captionSearch)
+                    Require(control == trigger && reference == plate &&
+                            reference.Width * reference.Height >= control.Width * control.Height,
+                        label + "/" + button.Label +
+                        " diluted caption acquisition with plate/artwork area or discarded its full optical reference.");
+                else if (button.IsHold && !vectorGlyph && !rouletteChip)
+                    Require(control == plate && reference == plate,
+                        label + "/" + button.Label + " changed its existing long-press search/reference geometry.");
                 Require(trigger.Width > 0 && trigger.Height > 0 && trigger.X >= control.X && trigger.Y >= control.Y &&
                         trigger.X + trigger.Width <= control.X + control.Width + 1e-9 &&
                         trigger.Y + trigger.Height <= control.Y + control.Height + 1e-9 &&
@@ -213,7 +250,28 @@ public sealed partial class MainWindow
                             emptyQuery.SearchRegions.All(region => region.Width == region.Height &&
                                 region.X >= 0 && region.Y >= 0 &&
                                 region.X + region.Width <= size && region.Y + region.Height <= size),
-                        "Photo Copy lost its bounded native square object-field search.");
+                        label + " lost its bounded native square field search.");
+                    if (screen == BoardScreen.HandTracking)
+                    {
+                        // A hand can arrive in the middle of the tester without
+                        // ever crossing Back. Schedule inference there on the
+                        // actual camera image, without inventing a hand or light.
+                        var middle = CameraPoint(.55, .55);
+                        Require(!scene.CurrentBoardButtons.Any(item => item.Bounds.Contains(.55, .55)) &&
+                                emptyQuery.SearchRegions.Any(region => middle.X >= region.X &&
+                                    middle.X <= region.X + region.Width && middle.Y >= region.Y &&
+                                    middle.Y <= region.Y + region.Height) &&
+                                context.ContinuousSearchPolygon!.SequenceEqual(context.SearchPolygon),
+                            "The gesture tester cannot search the calibrated grid away from Back.");
+                        Require(PixelMatches(empty, middle, 100, 100, 100) &&
+                                PixelMatches(empty, new(0, 0), 0, 0, 0),
+                            "The gesture tester must illuminate its grid neutrally inside the physical board only.");
+                        scene.CompleteHandAcquisition(context, emptyQuery.LightingHints, [], now);
+                        Require(scene.CurrentBoardScreen == BoardScreen.HandTracking &&
+                                scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null &&
+                                scene.ActiveHandSpotlightCount == 0 && scene.HoveredBoardButtons.Count == 0,
+                            "The clear tester's scheduled crops synthesized a hand, search light, or selection.");
+                    }
                     foreach (var field in new PixelPoint[][]
                     {
                         [new(100, 300), new(900, 300), new(900, 500), new(100, 500)],
@@ -232,7 +290,7 @@ public sealed partial class MainWindow
                                     field.Average(point => point.X) <= region.X + region.Width &&
                                     field.Average(point => point.Y) >= region.Y &&
                                     field.Average(point => point.Y) <= region.Y + region.Height),
-                            "A wide or tall Photo Copy field left its middle unsearched or stretched a model crop.");
+                            "A wide or tall continuous field left its middle unsearched or stretched a model crop.");
                     }
                 }
                 // A large, stationary off-button occlusion must not become a
@@ -256,6 +314,7 @@ public sealed partial class MainWindow
                 // in recorded camera captures, not asserted by a painted patch.
                 bool arrow = button.Id is "globe-drawer-open" or "globe-drawer-close" or
                     "photo-drawer-open" or "photo-drawer-close" or
+                    "paint-drawer-open" or "paint-drawer-close" or
                     "water-drawer-open" or "water-drawer-close" or
                     "menu-scroll-down" or "menu-scroll-up";
                 if (screen == BoardScreen.Roulette && !button.IsHold)
@@ -357,8 +416,13 @@ public sealed partial class MainWindow
                     Require(presence.TextPatterns?.SingleOrDefault(pattern => pattern.ControlRegion == index) is
                         { ShapeCorrupted: true, ConfirmationFrames: >= 2 },
                         label + "/" + button.Label + " qualified without confirming stationary interference with the rendered heading.");
-                var edge = LargestUnlabelledPart(control, trigger);
-                if (edge.Width * edge.Height >= control.Width * control.Height * .07)
+                // Caption-sized search masks have no unlabelled interior. Keep
+                // testing unrelated plate/artwork interference against the full
+                // optical reference, where it must never qualify acquisition.
+                var edgeControl = captionSearch ? reference : control;
+                var edge = LargestUnlabelledPart(edgeControl, trigger);
+                bool hasEdgeFixture = edge.Width * edge.Height >= edgeControl.Width * edgeControl.Height * .07;
+                if (hasEdgeFixture)
                 {
                     var edgeOnly = (byte[])empty.Clone();
                     var edgeTopLeft = CameraPoint(edge.X, edge.Y);
@@ -395,7 +459,7 @@ public sealed partial class MainWindow
                 }
                 // The edge-only comparison advanced the fixture clock. Refresh
                 // measured obstruction before the scene accepts its exact frame.
-                if (edge.Width * edge.Height >= control.Width * control.Height * .07)
+                if (hasEdgeFixture)
                 {
                     pendingQuery = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
                         context, occupiedTracker, now);
@@ -584,6 +648,14 @@ public sealed partial class MainWindow
             Require(rimPixels > 200 && arrivals.Skip(1).All(held => held) && throughRim.All(held => held),
                 $"{button.Label} lost its hold evidence once the warming rim appeared " +
                 $"(rim pixels {rimPixels}; before [{string.Join(",", arrivals)}], with rim [{string.Join(",", throughRim)}]).");
+            var captionOnly = lastPresence! with
+            {
+                Hints = [],
+                TextPatterns = lastPresence!.TextPatterns!.Select(pattern => pattern with
+                    { ControlCoverage = 0, ConfirmationFrames = 0 }).ToArray()
+            };
+            Require(hold!.HeldButtons(captionOnly).Contains(button.Id),
+                button.Label + " required whole-button coverage or hand acquisition to accept already verified broken lettering.");
             if (button.Id == "slot-spin")
             {
                 int region = hold!.ButtonIds.ToList().IndexOf(button.Id);
@@ -790,6 +862,12 @@ public sealed partial class MainWindow
         {
             using (var drawing = target.CreateDrawingSession()) scene.Draw(drawing, size, size, false, false);
             return target.GetPixelBytes();
+        }
+        static bool PixelMatches(byte[] pixels, PixelPoint point, byte r, byte g, byte b)
+        {
+            int offset = ((int)point.Y * size + (int)point.X) * 4;
+            return pixels[offset] == b && pixels[offset + 1] == g &&
+                pixels[offset + 2] == r && pixels[offset + 3] == 255;
         }
         static void Fill(byte[] pixels, int left, int top, int width, int height, byte b, byte g, byte r)
         {

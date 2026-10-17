@@ -180,7 +180,7 @@ public sealed partial class MainWindow
         ResetFootballInput();
         _footballInputWasActive = _scene.FootballInputActive;
         // Cancel another learning gesture without replacing its saved profile.
-        lock (_eyeTipGate) { _eyeTipLearning = false; _colorTipLearning = false; }
+        ResetEyeTipTracking("football-marker-learning");
         UpdateEyeTipStatus();
         _frozenFrame = null;
         lock (_footballInputGate)
@@ -195,7 +195,7 @@ public sealed partial class MainWindow
     }
 
     // Starting another marker's learning replaces a pending football click, just
-    // as football learning cancels eye and colour learning.
+    // as football learning cancels eye and wand learning.
     private void CancelFootballLearning()
     {
         lock (_footballInputGate)
@@ -540,7 +540,7 @@ public sealed partial class MainWindow
                 : _scene.CurrentBoardScreen == BoardScreen.Football && _scene.FootballState.Phase == FootballPhase.Finished
                     ? "Match finished. Tracking resumes with the next match."
                 : _footballFingerInputs[player] ? _footballInputReasons[player]
-                : profiles?.ForPlayer(player) is null ? "Choose Learn marker, then click inside one of its bars."
+                : profiles?.ForPlayer(player) is null ? "Choose Marker setup to learn and check your marker."
                 : _footballInputReasons[player]);
             FootballInputStatusText.Text = Describe(0) + "\n" + Describe(1) +
                 (FootballMarkerSettingsError is null ? "" : "\n" + FootballMarkerSettingsError);

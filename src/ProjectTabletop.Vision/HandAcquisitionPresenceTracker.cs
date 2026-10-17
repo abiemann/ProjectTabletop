@@ -16,12 +16,19 @@ namespace ProjectTabletop.Vision;
 /// <param name="BoardControlReferenceRegions">Optional index-aligned opaque control plates
 /// containing the corresponding search regions. Their reference pixels belong to that
 /// control's camera-appearance fit, never its foreground or press evidence.</param>
+/// <param name="BoardVectorGlyphRegions">Optional control indices rendered as compact vector
+/// symbols. Their generated ink also receives local stroke-integrity checks; ordinary
+/// text captions retain their existing whole-caption and sector policy.</param>
+/// <param name="BoardDisturbanceExclusionRegion">Optional board control plate excluded from
+/// a separate whole-board obstruction veto. This never supplies caption or hand evidence.</param>
 public sealed record HandAcquisitionSceneImage(int Width, int Height, byte[] Bgra,
     IReadOnlyList<double> CameraToBoard, IReadOnlyList<HandTrackingBounds>? BoardSearchRegions = null,
     IReadOnlyList<HandTrackingBounds>? BoardReferenceRegions = null,
     IReadOnlyList<HandTrackingBounds>? BoardTriggerRegions = null,
     bool AllowsLocalForegroundContext = false,
-    IReadOnlyList<HandTrackingBounds>? BoardControlReferenceRegions = null);
+    IReadOnlyList<HandTrackingBounds>? BoardControlReferenceRegions = null,
+    IReadOnlyList<int>? BoardVectorGlyphRegions = null,
+    HandTrackingBounds? BoardDisturbanceExclusionRegion = null);
 
 /// <summary>Fresh generated-letter structure evidence, independent of panel palette fitting.
 /// Coverage counts measured changed glyph/halo pixels against the complete paired rectangles.</summary>
@@ -39,16 +46,27 @@ public sealed record HandAcquisitionTextPatternResult(int ControlRegion, bool La
     IReadOnlyList<double>? SectorCorrelations = null, double LocalDamageCoverage = 0,
     double OpticalExposureGain = 1, double OpticalExposureBackground = 0,
     double CaptionReflectanceCoverage = 0, double CaptionReflectanceTriggerCoverage = 0,
-    double CaptionReflectanceInkFraction = 0, bool CaptionReflectanceChanged = false, bool CaptionClipped = false);
+    double CaptionReflectanceInkFraction = 0, bool CaptionReflectanceChanged = false, bool CaptionClipped = false)
+{
+    // Long presses depend only on measured damage to the stationary caption.
+    // Acquisition confirmation also requires a larger control footprint for
+    // hand searches; a short damaged label need not satisfy that separate gate.
+    public bool CaptionHoldEvidence => ShapeCorrupted && !LabelIntact;
+}
 
 /// <summary>Foreground evidence for acquisition, never proof of a hand or a selection.</summary>
 /// <param name="ForegroundFraction">Foreground occupancy among eligible candidate samples.
 /// When separate reference regions are supplied, their fit quality is checked independently.</param>
+/// <param name="OutsideControlDisturbance">A compact obstruction outside the opted-in control plate.
+/// Independent of caption corruption and hand acquisition; false for uncertain broad changes.</param>
+/// <param name="OutsideControlForegroundFraction">Residual area divided by eligible opaque board
+/// area outside the control plate, before compact-component qualification.</param>
 public sealed record HandAcquisitionPresenceResult(IReadOnlyList<HandAcquisitionHint> Hints,
     bool BaselineReady, bool? IlluminatedPresence, double ForegroundFraction, string Reason,
     IReadOnlyList<HandAcquisitionTextPatternResult>? TextPatterns = null,
     IReadOnlyList<HandAcquisitionLocalFitResult>? LocalFits = null, double? IlluminatedWhiteLuminance = null,
-    bool? ProjectedWhiteClipped = null);
+    bool? ProjectedWhiteClipped = null, bool OutsideControlDisturbance = false,
+    double OutsideControlForegroundFraction = 0);
 
 /// <summary>Current-frame opposite-margin fitting diagnostics for compact controls.</summary>
 public sealed record HandAcquisitionLocalFitResult(int ControlRegion, int TrainingSamples,
@@ -228,6 +246,8 @@ public sealed partial class HandAcquisitionPresenceTracker
         }
         bool modelReliable = fit is not null && fit.MedianError <= 18 && referenceFraction < .40;
         if (!modelReliable) Array.Clear(foreground);
+        var outsideControl = MeasureOutsideControlDisturbance(reference, current,
+            modelReliable ? fit : null, colorOffsets, threshold, activeLight ? illuminatedHint : null);
         var captionReflectance = MeasureCaptionReflectance(reference, current, foreground, fit, colorOffsets);
         var reflectedControls = ValidateCaptionReflectance(reference, current, captionReflectance,
             textObservations, fitAllowed);
@@ -322,7 +342,9 @@ public sealed partial class HandAcquisitionPresenceTracker
         // A hand reaches in from the viewer's edge, the rendered board's bottom.
         // Across several disturbed controls its fingertips are on the one
         // farthest from that edge: keep that target first, the palm's next.
-        if (!activeLight && hints.Count > 1 && _scene is not null)
+        // Sort alternatives even while lit, before renewal reserves the first
+        // slot and the two-hint cap could discard the higher target.
+        if (hints.Count > 1 && _scene is not null)
             hints = hints.OrderBy(hint => BoardPosition(_scene, hint.Center, out _, out double v) ? v : double.PositiveInfinity)
                 .ToList();
         if (illuminatedPresence == true)
@@ -365,7 +387,11 @@ public sealed partial class HandAcquisitionPresenceTracker
             observation.Region, observation.Clean, observation.Correlation,
             observation.ChangedBoardPixels.Count / 1_000_000.0 / _controlBoardAreas![observation.Region],
             observation.ChangedBoardPixels.Count / 1_000_000.0 / _controlTriggerBoardAreas![observation.Region],
-            observation.StrongCorruption, _textCorruptionFrames![observation.Region], observation.OpticalBlur,
+            // Globally washed-out letters can have no correlation and no
+            // measurable damaged pixels. Keep that optical uncertainty eligible
+            // for exposure recovery, while preserving measured local ink breaks.
+            (observation.StrongCorruption && observation.ChangedBoardPixels.Count > 0) || observation.LocalInkCorruption,
+            _textCorruptionFrames![observation.Region], observation.OpticalBlur,
             observation.OffsetX, observation.OffsetY, observation.ScaleX, observation.ScaleY,
             observation.SectorCorrelations, observation.LocalDamageCoverage,
             observation.ExposureGain, observation.ExposureBackground,
@@ -378,7 +404,8 @@ public sealed partial class HandAcquisitionPresenceTracker
             // Intact white captions already clipping means a white search light
             // will clip too; night exposure raised the unlit board by about 38%.
             textObservations.Any(observation => observation.Clean)
-                ? textObservations.Any(observation => observation.Clean && observation.Clipped) : null);
+                ? textObservations.Any(observation => observation.Clean && observation.Clipped) : null,
+            outsideControl.Disturbed, outsideControl.Fraction);
     }
 
     public void Reset()
@@ -386,6 +413,7 @@ public sealed partial class HandAcquisitionPresenceTracker
         _polygon = []; _locations = []; _mask = [];
         _baseline = _expected = null; _templateEdges = _templateMask = _templateReferenceMask = _templateSampleMask = null;
         _edgeColors = null; _controlRegions = _referenceControlRegions = null; _controlReferenceBounds = null;
+        ResetOutsideControlDisturbance();
         _sampleBoardAreas = _controlBoardAreas = null; _scene = null;
         _controlTriggerRegions = null; _controlTriggerBoardAreas = null;
         _unobstructedFit = null; _unobstructedColorOffsets = null;
@@ -569,6 +597,7 @@ public sealed partial class HandAcquisitionPresenceTracker
         _textCorruptionTimes = null;
         _templateEdges = _templateMask = _templateReferenceMask = _templateSampleMask = null;
         _edgeColors = null;
+        ResetOutsideControlDisturbance();
         _controlRegions = _referenceControlRegions = null; _controlReferenceBounds = null;
         _sampleBoardAreas = _controlBoardAreas = null;
         _controlTriggerRegions = null; _controlTriggerBoardAreas = null;
@@ -579,7 +608,12 @@ public sealed partial class HandAcquisitionPresenceTracker
         var referenceRegions = scene.BoardReferenceRegions;
         var triggerRegions = scene.BoardTriggerRegions;
         var controlReferenceRegions = scene.BoardControlReferenceRegions;
+        var vectorGlyphRegions = scene.BoardVectorGlyphRegions;
         if (!ValidRegions(regions) || !ValidRegions(referenceRegions)) return;
+        if (scene.BoardDisturbanceExclusionRegion is { } exclusion && !ValidRegions([exclusion])) return;
+        if (vectorGlyphRegions is not null && (vectorGlyphRegions.Count > MaximumSceneRegions ||
+            vectorGlyphRegions.Distinct().Count() != vectorGlyphRegions.Count ||
+            vectorGlyphRegions.Any(index => index < 0 || triggerRegions is null || index >= triggerRegions.Count))) return;
         if (controlReferenceRegions is not null && (!ValidRegions(controlReferenceRegions) || regions is null ||
             controlReferenceRegions.Count != regions.Count || Enumerable.Range(0, regions.Count).Any(index =>
                 !Contains(controlReferenceRegions[index], regions[index])))) return;
@@ -600,7 +634,15 @@ public sealed partial class HandAcquisitionPresenceTracker
         {
             if (!_mask[index]) { edges[index] = true; continue; }
             PixelPoint point = _locations[index];
-            if (!TemplateColor(scene, point, expected.AsSpan(index * 3, 3))) { edges[index] = true; continue; }
+            if (!TemplateColor(scene, point, expected.AsSpan(index * 3, 3)))
+            {
+                // Explicit UI masks may legitimately leave the scenery transparent.
+                // Validate their geometric coverage independently; absent colour
+                // still supplies no candidate or appearance-reference samples.
+                if (regions is not null && BoardPosition(scene, point, out _, out _)) mapped++;
+                edges[index] = true;
+                continue;
+            }
             mapped++;
             templateMask[index] = WithinSampleRegions(scene, point, regions);
             referenceMask[index] = referenceRegions is null ? templateMask[index] : WithinSampleRegions(scene, point, referenceRegions);
@@ -677,6 +719,7 @@ public sealed partial class HandAcquisitionPresenceTracker
                 _edgeColors[index] = colors.ToArray();
             }
         }
+        ConfigureOutsideControlDisturbance(scene);
     }
 
     private static bool Contains(HandTrackingBounds outer, HandTrackingBounds inner) =>
@@ -928,7 +971,7 @@ public sealed partial class HandAcquisitionPresenceTracker
         independent.CopyTo(fitAllowed, 0);
     }
 
-    private PhotometricFit? Fit(double[] reference, double[] current, bool[] allowed)
+    private PhotometricFit? Fit(double[] reference, double[] current, bool[] allowed, bool fullColorResponse = false)
     {
         int[] training = Enumerable.Range(0, allowed.Length).Where(index => allowed[index]).ToArray();
         if (training.Length < 80) return null;
@@ -943,27 +986,33 @@ public sealed partial class HandAcquisitionPresenceTracker
         int[] retained = training;
         double[][] coefficients = new double[3][];
         double median = 0;
-        double[] features = new double[Features];
+        int featureCount = fullColorResponse ? 12 : Features;
+        // Full-board colour samples include small, saturated artwork patches.
+        // Keep their cross-channel curves from being flattened by the much
+        // larger dark background; ordinary caption fitting is unchanged.
+        double quadraticPenalty = fullColorResponse ? .00003 : .0003;
+        double[] features = new double[featureCount];
         for (int iteration = 0; iteration < 4; iteration++)
         {
             for (int channel = 0; channel < 3; channel++)
             {
-                double[,] normal = new double[Features, Features];
-                double[] values = new double[Features];
+                double[,] normal = new double[featureCount, featureCount];
+                double[] values = new double[featureCount];
                 foreach (int index in retained)
                 {
                     FeatureVector(reference, index, channel, features);
                     if (!spatialCompensation) features[5] = features[6] = 0;
                     double value = current[index * 3 + channel];
-                    for (int row = 0; row < Features; row++)
+                    for (int row = 0; row < featureCount; row++)
                     {
                         values[row] += features[row] * value;
-                        for (int column = 0; column < Features; column++) normal[row, column] += features[row] * features[column];
+                        for (int column = 0; column < featureCount; column++) normal[row, column] += features[row] * features[column];
                     }
                 }
                 // Regularize degenerate flat-color scenes and prefer a linear response when
                 // the template lacks enough brightness range to estimate a gamma curve.
-                for (int diagonal = 0; diagonal < Features; diagonal++) normal[diagonal, diagonal] += retained.Length * (diagonal == 4 ? .0003 : .00001);
+                for (int diagonal = 0; diagonal < featureCount; diagonal++) normal[diagonal, diagonal] += retained.Length *
+                    (diagonal == 4 || diagonal >= Features ? quadraticPenalty : .00001);
                 coefficients[channel] = Solve(normal, values);
                 if (coefficients[channel].Any(value => !double.IsFinite(value))) return null;
             }
@@ -988,15 +1037,32 @@ public sealed partial class HandAcquisitionPresenceTracker
         features[4] = normalized * normalized;
         features[5] = (index % _columns + .5) / _columns - .5;
         features[6] = (index / _columns + .5) / _rows - .5;
+        if (features.Length > Features)
+        {
+            double first = reference[index * 3 + (channel + 1) % 3] / 255;
+            double second = reference[index * 3 + (channel + 2) % 3] / 255;
+            features[7] = first * first; features[8] = second * second;
+            features[9] = features[1] * features[2];
+            features[10] = features[1] * features[3];
+            features[11] = features[2] * features[3];
+        }
     }
 
     private double Predict(double[] coefficients, double blue, double green, double red, int index, int channel)
     {
         double normalized = (channel == 0 ? blue : channel == 1 ? green : red) / 255;
-        return Math.Clamp(coefficients[0] + coefficients[1] * blue / 255 + coefficients[2] * green / 255 +
+        double prediction = coefficients[0] + coefficients[1] * blue / 255 + coefficients[2] * green / 255 +
             coefficients[3] * red / 255 + coefficients[4] * normalized * normalized +
             coefficients[5] * ((index % _columns + .5) / _columns - .5) +
-            coefficients[6] * ((index / _columns + .5) / _rows - .5), 0, 255);
+            coefficients[6] * ((index / _columns + .5) / _rows - .5);
+        if (coefficients.Length > Features)
+        {
+            double first = (channel == 0 ? green : channel == 1 ? red : blue) / 255;
+            double second = (channel == 0 ? red : channel == 1 ? blue : green) / 255;
+            prediction += coefficients[7] * first * first + coefficients[8] * second * second +
+                (coefficients[9] * blue * green + coefficients[10] * blue * red + coefficients[11] * green * red) / (255 * 255);
+        }
+        return Math.Clamp(prediction, 0, 255);
     }
 
     private double Error(double[][] coefficients, double[] reference, double[] current, int index, double[]? colorOffset = null)
@@ -1083,26 +1149,27 @@ public sealed partial class HandAcquisitionPresenceTracker
 
     private static double[] Solve(double[,] matrix, double[] values)
     {
-        for (int pivot = 0; pivot < Features; pivot++)
+        int featureCount = values.Length;
+        for (int pivot = 0; pivot < featureCount; pivot++)
         {
             int best = pivot;
-            for (int row = pivot + 1; row < Features; row++)
+            for (int row = pivot + 1; row < featureCount; row++)
                 if (Math.Abs(matrix[row, pivot]) > Math.Abs(matrix[best, pivot])) best = row;
-            if (Math.Abs(matrix[best, pivot]) < 1e-12) return Enumerable.Repeat(double.NaN, Features).ToArray();
+            if (Math.Abs(matrix[best, pivot]) < 1e-12) return Enumerable.Repeat(double.NaN, featureCount).ToArray();
             if (best != pivot)
             {
-                for (int column = 0; column < Features; column++)
+                for (int column = 0; column < featureCount; column++)
                     (matrix[best, column], matrix[pivot, column]) = (matrix[pivot, column], matrix[best, column]);
                 (values[best], values[pivot]) = (values[pivot], values[best]);
             }
             double divisor = matrix[pivot, pivot];
-            for (int column = pivot; column < Features; column++) matrix[pivot, column] /= divisor;
+            for (int column = pivot; column < featureCount; column++) matrix[pivot, column] /= divisor;
             values[pivot] /= divisor;
-            for (int row = 0; row < Features; row++)
+            for (int row = 0; row < featureCount; row++)
             {
                 if (row == pivot) continue;
                 double amount = matrix[row, pivot];
-                for (int column = pivot; column < Features; column++) matrix[row, column] -= amount * matrix[pivot, column];
+                for (int column = pivot; column < featureCount; column++) matrix[row, column] -= amount * matrix[pivot, column];
                 values[row] -= amount * values[pivot];
             }
         }

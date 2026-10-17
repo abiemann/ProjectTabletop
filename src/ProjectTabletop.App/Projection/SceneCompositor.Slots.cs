@@ -76,7 +76,7 @@ public sealed partial class SceneCompositor
 
         if (buttons.Count == 0) return;
         using var fade = CreateBoardControlsFadeLayer(ds);
-        foreach (var button in buttons) DrawSlotButton(ds, button, game, a, _holdControlBrightness);
+        foreach (var button in buttons) DrawSlotButton(ds, button, game, boardAspect, _holdControlBrightness);
     }
 
     private const double SlotWinMessageDuration = .65;
@@ -225,7 +225,7 @@ public sealed partial class SceneCompositor
 
     // Pale opaque buttons with dark captions: palm-down fingers over dark glass
     // gave the camera almost no contrast. Captions are the long-press evidence.
-    private static void DrawSlotButton(CanvasDrawingSession ds, BoardButton button, SlotSnapshot game, float aspect,
+    private static void DrawSlotButton(CanvasDrawingSession ds, BoardButton button, SlotSnapshot game, double aspect,
         double holdExposure = 1)
     {
         double plate = button.IsHold ? holdExposure : 1;
@@ -241,17 +241,18 @@ public sealed partial class SceneCompositor
         ds.DrawRoundedRectangle(rect, radius, radius, button.Enabled ? SlotDeepGold : ThemeColor(90, 80, 70), 2);
         ds.DrawLine((float)rect.X + 20, (float)rect.Y + 3, (float)rect.Right - 20, (float)rect.Y + 3, ThemeColor(255, 255, 255, 170), 1.2f);
         var text = SlotButtonTextSpec(button);
-        SlotText(ds, text.Caption, text.Bounds, text.Size, button.Enabled ? ThemeColor(52, 28, 12) : ThemeColor(70, 62, 56), aspect);
+        DrawHoldButtonCaption(ds, text.Caption, text.Bounds,
+            button.Enabled ? ThemeColor(52, 28, 12) : ThemeColor(70, 62, 56), aspect);
         if (button.Id == "slot-buy")
-            SlotText(ds, SlotGame.Format(game.BuyCost), new Rect(text.Bounds.X,
-                text.Bounds.Y + text.Bounds.Height / 2 + 16, text.Bounds.Width, 24), 16,
+            DrawHoldButtonCaption(ds, SlotGame.Format(game.BuyCost), new Rect(text.Bounds.X,
+                rect.Y + rect.Height / 2, text.Bounds.Width, text.Bounds.Height),
                 button.Enabled ? ThemeColor(110, 60, 20) : ThemeColor(80, 70, 62), aspect);
     }
 
     private static Rect SlotButtonRect(BoardButton button) => new(button.Bounds.X * BoardSurfaceSize,
         button.Bounds.Y * BoardSurfaceSize, button.Bounds.Width * BoardSurfaceSize, button.Bounds.Height * BoardSurfaceSize);
 
-    private static (string Caption, Rect Bounds, float Size) SlotButtonTextSpec(BoardButton button)
+    private static (string Caption, Rect Bounds) SlotButtonTextSpec(BoardButton button)
     {
         var rect = SlotButtonRect(button);
         string caption = button.Id switch
@@ -259,24 +260,16 @@ public sealed partial class SceneCompositor
             "slot-exit" => "EXIT", "slot-bet-down" => "BET −", "slot-bet-up" => "BET +",
             "slot-buy" => "BUY", "slot-refill" => "REFILL", _ => "SPIN"
         };
-        float size = button.Id == "slot-spin" ? 46 : 34;
         double topInset = button.Id == "slot-buy" ? 6 : 4;
-        return (caption, new Rect(rect.X + 8, rect.Y + topInset, rect.Width - 16, rect.Height - 12), size);
+        double height = (rect.Height - 12) / (button.Id == "slot-buy" ? 2 : 1);
+        return (caption, new Rect(rect.X + 8, rect.Y + topInset, rect.Width - 16, height));
     }
 
     /// <summary>The camera trigger region: the caption's ink, narrowed exactly as it is drawn.</summary>
     private HandTrackingBounds SlotButtonTextRegion(CanvasDevice device, BoardButton button)
     {
         var spec = SlotButtonTextSpec(button);
-        float aspect = SlotsLayout(PaintBoardAspect()).Aspect;
-        using var format = FitSlotTextFormat(device, spec.Caption, spec.Bounds, spec.Size, aspect, "Bahnschrift", true);
-        using var layout = new CanvasTextLayout(device, spec.Caption, format, (float)spec.Bounds.Width * aspect,
-            (float)spec.Bounds.Height);
-        var ink = layout.DrawBounds;
-        double centerX = spec.Bounds.X + spec.Bounds.Width / 2;
-        double left = centerX + (ink.X - spec.Bounds.Width * aspect / 2) / aspect;
-        return ButtonInkRegion(button, new Rect(left - spec.Bounds.X, ink.Y, ink.Width / aspect, ink.Height),
-            spec.Bounds.X, spec.Bounds.Y);
+        return HoldButtonCaptionRegion(device, button, spec.Bounds, spec.Caption);
     }
 
     /// <summary>Draws the reel frame's controls on black: the camera reference for the hold detector.</summary>
@@ -285,7 +278,7 @@ public sealed partial class SceneCompositor
         ds.Clear(Microsoft.UI.Colors.Black);
         var game = _boardSession.SlotsState;
         foreach (var button in _boardSession.Buttons)
-            DrawSlotButton(ds, button, game, SlotsLayout(PaintBoardAspect()).Aspect, _holdControlBrightness);
+            DrawSlotButton(ds, button, game, PaintBoardAspect(), _holdControlBrightness);
     }
 
     /// <summary>Text drawn physically unstretched: the square layout is widened by the board aspect.</summary>
@@ -328,8 +321,7 @@ public sealed partial class SceneCompositor
         WordWrapping = CanvasWordWrapping.NoWrap
     };
 
-    // Fit to physical width on narrow boards. The caption detector calls this
-    // same function, so its ink mask remains identical to the visible lettering.
+    // Fit decorative text and values to their physical width on narrow boards.
     private static CanvasTextFormat FitSlotTextFormat(CanvasDevice device, string text, Rect rect, float size,
         float aspect, string family, bool bold)
     {

@@ -15,14 +15,16 @@ public sealed partial class MainWindow
     // Mutable image/path history belongs exclusively to this worker.
     private readonly BoardDisturbanceTracker _controlSwipeDisturbance = new();
     private readonly BoardControlSwipeTracker _controlSwipePath = new();
-    private readonly List<BoardSwipeSample> _controlSwipeSamples = new(2);
+    private readonly List<BoardSwipeSample> _controlSwipeSamples = new(4);
     private long _controlSwipeWorkerGeneration = -1;
     private int _controlSwipeFrameWidth, _controlSwipeFrameHeight, _controlSwipeFrameStride;
     private SceneCompositor.ControlSwipeContext? _controlSwipeWorkerContext;
     private ControlSwipeDetectionDiagnostics? _lastControlSwipeDetection;
     private readonly record struct ControlSwipeDetectionDiagnostics(DateTimeOffset FrameTime, long Revision,
         int MotionCount, long? TrackingId, double? U, double? V, bool Traversing,
-        BoardControlSwipe? Gesture, bool Applied, string? Error);
+        BoardControlSwipe? Gesture, bool Applied, string? Error,
+        BoardSwipeSample? SecondDisturbance = null, BoardSwipeSample? ThirdDisturbance = null,
+        BoardSwipeSample? FourthDisturbance = null);
     private ControlSwipeDetectionDiagnostics? ControlSwipeDiagnostics
     {
         get { lock (_controlSwipeGate) return _lastControlSwipeDetection; }
@@ -83,7 +85,10 @@ public sealed partial class MainWindow
                         observations.Count > 0 ? observations[0].TrackingId : null,
                         observations.Count > 0 ? observations[0].U : null,
                         observations.Count > 0 ? context.Top + (context.Bottom - context.Top) * observations[0].V : null,
-                        traversing, command, applied, null);
+                        traversing, command, applied, null,
+                        _controlSwipeSamples.Count > 1 ? _controlSwipeSamples[1] : null,
+                        _controlSwipeSamples.Count > 2 ? _controlSwipeSamples[2] : null,
+                        _controlSwipeSamples.Count > 3 ? _controlSwipeSamples[3] : null);
                 }
             }
             catch (Exception error)

@@ -27,6 +27,8 @@ internal static class AppPalette
     public static readonly Color IndicatorOff = Color.FromArgb(255, 64, 84, 104);
     public static readonly Color AccentSecondary = Color.FromArgb(255, 168, 151, 235);
     public static readonly Color PhotoCopyBackground = Color.FromArgb(255, 100, 100, 100);
+    // Enough neutral projected light to acquire a hand before its spotlight exists.
+    public static readonly Color HandTrackingBackground = Color.FromArgb(255, 100, 100, 100);
 
     public static void Apply(ResourceDictionary resources)
     {

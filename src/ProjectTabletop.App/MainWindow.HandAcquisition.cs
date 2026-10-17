@@ -135,8 +135,8 @@ public sealed partial class MainWindow
         if (context.IlluminatedHint is not null && regions.Count > 0 &&
             LitSearchView(regions[0], frame.Timestamp - context.IlluminationStartedAt, frame.Width, frame.Height) is { } view)
             regions[0] = view;
-        // Photo Copy's object field is also a point of interest. Keep its
-        // separate capture gesture without searching the whole webcam.
+        // Continuous capture fields (including the gesture tester's grid)
+        // provide focused views without manufacturing an obstruction or hand.
         if (context.ContinuousSearchPolygon is { Length: >= 3 } polygon)
         {
             double left = polygon.Min(point => point.X), top = polygon.Min(point => point.Y);

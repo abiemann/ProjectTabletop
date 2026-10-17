@@ -12,6 +12,7 @@ public sealed partial class BoardSession
     public static readonly TimeSpan HoldEvidenceGap = TimeSpan.FromMilliseconds(350);
     private readonly Dictionary<string, HoldState> _holds = [];
     private readonly Dictionary<string, DateTimeOffset> _clearHoldCaptions = [];
+    private readonly Dictionary<string, DateTimeOffset> _holdCaptionInputNotBefore = [];
     private DateTimeOffset _holdCaptionObservedAt = DateTimeOffset.MinValue;
     // Single-action holds stay spent at their place, even when the action puts
     // another button there (Globe's ^ becomes v; Blackjack's Deal becomes Double
@@ -43,10 +44,14 @@ public sealed partial class BoardSession
     /// prior, fresh clear observation of that enabled caption. Disabled controls and
     /// one-shot activations discard that readiness. A null collection retains legacy
     /// behavior for callers whose held/absent sets already provide determinate input.
+    /// A fresh frame may veto individual captions through <paramref name="blockedIds"/>;
+    /// this discards their progress and clear readiness without marking them clear or
+    /// releasing a spent physical place. Other captions retain their evidence.
     /// Returns the buttons activated by this frame.
     /// </summary>
     public IReadOnlyList<string> ObserveHeldButtons(IReadOnlyCollection<string> heldIds,
-        DateTimeOffset frameTime, DateTimeOffset now, IReadOnlyCollection<string>? clearedIds = null)
+        DateTimeOffset frameTime, DateTimeOffset now, IReadOnlyCollection<string>? clearedIds = null,
+        IReadOnlyCollection<string>? blockedIds = null)
     {
         ArgumentNullException.ThrowIfNull(heldIds);
         TickControlVisibility(now);
@@ -55,13 +60,21 @@ public sealed partial class BoardSession
         AdvanceMenuScroll(now);
         if (Screen == BoardScreen.Menu && (MenuScrolling || frameTime <= _menuInputReadyAfter)) return [];
         bool strictCaptions = clearedIds is not null;
-        if (strictCaptions && frameTime <= _holdCaptionObservedAt) return [];
+        if ((strictCaptions || blockedIds is not null) && frameTime <= _holdCaptionObservedAt) return [];
         _holdCaptionObservedAt = Later(_holdCaptionObservedAt, frameTime);
+        if (blockedIds is { Count: > 0 })
+        {
+            var blocked = Buttons.Where(button => button.IsHold && button.Enabled &&
+                    blockedIds.Contains(button.Id) && HoldCaptionFrameIsCurrent(button.Id, frameTime))
+                .Select(button => button.Id).ToArray();
+            if (blocked.Length != 0) ResetHoldCaptionEvidence(blocked, frameTime);
+        }
         // This frame cannot prove that a newly re-enabled appearance was clear
         // when the phase changes below. Production also filters clearedIds by
         // the enabled controls in its captured rendered-reference context.
         var clearEligible = strictCaptions
-            ? Buttons.Where(button => button.IsHold && button.Enabled).Select(button => button.Id).ToHashSet()
+            ? Buttons.Where(button => button.IsHold && button.Enabled && HoldCaptionFrameIsCurrent(button.Id, frameTime))
+                .Select(button => button.Id).ToHashSet()
             : null;
         // Like any camera frame, hold evidence advances timed presentations.
         AdvanceBlackjackPresentation(now);
@@ -70,7 +83,7 @@ public sealed partial class BoardSession
         AdvanceSlots(now);
         AdvanceRoulette(now);
         if (!BottomDrawerHoldFrameIsCurrent(frameTime)) return [];
-        var holdButtons = Buttons.Where(button => button.IsHold && button.Enabled)
+        var holdButtons = Buttons.Where(button => button.IsHold && button.Enabled && HoldCaptionFrameIsCurrent(button.Id, frameTime))
             .ToDictionary(button => button.Id);
         foreach (string id in _clearHoldCaptions.Keys.ToArray())
             if (!holdButtons.ContainsKey(id)) _clearHoldCaptions.Remove(id);
@@ -153,9 +166,15 @@ public sealed partial class BoardSession
     /// <paramref name="buttonIds"/> is null. Unchanged controls keep their repeat
     /// timing. Spent places remain blocked until release; obsolete camera
     /// timestamps cannot arm the replacement reference.
+    /// An optional per-control input boundary rejects delayed clear/held frames
+    /// without interrupting an unchanged neighbouring navigation caption.
     /// </summary>
-    public void ResetHoldCaptionEvidence(IReadOnlyCollection<string>? buttonIds = null)
+    public void ResetHoldCaptionEvidence(IReadOnlyCollection<string>? buttonIds = null, DateTimeOffset? inputNotBefore = null)
     {
+        if (inputNotBefore is { } boundary)
+            foreach (string id in buttonIds ?? Buttons.Where(button => button.IsHold).Select(button => button.Id).ToArray())
+                _holdCaptionInputNotBefore[id] = _holdCaptionInputNotBefore.TryGetValue(id, out var previous)
+                    ? Later(previous, boundary) : boundary;
         if (buttonIds is null)
         {
             _holds.Clear();
@@ -169,9 +188,13 @@ public sealed partial class BoardSession
         }
     }
 
+    private bool HoldCaptionFrameIsCurrent(string buttonId, DateTimeOffset frameTime) =>
+        !_holdCaptionInputNotBefore.TryGetValue(buttonId, out var boundary) || frameTime > boundary;
+
     private void ClearHolds()
     {
         ResetHoldCaptionEvidence();
+        _holdCaptionInputNotBefore.Clear();
         _spentHolds.Clear();
         _holdCaptionObservedAt = DateTimeOffset.MinValue;
     }

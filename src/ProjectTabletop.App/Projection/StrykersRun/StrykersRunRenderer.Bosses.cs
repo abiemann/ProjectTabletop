@@ -10,15 +10,13 @@ namespace ProjectTabletop.App.Projection.StrykersRun;
 internal sealed partial class StrykersRunRenderer
 {
     private readonly CanvasTextFormat _bossTitle = TextFormat(29);
-    private readonly CanvasTextFormat _bossHint = TextFormat(22);
+    private readonly CanvasTextFormat _bossDetail = TextFormat(22);
+    private const float BossHudBottom = 215;
     private readonly CanvasTextFormat _victoryTitle = TextFormat(65);
     private int _bossHealth = -1, _bossMaximumHealth = -1;
     private string _bossHealthLabel = string.Empty;
     private static readonly string[] BossNames =
         ["BARREL WARDEN", "SWARM COMMANDER", "STORM REVENANT", "SKIN-WALKER", "COLOSSUS"];
-    private static readonly string[] BossHints =
-        [string.Empty, "BREAK THROUGH HIS MINION WAVES", "MOVE WHEN THE LIGHTNING LOCKS ON",
-         "WATCH THE TONGUE", "SHOOT THE LEGS · AVOID THE RED SWIRLS"];
 
     private static int BossCell(StrykersRunBossSnapshot boss) => boss.Kind switch
     {
@@ -54,36 +52,28 @@ internal sealed partial class StrykersRunRenderer
             }
             int index = Math.Clamp(state.Level - 1, 0, 4);
             Color accent = BossColor(boss);
-            string hint = boss.Kind == StrykersRunBossKind.SkinWalker && boss.Phase == 2
-                ? "KEEP CLEAR OF THE POISON CLOUDS" : BossHints[index];
-            ds.FillRoundedRectangle(new Rect(55, 139, 790, hint.Length > 0 ? 105 : 75), 9, 9, Ink(10, 17, 23, 242));
+            ds.FillRoundedRectangle(new Rect(55, 139, 790, BossHudBottom - 139), 9, 9, Ink(10, 17, 23, 242));
             Text(ds, boss.Kind == StrykersRunBossKind.SkinWalker && boss.Phase == 2 ? "FUNGAL HORROR" : BossNames[index],
                 new Rect(75, 141, 750, 35), accent, _bossTitle);
             ds.FillRoundedRectangle(new Rect(79, 180, 742, 23), 5, 5, Ink(58, 34, 39));
             float health = HealthFraction(boss.Health, boss.MaxHealth);
             if (health > 0) ds.FillRoundedRectangle(new Rect(79, 180, 742 * health, 23), 5, 5, accent);
-            Text(ds, _bossHealthLabel, new Rect(80, 178, 740, 26), Ink(255, 255, 236), _bossHint);
-            if (hint.Length > 0)
-                Text(ds, hint, new Rect(74, 207, 752, 30), Ink(211, 224, 216), _bossHint);
+            Text(ds, _bossHealthLabel, new Rect(80, 178, 740, 26), Ink(255, 255, 236), _bossDetail);
         }
         else if (state.Stage == StrykersRunStage.Intermission)
         {
             ds.FillRoundedRectangle(new Rect(119, 411, 662, 121), 10, 10, Ink(11, 35, 34, 241));
             ds.DrawRoundedRectangle(new Rect(119, 411, 662, 121), 10, 10, Ink(124, 249, 202), 2);
             Text(ds, "BOSS DEFEATED", new Rect(131, 420, 638, 58), Ink(160, 255, 214), _title);
-            Text(ds, "SURVIVORS ADVANCE · NEXT LEVEL", new Rect(131, 482, 638, 37), Ink(239, 230, 196), _bossHint);
+            Text(ds, "SURVIVORS ADVANCE · NEXT LEVEL", new Rect(131, 482, 638, 37), Ink(239, 230, 196), _bossDetail);
         }
     }
 
-    private static Rect BossWorldClip(StrykersRunBossSnapshot boss)
-    {
-        float top = boss.Kind == StrykersRunBossKind.BarrelWarden ? 214 : 244;
-        return new(0, top, Width, RailTop - top);
-    }
+    private static Rect BossWorldClip => new(0, BossHudBottom, Width, RailTop - BossHudBottom);
 
     private static void DrawBossShadow(CanvasDrawingSession ds, StrykersRunBossSnapshot boss)
     {
-        using var hudClip = ds.CreateLayer(1, BossWorldClip(boss));
+        using var hudClip = ds.CreateLayer(1, BossWorldClip);
         if (boss.Kind == StrykersRunBossKind.Colossus)
         {
             for (int leg = 0; leg < 2; leg++)
@@ -106,7 +96,7 @@ internal sealed partial class StrykersRunRenderer
         if (state.Boss is not { } boss) return;
         // Enter from behind the HUD, keeping even the giant's thighs clear of
         // stationary text. The same boundary remains after arrival.
-        using var hudClip = ds.CreateLayer(1, BossWorldClip(boss));
+        using var hudClip = ds.CreateLayer(1, BossWorldClip);
         if (boss.Kind == StrykersRunBossKind.Colossus) { DrawColossus(ds, state, boss); return; }
         var point = Point(boss.X, boss.Y);
         Rect source = _bossCells[BossCell(boss)];
@@ -145,7 +135,7 @@ internal sealed partial class StrykersRunRenderer
         {
             float charge = 0;
             foreach (var hazard in state.Hazards)
-                if (hazard.Kind == StrykersRunHazardKind.Lightning && hazard.IsWarning)
+                if (hazard.Kind == StrykersRunHazardKind.StormCloud && hazard.IsWarning)
                     charge = Math.Max(charge, hazard.Age / Math.Max(.01f, hazard.WarningSeconds));
             for (int arc = 0; arc < 5; arc++)
             {
@@ -272,7 +262,6 @@ internal sealed partial class StrykersRunRenderer
             float fraction = HealthFraction(health, Math.Max(1, boss.MaxHealth / 2));
             ds.FillRoundedRectangle(new Rect(point.X - 79, point.Y + 17, 158, 12), 4, 4, Ink(52, 22, 20));
             ds.FillRoundedRectangle(new Rect(point.X - 79, point.Y + 17, 158 * fraction, 12), 4, 4, Ink(255, 124, 68));
-            Text(ds, "SHOOT", new Rect(point.X - 78, point.Y + 30, 156, 26), Ink(255, 202, 161), _bossHint);
         }
     }
 
@@ -280,7 +269,9 @@ internal sealed partial class StrykersRunRenderer
     {
         foreach (var hazard in state.Hazards)
         {
-            if (hazard.Kind == StrykersRunHazardKind.Stomp)
+            if (hazard.Kind == StrykersRunHazardKind.StormCloud)
+                DrawStormCloudShadow(ds, hazard);
+            else if (hazard.Kind == StrykersRunHazardKind.Stomp)
             {
                 float progress = Math.Clamp(hazard.Age / Math.Max(.01f, hazard.WarningSeconds), 0, 1);
                 float alpha = hazard.IsWarning ? .60f + .35f * progress : Math.Clamp(1 - (hazard.Age - hazard.WarningSeconds) / .7f, 0, 1);
@@ -339,6 +330,8 @@ internal sealed partial class StrykersRunRenderer
                         DrawBolt(ds, Point(hazard.X, hazard.Y) - new Vector2(0, 125 * DepthScale(hazard.Y)),
                             Point(hazard.TargetX, hazard.TargetY), hazard.Id * 71 + (int)(hazard.Age * 35), 5.5f, Ink(162, 226, 255));
                     break;
+                case StrykersRunHazardKind.StormCloud: DrawStormCloud(ds, hazard); break;
+                case StrykersRunHazardKind.ReturnLightning: DrawReturningLightning(ds, hazard); break;
                 case StrykersRunHazardKind.Tongue: DrawTongue(ds, hazard); break;
                 case StrykersRunHazardKind.PoisonGas: DrawPoisonGas(ds, hazard); break;
                 case StrykersRunHazardKind.Stomp:
@@ -350,7 +343,7 @@ internal sealed partial class StrykersRunRenderer
 
     private void DrawBurningBarrel(CanvasDrawingSession ds, StrykersRunHazardSnapshot hazard)
     {
-        using var hudClip = ds.CreateLayer(1, new Rect(0, 214, Width, RailTop - 214));
+        using var hudClip = ds.CreateLayer(1, BossWorldClip);
         float thrown = Math.Clamp(hazard.Age / .30f, 0, 1);
         float depth = DepthScale(hazard.Y), bossScale = 335 * DepthScale(StrykersRunGame.BossY) / WardenReadyHeight;
         var releaseOffset = (WardenReleaseAnchor - WardenFootAnchors[3]) * bossScale;
@@ -465,15 +458,16 @@ internal sealed partial class StrykersRunRenderer
         }
     }
 
-    private static void DrawBolt(CanvasDrawingSession ds, Vector2 from, Vector2 to, int seed, float width, Color color)
+    private static void DrawBolt(CanvasDrawingSession ds, Vector2 from, Vector2 to, int seed, float width, Color color,
+        int segments = 14)
     {
         Vector2 direction = to - from;
         float length = direction.Length();
         if (length < 1) return;
         Vector2 normal = new(-direction.Y / length, direction.X / length), previous = from;
-        for (int segment = 1; segment <= 14; segment++)
+        for (int segment = 1; segment <= segments; segment++)
         {
-            float t = segment / 14f;
+            float t = segment / (float)segments;
             var next = Vector2.Lerp(from, to, t) + normal * ((Noise(seed + segment * 43) - .5f) *
                 Math.Min(46, length * .21f) * MathF.Sin(t * MathF.PI));
             ds.DrawLine(previous, next, Color.FromArgb((byte)(color.A * .24f), color.R, color.G, color.B), width * 4);
@@ -582,6 +576,6 @@ internal sealed partial class StrykersRunRenderer
         ds.DrawRoundedRectangle(new Rect(69, 483, 762, 225), 12, 12, Ink(128, 251, 198), 3);
         Text(ds, "CITY LIBERATED", new Rect(82, 493, 736, 88), Ink(171, 255, 204), _victoryTitle);
         Text(ds, "ALL FIVE BOSSES DEFEATED", new Rect(91, 591, 718, 43), Ink(249, 224, 172), _bossTitle);
-        Text(ds, "STRYKER AND HIS SURVIVORS STAND TALL", new Rect(91, 644, 718, 35), Ink(207, 227, 221), _bossHint);
+        Text(ds, "STRYKER AND HIS SURVIVORS STAND TALL", new Rect(91, 644, 718, 35), Ink(207, 227, 221), _bossDetail);
     }
 }

@@ -23,6 +23,8 @@ public sealed partial class SceneCompositor
     private Vector2? _waterTip, _waterSurfaceTip;
     private Homography? _waterCameraMap, _waterSurfaceMap;
     private long _waterNavigation = -1, _waterResetRevision = -1;
+    private long _waterMarkerInputRevision;
+    private PixelPoint[]? _waterMarkerCameraPolygon;
     private int _waterAppliedDuckCount;
     private long _waterVisualRevision, _waterInputCount;
     private bool _waterWasActive;
@@ -116,7 +118,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
-            if (_boardSession.Screen != BoardScreen.WaterGarden) return false;
+            if (_markerSetup is not null || _boardSession.Screen != BoardScreen.WaterGarden) return false;
             RefreshWaterStickPresence();
             bool accepted = _boardSession.ActivateButton(id, _waterClock());
             SyncWaterGardenSession();
@@ -159,6 +161,14 @@ public sealed partial class SceneCompositor
             var rendered = GetWaterGardenFrame(ds.Device, _waterClock(), CurrentFingerSelectionFeedback, preview: true);
             ds.DrawImage(rendered, new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight),
                 new Rect(0, 0, rendered.SizeInPixels.Width, rendered.SizeInPixels.Height));
+            if (_markerSetup is not null)
+            {
+                var previous = ds.Transform;
+                ds.Transform = Matrix3x2.CreateScale((float)(drawWidth / BoardSurfaceSize), (float)(drawHeight / BoardSurfaceSize)) *
+                    Matrix3x2.CreateTranslation((float)((width - drawWidth) / 2), (float)((height - drawHeight) / 2)) * previous;
+                try { DrawMarkerSetupPresentation(ds, boardTexture: false); }
+                finally { ds.Transform = previous; }
+            }
         }
     }
 
@@ -229,6 +239,48 @@ public sealed partial class SceneCompositor
         _waterFrameTarget is { } target && target.Device == device &&
         target.SizeInPixels.Width == _boardRasterPixels.Width &&
         target.SizeInPixels.Height == _boardRasterPixels.Height;
+
+    public long WaterMarkerInputRevision
+    {
+        get { lock (_gate) { SyncWaterGardenSession(); return _waterMarkerInputRevision; } }
+    }
+
+    public IReadOnlyList<PixelPoint>? GetWaterMarkerCameraPolygon()
+    {
+        lock (_gate)
+        {
+            SyncWaterGardenSession();
+            if (!_waterWasActive || _boardCameraMap is null || _boardSurfaceMap is null) return null;
+            if (_waterMarkerCameraPolygon is not null) return _waterMarkerCameraPolygon;
+            try
+            {
+                _waterMarkerCameraPolygon = new[] { new Point2(0, 0), new Point2(1, 0), new Point2(1, 1), new Point2(0, 1) }
+                    .Select(point => _boardCameraMap.InverseTransform(_boardSurfaceMap.Transform(point)))
+                    .Select(point => new PixelPoint(point.X, point.Y)).ToArray();
+                return _waterMarkerCameraPolygon;
+            }
+            catch (InvalidOperationException) { return null; }
+        }
+    }
+
+    public bool TryMapWaterMarkerCameraPoint(PixelPoint camera, out PixelPoint board)
+    {
+        lock (_gate)
+        {
+            board = default;
+            SyncWaterGardenSession();
+            if (!_waterWasActive || _boardCameraMap is null || _boardSurfaceMap is null ||
+                !double.IsFinite(camera.X) || !double.IsFinite(camera.Y)) return false;
+            try
+            {
+                var uv = _boardSurfaceMap.InverseTransform(_boardCameraMap.Transform(new(camera.X, camera.Y)));
+                if (!double.IsFinite(uv.X) || !double.IsFinite(uv.Y) || uv.X is < 0 or > 1 || uv.Y is < 0 or > 1) return false;
+                board = new(uv.X, uv.Y);
+                return true;
+            }
+            catch (InvalidOperationException) { return false; }
+        }
+    }
 
     // Stick observations cannot select buttons, but disarm controls while the
     // tip is in the water. The calibrated plane supplies position, not contact
@@ -375,11 +427,11 @@ public sealed partial class SceneCompositor
             WaterGardenAudioChanged?.Invoke();
         }
         if (!_boardSession.SetWaterGardenStickPresent(present, _waterClock())) return;
-        // Reject in-flight caption results even if the marker enters and leaves
-        // between two hold-context captures. Re-arming requires a fresh clear.
-        _holdSceneKey = null;
-        _holdExpectedScene = null;
-        _holdRevision++;
+        // Only the action row changes appearance. Keep the navigation arrow's
+        // verified optics and hold while a wand enters/leaves the water. An
+        // open row still rejects in-flight results from its previous enabled
+        // state; GetHoldButtonContext selectively resets the changed actions.
+        if (_boardSession.WaterGardenDrawerOpen) _holdRevision++;
         _waterVisualRevision++;
         _waterRenderedFrame = null;
     }
@@ -396,6 +448,8 @@ public sealed partial class SceneCompositor
             _waterResetRevision == _boardSession.WaterGardenResetRevision) return;
         ClearWaterStick();
         _waterResetThrough = _waterClock();
+        _waterMarkerInputRevision++;
+        _waterMarkerCameraPolygon = null;
         _waterFrameTime = default;
         _waterAdvancedAt = default;
         _waterInputCount = 0;
@@ -550,15 +604,15 @@ public sealed partial class SceneCompositor
             hovered ? Color.FromArgb(255, 151, 174, 134) : Color.FromArgb(255, 239, 239, 221), hovered ? 3 : 2);
         if (IsBoardDrawerHandle(button))
         {
-            using var arrow = CanvasGeometry.CreatePolygon(ds.Device, DrawerArrowVertices(button, PaintBoardAspect()));
-            ds.FillGeometry(arrow, button.Enabled ? WaterInk : Color.FromArgb(255, 104, 115, 107));
+            double aspect = PaintBoardAspect();
+            using var arrow = DrawerArrowGeometry(ds.Device, button, DrawerArrowVertices(button, aspect), aspect);
+            ds.FillGeometry(arrow, button.Enabled ? Color.FromArgb(255, 0, 0, 0) : Color.FromArgb(255, 104, 115, 107));
             DrawButtonFingerSelectionFeedback(ds, button, feedback, WaterInk, showCaption: false);
         }
         else
         {
-            using var text = WaterGardenButtonTextFormat();
-            DrawBoardAspectText(ds, button.Label, WaterGardenButtonTextRectangle(button),
-                button.Enabled ? WaterInk : Color.FromArgb(255, 104, 115, 107), text);
+            DrawHoldButtonCaption(ds, button.Label, WaterGardenButtonTextRectangle(button),
+                button.Enabled ? WaterInk : Color.FromArgb(255, 104, 115, 107), PaintBoardAspect());
             DrawButtonFingerSelectionFeedback(ds, button, feedback, WaterInk);
         }
     }
@@ -570,18 +624,8 @@ public sealed partial class SceneCompositor
             b.Width * BoardSurfaceSize - 20, b.Height * BoardSurfaceSize - 18);
     }
 
-    private static CanvasTextFormat WaterGardenButtonTextFormat()
-    {
-        var format = PaintButtonTextFormat();
-        format.FontSize = 28;
-        return format;
-    }
-
-    private HandTrackingBounds WaterGardenButtonTextRegion(CanvasDevice device, BoardButton button)
-    {
-        using var format = WaterGardenButtonTextFormat();
-        return BoardAspectButtonTextRegion(device, button, format, WaterGardenButtonTextRectangle(button));
-    }
+    private HandTrackingBounds WaterGardenButtonTextRegion(CanvasDevice device, BoardButton button) =>
+        HoldButtonCaptionRegion(device, button, WaterGardenButtonTextRectangle(button));
 
     private void DisposeWaterGardenResources()
     {

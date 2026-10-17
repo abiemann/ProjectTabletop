@@ -30,10 +30,10 @@ public sealed partial class SceneCompositor
     {
         // Golden rule: a long press requires broken lettering. A colour or
         // reflectance change beneath still-readable letters is never a press.
-        // Confirmation also requires both 7% obstruction coverage floors.
+        // The caption supplies its own damage evidence. Whole-button coverage
+        // and acquisition confirmation govern hand searches, never this hold.
         public IReadOnlyList<string> HeldButtons(HandAcquisitionPresenceResult? result) =>
-            result?.TextPatterns?.Where(pattern => pattern.ShapeCorrupted && !pattern.LabelIntact &&
-                    pattern.ConfirmationFrames >= 1 &&
+            result?.TextPatterns?.Where(pattern => pattern.CaptionHoldEvidence &&
                     pattern.ControlRegion >= 0 && pattern.ControlRegion < ButtonIds.Count &&
                     EnabledHoldIds.Contains(ButtonIds[pattern.ControlRegion]))
                 .Select(pattern => ButtonIds[pattern.ControlRegion]).ToArray() ?? [];
@@ -45,6 +45,17 @@ public sealed partial class SceneCompositor
                     pattern.ControlRegion >= 0 && pattern.ControlRegion < ButtonIds.Count &&
                     EnabledHoldIds.Contains(ButtonIds[pattern.ControlRegion]))
                 .Select(pattern => ButtonIds[pattern.ControlRegion]).ToArray() ?? [];
+
+        // Menu paging yields to activity anywhere else on the board. Keep the
+        // actual held/clear observations intact: a veto is not proof of release.
+        public IReadOnlyList<string> BlockedButtons(HandAcquisitionPresenceResult? result)
+        {
+            if (ExpectedScene.BoardDisturbanceExclusionRegion is null || result is null) return [];
+            bool elsewhere = result.OutsideControlDisturbance || result.TextPatterns?.Any(pattern =>
+                pattern.CaptionHoldEvidence && pattern.ControlRegion >= 0 && pattern.ControlRegion < ButtonIds.Count &&
+                ButtonIds[pattern.ControlRegion] is not ("menu-scroll-down" or "menu-scroll-up")) == true;
+            return elsewhere ? ButtonIds.Where(id => id is "menu-scroll-down" or "menu-scroll-up").ToArray() : [];
+        }
     }
 
     public HoldButtonContext? GetHoldButtonContext(DateTimeOffset frameTime)
@@ -65,6 +76,13 @@ public sealed partial class SceneCompositor
             if (_holdSceneKey != key || _holdExpectedScene is null)
             {
                 if (CaptureExpectedAcquisitionScene() is not { } scene) return null;
+                if (_boardSession.Screen == BoardScreen.Menu)
+                {
+                    var arrow = BoardSession.MenuScrollButtonBounds;
+                    // Ignore the arrow's own plate and its narrow optical edge.
+                    scene = scene with { BoardDisturbanceExclusionRegion = new(
+                        arrow.X - .015, arrow.Y - .015, arrow.Width + .03, arrow.Height + .03) };
+                }
                 // Disabled artwork, changed captions or resized letters cannot
                 // arm a later enabled control. Verify this exact appearance
                 // uncovered before accepting its next camera-driven press.
@@ -97,7 +115,8 @@ public sealed partial class SceneCompositor
 
     /// <summary>Applies one camera frame's hold evidence; returns the buttons it activated.</summary>
     public IReadOnlyList<string> ObserveHoldButtons(HoldButtonContext? context, IReadOnlyList<string> heldIds,
-        DateTimeOffset frameTime, IReadOnlyCollection<string>? clearedIds = null)
+        DateTimeOffset frameTime, IReadOnlyCollection<string>? clearedIds = null,
+        IReadOnlyCollection<string>? blockedIds = null)
     {
         lock (_gate)
         {
@@ -107,9 +126,15 @@ public sealed partial class SceneCompositor
                 frameTime < _holdNavigationStartedAt || HoldControlsSettling(frameTime) ||
                 context is null || !IsCurrentHoldContext(context) ||
                 !AcquisitionBoardReady || HasBoardControlDrawerAnimation()) return [];
-            var activated = _boardSession.ObserveHeldButtons(heldIds, frameTime, HoldClock(), clearedIds);
+            var activated = _boardSession.ObserveHeldButtons(heldIds, frameTime, HoldClock(), clearedIds, blockedIds);
             if (activated.Count > 0)
             {
+                if (context.ButtonIds.Contains("paint-drawer-close") || context.ButtonIds.Contains("paint-drawer-open"))
+                {
+                    SyncPaintSession();
+                    NotePaintUserActivity();
+                    if (activated.Contains("paint-save")) QueuePaintSaveRequest(frameTime);
+                }
                 QueuePhotoCopyHoldAction(activated, frameTime);
                 SyncPhotoCopySession();
             }
@@ -174,12 +199,13 @@ public sealed partial class SceneCompositor
     private static float BoardButtonCornerRadius(BoardButton button) => button.Id switch
     {
         "globe-drawer-open" or "globe-drawer-close" or "photo-drawer-open" or "photo-drawer-close" or
-            "water-drawer-open" or "water-drawer-close" or
+            "water-drawer-open" or "water-drawer-close" or "paint-drawer-open" or "paint-drawer-close" or
             "menu-scroll-down" or "menu-scroll-up" => 25,
         _ when button.Id.StartsWith("slot-", StringComparison.Ordinal) => 18,
         _ when button.Id.StartsWith("bj-", StringComparison.Ordinal) => 13,
         _ when button.Id.StartsWith("globe-", StringComparison.Ordinal) => 15,
         _ when button.Id.StartsWith("water-garden-", StringComparison.Ordinal) => 15,
+        "paint-save" or "paint-reset" => 15,
         _ when button.Id.StartsWith("photo-", StringComparison.Ordinal) || button.Id == "capture-again" ||
             button.Id == "menu" && button.IsHold => 15,
         _ => 19
@@ -201,6 +227,7 @@ public sealed partial class SceneCompositor
         BoardScreen.StrykersRun => _strykersRunClock(),
         BoardScreen.Globe => _globeClock(),
         BoardScreen.WaterGarden => _waterClock(),
+        BoardScreen.Paint => _paintClock(),
         _ => _blackjackClock()
     };
 

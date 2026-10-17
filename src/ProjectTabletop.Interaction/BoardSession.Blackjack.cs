@@ -117,6 +117,15 @@ public sealed partial class BoardSession
         {
             return SelectSlotsButton(button, now);
         }
+        if (Screen == BoardScreen.Paint)
+        {
+            if (now < _paintDrawer.ObservedAt) return false;
+            if (button.Id == "paint-drawer-open")
+                return SelectBottomDrawer(_paintDrawer, BoardScreen.Paint, open: true, now);
+            if (button.Id == "paint-drawer-close")
+                return SelectBottomDrawer(_paintDrawer, BoardScreen.Paint, open: false, now);
+            if (!PaintDrawerOpen || !_paintDrawer.OpeningReady) return false;
+        }
         if (Screen == BoardScreen.PhotoCopy)
         {
             if (now < _photoCopyDrawer.ObservedAt) return false;
@@ -133,6 +142,11 @@ public sealed partial class BoardSession
         {
             // The application owns the readable dialog. This is an action on
             // Settings, not navigation; preserve the board and its references.
+        }
+        else if (button.Id == "paint-reset")
+        {
+            if (Screen != BoardScreen.Paint) return false;
+            PaintResetRevision++;
         }
         else if (button.Id == "paint-save")
         {

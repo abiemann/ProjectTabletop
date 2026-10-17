@@ -248,10 +248,13 @@ public sealed partial class SceneCompositor
         else
         {
             var text = CasinoButtonTextSpec(button);
-            CasinoText(ds, text.Caption, text.Bounds, text.Size, HoldExposure(ink, lettering), "Bahnschrift", true);
+            if (button.IsHold)
+                DrawHoldButtonCaption(ds, text.Caption, text.Bounds, HoldExposure(ink, lettering), PaintBoardAspect());
+            else
+                CasinoText(ds, text.Caption, text.Bounds, text.Size, HoldExposure(ink, lettering), "Bahnschrift", true);
             if (primary)
-                CasinoText(ds, "NEW HAND", new Rect(rect.X + 8, rect.Bottom - 33, rect.Width - 16, 22), 13,
-                    ThemeColor(63, 55, 29), "Bahnschrift", true);
+                DrawHoldButtonCaption(ds, "NEW HAND", new Rect(text.Bounds.X, rect.Y + rect.Height / 2,
+                    text.Bounds.Width, text.Bounds.Height), ThemeColor(63, 55, 29), PaintBoardAspect());
         }
     }
 
@@ -518,7 +521,8 @@ public sealed partial class SceneCompositor
             "bj-double" => "DOUBLE", "bj-split" => "SPLIT",
             "menu" => "Exit", _ => button.Label
         };
-        return (caption, new Rect(rect.X + 8, rect.Y + (button.Id == "bj-deal" ? -7 : 0),
-            rect.Width - 16, rect.Height), button.Id == "menu" ? 30 : 27);
+        bool deal = button.Id == "bj-deal";
+        return (caption, new Rect(rect.X + 8, rect.Y + (deal ? 6 : 0),
+            rect.Width - 16, deal ? (rect.Height - 12) / 2 : rect.Height), button.Id == "menu" ? 30 : 27);
     }
 }

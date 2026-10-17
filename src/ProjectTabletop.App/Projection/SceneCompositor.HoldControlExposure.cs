@@ -62,7 +62,7 @@ public sealed partial class SceneCompositor
             // Real obstruction or an active hold must never alter its reference.
             if (_holdControlBrightness <= MinimumLightLevel || presence.Hints.Count > 0 ||
                 _boardSession.HoldProgress(now).Count > 0 || patterns.Any(pattern =>
-                    pattern.ConfirmationFrames > 0 ||
+                    pattern.CaptionHoldEvidence || pattern.ConfirmationFrames > 0 ||
                     pattern.ControlCoverage >= HandAcquisitionPresenceTracker.MinimumControlCoverage &&
                     pattern.ControlTriggerCoverage >= HandAcquisitionPresenceTracker.MinimumControlCoverage ||
                     pattern.CaptionReflectanceCoverage >= HandAcquisitionPresenceTracker.MinimumControlCoverage &&

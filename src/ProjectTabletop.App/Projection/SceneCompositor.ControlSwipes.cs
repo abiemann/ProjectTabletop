@@ -80,6 +80,9 @@ public sealed partial class SceneCompositor
             _controlSwipeTraversalFrame = frameTime;
             _controlSwipeTraversal = traversalInProgress;
             if (traversalInProgress || wasTraversing) _controlSwipeHoldNotBefore = frameTime;
+            // A deliberate control sweep is user activity before it reaches the
+            // opposite edge. Keep idle paint from redrawing its camera baseline.
+            if (traversalInProgress && _boardSession.Screen == BoardScreen.Paint) NotePaintUserActivity();
             if (traversalInProgress && !wasTraversing)
             {
                 // Crossing a caption must not complete a hold. A stationary
@@ -87,8 +90,9 @@ public sealed partial class SceneCompositor
                 _boardSession.ResetHoldCaptionEvidence();
                 _holdRevision++;
             }
-            if (swipe is not { } command || now < _controlSwipeRearmAt ||
-                !_boardSession.SetButtonsVisible(command == BoardControlSwipe.Show, now)) return false;
+            if (swipe != BoardControlSwipe.Toggle || now < _controlSwipeRearmAt ||
+                !_boardSession.SetButtonsVisible(!_boardSession.ButtonsVisible, now)) return false;
+            if (_boardSession.Screen == BoardScreen.Paint) NotePaintUserActivity();
             _controlSwipeRearmAt = now + TimeSpan.FromMilliseconds(600);
             InvalidateControlSwipeContext(now);
             // Reject results captured before a hide/show round trip even when

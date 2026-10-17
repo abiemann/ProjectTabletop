@@ -56,7 +56,7 @@ public sealed partial class MainWindow
         var lobbyCenter = new Vector2(-.42f, .04f);
         PixelPoint LobbyCamera(Vector2 point) => Camera(field.X + (point.X / FootballGame.Width + .5) * field.Width,
             field.Y + (point.Y / FootballGame.Height + .5) * field.Height, inset);
-        var lobbyMarker = new ColorTipObservation(LobbyCamera(lobbyCenter), 12, 300, 1)
+        var lobbyMarker = new MarkerTipObservation(LobbyCamera(lobbyCenter), 12, 300, 1)
         {
             Bar = new(LobbyCamera(lobbyCenter - new Vector2(0, .055f)), LobbyCamera(lobbyCenter + new Vector2(0, .055f)),
                 LobbyCamera(lobbyCenter - new Vector2(.008f, 0)), LobbyCamera(lobbyCenter + new Vector2(.008f, 0)))
@@ -240,7 +240,7 @@ public sealed partial class MainWindow
                     PixelPoint PoseCamera(Vector2 point) => Camera(pitch.X + (point.X / FootballGame.Width + .5) * pitch.Width,
                         pitch.Y + (point.Y / FootballGame.Height + .5) * pitch.Height, anchorInset, turnBoard);
                     now += TimeSpan.FromMilliseconds(300);
-                    var observation = new ColorTipObservation(PoseCamera(center), 12, 300, 1)
+                    var observation = new MarkerTipObservation(PoseCamera(center), 12, 300, 1)
                     {
                         Bar = new(PoseCamera(center - along * .055f), PoseCamera(center + along * .055f),
                             PoseCamera(center - forward * .008f), PoseCamera(center + forward * .008f))
@@ -580,7 +580,7 @@ public sealed partial class MainWindow
                 var center = new Vector2(winner == 0 ? -.4f : .4f, .04f);
                 var forward = new Vector2(winner == 0 ? 1 : -1, 0);
                 var along = new Vector2(-forward.Y, forward.X);
-                var observation = new ColorTipObservation(ToCamera(center), 12, 300, 1)
+                var observation = new MarkerTipObservation(ToCamera(center), 12, 300, 1)
                 {
                     Bar = new(ToCamera(center - along * .055f), ToCamera(center + along * .055f),
                         ToCamera(center - forward * .008f), ToCamera(center + forward * .008f))
@@ -863,7 +863,7 @@ public sealed partial class MainWindow
                     Check(current.TryMapFootballCameraPoint(cameraPoint, out var widened) &&
                         Math.Abs(widened.Y - (y / FootballGame.Height + .5)) < .0001,
                         "The newly widened sideline strip did not map to the playing field.");
-                    var observation = new ColorTipObservation(cameraPoint, 12, 300, 1)
+                    var observation = new MarkerTipObservation(cameraPoint, 12, 300, 1)
                     {
                         Bar = new(WorldCamera(center - new Vector2(0, .055f)), WorldCamera(center + new Vector2(0, .055f)),
                             WorldCamera(center - new Vector2(.008f, 0)), WorldCamera(center + new Vector2(.008f, 0)))
@@ -890,13 +890,13 @@ public sealed partial class MainWindow
                     var forward = new Vector2(player == 0 ? 1 : -1, 0);
                     var along = new Vector2(-forward.Y, forward.X);
                     const float halfThickness = .035f;
-                    var observation = new ColorTipObservation(cameraPoint, 16, 700, 1)
+                    var observation = new MarkerTipObservation(cameraPoint, 16, 700, 1)
                     {
                         Bar = new(WorldCamera(center - along * .055f), WorldCamera(center + along * .055f),
                             WorldCamera(center - forward * halfThickness), WorldCamera(center + forward * halfThickness))
                     };
-                    var detection = new ColorTipDetectionResult([observation], "black-bar-pair-candidate");
-                    var tracker = new ColorTipTracker();
+                    var detection = new MarkerTipDetectionResult([observation], "black-bar-pair-candidate");
+                    var tracker = new MarkerTipTracker();
                     PixelPoint? MarkerField(PixelPoint point) => current.TryMapFootballMarkerCameraPoint(point, out var fieldPoint)
                         ? fieldPoint : null;
                     now += TimeSpan.FromMilliseconds(33);

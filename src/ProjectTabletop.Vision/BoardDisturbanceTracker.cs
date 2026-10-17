@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Vision;
 
-/// <summary>A fresh, compact disturbance in normalized coordinates of the supplied control band.</summary>
+/// <summary>A fresh, compact disturbance in normalized band coordinates. TrackingId is diagnostic only and may be zero.</summary>
 public readonly record struct BoardMotionObservation(long TrackingId, double U, double V);
 
 /// <summary>
@@ -24,7 +24,8 @@ public sealed class BoardDisturbanceTracker
     private readonly Candidate[] _candidates = new Candidate[4];
     private readonly Track[] _tracks = new Track[2];
     private readonly bool[] _matchedTracks = new bool[2], _matchedCandidates = new bool[4];
-    private readonly List<BoardMotionObservation> _observations = new(2);
+    private readonly long[] _candidateTrackingIds = new long[4];
+    private readonly List<BoardMotionObservation> _observations = new(4);
     private int _width, _height, _stride, _validCells, _candidateCount;
     private bool _initialized, _configured;
     private long _nextTrackingId;
@@ -85,8 +86,13 @@ public sealed class BoardDisturbanceTracker
             float blue = _samples[c + 2] - _background[c + 2] - blueShift;
             float chroma = Math.Max(red, Math.Max(green, blue)) - Math.Min(red, Math.Min(green, blue));
             float luminance = Math.Abs((red + green + blue) / 3);
+            // A dark projected surface cannot lose 40 levels when a hand occludes it.
+            // Retain the bright-surface threshold and the measured camera-noise floor.
+            float backgroundLuminance = (_background[c] + redShift + _background[c + 1] + greenShift +
+                _background[c + 2] + blueShift) / 3;
+            float luminanceFloor = Math.Clamp(backgroundLuminance * .60f, 14, 40);
             bool foreground = !warming && (chroma > Math.Max(24, _noise[i] * 4 + 8) ||
-                luminance > Math.Max(40, _noise[i] * 5 + 14));
+                luminance > Math.Max(luminanceFloor, _noise[i] * 5 + 14));
             if (foreground) { _foreground[i] = 1; foregroundCount++; }
         }
         // A scene redraw is a new baseline, never a very large moving hand.
@@ -289,6 +295,7 @@ public sealed class BoardDisturbanceTracker
     {
         Array.Clear(_matchedTracks);
         Array.Clear(_matchedCandidates);
+        Array.Clear(_candidateTrackingIds);
         for (int i = 0; i < _tracks.Length; i++)
             if (frameTime - _tracks[i].LastSeen > TimeSpan.FromMilliseconds(180)) _tracks[i] = default;
         for (int match = 0; match < _tracks.Length; match++)
@@ -315,14 +322,14 @@ public sealed class BoardDisturbanceTracker
             Track previous = _tracks[bestTrack];
             Candidate current = _candidates[bestCandidate];
             bool moved = Math.Abs(current.U - previous.AnchorU) > .01 || Math.Abs(current.V - previous.AnchorV) > .04;
-            Track updated = new(previous.Id, current.U, current.V, current.Area, previous.Samples + 1, frameTime,
+            Track updated = new(previous.Id, current.U, current.V, current.Area, frameTime,
                 moved ? current.U : previous.AnchorU, moved ? current.V : previous.AnchorV,
                 moved ? frameTime : previous.LastMoved);
             _tracks[bestTrack] = updated;
             _componentProtection[current.ComponentStart] = (byte)(frameTime - updated.LastMoved <= TimeSpan.FromMilliseconds(650) ? 1 : 2);
             _matchedTracks[bestTrack] = true;
             _matchedCandidates[bestCandidate] = true;
-            if (updated.Samples >= 2) _observations.Add(new(updated.Id, updated.U, updated.V));
+            _candidateTrackingIds[bestCandidate] = updated.Id;
         }
         for (int c = 0; c < _candidateCount; c++)
         {
@@ -331,15 +338,21 @@ public sealed class BoardDisturbanceTracker
             {
                 if (_tracks[t].Id != 0) continue;
                 Candidate candidate = _candidates[c];
-                _tracks[t] = new(++_nextTrackingId, candidate.U, candidate.V, candidate.Area, 1, frameTime,
+                _tracks[t] = new(++_nextTrackingId, candidate.U, candidate.V, candidate.Area, frameTime,
                     candidate.U, candidate.V, frameTime);
+                _candidateTrackingIds[c] = _nextTrackingId;
                 _componentProtection[candidate.ComponentStart] = 1;
                 break;
             }
         }
+        // Internal identity protects moving foreground from background adaptation. A swipe
+        // consumes the current compact disturbances immediately, even when their shape splits
+        // or neither protection track can be matched. It does not require continuous identity.
+        for (int c = 0; c < _candidateCount; c++)
+            _observations.Add(new(_candidateTrackingIds[c], _candidates[c].U, _candidates[c].V));
     }
 
     private readonly record struct Candidate(double U, double V, int Area, int ComponentStart);
-    private readonly record struct Track(long Id, double U, double V, int Area, int Samples, DateTimeOffset LastSeen,
+    private readonly record struct Track(long Id, double U, double V, int Area, DateTimeOffset LastSeen,
         double AnchorU, double AnchorV, DateTimeOffset LastMoved);
 }

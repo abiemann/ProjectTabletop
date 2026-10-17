@@ -11,17 +11,17 @@ public sealed partial class MainWindow
     private long _captionGeneration;
     private DateTimeOffset _captionInputNotBefore;
 
-    // These capture boards intentionally consume the same hand/caption frame
-    // when making a photograph or saving paint. Other holds need no landmarks.
+    // Photo Copy intentionally consumes the same hand/caption frame when
+    // making a photograph. Other holds, including Paint's Save, need no landmarks.
     private static bool HandFrameOwnsCaptions(BoardScreen screen) =>
-        screen is BoardScreen.PhotoCopy or BoardScreen.Paint;
+        screen == BoardScreen.PhotoCopy;
 
     private void QueueHoldButtonDetection(CameraFrame frame, long tick)
     {
         if (!_holdWorker.CanRun(tick, HandDetectionInterval)) return;
         // Reserve without a scene/generation lock on the capture thread. All
         // state reads below run on this worker, independently of hand/UI work.
-        _holdWorker.TryRun(tick, HandDetectionInterval, frame, _ =>
+        _holdWorker.TryRun(tick, HandDetectionInterval, frame, work =>
         {
             long generation, handGeneration;
             lock (_captionGate)
@@ -37,6 +37,7 @@ public sealed partial class MainWindow
                 var context = _scene.GetHoldButtonContext(frame.Timestamp);
                 if (context is null) return;
                 var query = FindHeldButtons(frame, context, handGeneration);
+                bool savePaint;
                 lock (_captionGate)
                 {
                     if (generation != _captionGeneration || !HoldDetectionAvailable() ||
@@ -46,8 +47,23 @@ public sealed partial class MainWindow
                     _captionCheckError = null;
                     // Scene methods validate freshness again after acquiring
                     // their render lock. Never extend the 350 ms safety limit.
-                    PublishHoldButtonEvidence(frame, context, query);
+                    savePaint = PublishHoldButtonEvidence(frame, context, query).Contains("paint-save");
                 }
+                if (savePaint)
+                    work.TryPost(_dispatchInputResult, () =>
+                    {
+                        lock (_captionGate)
+                        {
+                            var age = MonotonicClock.UtcNow - frame.Timestamp;
+                            if (generation != _captionGeneration || !HoldDetectionAvailable() ||
+                                _scene.CurrentBoardScreen != BoardScreen.Paint ||
+                                age < TimeSpan.Zero || age > HandMarkerLifetime) return;
+                        }
+                        // Freeze and save on the UI thread, without holding a
+                        // caption lock across application status/hand queries.
+                        // The scene checks this exact source frame and visit.
+                        QueuePaintSave(frame.Timestamp);
+                    });
             }
             catch (Exception error)
             {
@@ -66,18 +82,21 @@ public sealed partial class MainWindow
         _cameraWanted && _camera.IsRunning && _cameraOperation.CurrentCount != 0 &&
         !Volatile.Read(ref _cameraHealthWarning) && !IsBoardScanMeasuring;
 
-    private void PublishHoldButtonEvidence(CameraFrame frame, SceneCompositor.HoldButtonContext? context,
+    private IReadOnlyList<string> PublishHoldButtonEvidence(CameraFrame frame, SceneCompositor.HoldButtonContext? context,
         HoldButtonQuery query)
     {
         var board = _scene.CurrentBoardScreen;
         _scene.ObserveHoldControlExposure(context, query.Presence, frame.Timestamp);
-        var activations = _scene.ObserveHoldButtons(context, query.Held, frame.Timestamp, query.Cleared);
+        var blocked = context?.BlockedButtons(query.Presence) ?? [];
+        var activations = _scene.ObserveHoldButtons(context, query.Held, frame.Timestamp, query.Cleared, blocked);
         _lastHoldButtonDetection = new { frameTime = frame.Timestamp,
             board = board.ToString(), context = context is not null, held = query.Held,
-            cleared = query.Cleared, revision = context?.Revision,
+            cleared = query.Cleared, blocked, revision = context?.Revision,
             buttonIds = context?.ButtonIds, enabledHoldIds = context?.EnabledHoldIds,
             ageMilliseconds = (MonotonicClock.UtcNow - frame.Timestamp).TotalMilliseconds,
             reason = query.Presence?.Reason, baselineReady = query.Presence?.BaselineReady,
+            outsideControlDisturbance = query.Presence?.OutsideControlDisturbance,
+            outsideControlForegroundFraction = query.Presence?.OutsideControlForegroundFraction,
             textPatterns = query.Presence?.TextPatterns, localFits = query.Presence?.LocalFits,
             progress = _scene.CurrentHoldProgress };
         if (activations.Count > 0)
@@ -87,5 +106,6 @@ public sealed partial class MainWindow
         }
         if (context is { EnabledHoldIds.Count: > 0 })
             LogHandTrackingEvent("hold_frame", _lastHoldButtonDetection);
+        return activations;
     }
 }

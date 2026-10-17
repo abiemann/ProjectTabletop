@@ -4,7 +4,7 @@ namespace ProjectTabletop.Interaction;
 
 public enum StrykersRunStage { Running, Boss, Intermission, Complete, BossEntrance }
 public enum StrykersRunBossKind { BarrelWarden, SwarmCommander, StormRevenant, SkinWalker, Colossus }
-public enum StrykersRunHazardKind { Barrel, BarrelBlast, Lightning, Tongue, PoisonGas, Stomp }
+public enum StrykersRunHazardKind { Barrel, BarrelBlast, Lightning, Tongue, PoisonGas, Stomp, StormCloud, ReturnLightning }
 
 public readonly record struct StrykersRunBossSnapshot(StrykersRunBossKind Kind, float X, float Y,
     int Health, int MaxHealth, int Phase, float PhaseSeconds, float AttackSeconds,
@@ -45,6 +45,7 @@ public sealed partial class StrykersRunGame
         _stage = StrykersRunStage.Running;
         _boss = null;
         _hazards.Clear();
+        _stormCraters.Clear();
     }
 
     // Level and attack boundaries use simulation ticks rather than accumulated
@@ -82,6 +83,7 @@ public sealed partial class StrykersRunGame
         {
             _levelTicks++;
             _distance = ((_level - 1) * LevelTicks + _levelTicks) * RoadSpeed / 120f;
+            CullStormCraters();
             _wave = 1 + (_level - 1) * 2 + _levelTicks / (18 * 120);
             if (_levelTicks >= LevelTicks)
             {
@@ -92,7 +94,7 @@ public sealed partial class StrykersRunGame
         else if (_stage == StrykersRunStage.Boss)
         {
             StepHazards();
-            if (_phase == StrykersRunPhase.GameOver) return false;
+            if (_phase == StrykersRunPhase.GameOver || _stage != StrykersRunStage.Boss) return false;
             StepBoss();
         }
         return true;
@@ -107,7 +109,9 @@ public sealed partial class StrykersRunGame
         // Reinforcements shorten a fight, while a lone survivor can still win.
         // Scaling once at entry prevents losing troops from healing the boss.
         int shooters = Math.Clamp((_soldiers + 3) / 4, 1, 12);
-        _boss = new((StrykersRunBossKind)(_level - 1), (90 + _level * 20) * (shooters + 1) / 2);
+        int baseHealth = _level == 3 ? 360 : 90 + _level * 20;
+        _boss = new((StrykersRunBossKind)(_level - 1), baseHealth * (shooters + 1) / 2)
+        { SpiderHealth = 8 + shooters * 3 };
         _fireRemaining = 0;
     }
 
@@ -141,8 +145,10 @@ public sealed partial class StrykersRunGame
                 boss.AttackRemaining = 330;
                 break;
             case StrykersRunBossKind.StormRevenant:
-                AddHazard(StrykersRunHazardKind.Lightning, BossX, BossY, _squadX, SquadY, 144, 180, .025f, 5);
-                boss.AttackRemaining = 306;
+                float lane = StormLane(boss.Waves++);
+                AddHazard(StrykersRunHazardKind.StormCloud, lane, StormCloudStartY, lane, StormCloudEndY,
+                    StormCloudWarningTicks, StormCloudDurationTicks, .085f, 4);
+                boss.AttackRemaining = StormAttackIntervalTicks;
                 break;
             case StrykersRunBossKind.SkinWalker when boss.Phase == 1:
                 AddHazard(StrykersRunHazardKind.Tongue, BossX, BossY, _squadX, SquadY, 90, 126, .018f, 4);
@@ -188,6 +194,24 @@ public sealed partial class StrykersRunGame
         {
             var hazard = _hazards[i];
             hazard.Ticks++;
+            if (hazard.Kind == StrykersRunHazardKind.StormCloud)
+            {
+                StepStormCloud(hazard);
+                if (_phase == StrykersRunPhase.GameOver) return;
+                if (hazard.Ticks >= hazard.DurationTicks) _hazards.RemoveAt(i);
+                continue;
+            }
+            if (hazard.Kind == StrykersRunHazardKind.ReturnLightning)
+            {
+                if (hazard.Ticks == hazard.WarningTicks)
+                {
+                    ApplyBossDamage(0, hazard.Damage);
+                    // A fatal return clears all encounters, including this list.
+                    if (_stage != StrykersRunStage.Boss) return;
+                }
+                if (hazard.Ticks >= hazard.DurationTicks) _hazards.RemoveAt(i);
+                continue;
+            }
             if (hazard.Kind == StrykersRunHazardKind.Barrel)
             {
                 float travel = Math.Min(1, hazard.Ticks / 360f);
@@ -297,22 +321,24 @@ public sealed partial class StrykersRunGame
         return new(part == 1 ? BossLeftLegX : BossRightLegX, BossLegY);
     }
 
-    private void DamageBoss(int part)
+    private void DamageBoss(int part) => ApplyBossDamage(part, 1);
+
+    private void ApplyBossDamage(int part, int damage)
     {
         if (_boss is not { } boss || _stage != StrykersRunStage.Boss) return;
         if (boss.Kind == StrykersRunBossKind.SkinWalker && boss.Phase == 2 && boss.PhaseTicks < 132) return;
         Vector2 hitPosition = BossPartPosition(boss, part);
         if (boss.Kind == StrykersRunBossKind.Colossus)
         {
-            if (part == 1) boss.LeftLegHealth = Math.Max(0, boss.LeftLegHealth - 1);
-            else if (part == 2) boss.RightLegHealth = Math.Max(0, boss.RightLegHealth - 1);
+            if (part == 1) boss.LeftLegHealth = Math.Max(0, boss.LeftLegHealth - damage);
+            else if (part == 2) boss.RightLegHealth = Math.Max(0, boss.RightLegHealth - damage);
             boss.Health = boss.LeftLegHealth + boss.RightLegHealth;
             // Breaking a leg interrupts its pending/active stomp instead of
             // transferring that already locked attack to the surviving leg.
             if (part == 1 && boss.LeftLegHealth == 0 || part == 2 && boss.RightLegHealth == 0)
                 _hazards.RemoveAll(hazard => hazard.Kind == StrykersRunHazardKind.Stomp);
         }
-        else boss.Health = Math.Max(0, boss.Health - 1);
+        else boss.Health = Math.Max(0, boss.Health - damage);
         AddEffect(StrykersRunEffectKind.Hit, hitPosition.X, hitPosition.Y);
         if (boss.Health == 0)
         {
@@ -367,12 +393,11 @@ public sealed partial class StrykersRunGame
     {
         StrykersRunStage.BossEntrance or StrykersRunStage.Boss => _boss?.Kind switch
         {
-            StrykersRunBossKind.BarrelWarden => "BARREL WARDEN · dodge the burning barrels",
-            StrykersRunBossKind.SwarmCommander => "SWARM COMMANDER · break through the minions",
-            StrykersRunBossKind.StormRevenant => "STORM REVENANT · dodge the lightning charge",
-            StrykersRunBossKind.SkinWalker when _boss.Phase == 2 => "SKIN WALKER · avoid the poison clouds",
-            StrykersRunBossKind.SkinWalker => "SKIN WALKER · dodge the tongue",
-            _ => "COLOSSUS · shoot both legs, evade the red swirls"
+            StrykersRunBossKind.BarrelWarden => "BARREL WARDEN",
+            StrykersRunBossKind.SwarmCommander => "SWARM COMMANDER",
+            StrykersRunBossKind.StormRevenant => "STORM REVENANT",
+            StrykersRunBossKind.SkinWalker => "SKIN WALKER",
+            _ => "COLOSSUS"
         },
         StrykersRunStage.Intermission => $"LEVEL {_level} CLEAR · survivors advance",
         StrykersRunStage.Complete => "CAMPAIGN COMPLETE",
@@ -383,7 +408,7 @@ public sealed partial class StrykersRunGame
     {
         public readonly StrykersRunBossKind Kind = kind;
         public readonly int MaxHealth = health;
-        public int Health = health, Phase = 1, PhaseTicks, AttackTicks, AttackRemaining = 144, Waves;
+        public int Health = health, Phase = 1, PhaseTicks, AttackTicks, AttackRemaining = 144, Waves, SpiderHealth;
         public int LeftLegHealth = kind == StrykersRunBossKind.Colossus ? health / 2 : 0;
         public int RightLegHealth = kind == StrykersRunBossKind.Colossus ? health - health / 2 : 0;
     }

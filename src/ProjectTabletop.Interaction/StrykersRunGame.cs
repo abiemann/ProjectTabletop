@@ -3,7 +3,7 @@ using System.Numerics;
 namespace ProjectTabletop.Interaction;
 
 public enum StrykersRunPhase { Ready, Starting, WaitingForInput, Playing, GameOver, Victory }
-public enum StrykersRunEnemyKind { Runner, Brute, Boss }
+public enum StrykersRunEnemyKind { Runner, Brute, Boss, ElectricSpider }
 public enum StrykersRunGateKind { Add, Subtract, Multiply }
 public enum StrykersRunObjectiveKind { Rescue, Reinforcements }
 public enum StrykersRunEffectKind { MuzzleFlash, Hit, Defeat, GateBoost, GatePenalty, SoldierLost, AllyUnlocked, AllyAttack, AllyLost, SupplyOpened }
@@ -25,6 +25,9 @@ public sealed record StrykersRunSnapshot(StrykersRunPhase Phase, float SquadX, i
     IReadOnlyList<StrykersRunEffectSnapshot> Effects)
 {
     public float PhaseSeconds { get; init; }
+    // -1 trails left, +1 trails right. The simulation owns the smooth turn so
+    // projector and preview render the same pose even at different frame rates.
+    public float ScarfSide { get; init; } = -1;
     public IReadOnlyList<StrykersRunObjectiveSnapshot> Objectives { get; init; } = [];
     public StrykersRunAllySnapshot? Ally { get; init; }
     public int Level { get; init; } = 1;
@@ -33,6 +36,7 @@ public sealed record StrykersRunSnapshot(StrykersRunPhase Phase, float SquadX, i
     public float StageSeconds { get; init; }
     public StrykersRunBossSnapshot? Boss { get; init; }
     public IReadOnlyList<StrykersRunHazardSnapshot> Hazards { get; init; } = [];
+    public IReadOnlyList<StrykersRunCraterSnapshot> Craters { get; init; } = [];
     public bool HeroAlive => SoldierCount > 0;
     public int TroopCount => Math.Max(0, SoldierCount - 1);
 }
@@ -83,6 +87,7 @@ public sealed partial class StrykersRunGame
     public StrykersRunSnapshot Snapshot => _snapshot ??= CreateSnapshot();
     // Control and rail transitions need only these values; reading them never builds a snapshot.
     public StrykersRunPhase Phase => _phase;
+    public bool RecoveringInput => _phase == StrykersRunPhase.WaitingForInput && _hasPlayed;
     public float RoadPresentationDistance => _roadPresentationDistance;
     public float PhaseSeconds => _phaseSeconds;
     public float GameOverSeconds => _phase == StrykersRunPhase.GameOver ? _phaseSeconds : 0;
@@ -95,6 +100,7 @@ public sealed partial class StrykersRunGame
         if (_lastAdvance is { } previous && now < previous) return;
         _phase = phase;
         _squadX = _targetX = .5f;
+        ResetScarf();
         _soldiers = InitialSoldiers;
         _score = 0;
         _wave = 1;
@@ -214,6 +220,7 @@ public sealed partial class StrykersRunGame
     {
         _runSeconds += StepSeconds;
         _squadX += Math.Clamp(_targetX - _squadX, -2.2f * StepSeconds, 2.2f * StepSeconds);
+        StepScarf();
         for (int i = _effects.Count - 1; i >= 0; i--)
         {
             _effects[i].Age += StepSeconds;
@@ -237,9 +244,10 @@ public sealed partial class StrykersRunGame
             {
                 StrykersRunEnemyKind.Boss => .065f,
                 StrykersRunEnemyKind.Brute => .09f,
+                StrykersRunEnemyKind.ElectricSpider => .115f,
                 _ => .125f
             };
-            enemy.Y += (speed + Math.Min(.07f, _wave * .003f)) * StepSeconds;
+            enemy.Y += (speed + (enemy.Kind == StrykersRunEnemyKind.ElectricSpider ? 0 : Math.Min(.07f, _wave * .003f))) * StepSeconds;
             enemy.X = Math.Clamp(enemy.Lane + MathF.Sin(_runSeconds * 2 + enemy.Id) * .018f, RoadLeft, RoadRight);
         }
         foreach (var objective in _objectives)
@@ -386,7 +394,9 @@ public sealed partial class StrykersRunGame
         enemy.Health = Math.Max(0, enemy.Health - damage);
         AddEffect(enemy.Health == 0 ? StrykersRunEffectKind.Defeat : StrykersRunEffectKind.Hit, enemy.X, enemy.Y);
         if (enemy.Health != 0) return;
-        int points = enemy.Kind switch { StrykersRunEnemyKind.Boss => 250, StrykersRunEnemyKind.Brute => 25, _ => 10 };
+        if (enemy.Kind == StrykersRunEnemyKind.ElectricSpider) ReleaseStormReturn(enemy);
+        int points = enemy.Kind switch { StrykersRunEnemyKind.Boss => 250, StrykersRunEnemyKind.ElectricSpider => 60,
+            StrykersRunEnemyKind.Brute => 25, _ => 10 };
         _score = (int)Math.Min(int.MaxValue, (long)_score + points);
     }
 
@@ -493,7 +503,9 @@ public sealed partial class StrykersRunGame
 
     private void AddEnemy(StrykersRunEnemyKind kind, float x, float y = -.06f)
     {
+        if (_enemies.Count >= MaximumEnemies) return;
         int health = kind switch { StrykersRunEnemyKind.Boss => 40 + Math.Min(120, _wave * 5),
+            StrykersRunEnemyKind.ElectricSpider => _boss?.SpiderHealth ?? 11,
             StrykersRunEnemyKind.Brute => 4 + Math.Min(12, _wave / 2), _ => 2 + Math.Min(5, _wave / 4) };
         _enemies.Add(new(_nextId++, x, y, kind, health));
     }
@@ -562,13 +574,15 @@ public sealed partial class StrykersRunGame
     }
 
     private static float EnemyRadius(StrykersRunEnemyKind kind) => kind switch
-    { StrykersRunEnemyKind.Boss => .075f, StrykersRunEnemyKind.Brute => .037f, _ => .023f };
+    { StrykersRunEnemyKind.Boss => .075f, StrykersRunEnemyKind.Brute => .037f,
+        StrykersRunEnemyKind.ElectricSpider => .045f, _ => .023f };
     private static int EnemyContactDamage(StrykersRunEnemyKind kind) => kind switch
-    { StrykersRunEnemyKind.Boss => 18, StrykersRunEnemyKind.Brute => 3, _ => 1 };
+    { StrykersRunEnemyKind.Boss => 18, StrykersRunEnemyKind.Brute => 3,
+        StrykersRunEnemyKind.ElectricSpider => 8, _ => 1 };
 
     private StrykersRunSnapshot CreateSnapshot() => new(_phase, _squadX, _soldiers, _score, _distance, _wave,
         _runSeconds, _phase == StrykersRunPhase.GameOver ? _phaseSeconds : 0,
-        _phase == StrykersRunPhase.WaitingForInput && _hasPlayed,
+        RecoveringInput,
         _phase switch
         {
             StrykersRunPhase.Ready => "Hold PLAY to begin",
@@ -586,6 +600,7 @@ public sealed partial class StrykersRunGame
         Array.AsReadOnly(_effects.Select(effect => new StrykersRunEffectSnapshot(effect.Kind, effect.X, effect.Y, effect.Age, effect.Seed)).ToArray()))
         {
             PhaseSeconds = _phaseSeconds,
+            ScarfSide = _scarfSide,
             Level = _level,
             LevelSeconds = _levelTicks / 120f,
             Stage = _stage,
@@ -595,6 +610,8 @@ public sealed partial class StrykersRunGame
                 hazard.Id, hazard.Kind, hazard.X, hazard.Y, hazard.TargetX, hazard.TargetY,
                 hazard.Ticks / 120f, hazard.WarningTicks / 120f,
                 hazard.DurationTicks / 120f, hazard.Radius)).ToArray()),
+            Craters = _stormCraters.Count == 0 ? [] : Array.AsReadOnly(_stormCraters.Select(crater => new StrykersRunCraterSnapshot(
+                crater.Id, crater.X, CraterY(crater), _runSeconds - crater.CreatedAt)).ToArray()),
             Objectives = Array.AsReadOnly(_objectives.Select(objective => new StrykersRunObjectiveSnapshot(
                 objective.Id, objective.X, objective.Y, objective.Kind, objective.Health, objective.MaxHealth)).ToArray()),
             Ally = _ally is { } ally ? new StrykersRunAllySnapshot(

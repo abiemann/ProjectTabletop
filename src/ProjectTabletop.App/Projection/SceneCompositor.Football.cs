@@ -21,6 +21,7 @@ public sealed partial class SceneCompositor
     private long _footballNavigation = -1;
     private long _footballSessionInputRevision = -1, _footballInputEpoch;
     private bool _footballActive, _footballArtworkPublished;
+    private bool _footballAudioTrainingBlocked;
     private DateTimeOffset _footballResetThrough;
     private DateTimeOffset? _footballVictoryStarted;
     private int _footballVictoryFrame = -1;
@@ -42,6 +43,16 @@ public sealed partial class SceneCompositor
     // Handlers must only enqueue the small cue value. Playback must not block the render lock.
     public event Action<FootballAudioUpdate>? FootballAudioRequested;
     public long FootballAudioGeneration { get { lock (_gate) return _footballAudio.Generation; } }
+
+    public void SetFootballAudioTrainingBlocked(bool blocked)
+    {
+        lock (_gate)
+        {
+            if (_footballAudioTrainingBlocked == blocked) return;
+            _footballAudioTrainingBlocked = blocked;
+            UpdateFootballAudio(_boardSession.FootballState, _footballClock());
+        }
+    }
     public bool FootballInputActive
     {
         get { lock (_gate) { SyncFootballSession(); return _footballActive; } }
@@ -128,7 +139,7 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
-            if (_boardSession.Screen != BoardScreen.Football) return false;
+            if (_markerSetup is not null || _boardSession.Screen != BoardScreen.Football) return false;
             bool accepted = _boardSession.ActivateButton(id, _footballClock());
             if (accepted)
             {
@@ -290,12 +301,12 @@ public sealed partial class SceneCompositor
 
     /// <summary>Maps the whole physical bar through the calibrated plane before deriving
     /// its angle. Camera angles alone are wrong on rotated or oblique projections.</summary>
-    public bool SetFootballPlayerBar(int player, ColorTipObservation observation, DateTimeOffset frameTime)
+    public bool SetFootballPlayerBar(int player, MarkerTipObservation observation, DateTimeOffset frameTime)
         => SetFootballPlayerBar(player, observation, frameTime, out _);
 
     // A frame rejected at publication (including one that aged while waiting for
     // the scene lock) must not be mistaken for an invalid physical marker.
-    public bool SetFootballPlayerBar(int player, ColorTipObservation observation, DateTimeOffset frameTime,
+    public bool SetFootballPlayerBar(int player, MarkerTipObservation observation, DateTimeOffset frameTime,
         out bool ignoredFrame)
     {
         if (player is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(player));
@@ -355,6 +366,7 @@ public sealed partial class SceneCompositor
     internal void UpdateFootballAudio(FootballSnapshot state, DateTimeOffset now)
     {
         bool visible = !_disposed && _boardSession.Screen == BoardScreen.Football &&
+            !_footballAudioTrainingBlocked && _markerSetup is null &&
             !_blackOutput && !_boardSetup && _calibrationTarget < 0 && !IsBoardRevealActive &&
             _boardCameraMap is not null && _boardSurfaceMap is not null;
         var update = _footballAudio.Update(state, now, _boardSession.NavigationRevision,
@@ -418,6 +430,7 @@ public sealed partial class SceneCompositor
             {
                 DrawFootballSurface(ds);
                 DrawFieldGameControls(ds);
+                DrawMarkerSetupPresentation(ds, boardTexture: false);
             }
             finally { ds.Transform = previous; }
         }
@@ -473,19 +486,13 @@ public sealed partial class SceneCompositor
     private static Rect FieldGameButtonTextRect(BoardButton button) => new(button.Bounds.X * BoardSurfaceSize + 12,
         button.Bounds.Y * BoardSurfaceSize + 12, button.Bounds.Width * BoardSurfaceSize - 24, button.Bounds.Height * BoardSurfaceSize - 24);
 
-    private static CanvasTextFormat FieldGameButtonTextFormat() => new()
-    {
-        FontFamily = "Bahnschrift", FontSize = 28, HorizontalAlignment = CanvasHorizontalAlignment.Center,
-        VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap
-    };
-
     private void DrawFieldGameControls(CanvasDrawingSession ds)
     {
         SyncHoldControlExposure();
         var buttons = BoardControlsForRendering;
         if (buttons.Count == 0) return;
         using var fade = CreateBoardControlsFadeLayer(ds);
-        using var format = FieldGameButtonTextFormat();
+        using var format = HoldButtonCaptionFormat();
         foreach (var button in buttons)
         {
             var b = button.Bounds;
@@ -493,15 +500,12 @@ public sealed partial class SceneCompositor
             // A light plate with dark lettering: exposure protection dims the plate.
             ds.FillRoundedRectangle(rect, 14, 14, HoldExposure(Color.FromArgb(255, 221, 229, 211), _holdControlBrightness));
             ds.DrawRoundedRectangle(rect, 14, 14, Color.FromArgb(255, 130, 163, 133), 2);
-            DrawBoardAspectText(ds, button.Label, FieldGameButtonTextRect(button), Color.FromArgb(255, 21, 46, 36), format);
+            DrawBoardAspectText(ds, button.Label.ToUpperInvariant(), FieldGameButtonTextRect(button), Color.FromArgb(255, 21, 46, 36), format);
         }
     }
 
-    private HandTrackingBounds FieldGameButtonTextRegion(CanvasDevice device, BoardButton button)
-    {
-        using var format = FieldGameButtonTextFormat();
-        return BoardAspectButtonTextRegion(device, button, format, FieldGameButtonTextRect(button));
-    }
+    private HandTrackingBounds FieldGameButtonTextRegion(CanvasDevice device, BoardButton button) =>
+        HoldButtonCaptionRegion(device, button, FieldGameButtonTextRect(button));
 
     // Null until the background pitch build publishes; the menu then redraws.
     private CanvasBitmap? FootballMenuThumbnail(CanvasDevice device)

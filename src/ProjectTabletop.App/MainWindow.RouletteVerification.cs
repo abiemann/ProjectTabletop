@@ -227,6 +227,15 @@ public sealed partial class MainWindow
         fixture.Draw();
         var topReference = scene.GetHandAcquisitionContext(fixture.Now);
         Check(topReference?.ExpectedScene is not null, "The initial menu did not capture its stationary control reference.");
+        var beforeArtwork = scene.GetHoldButtonContext(fixture.Now)!;
+        typeof(SceneCompositor).GetMethod("InvalidateMenuPreviewSurface", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(scene, null);
+        fixture.Draw();
+        var afterArtwork = scene.GetHoldButtonContext(fixture.Now)!;
+        Check(afterArtwork.Revision != beforeArtwork.Revision &&
+            !ReferenceEquals(afterArtwork.ExpectedScene, beforeArtwork.ExpectedScene) &&
+            scene.ObserveHoldButtons(beforeArtwork, ["menu-scroll-down"], fixture.Now, []).Count == 0,
+            "Thumbnail completion retained an obsolete whole-menu hold reference.");
         CheckArrowGesturesDoNotPage("menu-scroll-down");
         var topHold = HoldArrow("menu-scroll-down");
         var started = fixture.Now;
@@ -298,6 +307,9 @@ public sealed partial class MainWindow
         return new { passed = true, directory, images, nativeChevronHolds = 2, renderedChevronAcquisition = true,
             onlyPagingArrowUsesCaptionHold = true, oneSecondHoldRequired = true, intactChevronCancels = true,
             freshClearRequired = true, pinchAndIndexSeparationRejected = true, continuedSeparationCannotReverse = true,
+            outsideCaptionAndGapDisturbancesCancelPaging = true, stationaryOutsideDisturbanceKeepsPagingBlocked = true,
+            outsideDisturbanceRequiresFreshArrowRelease = true,
+            thumbnailCompletionRefreshesHoldReference = true,
             staleGesturesRejected = true, scrollDurationMilliseconds = BoardSession.MenuScrollDuration.TotalMilliseconds,
             fixedHeadingAndFooter = true, movingInputAndAcquisitionSuppressed = true,
             secondPageCardsRevealed = true, fullPageScroll = true, originalCardsFullyLeaveViewport = true,
@@ -314,7 +326,8 @@ public sealed partial class MainWindow
             var control = context.ExpectedScene.BoardSearchRegions![index];
             Check(button is { Enabled: true, Hold: BoardButtonHold.Once } &&
                 scene.CurrentBoardButtons.Where(item => item.Id != id).All(item => !item.IsHold) &&
-                context.EnabledHoldIds.SetEquals([id]) && trigger.Width > 0 && trigger.Height > 0 &&
+                context.EnabledHoldIds.SetEquals([id]) && context.ExpectedScene.BoardDisturbanceExclusionRegion is not null &&
+                trigger.Width > 0 && trigger.Height > 0 &&
                 button.Bounds.Contains(trigger.X + trigger.Width / 2, trigger.Y + trigger.Height / 2),
                 "The paging arrow is not the menu's sole native one-shot hold target: " + id + ".");
             byte[] empty = fixture.Draw();
@@ -342,7 +355,7 @@ public sealed partial class MainWindow
                 int pixel = (y * fixture.Width + x) * 4;
                 occupied[pixel] = 75; occupied[pixel + 1] = 95; occupied[pixel + 2] = 185; occupied[pixel + 3] = 255;
             }
-            bool confirmed = false;
+            bool confirmed = false, lastOutsideDisturbance = false;
             // Observing an intact reference above must not arm the button until
             // that clear camera evidence is actually published. This also
             // models a hand still covering the replacement arrow after paging.
@@ -363,6 +376,11 @@ public sealed partial class MainWindow
             Check(Feed(empty).Activated.Count == 0 && scene.CurrentHoldProgress.Count == 0,
                 "An intact chevron did not immediately cancel partial hold progress: " + id + ".");
 
+            CheckOutsideDisturbance(context.ExpectedScene.BoardTriggerRegions[0], backgroundOnly: false);
+            // A hand in the gap between card columns must also veto paging,
+            // even though no other caption is corrupted.
+            CheckOutsideDisturbance(new(.485, .26, .03, .50), backgroundOnly: true);
+
             DateTimeOffset? firstHeld = null;
             for (int frame = 0; frame < 18; frame++)
             {
@@ -380,18 +398,49 @@ public sealed partial class MainWindow
             }
             throw new InvalidOperationException("A full native chevron hold failed to page: " + id + ".");
 
-            (bool Held, IReadOnlyList<string> Activated) Feed(byte[] pixels)
+            void CheckOutsideDisturbance(HandTrackingBounds bounds, bool backgroundOnly)
+            {
+                for (int frame = 0; frame < 5; frame++) Feed(empty);
+                for (int frame = 0; frame < 4; frame++) Feed(occupied);
+                Check(scene.CurrentHoldProgress.Any(progress => progress.ButtonId == id),
+                    "The outside-disturbance fixture did not start an arrow hold: " + id + ".");
+                byte[] both = (byte[])occupied.Clone();
+                var upper = fixture.CameraPoint(bounds.X, bounds.Y);
+                var lower = fixture.CameraPoint(bounds.X + bounds.Width, bounds.Y + bounds.Height);
+                for (int y = Math.Max(0, (int)upper.Y); y < Math.Min(fixture.Height, (int)Math.Ceiling(lower.Y)); y++)
+                for (int x = Math.Max(0, (int)upper.X); x < Math.Min(fixture.Width, (int)Math.Ceiling(lower.X)); x++)
+                {
+                    int pixel = (y * fixture.Width + x) * 4;
+                    both[pixel] = 75; both[pixel + 1] = 95; both[pixel + 2] = 185; both[pixel + 3] = 255;
+                }
+                for (int frame = 0; frame < 14; frame++)
+                {
+                    var result = Feed(both);
+                    Check(result.Activated.Count == 0 && result.Blocked && scene.CurrentHoldProgress.Count == 0 &&
+                            !board.MenuScrolling && (!backgroundOnly || lastOutsideDisturbance),
+                        "An outside disturbance failed to cancel or keep the arrow disengaged: " + id + ".");
+                }
+                for (int frame = 0; frame < 14; frame++)
+                    Check(Feed(occupied).Activated.Count == 0 && scene.CurrentHoldProgress.Count == 0 && !board.MenuScrolling,
+                        "Removing the outside disturbance resumed a still-covered arrow without fresh release: " + id + ".");
+                for (int frame = 0; frame < 5; frame++) Feed(empty);
+            }
+
+            (bool Held, IReadOnlyList<string> Activated, bool Blocked) Feed(byte[] pixels)
             {
                 fixture.Now += TimeSpan.FromMilliseconds(100);
                 var presence = tracker.Update(fixture.Width, fixture.Height, fixture.Width * 4, pixels,
                     context.SearchPolygon, context.ExpectedScene, fixture.Now, fixture.Now);
                 var held = context.HeldButtons(presence);
+                var blocked = context.BlockedButtons(presence);
+                lastOutsideDisturbance = presence.OutsideControlDisturbance;
                 bool corrupted = presence.TextPatterns?.SingleOrDefault(pattern => pattern.ControlRegion == index) is
                     { ShapeCorrupted: true, LabelIntact: false, ConfirmationFrames: >= 1 };
                 confirmed |= corrupted;
-                Check(!held.Contains(id) || corrupted && ReferenceEquals(pixels, occupied),
+                Check(!held.Contains(id) || corrupted && !ReferenceEquals(pixels, empty),
                     "Unbroken native chevron pixels counted as a hold: " + id + ".");
-                return (held.Contains(id), scene.ObserveHoldButtons(context, held, fixture.Now, context.ClearedButtons(presence)));
+                return (held.Contains(id), scene.ObserveHoldButtons(context, held, fixture.Now,
+                    context.ClearedButtons(presence), blocked), blocked.Contains(id));
             }
         }
 

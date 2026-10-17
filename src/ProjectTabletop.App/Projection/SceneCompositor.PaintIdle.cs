@@ -44,7 +44,7 @@ public sealed partial class SceneCompositor
     private void AdvancePaintAutomatic(DateTimeOffset now)
     {
         if (_disposed || _boardSession.Screen != BoardScreen.Paint || _blackOutput || _boardSetup ||
-            _calibrationTarget >= 0 || IsBoardRevealActive)
+            _calibrationTarget >= 0 || IsBoardRevealActive || _markerSetup is not null)
         {
             PausePaintIdle();
             return;

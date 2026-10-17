@@ -8,7 +8,8 @@ namespace ProjectTabletop.App.Projection.StrykersRun;
 internal sealed record StrykersRunCampaignRenderResult(string[] Images, int RenderedFrames,
     bool DistinctBosses, bool AttackWarnings, bool SkinTransformation, bool BossHealth,
     bool Victory, bool RailProtected, bool ArticulatedThrow, bool BarrelRelease,
-    bool AnimatedFlames, bool PausedAttacks);
+    bool AnimatedFlames, bool PausedAttacks, bool StormClouds, bool ElectricSpiders,
+    bool ReturnedLightning, bool CompactBossHud, bool PersistentStormCraters);
 
 /// <summary>Native offscreen fixtures, also callable without constructing an app window or camera.</summary>
 internal static class StrykersRunCampaignVerification
@@ -39,6 +40,18 @@ internal static class StrykersRunCampaignVerification
             byte[] hurt = Draw(state with { Boss = boss with { Health = 60, LeftLegHealth = 30, RightLegHealth = 30 } });
             Require(Changed(pixels, hurt, new(0, 120, 900, 150)) > 50,
                 "Boss health did not visibly change.");
+            var entering = state with { Boss = boss with { Y = StrykersRunGame.BossEntranceStartY,
+                EntranceProgress = 0 } };
+            byte[] hintClear = await Capture(entering with { Boss = null }, $"level-{state.Level}-hint-clear");
+            byte[] hintPanel = await Capture(entering, $"level-{state.Level}-hint-panel");
+            Require(Changed(hintClear, hintPanel, new(65, 216, 770, 28)) == 0,
+                $"A boss instruction hint remained below the compact health panel. Compare level-{state.Level}-hint-clear/panel in {directory}.");
+            for (int x = 90; x < 810; x++)
+            {
+                int index = (210 * 900 + x) * 4;
+                Require(pixels[index] < 50 && pixels[index + 1] < 45 && pixels[index + 2] < 40,
+                    "The boss health meter lost its dark lower padding.");
+            }
             await CheckEntrance(state);
         }
 
@@ -86,10 +99,7 @@ internal static class StrykersRunCampaignVerification
         await Capture(baseline with { Level = 2, Boss = Boss(StrykersRunBossKind.SwarmCommander), Enemies = commanded }, "commander-minion-wave");
 
         var storm = baseline with { Level = 3, Boss = Boss(StrykersRunBossKind.StormRevenant) };
-        var lightning = Hazard(StrykersRunHazardKind.Lightning, .5f, .30f, .62f, .78f, .65f, 1.2f, 1.5f, .025f);
-        byte[] charge = await Capture(storm with { Hazards = [lightning] }, "lightning-charge");
-        byte[] strike = await Capture(storm with { Hazards = [lightning with { Age = 1.30f }] }, "lightning-strike");
-        Require(Changed(charge, strike, new(0, 230, 900, 1200)) > 250, "Lightning warning and strike looked identical.");
+        await CheckStorm(storm);
 
         var skin = baseline with { Level = 4, Boss = Boss(StrykersRunBossKind.SkinWalker) };
         var tongue = Hazard(StrykersRunHazardKind.Tongue, .5f, .30f, .35f, .78f, .42f, .75f, 1.05f, .018f);
@@ -115,7 +125,99 @@ internal static class StrykersRunCampaignVerification
         Require(Changed(plainBarrel!, won, new(0, 230, 900, 1000)) > 2000, "Victory did not receive its own presentation.");
         await Capture(baseline with { Level = 1, LevelSeconds = 60, Stage = StrykersRunStage.Intermission,
             StageSeconds = .8f, Banner = "LEVEL 1 CLEAR · survivors advance" }, "level-clear");
-        return new(images.ToArray(), frames, true, true, true, true, true, true, true, true, true, true);
+        return new(images.ToArray(), frames, true, true, true, true, true, true, true, true, true, true,
+            true, true, true, true, true);
+
+        async Task CheckStorm(StrykersRunSnapshot standing)
+        {
+            byte[] clear = Draw(standing);
+            var cloud = Hazard(StrykersRunHazardKind.StormCloud, .5f, .38f, .5f, 1.04f,
+                .45f, .75f, 4.35f, .085f);
+            var protectedHud = new Rect(0, 0, 900, 215);
+            var combat = new Rect(110, 235, 680, 1190);
+            byte[] charging = await Capture(standing with { Hazards = [cloud] }, "storm-cloud-charge");
+            Require(Changed(clear, charging, combat) > 500, "The summoned storm cloud did not appear.");
+            byte[] rain = await Capture(standing with { Hazards = [cloud with { Age = 1.1f }] }, "storm-cloud-rain");
+            Require(Changed(charging, rain, combat) > 500, "The charged cloud did not begin raining lightning.");
+            byte[]? previousLane = null;
+            foreach (float lane in new[] { .24f, .76f, .5f })
+            {
+                byte[] pixels = await Capture(standing with { Hazards = [cloud with
+                    { X = lane, TargetX = lane, Y = .60f, Age = 2 }] }, $"storm-cloud-lane-{(int)(lane * 100)}");
+                Require(Changed(clear, pixels, protectedHud) == 0, "Storm clouds obscured the boss HUD.");
+                if (previousLane is not null)
+                    Require(Changed(previousLane, pixels, combat) > 2000, "Storm clouds did not occupy distinct lanes.");
+                previousLane = pixels;
+            }
+            byte[] near = await Capture(standing with { Hazards = [cloud with { Y = .83f, Age = 3.2f }] },
+                "storm-cloud-near-player");
+            Require(Changed(rain, near, combat) > 2000, "A storm cloud did not visibly travel toward the player.");
+
+            var spider = new StrykersRunEnemySnapshot(501, .5f, .66f, StrykersRunEnemyKind.ElectricSpider, 32, 32, 0);
+            byte[] fullSpider = await Capture(standing with { Enemies = [spider] }, "electric-spider-full-health");
+            Require(Changed(clear, fullSpider, combat) > 1200, "The electric spider was not visible.");
+            byte[] hurtSpider = await Capture(standing with { Enemies = [spider with { Health = 12 }] }, "electric-spider-hurt");
+            Require(Changed(fullSpider, hurtSpider, combat) > 100, "The spider's HP bar did not visibly lose health.");
+            byte[]? previousWalk = null;
+            for (int frame = 0; frame < 8; frame++)
+            {
+                byte[] walking = await Capture(standing with { Enemies = [spider with { AnimationPhase = frame / 8f }] },
+                    $"electric-spider-walk-{frame:00}");
+                if (previousWalk is not null)
+                    Require(Changed(previousWalk, walking, new(300, 830, 300, 300)) > 350,
+                        "The electric spider's walking legs did not visibly change.");
+                previousWalk = walking;
+            }
+            var returning = Hazard(StrykersRunHazardKind.ReturnLightning, .69f, .67f,
+                StrykersRunGame.BossX, StrykersRunGame.BossY, .08f, .65f, .90f, .02f);
+            byte[]? previousReturn = null;
+            foreach (float age in new[] { .08f, .25f, .44f, .60f, .68f, .82f })
+            {
+                byte[] pixels = await Capture(standing with { Hazards = [returning with { Age = age }] },
+                    $"storm-return-{(int)(age * 100):00}");
+                Require(Changed(clear, pixels, combat) > 150, "The returned lightning or its impact was not visible.");
+                Require(Changed(clear, pixels, protectedHud) == 0, "Returned lightning obscured the boss HUD.");
+                if (previousReturn is not null)
+                    Require(Changed(previousReturn, pixels, combat) > 250,
+                        "Returned lightning did not advance from the defeated spider toward the boss.");
+                previousReturn = pixels;
+            }
+            await Capture(standing with { Hazards = [cloud with { X = .24f, TargetX = .24f, Y = .68f, Age = 2.7f },
+                returning with { Age = .29f }], Enemies = [spider with { X = .76f, Health = 21, AnimationPhase = .43f }] },
+                "storm-full-battle");
+            var paused = standing with { Phase = StrykersRunPhase.WaitingForInput,
+                Enemies = [spider], Hazards = [cloud with { Y = .57f, Age = 1.8f },
+                    returning with { X = .5f, Age = .25f }] };
+            Require(Changed(Draw(paused, 13), Draw(paused, 42), new(265, 230, 370, 1000)) == 0,
+                "Storm clouds, spider legs or returned lightning advanced while input was paused.");
+
+            var crater = new StrykersRunCraterSnapshot(501, .5f, .64f, 1);
+            byte[] freshCrater = await Capture(standing with { Craters = [crater] }, "storm-crater-fresh");
+            byte[] oldCrater = await Capture(standing with { Craters = [crater with { Age = 180 }] }, "storm-crater-persistent");
+            Require(Changed(clear, oldCrater, combat) > 1500,
+                "The charged crater disappeared instead of remaining on the road.");
+            Require(Changed(freshCrater, oldCrater, combat) > 150,
+                "The crater's smoke and electric rim did not animate.");
+            byte[] scrolledCrater = await Capture(standing with { Craters = [crater with { Y = .74f }] },
+                "storm-crater-scrolled-forward");
+            Require(Changed(freshCrater, scrolledCrater, combat) > 1500,
+                "The crater did not visibly move forward with the road.");
+            await Capture(standing with { Craters = [crater with { Y = .92f }] }, "storm-crater-crossing-rail");
+            // At the exact cutoff the renderer still draws the crater: these
+            // frames verify that the complete textured footprint and every
+            // smoke phase have physically passed below the protected rail.
+            for (int variant = 0; variant < 4; variant++)
+            for (int phase = 0; phase < 12; phase++)
+                Require(Changed(clear, Draw(standing with { Craters = [crater with
+                    { Id = 500 + variant, Y = StrykersRunGame.StormCraterCullY, Age = phase / 3.6f }] }),
+                    new(0, 0, 900, 1600)) == 0,
+                    "A crater or smoke phase remained onscreen at the model's culling threshold.");
+            Require(Changed(clear, Draw(standing with { Craters = [crater with { Y = 1.061f }] }),
+                new(0, 0, 900, 1600)) == 0, "An offscreen crater or its smoke remained visible.");
+            var pausedCrater = paused with { Craters = [crater] };
+            Require(Changed(Draw(pausedCrater, 13), Draw(pausedCrater, 42), new(265, 230, 370, 1000)) == 0,
+                "The crater's smoke or charge advanced while the run was paused.");
+        }
 
         async Task CheckBarrelThrow(StrykersRunSnapshot standing)
         {
@@ -215,7 +317,9 @@ internal static class StrykersRunCampaignVerification
                     Require(bottom > previousBottom + 12, "A boss did not visibly advance down the road during its entrance.");
                 }
                 if (firstEntrance is not null)
-                    Require(Changed(firstEntrance, pixels, roadBounds) == 0,
+                    // Native compositing can round one channel by one level even
+                    // on a stationary road; real travel changes its texture edges.
+                    Require(Changed(firstEntrance, pixels, roadBounds, channelTolerance: 1) == 0,
                         "The road moved during a boss entrance.");
                 firstEntrance ??= pixels;
                 previousBottom = bottom;
@@ -252,14 +356,16 @@ internal static class StrykersRunCampaignVerification
     private static StrykersRunHazardSnapshot Hazard(StrykersRunHazardKind kind, float x, float y,
         float targetX, float targetY, float age, float warning, float duration, float radius) =>
         new(100, kind, x, y, targetX, targetY, age, warning, duration, radius);
-    private static int Changed(byte[] a, byte[] b, Rect bounds)
+    private static int Changed(byte[] a, byte[] b, Rect bounds, int channelTolerance = 0)
     {
         int count = 0;
         for (int y = (int)bounds.Y; y < (int)bounds.Bottom; y++)
         for (int x = (int)bounds.X; x < (int)bounds.Right; x++)
         {
             int i = (y * 900 + x) * 4;
-            if (a[i] != b[i] || a[i + 1] != b[i + 1] || a[i + 2] != b[i + 2]) count++;
+            if (Math.Abs(a[i] - b[i]) > channelTolerance ||
+                Math.Abs(a[i + 1] - b[i + 1]) > channelTolerance ||
+                Math.Abs(a[i + 2] - b[i + 2]) > channelTolerance) count++;
         }
         return count;
     }

@@ -33,18 +33,33 @@ public sealed partial class MainWindow
 
     private object FootballAudioDiagnostics => new
     {
+        mutedForMarkerSetup = FootballAudioBlockedByMarkerSetup,
         crowd = _footballCrowdSound.Status,
         goals = _footballGoalSounds.Status,
         match = _footballMatchSound.Status,
         ambience = _footballAmbienceSound.Status
     };
 
+    private bool FootballAudioBlockedByMarkerSetup => _scene.CurrentBoardScreen == BoardScreen.Football &&
+        MarkerSetupFirstUse.BlocksFootballAudio(FirstUseMarkerContext(_selectedCameraId ?? string.Empty, ready: true));
+
     private void UpdateFootballAmbience()
     {
-        if (!_closing && _footballAmbienceActive && _scene.CurrentBoardScreen == BoardScreen.Football)
+        bool training = FootballAudioBlockedByMarkerSetup;
+        _scene.SetFootballAudioTrainingBlocked(training);
+        if (training) StopFootballCues();
+        if (!_closing && !training && _footballAmbienceActive && _scene.CurrentBoardScreen == BoardScreen.Football)
             _footballAmbienceSound.EnsureLooping(FootballAmbienceSound);
         else
             _footballAmbienceSound.Stop();
+    }
+
+    private void StopFootballCues()
+    {
+        _footballCrowdSound.Stop();
+        _footballGoalSounds.Stop();
+        _footballMatchSound.Stop();
+        _footballChantIndex = 0;
     }
 
     private void FootballAudioRequested(FootballAudioUpdate update)
@@ -53,17 +68,17 @@ public sealed partial class MainWindow
         // file loading and MediaPlayer work belong to the UI dispatcher.
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (_closing || update.Generation != _scene.FootballAudioGeneration) return;
+            if (_closing) return;
+            // First-use setup starts on this dispatcher too. Check its required
+            // profiles before playing an earlier board-entry cue.
+            bool training = FootballAudioBlockedByMarkerSetup;
+            _scene.SetFootballAudioTrainingBlocked(training);
+            if (update.Generation != _scene.FootballAudioGeneration) return;
             if ((update.Cues & FootballAudioCue.Stop) != 0)
-            {
-                _footballCrowdSound.Stop();
-                _footballGoalSounds.Stop();
-                _footballMatchSound.Stop();
-                _footballChantIndex = 0;
-            }
+                StopFootballCues();
             _footballAmbienceActive = update.AmbienceActive;
             UpdateFootballAmbience();
-            if (_scene.CurrentBoardScreen != BoardScreen.Football) return;
+            if (training || _scene.CurrentBoardScreen != BoardScreen.Football) return;
             if ((update.Cues & FootballAudioCue.StartWhistle) != 0)
                 _footballMatchSound.Play(FootballKickoffSound);
             if ((update.Cues & FootballAudioCue.GoalCheer) != 0 && update.ScoringPlayer is 1 or 2)

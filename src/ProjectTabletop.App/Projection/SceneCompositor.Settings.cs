@@ -23,8 +23,8 @@ public sealed partial class SceneCompositor
         var center = new Vector2((float)rect.X + 58, (float)(rect.Y + rect.Height / 2));
         float aspect = (float)PaintBoardAspect();
         var previous = ds.Transform;
-        // Physically round on the stretched board.
-        ds.Transform = Matrix3x2.CreateScale(1 / aspect, 1, center) * previous;
+        // Keep the smaller icon physically round on the stretched board.
+        ds.Transform = Matrix3x2.CreateScale(.88f / aspect, .88f, center) * previous;
         try
         {
             using var cog = SettingsCogGeometry(ds.Device, center, 30);

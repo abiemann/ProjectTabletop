@@ -25,7 +25,7 @@ public sealed partial class MainWindow
         var device = CanvasDevice.GetSharedDevice();
         using var target = new CanvasRenderTarget(device, outputWidth, outputHeight, 96);
         using var preview = new CanvasRenderTarget(device, 480, 270, 96);
-        using var scene = new SceneCompositor(paintClock: () => now);
+        using var scene = new SceneCompositor(blackjackClock: () => now, paintClock: () => now);
         scene.SetDisplayAspect(outputWidth / (double)outputHeight);
         scene.SetBoardSetup(true);
         double inset = scene.SetDetectedBoardGrid([new(.035f, .035f), new(.965f, .035f), new(.965f, .965f), new(.035f, .965f)],
@@ -33,6 +33,7 @@ public sealed partial class MainWindow
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
         scene.SetBoardSetup(false);
         scene.ShowPaint();
+        OpenDrawer();
         Draw();
         Require(scene.CanSavePaint && scene.GetPaintDiagnostics().DropCount == 1 &&
                 scene.GetPaintDiagnostics().PendingIntroductionDrops == 4 &&
@@ -44,8 +45,8 @@ public sealed partial class MainWindow
         scene.ResetPaint();
         Draw();
         var clearFilm = scene.CapturePaintArtworkForVerification();
-        Require(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(["menu", "paint-save"]) &&
-                scene.CurrentBoardButtons[0].Label == "Exit" && scene.CurrentBoardButtons[1].Label == "Save" &&
+        Require(scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(["paint-drawer-close", "menu", "paint-reset", "paint-save"]) &&
+                scene.CurrentBoardButtons.Select(button => button.Label).SequenceEqual(["v", "EXIT", "RESET", "SAVE"]) &&
                 !scene.CanSavePaint && !scene.TryBeginPaintSave(out _),
             "An explicitly reset Paint board did not expose Exit and an unavailable Save.");
 
@@ -67,11 +68,11 @@ public sealed partial class MainWindow
             "The saved-artwork fixture averaged its newest color or failed to retain layered thickness.");
         Advance(.5);
         var beforeSnapshot = scene.GetPaintDiagnostics();
-        Require(beforeSnapshot.ActiveDrops > 0 && scene.CanSavePaint && scene.CurrentBoardButtons[1].Enabled,
+        Require(beforeSnapshot.ActiveDrops > 0 && scene.CanSavePaint && scene.CurrentBoardButtons.Single(button => button.Id == "paint-save").Enabled,
             "The evolving wet field did not enable Save.");
 
-        long eventId = 120000;
-        var firstFrame = await Pinch();
+        var firstFrame = await HoldSave();
+        beforeSnapshot = scene.GetPaintDiagnostics();
         Require(scene.TryTakePaintSaveRequest(firstFrame, out var firstImage),
             "Selecting the projected Save button did not snapshot the in-memory painting.");
         byte[] frozenPixels = firstImage.BgraPixels.ToArray();
@@ -90,7 +91,7 @@ public sealed partial class MainWindow
                 afterSnapshot.Fluid!.SimulationSteps == beforeSnapshot.Fluid!.SimulationSteps,
             "Taking a Paint snapshot forced the live field to finish or changed its deposited drops.");
 
-        var busyFrame = await Pinch();
+        var busyFrame = await HoldSave();
         Require(!scene.TryTakePaintSaveRequest(busyFrame, out _), "A second selection queued a Save while one was busy.");
         Advance(2);
         Require(scene.AddPaintDrop(new(.73, .62), .06, now), "Saving blocked new paint from reaching the canvas.");
@@ -109,9 +110,9 @@ public sealed partial class MainWindow
         Require(await SavePaintMemoryImageAsync(scene, firstImage, staleDirectory) is null &&
                 !Directory.Exists(staleDirectory), "Replaying a completed snapshot published another file.");
 
-        var heldFrame = await Pinch(repeat: true);
-        Require(!scene.TryTakePaintSaveRequest(heldFrame, out _), "Holding an already consumed gesture repeated Save.");
-        var secondFrame = await Pinch();
+        var heldFrame = await HoldSave(repeat: true);
+        Require(!scene.TryTakePaintSaveRequest(heldFrame, out _), "Holding an already consumed caption repeated Save.");
+        var secondFrame = await HoldSave();
         Require(scene.TryTakePaintSaveRequest(secondFrame, out var secondImage) &&
                 !secondImage.BgraPixels.SequenceEqual(frozenPixels),
             "A later Save did not capture the painting's newer active state.");
@@ -142,7 +143,7 @@ public sealed partial class MainWindow
         Require(scene.CanSavePaint && scene.GetPaintSaveStatus(now) == "Save failed - retry",
             "A write failure during temporary black output left Save busy or reported success.");
 
-        var mismatched = await Pinch();
+        var mismatched = await HoldSave();
         Require(!scene.TryTakePaintSaveRequest(mismatched.AddTicks(1), out _) &&
                 !scene.TryTakePaintSaveRequest(mismatched, out _),
             "A wrong-frame Paint request survived for replay.");
@@ -152,7 +153,7 @@ public sealed partial class MainWindow
         string blocked = Path.Combine(directory, "not-a-directory");
         byte[] marker = [7, 11, 19, 23];
         await File.WriteAllBytesAsync(blocked, marker);
-        var failureFrame = await Pinch();
+        var failureFrame = await HoldSave();
         Require(scene.TryTakePaintSaveRequest(failureFrame, out var failureImage), "The failure fixture did not acquire Save.");
         bool failed = false;
         try { await SavePaintMemoryImageAsync(scene, failureImage, blocked); }
@@ -162,7 +163,7 @@ public sealed partial class MainWindow
                 failureStatus != "Image Saved" && failureStatus != "Saving image…" &&
                 marker.SequenceEqual(markerAfterFailure),
             "A failed Paint write reported success, damaged an existing file, or left Save busy.");
-        var retryFrame = await Pinch();
+        var retryFrame = await HoldSave();
         Require(scene.TryTakePaintSaveRequest(retryFrame, out var retryImage), "Save could not retry after a write failure.");
         string? third = await SavePaintMemoryImageAsync(scene, retryImage, directory);
         Require(third is not null && scene.GetPaintSaveStatus(now) == "Image Saved", "The Paint write retry failed.");
@@ -170,7 +171,7 @@ public sealed partial class MainWindow
         Require(Directory.GetFiles(directory, "*.png").Length == 3 && Directory.GetFiles(directory, "*.tmp").Length == 0,
             "A failed or replayed Paint save published another PNG or left a temporary file.");
 
-        var pendingBeforeExit = await Pinch();
+        var pendingBeforeExit = await HoldSave();
         scene.ShowBoardMenu();
         Require(!scene.TryTakePaintSaveRequest(pendingBeforeExit, out _) && !scene.CanSavePaint,
             "Navigation left an unconsumed Paint Save request available.");
@@ -185,7 +186,7 @@ public sealed partial class MainWindow
         now += TimeSpan.FromSeconds(1);
         Require(scene.AddPaintDrop(new(.5, .5), .08, now), "The reset fixture rejected its new drop.");
         Draw();
-        var resetFrame = await Pinch();
+        var resetFrame = await HoldSave();
         Require(scene.TryTakePaintSaveRequest(resetFrame, out var beforeReset), "The reset fixture could not snapshot paint.");
         scene.ResetPaint();
         Require(!scene.IsPaintMemoryImageCurrent(beforeReset) && !scene.CompletePaintSave(beforeReset) &&
@@ -198,7 +199,7 @@ public sealed partial class MainWindow
         now += TimeSpan.FromSeconds(1);
         Require(scene.AddPaintDrop(new(.5, .5), .08, now), "The navigation fixture rejected a new drop.");
         Draw();
-        var leaveFrame = await Pinch();
+        var leaveFrame = await HoldSave();
         Require(scene.TryTakePaintSaveRequest(leaveFrame, out var beforeNavigation), "Navigation fixture did not begin Save.");
         scene.ShowBoardMenu();
         Require(!scene.IsPaintMemoryImageCurrent(beforeNavigation) && !scene.CompletePaintSave(beforeNavigation) &&
@@ -214,7 +215,7 @@ public sealed partial class MainWindow
             activeAnimationCapturedWithoutFinishing = true, snapshotImmutableWhilePaintingContinues = true,
             accumulatedPaintWithNewestCoatColorSaved = true,
             physicalAspectPreserved = true, previewCannotResizeExport = true,
-            projectedGestureRoute = true, uniqueFiles = true, busyAndReplayRejected = true,
+            projectedCaptionHoldRoute = true, uniqueFiles = true, busyAndReplayRejected = true,
             failureRecoversWithoutFalseSuccess = true, temporaryBlankingReleasesBusyState = true,
             resetAndNavigationInvalidateSnapshots = true,
             imageSavedFeedbackThreeSeconds = true, liveHardwareUnchanged = true, noPicturesWrites = true,
@@ -235,16 +236,35 @@ public sealed partial class MainWindow
                 Draw();
             }
         }
-        async Task<DateTimeOffset> Pinch(bool repeat = false)
+        void OpenDrawer()
         {
+            if (scene.PaintDrawerOpen) return;
+            Require(scene.ActivatePaintButton("paint-drawer-open"), "The Paint Save fixture drawer could not open.");
+            now += BoardSession.PaintDrawerOpeningDuration;
+            scene.TickPaint(now);
+        }
+        Task<DateTimeOffset> HoldSave(bool repeat = false)
+        {
+            OpenDrawer();
             Draw();
-            await Task.Delay(10);
-            var bounds = scene.CurrentBoardButtons.Single(button => button.Id == "paint-save").Bounds;
-            var point = new PixelPoint(cameraSize * (.035 + .93 * (inset / 2 + (bounds.X + bounds.Width / 2) * (1 - inset))),
-                cameraSize * (.035 + .93 * (inset / 2 + (bounds.Y + bounds.Height / 2) * (1 - inset))));
-            var time = DateTimeOffset.UtcNow;
-            scene.SetHandCursors([new(point, time.AddSeconds(1), repeat ? eventId : ++eventId) { TrackingId = 901 }], time);
-            return time;
+            now += TimeSpan.FromMilliseconds(500);
+            var context = scene.GetHoldButtonContext(now) ??
+                throw new InvalidOperationException("The Paint Save fixture has no settled caption reference.");
+            // The dedicated drawer verifier proves these IDs from actual rendered
+            // broken/intact letters. Keep the 4K export suite's frame clock virtual.
+            if (!repeat)
+                for (int frame = 0; frame < 5; frame++)
+                {
+                    now += TimeSpan.FromMilliseconds(100);
+                    scene.ObserveHoldButtons(context, [], now, ["paint-save"]);
+                }
+            for (int frame = 0; frame < 14; frame++)
+            {
+                now += TimeSpan.FromMilliseconds(100);
+                if (scene.ObserveHoldButtons(context, ["paint-save"], now, []).Count != 0) break;
+            }
+            Draw();
+            return Task.FromResult(now);
         }
         async Task AssertPng(string path, SceneCompositor.PaintMemoryImage expected)
         {

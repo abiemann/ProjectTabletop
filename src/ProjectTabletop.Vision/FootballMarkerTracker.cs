@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Vision;
 
-/// <summary>Tracks measured football markers without manufacturing motion during a camera
+/// <summary>Tracks measured black markers without manufacturing motion during a camera
 /// gap. A learned pair may continue from one physically validated strip for at most 350 ms
 /// after the last complete pair. Prediction only associates measurements and places a search
 /// window; it is never published as a controller position.</summary>
@@ -8,7 +8,7 @@ public sealed class FootballMarkerTracker
 {
     private static readonly TimeSpan PartialLifetime = TimeSpan.FromMilliseconds(350);
     private static readonly TimeSpan IdentityLifetime = TimeSpan.FromMilliseconds(750);
-    private ColorTipObservation? _full, _measured;
+    private MarkerTipObservation? _full, _measured;
     private DateTimeOffset _lastFull, _lastMeasured, _lastFrame;
     private PixelPoint _velocity;
     private bool _confirmed;
@@ -22,7 +22,7 @@ public sealed class FootballMarkerTracker
     }
 
     /// <summary>A user-selected full marker seeds the normal two-frame acquisition.</summary>
-    public void Acquire(ColorTipObservation observation, DateTimeOffset frameTime)
+    public void Acquire(MarkerTipObservation observation, DateTimeOffset frameTime)
     {
         if (!Valid(observation)) throw new ArgumentException("Invalid black-marker observation.", nameof(observation));
         Reset();
@@ -34,14 +34,27 @@ public sealed class FootballMarkerTracker
         _confirmed && _full is not null && frameTime >= _lastFull && frameTime - _lastFull <= PartialLifetime
             ? new(_full, PredictedCenter(frameTime), _lastFull) : null;
 
-    public FootballTipDecision Update(int player, BlackTipProfile profile, ColorTipDetectionResult detection,
+    /// <summary>Tracks one marker in the selected Football half, preserving player ownership.</summary>
+    public FootballTipDecision Update(int player, BlackTipProfile profile, MarkerTipDetectionResult detection,
+        Func<PixelPoint, PixelPoint?> toField, DateTimeOffset frameTime, DateTimeOffset now)
+    {
+        if (player is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(player));
+        return UpdateCore(player, profile, detection, toField, frameTime, now);
+    }
+
+    /// <summary>Tracks one marker anywhere accepted by the caller's calibrated board mapping.
+    /// Return null for points outside the usable board; no Football half restriction is applied.</summary>
+    public FootballTipDecision Update(BlackTipProfile profile, MarkerTipDetectionResult detection,
+        Func<PixelPoint, PixelPoint?> toBoard, DateTimeOffset frameTime, DateTimeOffset now) =>
+        UpdateCore(null, profile, detection, toBoard, frameTime, now);
+
+    private FootballTipDecision UpdateCore(int? player, BlackTipProfile profile, MarkerTipDetectionResult detection,
         Func<PixelPoint, PixelPoint?> toField, DateTimeOffset frameTime, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(detection);
         ArgumentNullException.ThrowIfNull(toField);
         if (!profile.IsValid) throw new ArgumentException("Invalid black-marker profile.", nameof(profile));
-        if (player is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(player));
         // Neither stale images nor an unavailable reference refresh the caller's freshness
         // timer. Keep identity briefly so a single delayed frame does not force reacquisition.
         if (frameTime > now + TimeSpan.FromMilliseconds(30) || now - frameTime > TimeSpan.FromMilliseconds(250))
@@ -58,13 +71,16 @@ public sealed class FootballMarkerTracker
             _velocity = new(0, 0);
         }
 
-        bool InHalf(PixelPoint point) => toField(point) is { } field &&
-            double.IsFinite(field.X) && double.IsFinite(field.Y) && (field.X < .5 ? 0 : 1) == player;
-        var full = detection.Candidates.Where(Valid).Where(item => InHalf(item.Center)).ToArray();
-        if (full.Length > 1 || detection.AmbiguousMarkerCenters.Any(InHalf))
+        bool InArea(PixelPoint point) => toField(point) is { } field &&
+            double.IsFinite(field.X) && double.IsFinite(field.Y) &&
+            (player is null || (field.X < .5 ? 0 : 1) == player);
+        var full = detection.Candidates.Where(Valid).Where(item => InArea(item.Center)).ToArray();
+        if (full.Length > 1 || detection.AmbiguousMarkerCenters.Any(InArea))
         {
             Reset();
-            return new(FootballTipAction.Clear, null, null, "Show only one unambiguous black marker in this player's half.")
+            return new(FootballTipAction.Clear, null, null, player is null
+                ? "Show only one unambiguous black marker on the board."
+                : "Show only one unambiguous black marker in this player's half.")
                 { Source = "ambiguous" };
         }
         if (full.Length == 1)
@@ -86,7 +102,7 @@ public sealed class FootballMarkerTracker
             var inferred = detection.SupportingBars.Where(Valid)
                 .Where(strip => toField(strip.Center) is not null)
                 .Select(strip => ContinuePair(strip, profile, frameTime))
-                .Where(item => item is not null && InHalf(item.Center)).Cast<ColorTipObservation>().ToArray();
+                .Where(item => item is not null && InArea(item.Center)).Cast<MarkerTipObservation>().ToArray();
             // Threshold passes can retain both physical strips without forming a
             // complete pair. If each independently reconstructs the same pose,
             // they are supporting evidence for one controller, not two players.
@@ -108,29 +124,30 @@ public sealed class FootballMarkerTracker
                     "Tracking one visible strip briefly; show both bars.") { Source = "single-strip" };
             }
         }
-        return Hold($"Looking for a black marker in the {(player == 0 ? "left" : "right")} half.", "missing");
+        return Hold(player is null ? "Looking for a black marker on the board." :
+            $"Looking for a black marker in the {(player == 0 ? "left" : "right")} half.", "missing");
     }
 
     private static FootballTipDecision Hold(string reason, string source) =>
         new(FootballTipAction.Hold, null, null, reason) { Source = source };
 
-    private static bool SamePartialPose(ColorTipObservation first, ColorTipObservation second)
+    private static bool SamePartialPose(MarkerTipObservation first, MarkerTipObservation second)
     {
         var a = first.Bar!;
         var b = second.Bar!;
         double aLength = Length(first), bLength = Length(second);
-        double aWidth = ColorTipDetector.Distance(a.Side1, a.Side2);
-        double bWidth = ColorTipDetector.Distance(b.Side1, b.Side2);
+        double aWidth = MarkerTipGeometry.Distance(a.Side1, a.Side2);
+        double bWidth = MarkerTipGeometry.Distance(b.Side1, b.Side2);
         double axisDot = ((a.End2.X - a.End1.X) * (b.End2.X - b.End1.X) +
             (a.End2.Y - a.End1.Y) * (b.End2.Y - b.End1.Y)) / (aLength * bLength);
-        return ColorTipDetector.Distance(first.Center, second.Center) <= Math.Max(2, Math.Min(aLength, bLength) * .06) &&
+        return MarkerTipGeometry.Distance(first.Center, second.Center) <= Math.Max(2, Math.Min(aLength, bLength) * .06) &&
             Math.Abs(axisDot) >= .99 && // Within about eight degrees, with either endpoint order.
             Math.Min(aLength, bLength) >= Math.Max(aLength, bLength) * .90 &&
             Math.Min(aWidth, bWidth) >= Math.Max(aWidth, bWidth) * .85 &&
             Math.Min(first.AreaPixels, second.AreaPixels) >= Math.Max(first.AreaPixels, second.AreaPixels) * .80;
     }
 
-    private bool Associated(ColorTipObservation item, DateTimeOffset frameTime)
+    private bool Associated(MarkerTipObservation item, DateTimeOffset frameTime)
     {
         if (_measured is null || frameTime - _lastMeasured > IdentityLifetime) return false;
         double length = Length(_measured), age = Math.Max(0, (frameTime - _lastMeasured).TotalSeconds);
@@ -144,15 +161,15 @@ public sealed class FootballMarkerTracker
         double reach = Math.Min(Math.Max(32, length * 6),
             Math.Max(32, length * .9) + Math.Min(.25, age) * Math.Max(240, length * 40));
         return item.AreaPixels >= _measured.AreaPixels * .45 && item.AreaPixels <= _measured.AreaPixels * 2.2 &&
-            ColorTipDetector.Distance(item.Center, _measured.Center) <= reach;
+            MarkerTipGeometry.Distance(item.Center, _measured.Center) <= reach;
     }
 
-    private ColorTipObservation? ContinuePair(ColorTipObservation strip, BlackTipProfile profile, DateTimeOffset frameTime)
+    private MarkerTipObservation? ContinuePair(MarkerTipObservation strip, BlackTipProfile profile, DateTimeOffset frameTime)
     {
         if (strip.Bar is not { } bar || _full?.Bar is not { } previous) return null;
         double length = Length(strip), oldLength = Length(_full);
-        double width = ColorTipDetector.Distance(bar.Side1, bar.Side2);
-        double oldWidth = ColorTipDetector.Distance(previous.Side1, previous.Side2) - oldLength * profile.SpacingRatio;
+        double width = MarkerTipGeometry.Distance(bar.Side1, bar.Side2);
+        double oldWidth = MarkerTipGeometry.Distance(previous.Side1, previous.Side2) - oldLength * profile.SpacingRatio;
         if (!MatchesSize(oldLength, oldWidth, 0))
         {
             // Projected artwork can stretch a pair's envelope without lengthening
@@ -176,8 +193,8 @@ public sealed class FootballMarkerTracker
         var stripCenter = new PixelPoint((bar.End1.X + bar.End2.X) * .5, (bar.End1.Y + bar.End2.Y) * .5);
         var minus = new PixelPoint(stripCenter.X - nx * spacing * .5, stripCenter.Y - ny * spacing * .5);
         var plus = new PixelPoint(stripCenter.X + nx * spacing * .5, stripCenter.Y + ny * spacing * .5);
-        double minusDistance = ColorTipDetector.Distance(minus, predicted);
-        double plusDistance = ColorTipDetector.Distance(plus, predicted);
+        double minusDistance = MarkerTipGeometry.Distance(minus, predicted);
+        double plusDistance = MarkerTipGeometry.Distance(plus, predicted);
         if (Math.Abs(minusDistance - plusDistance) < Math.Max(2.5, spacing * .35)) return null;
         var center = minusDistance < plusDistance ? minus : plus;
         double dx = center.X - predicted.X, dy = center.Y - predicted.Y;
@@ -198,7 +215,7 @@ public sealed class FootballMarkerTracker
             width >= expectedWidth * .55 && width <= expectedWidth * 1.65 + edgeAllowance;
     }
 
-    private void Remember(ColorTipObservation item, DateTimeOffset frameTime, bool fullPair, bool resetVelocity)
+    private void Remember(MarkerTipObservation item, DateTimeOffset frameTime, bool fullPair, bool resetVelocity)
     {
         double seconds = (frameTime - _lastMeasured).TotalSeconds;
         if (resetVelocity || _measured is null || seconds <= 0 || seconds > .25) _velocity = new(0, 0);
@@ -224,10 +241,10 @@ public sealed class FootballMarkerTracker
         return new(_measured.Center.X + dx * scale, _measured.Center.Y + dy * scale);
     }
 
-    private static double Length(ColorTipObservation observation) => observation.Bar is { } bar
-        ? ColorTipDetector.Distance(bar.End1, bar.End2) : observation.RadiusPixels * 2;
+    private static double Length(MarkerTipObservation observation) => observation.Bar is { } bar
+        ? MarkerTipGeometry.Distance(bar.End1, bar.End2) : observation.RadiusPixels * 2;
 
-    private static bool Valid(ColorTipObservation? item) => item?.Bar is { } bar &&
+    private static bool Valid(MarkerTipObservation? item) => item?.Bar is { } bar &&
         new[] { item.Center, bar.End1, bar.End2, bar.Side1, bar.Side2 }.All(point =>
             double.IsFinite(point.X) && double.IsFinite(point.Y) && point.X >= 0 && point.Y >= 0) &&
         double.IsFinite(item.AreaPixels) && item.AreaPixels is >= 12 and <= 1000000 &&

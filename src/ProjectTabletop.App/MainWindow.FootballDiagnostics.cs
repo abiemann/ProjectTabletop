@@ -8,7 +8,7 @@ public sealed partial class MainWindow
 {
     private sealed record FootballDiagnosticObservation(CameraFrame Frame,
         IReadOnlyList<EyeTipProjectionFrame>? References, int[] Players, BlackTipProfile[] Profiles,
-        BlackTipSearchHint?[] Hints, IReadOnlyList<ColorTipDetectionResult> Results,
+        BlackTipSearchHint?[] Hints, IReadOnlyList<MarkerTipDetectionResult> Results,
         string[] Decisions, double?[] InputAgeMilliseconds, PixelPoint[]? SearchArea)
     {
         public CameraFrameLease FrameLease { get; } = Frame.Retain();
@@ -39,7 +39,7 @@ public sealed partial class MainWindow
 
     private void RecordFootballDetection(CameraFrame frame, IReadOnlyList<EyeTipProjectionFrame>? references,
         int[] players, BlackTipProfile[] profiles, BlackTipSearchHint?[] hints,
-        IReadOnlyList<ColorTipDetectionResult> results, string[] decisions, double?[] inputAgeMilliseconds,
+        IReadOnlyList<MarkerTipDetectionResult> results, string[] decisions, double?[] inputAgeMilliseconds,
         PixelPoint[]? searchArea)
     {
         lock (_footballDiagnosticGate)

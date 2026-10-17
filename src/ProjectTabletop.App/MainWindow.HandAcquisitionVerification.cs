@@ -51,6 +51,7 @@ public sealed partial class MainWindow
             frame.Timestamp, cameraWidth = frame.Width, cameraHeight = frame.Height, frame.Stride,
             expected.Width, expected.Height, expected.CameraToBoard, expected.BoardSearchRegions,
             expected.BoardReferenceRegions, expected.BoardTriggerRegions, expected.BoardControlReferenceRegions,
+            expected.BoardVectorGlyphRegions,
             expected.AllowsLocalForegroundContext, Revision = hold?.Context.Revision ?? context!.Revision,
             SearchPolygon = hold?.Context.SearchPolygon ?? context!.SearchPolygon,
             IlluminatedHint = context?.IlluminatedHint, IlluminationStartedAt = context?.IlluminationStartedAt,
@@ -338,6 +339,8 @@ public sealed partial class MainWindow
         Require(LitSearchView(new(900, 300, 300, 300), TimeSpan.FromMilliseconds(350), 1920, 1080) is null &&
             LitSearchView(litCrop, TimeSpan.FromMilliseconds(-150), 1920, 1080) is null,
             "A small crop or a frame before the light was given a corner view.");
+        VerifyCaptionHeightPriority(reverseCamera: false);
+        VerifyCaptionHeightPriority(reverseCamera: true);
         scene.SetBoardSetup(true);
         Require(scene.GetHandAcquisitionContext(now) is null, "Calibration did not cancel assistance.");
         return new { passed = true, reachingHandLight = true, lostHandSearchCrop = true, litSearchCornerViews = true, bottomButtonLit = true, motionCannotSelect = true,
@@ -347,7 +350,99 @@ public sealed partial class MainWindow
             stationaryPresenceRetainsLight = true, emptyAndStalePresenceCannotRetainLight = true,
             sevenPercentBoundaryEnforced = true, nonfiniteAndUnmeasuredEvidenceRejected = true,
             renewalRequiresFreshMeasuredEvidenceAtOriginalControl = true,
+            highestCaptionPriorityAcrossCameraOrientations = true,
+            higherCaptionReplacesLowerSearchWithoutSelection = true,
             connectedContextLightsPalmAndControlWithoutSelecting = true };
+
+        void VerifyCaptionHeightPriority(bool reverseCamera)
+        {
+            var priorityNow = now;
+            using var priorityScene = new SceneCompositor(blackjackClock: () => priorityNow);
+            using var priorityTarget = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96);
+            priorityScene.SetDisplayAspect(1);
+            priorityScene.SetBoardSetup(true);
+            var priorityInset = priorityScene.SetDetectedBoardGrid([new(.1f, .1f), new(.9f, .1f), new(.9f, .9f), new(.1f, .9f)],
+                Homography.FromFourPoints([new(0, 0), new(size, 0), new(size, size), new(0, size)], reverseCamera
+                    ? [new(1, 1), new(0, 1), new(0, 0), new(1, 0)]
+                    : [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
+            priorityScene.SetBoardSetup(false);
+            priorityScene.ShowBlackjack();
+            var watching = Settle();
+            var lower = Caption("bj-bet-10");
+            var higher = Caption("menu");
+            var hold = Caption("bj-deal");
+            Require(reverseCamera ? higher.Center.Y > lower.Center.Y : higher.Center.Y < lower.Center.Y,
+                "Caption priority fixture did not reverse camera Y independently of board height.");
+            long revision = priorityScene.BlackjackState.Revision;
+            priorityScene.CompleteHandAcquisition(watching, [lower, higher], [], priorityNow);
+            Require(priorityScene.GetHandAcquisitionContext(priorityNow)?.IlluminatedHint?.Center == higher.Center,
+                "Initial acquisition selected lower arm interference instead of the higher caption.");
+            priorityScene.CompleteHandAcquisition(priorityScene.GetHandAcquisitionContext(priorityNow), [], [], priorityNow,
+                illuminatedPresence: false);
+            priorityNow += TimeSpan.FromMilliseconds(1000);
+            watching = priorityScene.GetHandAcquisitionContext(priorityNow)!;
+            lower = Caption("bj-bet-10"); higher = Caption("menu"); hold = Caption("bj-deal");
+            var invalidHigher = new[] { higher with { ObservedAt = priorityNow.AddMilliseconds(-1) },
+                higher with { ControlCoverage = .069999 }, higher with { ControlTriggerCoverage = .069999 },
+                higher with { ControlCoverage = double.NaN }, hold };
+            priorityScene.CompleteHandAcquisition(watching, [.. invalidHigher, lower], [], priorityNow);
+            var lowerSearch = priorityScene.GetHandAcquisitionContext(priorityNow)!;
+            Require(lowerSearch.IlluminatedHint?.Center == lower.Center,
+                "Stale, insufficient, nonfinite or hold evidence displaced the valid lower caption.");
+            priorityNow += TimeSpan.FromMilliseconds(500);
+            lower = Caption("bj-bet-10"); higher = Caption("menu");
+            priorityScene.CompleteHandAcquisition(lowerSearch,
+                [.. invalidHigher.Select(item => item with { ObservedAt = item == invalidHigher[0]
+                    ? priorityNow.AddMilliseconds(-1) : priorityNow }), lower], [], priorityNow, illuminatedPresence: true);
+            Require(priorityScene.GetHandAcquisitionContext(priorityNow)?.IlluminationStartedAt == lowerSearch.IlluminationStartedAt,
+                "Invalid higher-caption evidence restarted an otherwise valid stationary search.");
+            priorityScene.CompleteHandAcquisition(lowerSearch, [lower, higher], [], priorityNow, illuminatedPresence: true);
+            var higherSearch = priorityScene.GetHandAcquisitionContext(priorityNow)!;
+            Require(higherSearch.IlluminatedHint?.Center == higher.Center && higherSearch.IlluminationStartedAt == priorityNow &&
+                    ReferenceEquals(higherSearch.ExpectedScene, watching.ExpectedScene),
+                "Fresh higher-caption evidence failed to replace the lower search with a new settling interval.");
+            var higherStart = higherSearch.IlluminationStartedAt;
+            priorityNow += TimeSpan.FromMilliseconds(100);
+            double lightLevel = priorityScene.SearchLightLevel;
+            priorityScene.CompleteHandAcquisition(lowerSearch, [Caption("bj-reset")], [], priorityNow,
+                illuminatedPresence: true, illuminatedWhite: 254);
+            Require(priorityScene.GetHandAcquisitionContext(priorityNow)?.IlluminationStartedAt == higherStart &&
+                    priorityScene.SearchLightLevel == lightLevel,
+                "An in-flight callback from the previous light replaced or dimmed the new search.");
+            priorityNow += TimeSpan.FromMilliseconds(400);
+            higher = Caption("menu");
+            var jitter = higher with { Center = new(higher.Center.X, higher.Center.Y + (reverseCamera ? 1 : -1)) };
+            priorityScene.CompleteHandAcquisition(higherSearch, [Caption("bj-bet-10"), jitter, higher], [], priorityNow,
+                illuminatedPresence: true);
+            Require(priorityScene.GetHandAcquisitionContext(priorityNow) is { IlluminatedHint: { } kept } stable &&
+                    kept.Center == higher.Center && stable.IlluminationStartedAt == higherStart &&
+                    priorityScene.BlackjackState.Revision == revision && priorityScene.HoveredBoardButtons.Count == 0 &&
+                    priorityScene.ActiveHandSpotlightCount == 0,
+                "Lower disturbance or same-caption jitter moved the light or manufactured an input action.");
+
+            SceneCompositor.HandAcquisitionContext Settle()
+            {
+                using (var drawing = priorityTarget.CreateDrawingSession())
+                    priorityScene.Draw(drawing, size, size, preview: false, runningSlowly: false);
+                priorityScene.GetHandAcquisitionContext(priorityNow);
+                priorityNow += TimeSpan.FromMilliseconds(600);
+                var context = priorityScene.GetHandAcquisitionContext(priorityNow)!;
+                Require(context is { ObserveMotion: true, ExpectedScene: not null },
+                    "Caption priority fixture did not settle its generated board.");
+                return context;
+            }
+
+            HandAcquisitionHint Caption(string id)
+            {
+                int index = priorityScene.CurrentBoardButtons.ToList().FindIndex(button => button.Id == id);
+                var bounds = watching.ExpectedScene!.BoardTriggerRegions![index];
+                double x = size * (.1 + .8 * (priorityInset + (1 - 2 * priorityInset) * (bounds.X + bounds.Width / 2)));
+                double y = size * (.1 + .8 * (priorityInset + (1 - 2 * priorityInset) * (bounds.Y + bounds.Height / 2)));
+                var point = new PixelPoint(reverseCamera ? size - x : x, reverseCamera ? size - y : y);
+                return new(new(Math.Clamp(point.X - 140, 0, size - 280), Math.Clamp(point.Y - 140, 0, size - 280), 280, 280),
+                    point, 24, priorityNow, .1, ControlCoverage: .1, ControlTriggerCoverage: .1);
+            }
+        }
 
         void AssertInvalidRenewal(HandAcquisitionHint[] evidence, bool refreshObservation)
         {

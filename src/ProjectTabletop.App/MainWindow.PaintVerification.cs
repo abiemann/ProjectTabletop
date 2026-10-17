@@ -2,7 +2,6 @@
 using System.Numerics;
 using System.Reflection;
 using Microsoft.Graphics.Canvas;
-using ProjectTabletop.App.Camera;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
@@ -33,10 +32,10 @@ public sealed partial class MainWindow
         using var secondReference = NewScene(out _);
         var blank = Draw(scene);
         var exit = scene.CurrentBoardButtons.Single(button => button.Id == "menu");
-        Require(scene.CurrentBoardScreen == BoardScreen.Paint && exit is { Id: "menu", Label: "Exit" } &&
+        Require(scene.CurrentBoardScreen == BoardScreen.Paint && exit is { Id: "menu", Label: "EXIT" } &&
                 scene.GetPaintDiagnostics().DropCount == 0 &&
                 scene.CurrentBoardButtons.Any(button => button.Id == "paint-save" && !button.Enabled),
-            "Explicitly resetting Paint must leave bottom-side Exit and an unavailable Save until paint exists.");
+            "The opened Paint drawer must retain EXIT and an unavailable SAVE until paint exists.");
         await Save(target, "paint-blank");
         var canvas = new BoardRect(.025, .08, .95, .79);
         var blankFluid = scene.GetPaintDiagnostics().Fluid ??
@@ -48,8 +47,8 @@ public sealed partial class MainWindow
                 scene.GetPaintDiagnostics().Fluid!.SimulationSteps == blankFluid.SimulationSteps,
             "An idle painting changed without an observed disturbance.");
 
-        // Intro paint uses the same liquid field and delayed rendered-frame
-        // history as real input. Keep the older pigment/flow fixtures blank so
+        // Intro paint uses the same liquid field as marker input. Keep the
+        // pigment/flow fixtures blank so
         // their deterministic comparison colors and layer depths stay exact.
         using (var introduction = NewScene(out _, nativeCamera: true, keepIntroduction: true))
         {
@@ -95,24 +94,14 @@ public sealed partial class MainWindow
                     introDrops.Take(4).All(drop => drop.Center != new Point2(.5, .5)),
                 "The fifth introductory drop must land exactly at board center after the four random surrounding drops.");
 
-            var introDetector = new PaintDisturbanceTracker();
-            var introFrames = new List<byte[]>();
-            int cleanIntroFramesCompared = 0;
             for (int frame = 0; frame < 18; frame++)
             {
                 now += TimeSpan.FromMilliseconds(125);
-                introFrames.Add(Draw(introduction));
-                var context = introduction.GetPaintDisturbanceContext();
-                if (introFrames.Count < 3 || context is null) continue;
-                var result = introDetector.Update(size, size, size * 4, introFrames[^3], context, now, now);
-                Require(result.ReferenceReady && result.Drops.Count == 0 &&
-                        introduction.CompletePaintDisturbance(context, result, now) == 0,
-                    "The webcam's delayed view of the introductory liquid animation deposited extra paint.");
-                cleanIntroFramesCompared++;
+                Draw(introduction);
             }
             var complete = introduction.GetPaintDiagnostics();
             Require(complete.DropCount == 5 && complete.PendingIntroductionDrops == 0 &&
-                    complete.LastDropAt == default && cleanIntroFramesCompared > 5,
+                    complete.LastDropAt == default,
                 "The introduction must finish with exactly five independent drops and no camera-observation cooldown.");
             Draw(introduction);
             Require(ChangedPixels(blank, target.GetPixelBytes(), new(.10, .10, .15, .65)) == 0 &&
@@ -133,7 +122,7 @@ public sealed partial class MainWindow
                     introduction.GetPaintDiagnostics().DropCount == complete.DropCount,
                 "Restoring Paint controls changed the existing canvas or replayed its introduction.");
             Require(introduction.AddPaintDrop(new(.5, .5), .06, now),
-                "Introductory paint prevented the first real camera disturbance from depositing paint in the same central area.");
+                "Introductory paint prevented a new drop from landing in the same central area.");
             introduction.ResetPaint();
             Draw(introduction);
             now += TimeSpan.FromSeconds(1);
@@ -179,6 +168,11 @@ public sealed partial class MainWindow
                 ChangedPixels(blank, Draw(scene), canvas) == 0,
             "A real hand input illuminated Paint or drew its fingertip marker over the painting.");
         scene.ClearHandTips();
+        Require(scene.ActivatePaintButton("paint-drawer-open"),
+            "The Paint fixture drawer did not reopen after clearing its hand-input state.");
+        now += BoardSession.PaintDrawerOpeningDuration;
+        scene.TickPaint(now);
+        Draw(scene);
         VerifyPaintButtonLighting();
 
         var firstCenter = new Point2(.47, .55);
@@ -353,7 +347,7 @@ public sealed partial class MainWindow
         // Enable Save before comparing its opaque interior: availability alone
         // changes the label styling independently of paint beneath the button.
         var enabledControls = Draw(fullCanvas);
-        foreach (var position in new Point2[] { new(.13, .9175), new(.87, .9175) })
+        foreach (var position in fullCanvas.CurrentBoardButtons.Select(button => new Point2(button.Bounds.X + button.Bounds.Width / 2, .9175)))
         {
             now += TimeSpan.FromMilliseconds(250);
             Require(fullCanvas.AddPaintDrop(position, .10, now), "Paint cannot flow beneath the bottom-side controls.");
@@ -361,11 +355,9 @@ public sealed partial class MainWindow
         Advance(2, fullCanvas);
         var paintedFullCanvas = Draw(fullCanvas);
         Require(ChangedPixels(cleanControls, paintedFullCanvas, new(.18, .012, .72, .035)) > 1000 &&
-                ChangedPixels(cleanControls, paintedFullCanvas, new(.075, .965, .11, .025)) > 100 &&
-                ChangedPixels(cleanControls, paintedFullCanvas, new(.815, .965, .11, .025)) > 100 &&
-                ChangedPixels(enabledControls, paintedFullCanvas, new(.075, .895, .11, .04)) == 0 &&
-                ChangedPixels(enabledControls, paintedFullCanvas, new(.815, .895, .11, .04)) == 0,
-            "Paint must reach the top and flow below both bottom controls while their interiors remain opaque above it.");
+                fullCanvas.CurrentBoardButtons.All(button => ChangedPixels(enabledControls, paintedFullCanvas,
+                    new(button.Bounds.X + .04, button.Bounds.Y + .025, button.Bounds.Width - .08, .04)) == 0),
+            "Paint must reach the top and flow beneath drawer controls while their interiors remain opaque above it.");
         await Save(target, "paint-beneath-floating-controls");
 
         // Adjacent paint mounds can meet while their opaque centers keep their
@@ -450,130 +442,6 @@ public sealed partial class MainWindow
             "A backwards timestamp advanced the liquid.");
         now += TimeSpan.FromSeconds(1);
 
-        using var inputScene = NewScene(out double inputInset, nativeCamera: true);
-        var detector = new PaintDisturbanceTracker();
-        var submittedFrames = new List<byte[]>();
-        for (int warmup = 0; warmup < 8; warmup++)
-        {
-            Draw(inputScene);
-            Require(inputScene.GetPaintDisturbanceContext() is null,
-                "Paint accepted camera input before the previous projection could leave the webcam feed.");
-            now += TimeSpan.FromMilliseconds(125);
-        }
-        Draw(inputScene);
-        var firstReadyContext = inputScene.GetPaintDisturbanceContext();
-        Require(firstReadyContext is not null, "Paint did not become ready after camera settling.");
-        // The worker can complete after warmup while its camera frame still
-        // belongs to the previous projected board. This frame is otherwise
-        // fresh enough to pass the ordinary 350 ms observation lifetime.
-        var previousProjectionTime = now.AddMilliseconds(-150);
-        var previousProjection = new PaintDisturbanceResult(
-            [new(new(.5, .5), .075, .01, previousProjectionTime)], 1, .01, true,
-            "delayed-previous-projection", 150);
-        Require(inputScene.CompletePaintDisturbance(firstReadyContext!, previousProjection, previousProjectionTime) == 0 &&
-                inputScene.GetPaintDiagnostics().DropCount == 0,
-            "A delayed camera frame from before projection warmup seeded a new painting.");
-        Require(inputScene.AddPaintDrop(new(.45, .03), .11, now), "The Paint animation fixture could not begin above the old header.");
-        int animationFramesCompared = 0;
-        // A webcam observes an older submitted projector frame. Feed actual GPU
-        // pixels with 250 ms delay while the current painting keeps spreading.
-        for (int frame = 0; frame < 32; frame++)
-        {
-            now += TimeSpan.FromMilliseconds(125);
-            Point2? addedPosition = frame switch
-            {
-                4 => new Point2(.62, .50),
-                8 => new Point2(.35, .50),
-                12 => new Point2(.72, .65),
-                16 => new Point2(.38, .66),
-                _ => null
-            };
-            if (addedPosition is { } position)
-                Require(inputScene.AddPaintDrop(position, .10, now),
-                    "The multicolor delayed-render fixture rejected a separate drop.");
-            submittedFrames.Add(Draw(inputScene));
-            if (submittedFrames.Count < 3) continue;
-            var context = inputScene.GetPaintDisturbanceContext();
-            Require(context is not null, "A rendered Paint board has no disturbance context.");
-            var result = detector.Update(size, size, size * 4, submittedFrames[^3], context!, now, now);
-            Require(result.ReferenceReady && result.Drops.Count == 0,
-                $"The app's own delayed paint animation created foreground drops: frame {frame}, {result.Reason}.");
-            Require(inputScene.CompletePaintDisturbance(context!, result, now) == 0,
-                "A clean projected animation changed the painting through camera input.");
-            animationFramesCompared++;
-        }
-        long beforePhysicalInput = inputScene.GetPaintDiagnostics().DropCount;
-        // Selecting floating controls must not deposit paint beneath the hand.
-        // Paint can already be flowing behind those opaque controls.
-        var controlDetector = new PaintDisturbanceTracker();
-        for (int observation = 0; observation < 2; observation++)
-        {
-            now += TimeSpan.FromMilliseconds(125);
-            submittedFrames.Add(Draw(inputScene));
-            var overControls = (byte[])submittedFrames[^3].Clone();
-            // A small camera registration error and projector blur can move the
-            // bright bevel/shadow outside a control's logical hit rectangle.
-            foreach (var control in inputScene.CurrentBoardButtons.Select(button => button.Bounds)
-                .Append(new BoardRect(.06, .018, .10, .028)))
-                ShiftControlEdge(overControls, submittedFrames[^3], control, inputInset);
-            FillObstruction(overControls, .13, .9175, inputInset);
-            FillObstruction(overControls, .87, .9175, inputInset);
-            var controlContext = inputScene.GetPaintDisturbanceContext()!;
-            var controlResult = controlDetector.Update(size, size, size * 4, overControls, controlContext, now, now);
-            Require(controlResult.ReferenceReady && controlResult.Drops.Count == 0 && controlResult.CandidateCount == 0,
-                "Floating control edges or operating Exit/Save deposited paint.");
-        }
-        PaintDisturbanceScene? physicalContext = null;
-        PaintDisturbanceResult? physicalResult = null;
-        foreach (int observation in new[] { 0, 1 })
-        {
-            now += TimeSpan.FromMilliseconds(125);
-            submittedFrames.Add(Draw(inputScene));
-            var occupied = (byte[])submittedFrames[^3].Clone();
-            FillObstruction(occupied, .32, .73, inputInset);
-            FillObstruction(occupied, .74, .73, inputInset);
-            physicalContext = inputScene.GetPaintDisturbanceContext();
-            physicalResult = detector.Update(size, size, size * 4, occupied, physicalContext!, now, now);
-            Require(physicalResult.ReferenceReady && physicalResult.CandidateCount == 2,
-                $"The two stationary obstructions were not isolated from paint: {physicalResult.Reason}.");
-            if (observation == 0)
-                Require(physicalResult.Drops.Count == 0, "One unconfirmed obstruction frame deposited paint.");
-            else
-                Require(physicalResult.Drops.Count == 2 &&
-                        physicalResult.Drops.Any(drop => Math.Abs(drop.BoardCenter.X - .32) < .04) &&
-                        physicalResult.Drops.Any(drop => Math.Abs(drop.BoardCenter.X - .74) < .04),
-                    "Confirmed stationary obstructions did not produce two correctly mapped drop positions.");
-        }
-        Require(inputScene.CompletePaintDisturbance(physicalContext!, physicalResult!, now) == 2 &&
-                inputScene.GetPaintDiagnostics().DropCount == beforePhysicalInput + 2,
-            "Two physical disturbances in one camera frame did not both reach the painting.");
-        Require(inputScene.CompletePaintDisturbance(physicalContext!, physicalResult!, now) == 0,
-            "Replaying a completed camera result duplicated its paint drops.");
-        inputScene.ShowBoardMenu();
-        Require(inputScene.CompletePaintDisturbance(physicalContext!, physicalResult!, now) == 0,
-            "An in-flight camera result painted after Exit.");
-        inputScene.ShowPaint();
-        Require(inputScene.CompletePaintDisturbance(physicalContext!, physicalResult!, now) == 0,
-            "The previous Paint visit's camera result contaminated a new painting.");
-        inputScene.ResetPaint();
-        now += TimeSpan.FromSeconds(1);
-        Draw(inputScene);
-        var beforeRescan = inputScene.GetPaintDisturbanceContext()!;
-        inputScene.SetBoardSetup(true);
-        Point2[] cameraPixels = [new(0, 0), new(size, 0), new(size, size), new(0, size)];
-        Point2[] unit = [new(0, 0), new(1, 0), new(1, 1), new(0, 1)];
-        inputScene.SetDetectedBoardGrid([new(.02f, .02f), new(.98f, .02f), new(.98f, .98f), new(.02f, .98f)],
-            Homography.FromFourPoints(cameraPixels, unit));
-        inputScene.SetBoardSetup(false);
-        Require(inputScene.GetPaintDisturbanceContext() is null &&
-                inputScene.CompletePaintDisturbance(beforeRescan, physicalResult!, now) == 0 &&
-                inputScene.GetPaintDiagnostics().DropCount == 0,
-            "A result mapped before recalibration deposited paint at an obsolete board position.");
-        now += TimeSpan.FromSeconds(1);
-        Draw(inputScene);
-        Require(inputScene.GetPaintDisturbanceContext()!.Revision != beforeRescan.Revision,
-            "Recalibration reused the old Paint reference generation.");
-
         Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
                 Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "The isolated Paint verification changed the live camera, projector or board.");
@@ -584,18 +452,13 @@ public sealed partial class MainWindow
             accumulatedLayerHeight = true, thinningFringeRevealsPreviousCoat = true, exitProtected = true,
             boundedBoardClip = true, invalidAndRepeatedObservationsRejected = true, freshSessionClearsPainting = true,
             nativePaintRaster = paintRaster, nativeBoardRaster = boardRaster, previewCannotShrinkPaint = true,
-            paintCanvasSpotlightsDisabled = true, paintControlLabelSpotlightLifecycle = true,
-            paintControlLightExcludedFromDropsIncludingCameraDelay = true,
-            animationFramesCompared, cameraDelayMilliseconds = 250,
-            renderedAnimationDoesNotRetrigger = true, twoStationaryObstructionsApplyIndependently = true,
+            paintCanvasSpotlightsDisabled = true, paintControlsUseCaptionHoldsWithoutSpotlights = true,
             fullCanvasBeneathFloatingControls = true,
-            completedInputReplayAndNavigationCalibrationBarriers = true,
-            layeredPaintContinuesWithoutNewCameraEvents = true,
+            layeredPaintContinuesWithoutNewInput = true,
             fixedTimeStepIndependentOfRenderFrequency = true, changedAtThirtyHz, changedAtOneTwentyHz,
             boundedLongGapCatchUp = true, zeroAndBackwardsTimeCannotAdvance = true,
-            framesObservedBeforeProjectionWarmupRejected = true,
             introductoryCentralDropsStaggeredAndSaveable = true,
-            delayedIntroductionCannotDepositExtraPaint = true,
+            introductionAnimationKeepsExactlyFiveDrops = true,
             introductionStartsOnVisibleDrawAndReentry = true,
             explicitResetCancelsIntroduction = true,
             fifthIntroductionDropLandsAtExactCenter = true,
@@ -607,20 +470,17 @@ public sealed partial class MainWindow
         async Task VerifyPaintIdleStreaks()
         {
             using var idle = NewScene(out _, nativeCamera: true, keepIntroduction: true);
-            var delayedDetector = new PaintDisturbanceTracker();
-            var submitted = new List<CameraFrame>();
-            int delayedStreakFramesCompared = 0;
             DrawNative(idle, target, size, size);
             var armed = idle.GetPaintDiagnostics();
             var firstDeadline = armed.NextIdleStreakAt ??
                 throw new InvalidOperationException("Paint did not arm its visible inactivity timer.");
             Require(firstDeadline == now.AddSeconds(10) && armed.IdleStreakCount == 0,
                 "The first visible Paint frame must schedule idle paint after ten seconds.");
-            PrepareObservedStreak(firstDeadline);
+            PrepareStreak(firstDeadline);
             Require(idle.GetPaintDiagnostics() is { DropCount: 5, PendingIdleStreakDrops: 0, IdleStreakCount: 0 },
                 "Idle paint started before ten seconds of user inactivity.");
             now = firstDeadline;
-            ObserveDraw();
+            Draw(idle);
             var firstStarted = idle.GetPaintDiagnostics();
             Require(firstStarted is { DropCount: 6, PendingIdleStreakDrops: 17, IdleStreakCount: 1 } &&
                     firstStarted.IdleStreakStartedAt == now && firstStarted.LastDropAt == default,
@@ -629,7 +489,7 @@ public sealed partial class MainWindow
             idle.CapturePaintArtworkForVerification();
             Require(idle.GetPaintDiagnostics().DropCount == firstStarted.DropCount,
                 "Repeated preview/output/memory draws deposited an idle streak more than once.");
-            AdvanceObservedTo(firstDeadline.AddMilliseconds(2040));
+            AdvanceStreakTo(firstDeadline.AddMilliseconds(2040));
             var streak = idle.GetPaintAutomaticDropsForVerification()
                 .Where(drop => drop.Kind == "IdleStreak" && drop.StreakId == 1).ToArray();
             Require(streak.Length == 18 && idle.GetPaintDiagnostics().PendingIdleStreakDrops == 0 &&
@@ -670,46 +530,28 @@ public sealed partial class MainWindow
                     idle.CompletePaintSave(dueArtwork),
                 "Saving at an expired idle deadline generated paint before freezing the selected artwork.");
             var secondDeadline = idle.GetPaintDiagnostics().NextIdleStreakAt!.Value;
-            PrepareObservedStreak(secondDeadline);
+            PrepareStreak(secondDeadline);
             now = secondDeadline;
-            ObserveDraw();
+            Draw(idle);
             var second = idle.GetPaintAutomaticDropsForVerification().Last(drop => drop.Kind == "IdleStreak");
             Require(idle.GetPaintDiagnostics().IdleStreakCount == 2 && second.StreakId == 2 &&
                     second.Pigment != streak[0].Pigment && idle.GetPaintDiagnostics().PendingIdleStreakDrops == 17,
                 "The next idle streak did not choose a new pigment or retained the earlier streak's launch state.");
-            AdvanceObservedTo(secondDeadline.AddMilliseconds(2040));
+            AdvanceStreakTo(secondDeadline.AddMilliseconds(2040));
             Require(idle.GetPaintDiagnostics().PendingIdleStreakDrops == 0 &&
                     idle.GetPaintAutomaticDropsForVerification().Count(drop => drop.Kind == "IdleStreak" && drop.StreakId == 2) == 18,
-                "The second observed idle streak did not finish its staggered eighteen drops.");
+                "The second idle streak did not finish its staggered eighteen drops.");
             AdvanceQuietlyTo(idle.GetPaintDiagnostics().NextIdleStreakAt!.Value);
             Require(idle.GetPaintDiagnostics().PendingIdleStreakDrops == 17,
                 "The held-input cancellation fixture did not start a fresh idle streak.");
             long countBeforeHeldInput = idle.GetPaintDiagnostics().DropCount;
-            var context = idle.GetPaintDisturbanceContext()!;
-            var unconfirmed = new PaintDisturbanceResult([], 1, .01, true, "disturbance-pending", 250);
-            var beforeUnconfirmed = idle.GetPaintDiagnostics().NextIdleStreakAt;
-            Require(idle.CompletePaintDisturbance(context, unconfirmed, now) == 0 &&
-                    idle.GetPaintDiagnostics().NextIdleStreakAt == beforeUnconfirmed &&
-                    idle.GetPaintDiagnostics().PendingIdleStreakDrops == 17,
-                "One unconfirmed disturbance canceled idle paint or restarted user inactivity.");
-            var held = new PaintDisturbanceResult([], 1, .01, true, "disturbance-held", 250,
-                ConfirmedCandidateCount: 1);
-            Require(idle.CompletePaintDisturbance(context, held, now) == 0 &&
-                    idle.GetPaintDiagnostics().PendingIdleStreakDrops == 0 &&
+            idle.NotifyPaintUserActivityForVerification();
+            Require(idle.GetPaintDiagnostics().PendingIdleStreakDrops == 0 &&
                     idle.GetPaintDiagnostics().DropCount == countBeforeHeldInput &&
                     idle.GetPaintDiagnostics().LastUserActivityAt == now &&
                     idle.GetPaintDiagnostics().NextIdleStreakAt == now.AddSeconds(10) &&
                     idle.GetPaintDiagnostics().LastDropAt == default,
-                "A fresh stationary user disturbance must cancel idle paint even when it creates no new drop.");
-            var renewedDeadline = idle.GetPaintDiagnostics().NextIdleStreakAt;
-            Require(idle.CompletePaintDisturbance(context, held, now.AddMilliseconds(-500)) == 0 &&
-                    idle.GetPaintDiagnostics().NextIdleStreakAt == renewedDeadline,
-                "A stale camera disturbance restarted the idle deadline.");
-            now += TimeSpan.FromMilliseconds(125);
-            var emptyObservation = new PaintDisturbanceResult([], 0, 0, true, "clean-generated-paint", 250);
-            Require(idle.CompletePaintDisturbance(context, emptyObservation, now) == 0 &&
-                    idle.GetPaintDiagnostics().NextIdleStreakAt == renewedDeadline,
-                "A clean expected camera frame counted as user activity.");
+                "User activity must cancel pending idle paint without adding a decorative drop.");
             Require(idle.AddPaintDrop(new(.82, .72), .04, now), "A real user drop could not interrupt idle decoration.");
             Draw(idle);
             long afterUserDrop = idle.GetPaintDiagnostics().DropCount;
@@ -717,16 +559,16 @@ public sealed partial class MainWindow
             Require(!idle.AddPaintDrop(new(.82, .72), .04, now) &&
                     idle.GetPaintDiagnostics().DropCount == afterUserDrop &&
                     idle.GetPaintDiagnostics().NextIdleStreakAt == now.AddSeconds(10),
-                "A held real disturbance did not restart inactivity while its duplicate drop was suppressed.");
+                "A repeated fixture drop did not restart inactivity while its duplicate drop was suppressed.");
 
-            var handDeadline = idle.GetPaintDiagnostics().NextIdleStreakAt!.Value;
-            AdvanceQuietlyTo(handDeadline);
+            var activityDeadline = idle.GetPaintDiagnostics().NextIdleStreakAt!.Value;
+            AdvanceQuietlyTo(activityDeadline);
             Require(idle.GetPaintDiagnostics().PendingIdleStreakDrops == 17,
                 "The next idle streak fixture did not start after user activity ended.");
             idle.NotifyPaintUserActivityForVerification();
             Require(idle.GetPaintDiagnostics().PendingIdleStreakDrops == 0 &&
                     idle.GetPaintDiagnostics().NextIdleStreakAt == now.AddSeconds(10),
-                "Fresh hand/control activity did not cancel an unfinished idle streak.");
+                "Marker/control activity did not cancel an unfinished idle streak.");
             long beforeGap = idle.GetPaintDiagnostics().DropCount;
             now += TimeSpan.FromMinutes(1);
             Draw(idle);
@@ -780,9 +622,8 @@ public sealed partial class MainWindow
             Require(idle.GetPaintDiagnostics() is { DropCount: 0, PendingIntroductionDrops: 5, PendingIdleStreakDrops: 0 },
                 "Paint reentry did not replace the departed session with its five-drop introduction.");
             Draw(idle);
-            Require(idle.GetPaintDiagnostics().NextIdleStreakAt == now.AddSeconds(10) &&
-                    delayedStreakFramesCompared > 30,
-                "A fresh Paint visit did not arm a new idle deadline or delayed animation was not exercised.");
+            Require(idle.GetPaintDiagnostics().NextIdleStreakAt == now.AddSeconds(10),
+                "A fresh Paint visit did not arm a new idle deadline.");
 
             // A visible but slow surface still reaches its inactivity deadline;
             // its stretched swing can release only one drop per shown frame.
@@ -813,257 +654,43 @@ public sealed partial class MainWindow
 
             void AdvanceQuietlyTo(DateTimeOffset destination)
             {
-                // Idle deadlines need a visibly drawing timeline, not a native
-                // camera comparison for every empty waiting frame. Keep gaps
-                // well below the production pause threshold and avoid readback.
+                // Idle deadlines need a visibly drawing timeline. Keep gaps
+                // below the production pause threshold and avoid readback.
                 while (now < destination)
                 {
                     now += TimeSpan.FromTicks(Math.Min(TimeSpan.FromSeconds(1).Ticks, (destination - now).Ticks));
                     DrawNative(idle, target, size, size);
                 }
             }
-            void PrepareObservedStreak(DateTimeOffset deadline)
+            void PrepareStreak(DateTimeOffset deadline)
             {
                 AdvanceQuietlyTo(deadline.AddMilliseconds(-250));
-                submitted.Clear();
-                delayedDetector.Reset();
-                ObserveDraw();
+                Draw(idle);
                 now = deadline.AddMilliseconds(-125);
-                ObserveDraw();
+                Draw(idle);
                 now = deadline.AddTicks(-1);
-                ObserveDraw();
+                Draw(idle);
             }
-            void AdvanceObservedTo(DateTimeOffset destination)
+            void AdvanceStreakTo(DateTimeOffset destination)
             {
                 while (now < destination)
                 {
                     now += TimeSpan.FromTicks(Math.Min(TimeSpan.FromMilliseconds(125).Ticks, (destination - now).Ticks));
-                    ObserveDraw();
+                    Draw(idle);
                 }
-            }
-            void ObserveDraw()
-            {
-                submitted.Add(new(size, size, size * 4, Draw(idle), now));
-                if (submitted.Count > 4) submitted.RemoveAt(0);
-                var expected = idle.GetPaintDisturbanceContext();
-                if (submitted.Count < 3 || expected is null) return;
-                var rendered = submitted[^3];
-                var frame = new CameraFrame(rendered.Width, rendered.Height, rendered.Stride, rendered.Bgra, now)
-                    { ArrivedAt = rendered.ArrivedAt };
-                var result = delayedDetector.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
-                    expected, frame.Timestamp, now);
-                int accepted = idle.CompletePaintDisturbance(expected, result, frame.Timestamp);
-                if (!result.ReferenceReady || result.Drops.Count != 0 || accepted != 0)
-                {
-                    string failureDirectory = Path.Combine(directory, "paint-idle-delayed-failure");
-                    Directory.CreateDirectory(failureDirectory);
-                    File.WriteAllBytes(Path.Combine(failureDirectory, "confirmed.camera.bgra"), frame.Bgra);
-                    var history = new List<object>();
-                    for (int index = 0; index < expected.ExpectedHistory.Count; index++)
-                    {
-                        var reference = expected.ExpectedHistory[index];
-                        string file = $"confirmed.expected-{index}.bgra";
-                        File.WriteAllBytes(Path.Combine(failureDirectory, file), reference.Bgra);
-                        history.Add(new { reference.Width, reference.Height, reference.PresentedAt, file });
-                    }
-                    File.WriteAllText(Path.Combine(failureDirectory, "confirmed.json"),
-                        System.Text.Json.JsonSerializer.Serialize(new
-                        {
-                            frame.Timestamp, frame.Width, frame.Height, frame.Stride,
-                            cameraWasRenderedAt = rendered.Timestamp,
-                            expected.Revision, expected.CameraToBoard, expected.PaintBounds, expected.IgnoredRegions,
-                            expectedHistory = history, result, acceptedDrops = accepted,
-                            paint = idle.GetPaintDiagnostics()
-                        }));
-                    throw new InvalidOperationException(
-                        "The webcam's delayed view of an idle brush streak failed its comparison. " +
-                        $"Accepted drops: {accepted}. Result: " + System.Text.Json.JsonSerializer.Serialize(result) +
-                        $". Exact replay: {failureDirectory}.");
-                }
-                if (idle.GetPaintDiagnostics().IdleStreakStartedAt is not null)
-                    delayedStreakFramesCompared++;
             }
         }
 
         void VerifyPaintButtonLighting()
         {
-            using var lightingScene = NewScene(out double lightingInset, nativeCamera: true);
-            for (int frame = 0; frame < 9; frame++)
-            {
-                Draw(lightingScene);
-                lightingScene.GetHandAcquisitionContext(now);
-                now += TimeSpan.FromMilliseconds(125);
-            }
-            var empty = Draw(lightingScene);
-            var context = lightingScene.GetHandAcquisitionContext(now)!;
-            Require(context is { ObserveMotion: true, AllowsSearchIllumination: true,
-                    ExpectedScene.BoardTriggerRegions.Count: 2 },
-                "Paint did not expose settled label-gated Exit/Save acquisition.");
-            var emptyQuery = Query(empty, context);
-            Require(emptyQuery.Hints.Count == 0 && emptyQuery.LightingHints.Count == 0 &&
-                    emptyQuery.SearchRegions.Count == 0 && context.IlluminatedHint is null,
-                "An idle Paint board illuminated or searched its controls.");
-            var canvasOnly = (byte[])empty.Clone();
-            FillObstruction(canvasOnly, .5, .55, lightingInset);
-            var canvasQuery = Query(canvasOnly, context);
-            lightingScene.CompleteHandAcquisition(context, canvasQuery.LightingHints, [], now);
-            Require(canvasQuery.Hints.Count == 0 && canvasQuery.SearchRegions.Count == 0 &&
-                    lightingScene.GetHandAcquisitionContext(now)?.IlluminatedHint is null &&
-                    empty.SequenceEqual(Draw(lightingScene)),
-                "An ordinary canvas disturbance illuminated Paint or searched for a navigation gesture.");
-
-            var exitButton = lightingScene.CurrentBoardButtons.Single(button => button.Id == "menu");
-            var exitBounds = exitButton.Bounds;
-            double exitU = exitBounds.X + exitBounds.Width / 2, exitV = exitBounds.Y + exitBounds.Height / 2;
-            var occupied = (byte[])empty.Clone();
-            FillObstruction(occupied, exitU, exitV, lightingInset);
-            var captionTracker = new HandAcquisitionPresenceTracker();
-            var firstArrival = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
-                context, captionTracker, now);
-            Require(firstArrival.LightingHints.Count == 0 && firstArrival.SearchRegions.Count == 0,
-                "One generated Exit-label obstruction frame started Paint assistance before confirmation.");
-            now += TimeSpan.FromMilliseconds(125);
-            var query = CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, occupied, now),
-                context, captionTracker, now);
-            if (query.LightingHints.Count != 1)
-            {
-                File.WriteAllBytes(Path.Combine(directory, "button-empty.bgra"), empty);
-                File.WriteAllBytes(Path.Combine(directory, "button-occupied.bgra"), occupied);
-                File.WriteAllBytes(Path.Combine(directory, "button-expected.bgra"), context.ExpectedScene!.Bgra);
-                File.WriteAllText(Path.Combine(directory, "button-presence.json"),
-                    System.Text.Json.JsonSerializer.Serialize(new { size, lightingInset,
-                        context.SearchPolygon, context.ExpectedScene.CameraToBoard,
-                        context.ExpectedScene.BoardSearchRegions, context.ExpectedScene.BoardReferenceRegions,
-                        context.ExpectedScene.BoardTriggerRegions, query.Presence }));
-            }
-            Require(query.LightingHints.Count == 1,
-                "Stationary Exit fingers did not produce exactly one label-triggered candidate. " +
-                System.Text.Json.JsonSerializer.Serialize(new { query.Presence,
-                    context.ExpectedScene!.BoardSearchRegions, context.ExpectedScene.BoardTriggerRegions }) +
-                " Diagnostic: " + directory);
-            var hint = query.LightingHints[0];
-            Require(hint.ControlCoverage is >= .07 && hint.ControlTriggerCoverage is >= .07 &&
-                    query.SearchRegions.Count == 1 && query.SearchRegions.Contains(hint.SearchBounds) &&
-                    context.IlluminatedHint is null,
-                "Stationary fingers over Exit did not request their qualified native crop before fallback illumination.");
-            foreach (double? textCoverage in new double?[] { null, .069999, double.NaN,
-                         double.PositiveInfinity, double.NegativeInfinity })
-            {
-                lightingScene.CompleteHandAcquisition(context,
-                    [hint with { ControlTriggerCoverage = textCoverage }], [], now);
-                Require(lightingScene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
-                    "Missing, sub-7%, or non-finite Exit-text interference switched on a Paint spotlight.");
-            }
-            lightingScene.CompleteHandAcquisition(context, [hint with { ObservedAt = now.AddMilliseconds(-1) }], [], now);
-            Require(lightingScene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
-                "An older frame's Exit-text measurement switched on a Paint spotlight.");
-            var beforeLightIgnored = lightingScene.GetPaintDisturbanceContext()!.IgnoredRegions!.ToArray();
-            lightingScene.CompleteHandAcquisition(context, [hint], [], now);
-            var searching = lightingScene.GetHandAcquisitionContext(now)!;
-            var litPixels = Draw(lightingScene);
-            // The lit search follows the expected reaching hand but keeps the caption core.
-            double litCore = hint.RadiusPixels * .64;
-            var illuminatedQuery = Query(occupied, searching);
-            int changedExitPixels = ChangedPixels(empty, litPixels, exitBounds);
-            Require(searching.IlluminatedHint is not null &&
-                    illuminatedQuery.SearchRegions is [var litSearch] &&
-                    litSearch.Width >= hint.SearchBounds.Width &&
-                    litSearch.X <= hint.Center.X - litCore && litSearch.X + litSearch.Width >= hint.Center.X + litCore &&
-                    litSearch.Y <= hint.Center.Y - litCore && litSearch.Y + litSearch.Height >= hint.Center.Y + litCore &&
-                    changedExitPixels > 300,
-                "Exit text interference did not illuminate its hand region and focus the subsequent model search. " +
-                System.Text.Json.JsonSerializer.Serialize(new { hint, litCore, searching.IlluminatedHint,
-                    searching.IlluminationStartedAt, illuminatedQuery.SearchRegions, changedExitPixels,
-                    acquisition = lightingScene.GetHandAcquisitionDiagnostics() }));
-
-            // A real landmark result must not extinguish this control-specific
-            // light. Paint's ordinary hand spotlight still remains disabled.
-            var hand = new HandDetection(Hand(exitU, exitV + .03).Landmarks.Select(point =>
-                new PixelPoint(size * (lightingInset / 2 + point.X * (1 - lightingInset)),
-                    size * (lightingInset / 2 + point.Y * (1 - lightingInset)))).ToArray(), .95, .5);
-            var sourceTime = MonotonicClock.UtcNow;
-            lightingScene.SetHandSpotlights([hand], sourceTime);
-            for (int frame = 0; frame < 3; frame++)
-            {
-                now += TimeSpan.FromMilliseconds(400);
-                hint = hint with { ObservedAt = now };
-                lightingScene.CompleteHandAcquisition(searching, [hint], [hand], now, illuminatedPresence: true);
-                searching = lightingScene.GetHandAcquisitionContext(now)!;
-                Require(searching.IlluminatedHint is not null && lightingScene.ActiveHandSpotlightCount == 0,
-                    "Acquiring real fingers extinguished Paint's Exit light or enabled ordinary canvas hand lighting.");
-                litPixels = Draw(lightingScene);
-            }
-            var paintContext = lightingScene.GetPaintDisturbanceContext()!;
-            var lightMask = paintContext.IgnoredRegions!.Except(beforeLightIgnored).Single();
-            var outsideControlPoint = new PixelPoint(lightMask.X + lightMask.Width / 2, lightMask.Y + .01);
-            Require(!beforeLightIgnored.Any(bounds => Contains(bounds, outsideControlPoint)),
-                "The light-exclusion fixture did not extend beyond the ordinary control mask.");
-            var syntheticLightDrop = new PaintDisturbanceResult(
-                [new(outsideControlPoint, .05, .01, now)], 1, .01, true, "own-button-light");
-            Require(lightingScene.CompletePaintDisturbance(paintContext, syntheticLightDrop, now) == 0,
-                "Paint accepted its own control spotlight as a drop outside the button mask.");
-            var lightDetector = new PaintDisturbanceTracker();
-            for (int frame = 0; frame < 2; frame++)
-            {
-                now += TimeSpan.FromMilliseconds(125);
-                hint = hint with { ObservedAt = now };
-                lightingScene.CompleteHandAcquisition(searching, [hint], [hand], now, illuminatedPresence: true);
-                searching = lightingScene.GetHandAcquisitionContext(now)!;
-                litPixels = Draw(lightingScene);
-                paintContext = lightingScene.GetPaintDisturbanceContext()!;
-                var result = lightDetector.Update(size, size, size * 4, litPixels, paintContext, now, now);
-                Require(result.ReferenceReady && result.CandidateCount == 0 && result.Drops.Count == 0,
-                    "The rendered Exit spotlight seeded Paint canvas candidates.");
-            }
-
-            lightingScene.CompleteHandAcquisition(searching, [], [hand], now, illuminatedPresence: false);
-            Require(lightingScene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
-                "Removing current Exit-text obstruction retained the Paint spotlight after real fingers were acquired.");
-            for (int frame = 0; frame < 2; frame++)
-            {
-                now += TimeSpan.FromMilliseconds(125);
-                Draw(lightingScene);
-                paintContext = lightingScene.GetPaintDisturbanceContext()!;
-                var result = lightDetector.Update(size, size, size * 4, litPixels, paintContext, now, now);
-                Require(result.ReferenceReady && result.CandidateCount == 0 && result.Drops.Count == 0 &&
-                        paintContext.IgnoredRegions!.Contains(lightMask),
-                    "The webcam's delayed view of a switched-off Exit light seeded a Paint drop.");
-                var delayedDrop = syntheticLightDrop with
-                    { Drops = [syntheticLightDrop.Drops[0] with { ObservedAt = now }] };
-                Require(lightingScene.CompletePaintDisturbance(paintContext, delayedDrop, now) == 0,
-                    "A late camera result bypassed the recently switched-off light's Paint exclusion.");
-            }
-            now += TimeSpan.FromMilliseconds(1000);
-            Draw(lightingScene);
-            Require(!lightingScene.GetPaintDisturbanceContext()!.IgnoredRegions!.Contains(lightMask),
-                "The temporary navigation-light exclusion permanently disabled part of the Paint canvas.");
-
-            // Ordinary tracked hands remain dark after navigation assistance is
-            // gone. Execution suppression also wins over label measurements.
-            context = lightingScene.GetHandAcquisitionContext(now)!;
-            hint = hint with { ObservedAt = now };
-            lightingScene.CompleteHandAcquisition(context, [hint], [], now);
-            Require(lightingScene.GetHandAcquisitionContext(now)?.IlluminatedHint is not null,
-                "Paint did not rearm label-gated Exit assistance after departure.");
-            // Real cursor freshness and the one-second execute pulse use the
-            // monotonic input clock, independently of the simulated fluid time.
-            sourceTime = MonotonicClock.UtcNow;
-            lightingScene.SetHandCursors([new HandCursor(new(size * .5, size * .5), sourceTime.AddSeconds(1), 7871)
-                { TrackingId = 7871 }], sourceTime);
-            Require(lightingScene.GetHandLightingDiagnostics().SuppressedHandIds.Contains(7871) &&
-                    lightingScene.GetHandAcquisitionContext(now)?.IlluminatedHint is null &&
-                    lightingScene.ActiveHandSpotlightCount == 0,
-                "An execute gesture retained Paint's navigation spotlight.");
-            lightingScene.ShowBoardMenu();
-            Require(lightingScene.GetPaintDisturbanceContext() is null,
-                "Leaving Paint retained its control-light exclusion context.");
-
-            HandAcquisitionQuery Query(byte[] pixels, SceneCompositor.HandAcquisitionContext request) =>
-                CreateHandAcquisitionQuery(new CameraFrame(size, size, size * 4, pixels, now), request,
-                    new HandAcquisitionPresenceTracker(), now);
-            static bool Contains(HandTrackingBounds bounds, PixelPoint point) =>
-                point.X >= bounds.X && point.X <= bounds.X + bounds.Width &&
-                point.Y >= bounds.Y && point.Y <= bounds.Y + bounds.Height;
+            using var controls = NewScene(out _, nativeCamera: true);
+            Draw(controls);
+            now += TimeSpan.FromSeconds(1);
+            var context = controls.GetHandAcquisitionContext(now);
+            Require(context is { IlluminatedHint: null } &&
+                    controls.GetHoldButtonContext(now) is { ButtonIds.Count: 3 } &&
+                    controls.CurrentBoardButtons.All(button => button.IsHold),
+                "Paint's drawer must use caption holds without navigation spotlights.");
         }
 
         SceneCompositor NewScene(out double safetyInset, bool nativeCamera = false, bool keepIntroduction = false)
@@ -1076,12 +703,14 @@ public sealed partial class MainWindow
             Point2[] camera = nativeCamera ? [new(0, 0), new(size, 0), new(size, size), new(0, size)] : unit;
             safetyInset = result.SetDetectedBoardGrid(corners, Homography.FromFourPoints(camera, unit));
             result.SetBoardSetup(false);
-            result.SetPaintInputAvailable(true);
             result.ShowPaint();
+            Require(result.ActivatePaintButton("paint-drawer-open"), "The Paint fixture drawer could not open.");
+            now += BoardSession.PaintDrawerOpeningDuration;
+            result.TickPaint(now);
             if (!keepIntroduction)
             {
-                // These existing fixtures isolate paint transport, camera
-                // comparison and exact pigment/export behavior from decoration.
+                // These fixtures isolate paint transport and exact pigment/
+                // export behavior from decoration.
                 result.DisablePaintIdleStreaksForVerification();
                 result.ResetPaint();
             }
@@ -1130,27 +759,6 @@ public sealed partial class MainWindow
         static int MaxDifference(byte[] first, byte[] second, int offset) =>
             Math.Max(Math.Abs(first[offset] - second[offset]), Math.Max(Math.Abs(first[offset + 1] - second[offset + 1]),
                 Math.Abs(first[offset + 2] - second[offset + 2])));
-        static void FillObstruction(byte[] pixels, double u, double v, double safetyInset)
-        {
-            int centerX = (int)(size * (safetyInset / 2 + u * (1 - safetyInset)));
-            int centerY = (int)(size * (safetyInset / 2 + v * (1 - safetyInset)));
-            for (int y = centerY - 42; y < centerY + 43; y++)
-            for (int x = centerX - 36; x < centerX + 37; x++)
-            {
-                int offset = (y * size + x) * 4;
-                pixels[offset] = 95; pixels[offset + 1] = 145; pixels[offset + 2] = 195; pixels[offset + 3] = 255;
-            }
-        }
-        static void ShiftControlEdge(byte[] pixels, byte[] source, BoardRect bounds, double safetyInset)
-        {
-            int left = (int)(size * (safetyInset / 2 + bounds.X * (1 - safetyInset)));
-            int top = (int)(size * (safetyInset / 2 + bounds.Y * (1 - safetyInset)));
-            int right = (int)(size * (safetyInset / 2 + (bounds.X + bounds.Width) * (1 - safetyInset)));
-            int bottom = (int)(size * (safetyInset / 2 + (bounds.Y + bounds.Height) * (1 - safetyInset)));
-            for (int y = top - 3; y <= bottom + 7; y++)
-            for (int x = left - 3; x <= right + 3; x++)
-                Buffer.BlockCopy(source, (y * size + x) * 4, pixels, ((y + 7) * size + x + 6) * 4, 4);
-        }
         static HandDetection Hand(double x, double y)
         {
             PixelPoint[] local =

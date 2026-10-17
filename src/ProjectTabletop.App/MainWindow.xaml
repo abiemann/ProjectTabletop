@@ -114,6 +114,27 @@
                             <Button x:Name="RescanBoardButton" Content="Scan again" Click="RescanBoard_Click" IsEnabled="False" />
                         </StackPanel>
                         <TextBlock x:Name="BoardSetupStatusText" Text="Board setup first finds the cardboard under black output, then uses white projection and five alignment spots to fit its grid." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <Expander x:Name="MarkerSetupExpander" Header="Marker setup" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="Use two equal parallel black bars with a clear gap on a light backing. Follow the projected position targets, slide between the two rings and back, then lift the marker away. Save becomes available after all checks pass." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <ComboBox x:Name="MarkerSetupTargetCombo" Header="Set up" SelectedIndex="0" HorizontalAlignment="Stretch">
+                                    <ComboBoxItem Content="Water Garden / Paint marker" />
+                                    <ComboBoxItem Content="Football player 1" />
+                                    <ComboBoxItem Content="Football player 2" />
+                                </ComboBox>
+                                <TextBlock Text="Water Garden and Paint share a saved marker. Open either board first to check or train it on that surface." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Name="StartMarkerSetupButton" Content="Start setup" Click="StartMarkerSetup_Click" />
+                                    <Button x:Name="RecheckMarkerSetupButton" Content="Recheck saved marker" Click="RecheckMarkerSetup_Click" />
+                                </StackPanel>
+                                <TextBlock x:Name="MarkerSetupStatusText" Text="Start the camera and scan the board, then choose a marker to set up." TextWrapping="Wrap" />
+                                <ProgressBar x:Name="MarkerSetupProgress" Minimum="0" Maximum="100" Value="0" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Name="SaveMarkerSetupButton" Content="Save marker" Click="SaveMarkerSetup_Click" IsEnabled="False" />
+                                    <Button x:Name="CancelMarkerSetupButton" Content="Cancel" Click="CancelMarkerSetup_Click" IsEnabled="False" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Expander>
                         <Border Height="1" Background="{StaticResource TabletopPanelBorderBrush}" Margin="0,2" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Content="Board menu" Click="BoardMenu_Click" />
@@ -136,7 +157,7 @@
                         <Button Content="Blackjack" Click="Blackjack_Click" />
                         <TextBlock Text="Play the dealer with virtual chips. Aim with four fingers together, then move your index finger sideways to select, or click the laptop table. The laptop table works with the projector off." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Water Garden" Click="WaterGarden_Click" />
-                        <TextBlock Text="Move a calibrated stick tip across the water to make ripples. Learn its marker and enable Stick tip tracking in Hand interaction. Open the bottom-left arrow to find EXIT, RESET, and DUCK+. Hold a projected control for one second, then uncover it before pressing again. Laptop clicks also work." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <TextBlock Text="Use Marker setup above to train the Water Garden wand, then move its marker across the water to make ripples. Open the bottom-left arrow to find EXIT, RESET, and DUCK+. Hold a projected control for one second, then uncover it before pressing again. Laptop clicks also work." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Football" Click="OnOpenFootballBoard" />
                         <Button Content="Stryker's Run" Click="OnOpenStrykersRunBoard" />
                         <TextBlock Text="Kick a lively football with a black bar, a double-bar marker or your index finger. Play against the computer or another person, defending opposite goals. Player 1 uses the left half; player 2 uses the right." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
@@ -158,8 +179,17 @@
                                     <ComboBoxItem Content="Frying pan" />
                                     <ComboBoxItem Content="Football boot" />
                                 </ComboBox>
+                                <ComboBox x:Name="FootballPlayer1Input" Header="Player 1 input" Tag="0" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="FootballInputMode_SelectionChanged">
+                                    <ComboBoxItem Content="Double-bar marker" />
+                                    <ComboBoxItem Content="Index fingertip" />
+                                </ComboBox>
+                                <ComboBox x:Name="FootballPlayer2Input" Header="Player 2 input" Tag="1" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="FootballInputMode_SelectionChanged">
+                                    <ComboBoxItem Content="Double-bar marker" />
+                                    <ComboBoxItem Content="Index fingertip" />
+                                </ComboBox>
+                                <TextBlock x:Name="FootballInputStatusText" Text="Use Marker setup for each human player's marker, or choose Index fingertip." TextWrapping="Wrap" />
                                 <Button Content="Reset football match" Click="OnResetFootball" />
-                                <TextBlock Text="Choose each player's input and learn their marker under Football input below. Every kicker uses the same contact size." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <TextBlock Text="Use Marker setup above to train each human player. Keep one marker in each half; player 1 uses the left and player 2 the right. Every kicker uses the same contact size." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                             </StackPanel>
                         </Expander>
                         <Button Content="Crown &amp; Deed" Click="CrownDeed_Click" />
@@ -191,100 +221,9 @@
                             </StackPanel>
                         </Border>
                         <Button Content="Save raw camera PNG" Click="SaveRawSnapshot_Click" />
-                        <Border Height="1" Background="{StaticResource TabletopPanelBorderBrush}" />
-                        <ToggleSwitch x:Name="StickTrackingToggle" Header="Stick tip tracking" IsOn="False" Toggled="StickTrackingToggle_Toggled" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="Learn colour tip" Click="LearnColorTip_Click" />
-                            <Button Content="Learn eye tip" Click="LearnEyeTip_Click" />
-                            <Button Content="Forget" Click="ForgetEyeTip_Click" />
-                        </StackPanel>
-                        <TextBlock x:Name="EyeTipStatusText" Text="Off. Learn a coloured tip or eye sticker before tracking." TextWrapping="Wrap" />
-                        <TextBlock Text="For a coloured pin, choose Learn colour tip and click inside its coloured surface. For an eye sticker, choose Learn eye tip and click its black pupil. A green circle confirms tracking. After board setup, open Water Garden and move the tip close to the board to make ripples." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
-                        <Expander Header="Football input" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                            <StackPanel Spacing="10">
-                                <TextBlock Text="Use one solid black rectangle, or two equal parallel bars with aligned ends and a clear gap. For a new marker, aim for bars about 1 cm thick and 5–6 cm long with a 1 cm gap. A cardboard T with a black top crossbar and an uncoloured stem also works. Choose Learn marker, then click inside one black bar in the live webcam preview. A nearby matching parallel bar is learned as part of the same marker. Face both bars up toward the camera and keep them close to the board. Markers work across the grass in your half, including behind your goal line. Profiles are saved separately for each camera." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
-                                <ComboBox x:Name="FootballPlayer1Input" Header="Player 1 input" Tag="0" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="FootballInputMode_SelectionChanged">
-                                    <ComboBoxItem Content="Black bar / pair" />
-                                    <ComboBoxItem Content="Index fingertip" />
-                                </ComboBox>
-                                <Button Content="Learn player 1 marker" Tag="0" Click="LearnFootballTip_Click" />
-                                <ComboBox x:Name="FootballPlayer2Input" Header="Player 2 input" Tag="1" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="FootballInputMode_SelectionChanged">
-                                    <ComboBoxItem Content="Black bar / pair" />
-                                    <ComboBoxItem Content="Index fingertip" />
-                                </ComboBox>
-                                <Button Content="Learn player 2 marker" Tag="1" Click="LearnFootballTip_Click" />
-                                <Button Content="Cancel learning" Click="CancelFootballLearning_Click" />
-                                <TextBlock x:Name="FootballInputStatusText" Text="Learn a black marker for each human player, or choose Index fingertip." TextWrapping="Wrap" />
-                                <TextBlock Text="Players' markers may look identical: keep one marker in each half, player 1 on the left and player 2 on the right. A learned pair counts as one marker. Show both bars to start tracking; brief coverage of one bar is tolerated. Your kicker sits directly in front of the marker, facing the opponent's half, and follows when you move or rotate it. For fingertip play, show the back of one hand in your half and point with the index finger. Player 2 input is used in two-human mode. Short tracking interruptions resume quietly; longer losses pause play." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
-                            </StackPanel>
-                        </Expander>
                     </StackPanel>
                 </Border>
 
-                <Expander Header="Physical pieces (optional / later)" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="Learn a physical piece" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
-                        <TextBox x:Name="PieceIdTextBox" Header="Piece ID" PlaceholderText="e.g. boat-1" Text="piece-1" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="Capture snapshot" Click="CaptureSnapshot_Click" />
-                            <Button Content="Resume live" Click="ResumeLive_Click" />
-                        </StackPanel>
-                        <Button Content="Clear marks" Click="ClearMarks_Click" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="Outline" Click="OutlineMode_Click" />
-                            <Button Content="Front point" Click="FrontMode_Click" />
-                            <Button Content="Add labeled sample" Click="AddSample_Click" />
-                        </StackPanel>
-                        <TextBlock Text="On a frozen camera frame, click around one piece's top in order, then click its front point. Label other visible pieces on the same frame; capture more views and orientations for training." TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="Train" Click="Train_Click" />
-                            <Button Content="Save models" Click="SaveModels_Click" />
-                            <Button Content="Load models" Click="LoadModels_Click" />
-                        </StackPanel>
-                        <TextBlock x:Name="TrainingStatusText" Text="Untrained: no labeled samples." TextWrapping="Wrap" />
-                        <TextBlock Text="Vision tuning" FontWeight="SemiBold" Margin="0,4,0,0" />
-                        <ComboBox x:Name="VisionSegmentationComboBox" Header="Find candidate cards by" HorizontalAlignment="Stretch">
-                            <ComboBoxItem Content="Fixed brightness" />
-                            <ComboBoxItem Content="Automatic brightness (Otsu)" />
-                            <ComboBoxItem Content="Empty-board difference" />
-                        </ComboBox>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <NumberBox x:Name="VisionBrightnessThresholdBox" Header="Brightness cutoff" Minimum="0" Maximum="255" Value="205" Width="150" SmallChange="1" />
-                            <NumberBox x:Name="VisionDifferenceThresholdBox" Header="Difference cutoff" Minimum="0" Maximum="255" Value="35" Width="150" SmallChange="1" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <NumberBox x:Name="VisionMinimumAreaBox" Header="Min area (pixels²)" Minimum="1" Maximum="1000000" Value="300" Width="150" SmallChange="10" />
-                            <NumberBox x:Name="VisionPatternThresholdBox" Header="Pattern cutoff" Minimum="0" Maximum="255" Value="225" Width="150" SmallChange="1" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button x:Name="ApplyVisionSettingsButton" Content="Apply tuning" Click="ApplyVisionSettings_Click" />
-                            <Button x:Name="CaptureEmptyBoardButton" Content="Capture empty board" Click="CaptureEmptyBoard_Click" />
-                        </StackPanel>
-                        <TextBlock x:Name="VisionReferenceStatusText" Text="No empty-board reference saved." TextWrapping="Wrap" />
-                        <TextBlock Text="Empty-board difference needs a card-free frame and a fixed projected image. Moving video changes the background every frame." TextWrapping="Wrap" />
-
-                        <TextBlock Text="Assign media to a piece" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
-                        <ComboBox x:Name="OverlayPieceComboBox" PlaceholderText="Choose trained piece" HorizontalAlignment="Stretch" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="Choose overlay" Click="ChooseOverlay_Click" />
-                            <Button Content="Remove overlay" Click="RemoveOverlay_Click" />
-                        </StackPanel>
-                        <TextBlock x:Name="OverlayMappingsText" Text="No overlays assigned." TextWrapping="Wrap" />
-
-                        <TextBlock Text="Raised-piece registration" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="Board corners" Click="BoardCorners_Click" />
-                            <Button Content="Raised top points" Click="TopPoints_Click" />
-                        </StackPanel>
-                        <NumberBox x:Name="PieceHeightNumberBox" Header="Measured piece top height above board (mm)" Minimum="0.1" Maximum="100" Value="5" ValueChanged="PieceHeightNumberBox_ValueChanged" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="Save calibration" Click="SaveCalibration_Click" />
-                            <Button Content="Load calibration" Click="LoadCalibration_Click" />
-                        </StackPanel>
-                        <TextBlock Text="For board: click the four projected corner targets in the camera view. For raised top: move a piece until each projected target lands on its top center, then click that center in the camera view. The app advances the target after each click." TextWrapping="Wrap" />
-                        <TextBlock x:Name="CalibrationStatusText" Text="Registration needed before overlays can align." TextWrapping="Wrap" />
-                    </StackPanel>
-                </Expander>
                 <TextBlock Text="Media decoding and 4K/60 performance must be checked on the connected laptop and projector." TextWrapping="Wrap" FontStyle="Italic" Margin="0,8,0,12" />
             </StackPanel>
         </ScrollViewer>

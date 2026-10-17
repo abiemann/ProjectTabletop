@@ -27,8 +27,24 @@ public sealed partial class MainWindow
     private async Task<object?> HandleControlOnUiAsync(string method, JsonElement parameters)
     {
         if (_closing) throw new InvalidOperationException("The app is closing.");
+        if (_scene.MarkerSetupActive && method is "learn_stick_tip" or "learn_wand_marker" or "learn_football_bar")
+            throw new InvalidOperationException("Finish or cancel guided marker setup before using direct marker learning.");
         switch (method)
         {
+            case "get_marker_setup":
+                return GetMarkerSetupStatus();
+            case "start_marker_setup":
+                int markerTarget = parameters.TryGetProperty("target", out var markerTargetValue) ? markerTargetValue.GetInt32() : 0;
+                if (markerTarget is < 0 or > 2) throw new ArgumentException("Use target 0 for Water Garden, 1 or 2 for Football.");
+                MarkerSetupTargetCombo.SelectedIndex = markerTarget;
+                BeginMarkerSetup(parameters.TryGetProperty("recheck", out var recheckValue) && recheckValue.GetBoolean());
+                return GetMarkerSetupStatus();
+            case "cancel_marker_setup":
+                CancelMarkerSetup("Setup cancelled. Your saved marker is unchanged.");
+                return GetMarkerSetupStatus();
+            case "save_marker_setup":
+                SaveVerifiedMarker();
+                return GetMarkerSetupStatus();
             case "set_football_diagnostic_capture":
                 return SetFootballDiagnosticCapture(parameters.GetProperty("enabled").GetBoolean());
             case "capture_football_diagnostics":
@@ -144,14 +160,20 @@ public sealed partial class MainWindow
                     ? acquisitionBoard.GetString() : null);
             case "verify_paint":
                 return await VerifyPaintAsync();
+            case "verify_paint_drawer":
+                return await VerifyPaintDrawerAsync();
+            case "verify_control_swipes":
+                return await VerifyControlSwipesAsync();
+            case "verify_paint_marker":
+                return await VerifyPaintMarkerAsync();
             case "verify_water_garden":
                 return await VerifyWaterGardenAsync();
+            case "verify_marker_setup":
+                return await VerifyMarkerSetupAsync();
             case "verify_football":
                 return await VerifyFootballAsync();
             case "capture_water_garden_motion":
                 return await CaptureWaterGardenMotionAsync();
-            case "capture_paint_diagnostics":
-                return await SavePaintDiagnosticsAsync();
             case "verify_paint_save":
                 return await VerifyPaintSaveAsync();
             case "capture_hand_acquisition":
@@ -293,12 +315,12 @@ public sealed partial class MainWindow
                     lastHandDetection = _lastHandDetection,
                     handDetectionLog = _handDetectionLog?.Status,
                     paint = _scene.GetPaintDiagnostics(),
+                    paintDrawerOpen = _scene.PaintDrawerOpen,
                     waterGarden = _scene.GetWaterGardenDiagnostics(),
                     paintInput = _scene.GetPaintInputDiagnostics(),
                     paintSaveStatus = _scene.GetPaintSaveStatus(MonotonicClock.UtcNow),
                     lastSavedPaintPath = _lastSavedPaintPath,
                     paintSaveDirectory = PaintSaveDirectory,
-                    lastPaintDetection = _lastPaintDetection,
                     handVideoRecording = _handVideoRecorder?.Status,
                     handLighting = _scene.GetHandLightingDiagnostics(),
                     handAcquisition = new { lighting = _scene.GetHandAcquisitionDiagnostics(),
@@ -352,11 +374,11 @@ public sealed partial class MainWindow
                     !parameters.TryGetProperty("y", out var stickY) || stickY.ValueKind != JsonValueKind.Number || !stickY.TryGetDouble(out double eyeY))
                     throw new ArgumentException("Provide numeric x and y in raw camera pixels.");
                 return await LearnEyeTipAsync(eyeX, eyeY);
-            case "learn_color_tip":
-                if (!parameters.TryGetProperty("x", out var colorTipX) || colorTipX.ValueKind != JsonValueKind.Number || !colorTipX.TryGetDouble(out double colorX) ||
-                    !parameters.TryGetProperty("y", out var colorTipY) || colorTipY.ValueKind != JsonValueKind.Number || !colorTipY.TryGetDouble(out double colorY))
+            case "learn_wand_marker":
+                if (!parameters.TryGetProperty("x", out var wandX) || wandX.ValueKind != JsonValueKind.Number || !wandX.TryGetDouble(out double markerX) ||
+                    !parameters.TryGetProperty("y", out var wandY) || wandY.ValueKind != JsonValueKind.Number || !wandY.TryGetDouble(out double markerY))
                     throw new ArgumentException("Provide numeric x and y in raw camera pixels.");
-                return await LearnColorTipAsync(colorX, colorY);
+                return await LearnWandMarkerAsync(markerX, markerY);
             case "capture_stick_tip":
                 return await CaptureStickTipAsync();
             case "start_board_scan":

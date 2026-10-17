@@ -9,7 +9,7 @@ public class FootballFieldGeometryTests
     public void BehindGoalMarkersKeepTheirPlayerAndMeasuredPosition()
     {
         var now = DateTimeOffset.UtcNow;
-        var detection = new ColorTipDetectionResult(
+        var detection = new MarkerTipDetectionResult(
             [new(new(40, 100), 8, 200, 1), new(new(960, 100), 8, 200, 1)], "multiple-black-bar-pairs");
         static PixelPoint? Map(PixelPoint p)
         {
@@ -18,7 +18,7 @@ public class FootballFieldGeometryTests
         }
         for (int player = 0; player < 2; player++)
         {
-            var tracker = new ColorTipTracker();
+            var tracker = new MarkerTipTracker();
             Assert.Equal(FootballTipAction.Hold, FootballTipAssignment.Update(tracker, player, detection, Map, now, now).Action);
             var later = now.AddMilliseconds(40);
             var result = FootballTipAssignment.Update(tracker, player, detection, Map, later, later);

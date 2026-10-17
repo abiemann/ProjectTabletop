@@ -131,7 +131,7 @@ public sealed partial class SceneCompositor
             ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 5, rect.Width, rect.Height), 19, 19, ThemeColor(0, 5, 9));
             ds.FillRoundedRectangle(rect, 19, 19, sheen);
             ds.DrawRoundedRectangle(rect, 19, 19, edge, 1.5f);
-            RouletteText(ds, button.Label.ToUpperInvariant(), RouletteButtonTextRectangle(button), 23,
+            DrawHoldButtonCaption(ds, button.Label, RouletteButtonTextRectangle(button),
                 HoldExposure(!button.Enabled ? ThemeColor(134, 142, 139) : primary ? RouletteInk : RouletteCream, lettering), aspect);
             return;
         }
@@ -178,7 +178,8 @@ public sealed partial class SceneCompositor
     private HandTrackingBounds RouletteButtonTextRegion(CanvasDevice device, BoardButton button)
     {
         var rect = RouletteButtonTextRectangle(button);
-        float size = button.IsHold ? 23 : button.Id.StartsWith("roulette-number-") ? 22 : 13;
+        if (button.IsHold) return HoldButtonCaptionRegion(device, button, rect);
+        float size = button.Id.StartsWith("roulette-number-") ? 22 : 13;
         if (button.Id.StartsWith("roulette-chip-", StringComparison.Ordinal))
         {
             var bounds = Pixels(button.Bounds, 0);

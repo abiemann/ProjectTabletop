@@ -90,11 +90,6 @@ public sealed partial class BoardSession
     {
         new BoardButton("menu", "Back to settings", new(.06, .055, .30, .105), BoardScreen.Settings)
     });
-    private static readonly IReadOnlyList<BoardButton> PaintButtons = Array.AsReadOnly(new[]
-    {
-        new BoardButton("menu", "Exit", new(.06, .85, .26, .105), BoardScreen.Menu),
-        new BoardButton("paint-save", "Save", new(.68, .85, .26, .105), BoardScreen.Paint, Enabled: false)
-    });
     private DateTimeOffset? _lastFrameTime;
     private DateTimeOffset? _lastNow;
     private DateTimeOffset _ignoreExecutionsThrough = DateTimeOffset.MinValue;
@@ -239,7 +234,7 @@ public sealed partial class BoardSession
         TickFootball(now);
         ClearStrykersRunInput(now);
         TickStrykersRun(now);
-        ClearMenuScroll(now);
+        ResetMenuScrollMotion(now);
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
         ClearCrownDeedPresentationHold();
@@ -259,8 +254,9 @@ public sealed partial class BoardSession
 
     private void Show(BoardScreen screen, DateTimeOffset now)
     {
+        if (Screen == BoardScreen.StrykersRun && screen != BoardScreen.StrykersRun) _strykersRun.ClearStormCraters();
         ClearStrykersRunInput(now);
-        ClearMenuScroll(now);
+        ResetMenuScrollMotion(now);
         ClearBlackjackPresentationHold();
         AdvanceBlackjackPresentation(now);
         ClearCrownDeedPresentationHold();

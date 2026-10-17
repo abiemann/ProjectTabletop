@@ -160,14 +160,17 @@ public class BoardControlVisibilityTests
     {
         var board = new BoardSession();
         board.ShowWaterGarden(At(0));
-        board.SetWaterGardenStickPresent(true, At(10));
-        board.SetButtonsVisible(false, At(20));
-        board.SetButtonsVisible(true, At(30));
-        Assert.NotEmpty(board.GetVisibleButtons(At(100)));
-        Assert.All(board.GetVisibleButtons(At(100)), button => Assert.False(button.Enabled));
-        board.TickControlVisibility(At(330));
-        Assert.All(board.Buttons, button => Assert.False(button.Enabled));
-        Assert.False(board.ActivateButton("water-drawer-open", At(340)));
+        Assert.True(board.ActivateButton("water-drawer-open", At(1)));
+        board.TickWaterGarden(At(400));
+        board.SetWaterGardenStickPresent(true, At(410));
+        board.SetButtonsVisible(false, At(420));
+        board.SetButtonsVisible(true, At(430));
+        Assert.NotEmpty(board.GetVisibleButtons(At(500)));
+        Assert.True(board.GetVisibleButtons(At(500))[0].Enabled);
+        Assert.All(board.GetVisibleButtons(At(500)).Skip(1), button => Assert.False(button.Enabled));
+        board.TickControlVisibility(At(730));
+        Assert.All(board.Buttons.Skip(1), button => Assert.False(button.Enabled));
+        Assert.True(board.ActivateButton("water-drawer-close", At(740)));
         Assert.True(board.WaterGardenStickPresent);
     }
 
@@ -234,12 +237,15 @@ public class BoardControlVisibilityTests
     {
         var board = new BoardSession();
         board.ShowWaterGarden(At(0));
-        board.SetButtonsVisible(false, At(10));
-        Assert.All(board.GetVisibleButtons(At(50)), button => Assert.True(button.Enabled));
-        board.SetWaterGardenStickPresent(true, At(100));
-        Assert.NotEmpty(board.GetVisibleButtons(At(150)));
-        Assert.All(board.GetVisibleButtons(At(150)), button => Assert.False(button.Enabled));
-        Assert.Empty(board.GetVisibleButtons(At(310)));
+        Assert.True(board.ActivateButton("water-drawer-open", At(1)));
+        board.TickWaterGarden(At(400));
+        board.SetButtonsVisible(false, At(410));
+        Assert.All(board.GetVisibleButtons(At(450)), button => Assert.True(button.Enabled));
+        board.SetWaterGardenStickPresent(true, At(500));
+        Assert.NotEmpty(board.GetVisibleButtons(At(550)));
+        Assert.True(board.GetVisibleButtons(At(550))[0].Enabled);
+        Assert.All(board.GetVisibleButtons(At(550)).Skip(1), button => Assert.False(button.Enabled));
+        Assert.Empty(board.GetVisibleButtons(At(710)));
     }
 
     [Fact]

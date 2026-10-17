@@ -180,52 +180,6 @@ public sealed partial class MainWindow
             : "Complete a board scan before the test grid is projected.");
     }
 
-    private async void ChooseOverlay_Click(object sender, RoutedEventArgs e)
-    {
-        var pieceId = OverlayPieceComboBox.SelectedItem as string;
-        if (string.IsNullOrWhiteSpace(pieceId)) pieceId = PieceIdTextBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(pieceId))
-        {
-            SetStatus("Enter a piece ID or select a trained piece before assigning media.");
-            return;
-        }
-        var path = await PickMediaPathAsync();
-        if (path is null) return;
-        try
-        {
-            var asset = _scene.FindAssetByPath(path) ??
-                await MediaAsset.OpenAsync(CanvasDevice.GetSharedDevice(), path);
-            _scene.SetOverlay(pieceId, asset);
-            AddPieceChoice(pieceId);
-            UpdateOverlayMappings();
-            SetStatus($"Assigned {Path.GetFileName(path)} to {pieceId}.");
-        }
-        catch (Exception ex) { SetStatus("Piece media could not open: " + ex.Message); }
-    }
-
-    private void RemoveOverlay_Click(object sender, RoutedEventArgs e)
-    {
-        if (OverlayPieceComboBox.SelectedItem is not string pieceId) return;
-        _scene.SetOverlay(pieceId, null);
-        UpdateOverlayMappings();
-    }
-
-    private void AddPieceChoice(string pieceId)
-    {
-        if (!OverlayPieceComboBox.Items.OfType<string>().Contains(pieceId, StringComparer.OrdinalIgnoreCase))
-            OverlayPieceComboBox.Items.Add(pieceId);
-        OverlayPieceComboBox.SelectedItem = OverlayPieceComboBox.Items.OfType<string>()
-            .First(item => string.Equals(item, pieceId, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private void UpdateOverlayMappings()
-    {
-        var mappings = _scene.OverlayPaths;
-        OverlayMappingsText.Text = mappings.Count == 0 ? "No overlays assigned." :
-            string.Join("\n", mappings.OrderBy(item => item.Key).Select(item =>
-                $"{item.Key}: {Path.GetFileName(item.Value)}"));
-    }
-
     private async Task<string?> PickMediaPathAsync()
     {
         try

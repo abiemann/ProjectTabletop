@@ -19,9 +19,13 @@ public sealed partial class SceneCompositor
 
     // The board surface is square in logical units but not on the physical
     // board. Draw text in physical proportions; narrow boards shrink the font.
-    private void DrawBoardAspectText(CanvasDrawingSession ds, string text, Rect bounds, Color color, CanvasTextFormat format)
+    private void DrawBoardAspectText(CanvasDrawingSession ds, string text, Rect bounds, Color color, CanvasTextFormat format) =>
+        DrawBoardAspectText(ds, text, bounds, color, format, PaintBoardAspect());
+
+    private static void DrawBoardAspectText(CanvasDrawingSession ds, string text, Rect bounds, Color color,
+        CanvasTextFormat format, double boardAspect)
     {
-        float aspect = (float)PaintBoardAspect();
+        float aspect = (float)boardAspect;
         float size = format.FontSize;
         var transform = ds.Transform;
         try
@@ -59,12 +63,14 @@ public sealed partial class SceneCompositor
         new(button.Bounds.X + .012, button.Bounds.Y + .012,
             button.Bounds.Width - .024, button.Bounds.Height - .024);
 
-    private HandTrackingBounds BoardButtonSearchRegion(BoardButton button)
+    private HandTrackingBounds BoardButtonSearchRegion(BoardButton button, HandTrackingBounds caption)
     {
         if (_boardSession.Screen == BoardScreen.Roulette && button.Id.StartsWith("roulette-chip-", StringComparison.Ordinal))
             return RouletteChipSearchRegion(button);
         var plate = BoardButtonPlateRegion(button);
-        if (!IsVectorArrowHandle(button)) return plate;
+        // Gesture controls acquire from broken lettering. Decorative tile area
+        // must not dilute the measured caption damage below the evidence floor.
+        if (!IsVectorArrowHandle(button)) return button.IsHold ? plate : caption;
         var ink = BoardVectorArrowInk(button);
         // A compact chevron must be measured against its actual shape, rather
         // than the much larger pill. Twelve logical pixels retain the bounded
@@ -83,20 +89,13 @@ public sealed partial class SceneCompositor
     {
         if (IsVectorArrowHandle(button)) return ButtonInkRegion(button, BoardVectorArrowInk(button), 0, 0);
         if (_boardSession.Screen == BoardScreen.Roulette) return RouletteButtonTextRegion(device, button);
-        if (_boardSession.Screen == BoardScreen.Paint) return PaintButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.WaterGarden) return WaterGardenButtonTextRegion(device, button);
         if (_boardSession.Screen is BoardScreen.Football or BoardScreen.StrykersRun)
             return FieldGameButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Slots) return SlotButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Menu && button.Id == "settings") return SettingsCogTextRegion(device, button);
-        if (_boardSession.Screen == BoardScreen.Globe)
-        {
-            var rectangle = DrawerButtonTextRectangle(button);
-            using var format = DrawerButtonTextFormat(button);
-            using var layout = new CanvasTextLayout(device, button.Label, format,
-                (float)rectangle.Width, (float)rectangle.Height);
-            return ButtonInkRegion(button, layout.DrawBounds, rectangle.X, rectangle.Y);
-        }
+        if (_boardSession.Screen is BoardScreen.Globe or BoardScreen.Paint)
+            return HoldButtonCaptionRegion(device, button, DrawerButtonTextRectangle(button));
         if (_boardSession.Screen == BoardScreen.CrownDeed)
         {
             var rectangle = CrownDeedButtonTextRectangle(button);
@@ -108,19 +107,14 @@ public sealed partial class SceneCompositor
         if (_boardSession.Screen == BoardScreen.Blackjack)
         {
             var spec = CasinoButtonTextSpec(button);
+            if (button.IsHold) return HoldButtonCaptionRegion(device, button, spec.Bounds, spec.Caption);
             using var format = CasinoTextFormat(spec.Size, "Bahnschrift", true);
             using var layout = new CanvasTextLayout(device, spec.Caption, format,
                 (float)spec.Bounds.Width, (float)spec.Bounds.Height);
             return ButtonInkRegion(button, layout.DrawBounds, spec.Bounds.X, spec.Bounds.Y);
         }
         if (_boardSession.Screen == BoardScreen.PhotoCopy)
-        {
-            var rectangle = DrawerButtonTextRectangle(button);
-            using var format = DrawerButtonTextFormat(button);
-            using var layout = new CanvasTextLayout(device, DrawerButtonCaption(button), format,
-                (float)rectangle.Width, (float)rectangle.Height);
-            return ButtonInkRegion(button, layout.DrawBounds, rectangle.X, rectangle.Y);
-        }
+            return HoldButtonCaptionRegion(device, button, DrawerButtonTextRectangle(button));
         using var label = BoardButtonTextFormat();
         bool menu = _boardSession.Screen == BoardScreen.Menu ||
             _boardSession.Screen == BoardScreen.Settings && button.Destination == BoardScreen.HandTracking;

@@ -1,22 +1,22 @@
 namespace ProjectTabletop.Interaction;
 
-/// <summary>A stable observation's center in player-facing, normalized board coordinates.</summary>
+/// <summary>A disturbance center in player-facing, normalized board coordinates. Identity is optional.</summary>
 public readonly record struct BoardSwipeSample(long TrackingId, double U, double V);
 
 public enum BoardControlSwipe
 {
-    Hide,
-    Show
+    Toggle
 }
 
-/// <summary>Recognizes deliberate horizontal crossings without joining different tracks or stale frames.</summary>
+/// <summary>Fits a bottom-band motion vector from coordinates, without requiring a tracked hand.</summary>
 public sealed class BoardControlSwipeTracker
 {
-    private static readonly TimeSpan MaximumGap = TimeSpan.FromMilliseconds(350);
-    private static readonly TimeSpan MinimumDuration = TimeSpan.FromMilliseconds(200);
-    private static readonly TimeSpan MaximumDuration = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan MaximumFrameAge = TimeSpan.FromMilliseconds(350);
+    private static readonly TimeSpan MaximumGap = TimeSpan.FromMilliseconds(600);
+    private static readonly TimeSpan MinimumDuration = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan MaximumDuration = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan RearmDelay = TimeSpan.FromMilliseconds(600);
-    private readonly Candidate[] _candidates = new Candidate[2];
+    private Candidate _candidate;
     private DateTimeOffset? _lastFrameTime;
     private DateTimeOffset _rearmAt;
 
@@ -27,117 +27,196 @@ public sealed class BoardControlSwipeTracker
         DateTimeOffset frameTime, DateTimeOffset now)
     {
         HasTraversalInProgress = false;
-        if (frameTime > now || now - frameTime > MaximumGap)
+        if (frameTime > now || now - frameTime > MaximumFrameAge)
         {
-            Array.Clear(_candidates);
+            _candidate = default;
             return null;
         }
         if (_lastFrameTime is { } previous && frameTime <= previous) return null;
         _lastFrameTime = frameTime;
         if (frameTime < _rearmAt) return null;
 
-        for (int i = 0; i < _candidates.Length; i++)
-            if (_candidates[i].TrackingId != 0 && frameTime - _candidates[i].LastTime > MaximumGap)
-                _candidates[i] = default;
-
-        for (int i = 0; i < samples.Count; i++)
+        if (_candidate.Observations != 0 && frameTime - _candidate.LastTime > MaximumGap)
+            _candidate = default;
+        if (!TryGetCenter(samples, out double u, out double v))
         {
-            var sample = samples[i];
-            if (sample.TrackingId <= 0 || !double.IsFinite(sample.U) || !double.IsFinite(sample.V) ||
-                sample.U is < 0 or > 1 || sample.V is < 0 or > 1) continue;
-            int index = FindCandidate(sample.TrackingId);
-            if (index < 0) continue;
-            ref var candidate = ref _candidates[index];
-            if (candidate.TrackingId == 0)
-            {
-                candidate = Start(sample, frameTime);
-                continue;
-            }
-            // A repeated tracking ID in one frame must not add another observation.
-            if (candidate.LastTime == frameTime) continue;
-            // Waiting at the starting edge is not part of the movement duration.
-            bool startingEdge = candidate.Direction > 0 ? sample.U <= .25 : sample.U >= .75;
-            if (startingEdge)
-            {
-                candidate = Start(sample, frameTime);
-                continue;
-            }
-            var duration = frameTime - candidate.StartTime;
-            double minV = Math.Min(candidate.MinV, sample.V);
-            double maxV = Math.Max(candidate.MaxV, sample.V);
-            double reversal = (candidate.FurthestU - sample.U) * candidate.Direction;
-            if (duration > MaximumDuration || maxV - minV > .22 || reversal > .10)
-            {
-                candidate = Start(sample, frameTime);
-                continue;
-            }
-            candidate.LastTime = frameTime;
-            candidate.MinV = minV;
-            candidate.MaxV = maxV;
-            candidate.Observations++;
-            if (candidate.Observations >= 3 &&
-                (sample.U - candidate.StartU) * candidate.Direction >= .10)
-                HasTraversalInProgress = true;
-            if ((sample.U - candidate.FurthestU) * candidate.Direction > 0)
-                candidate.FurthestU = sample.U;
-            bool oppositeEdge = candidate.Direction > 0 ? sample.U >= .75 : sample.U <= .25;
-            if (!oppositeEdge || (sample.U - candidate.StartU) * candidate.Direction < .50) continue;
-            if (duration < MinimumDuration)
-            {
-                candidate = Start(sample, frameTime);
-                continue;
-            }
-            if (candidate.Observations < 4) continue;
-            var result = candidate.Direction > 0 ? BoardControlSwipe.Show : BoardControlSwipe.Hide;
-            HasTraversalInProgress = false;
-            Array.Clear(_candidates);
-            _rearmAt = frameTime + RearmDelay;
-            return result;
+            // Brief empty frames may occur between unrelated optical component
+            // IDs. Ambiguous simultaneous disturbances must not be joined.
+            if (samples.Count != 0) _candidate = default;
+            else if (CompletesDeparture(frameTime)) return Complete(frameTime);
+            return null;
         }
-        return null;
+        ref var candidate = ref _candidate;
+        if (candidate.Observations == 0)
+        {
+            candidate = Start(u, v, frameTime);
+            return null;
+        }
+        // Start anywhere. Stationary observations supply neither direction nor
+        // extra evidence; waiting before the motion does not consume its window.
+        if (candidate.Direction == 0)
+        {
+            if (Math.Abs(u - candidate.StartU) < .035)
+            {
+                candidate.StartTime = frameTime;
+                candidate.LastTime = frameTime;
+                candidate.LastU = u;
+                candidate.LastV = v;
+                candidate.LastMovement = 0;
+                // Rebase the sole vertical observation as the hand settles;
+                // retain its horizontal anchor to accumulate slow movement.
+                candidate.SumV = candidate.MinV = candidate.MaxV = v;
+                return null;
+            }
+            candidate.Direction = u > candidate.StartU ? 1 : -1;
+        }
+        var duration = frameTime - candidate.StartTime;
+        double minV = Math.Min(candidate.MinV, v);
+        double maxV = Math.Max(candidate.MaxV, v);
+        double movement = (u - candidate.LastU) * candidate.Direction;
+        double reversal = (candidate.FurthestU - u) * candidate.Direction;
+        if (duration > MaximumDuration || Math.Abs(u - candidate.LastU) > .40)
+        {
+            candidate = Start(u, v, frameTime);
+            return null;
+        }
+        if (reversal > .10)
+        {
+            // A new sweep in the opposite direction starts at the observed
+            // turning point; discard the previous direction's evidence.
+            candidate = Start(candidate.LastU, candidate.LastV, candidate.LastTime);
+            candidate.Direction = u > candidate.StartU ? 1 : -1;
+            duration = frameTime - candidate.StartTime;
+            minV = Math.Min(candidate.MinV, v);
+            maxV = Math.Max(candidate.MaxV, v);
+            movement = Math.Abs(u - candidate.LastU);
+        }
+        if (maxV - minV > .22)
+        {
+            candidate = Start(u, v, frameTime);
+            return null;
+        }
+        candidate.LastTime = frameTime;
+        candidate.LastU = u;
+        candidate.LastV = v;
+        candidate.LastMovement = movement;
+        candidate.MinV = minV;
+        candidate.MaxV = maxV;
+        // Distinct progress, not repeated frames or component count, supplies
+        // the bounded stream's least-squares horizontal and vertical velocity.
+        if ((u - candidate.LastEvidenceU) * candidate.Direction >= .035)
+        {
+            candidate.Observations++;
+            candidate.LastEvidenceU = u;
+            double seconds = duration.TotalSeconds;
+            candidate.SumTime += seconds;
+            candidate.SumTimeSquared += seconds * seconds;
+            candidate.SumU += u;
+            candidate.SumV += v;
+            candidate.SumTimeU += seconds * u;
+            candidate.SumTimeV += seconds * v;
+        }
+        if (candidate.Observations >= 3 && movement > .002 &&
+            (u - candidate.StartU) * candidate.Direction >= .10)
+            HasTraversalInProgress = true;
+        if ((u - candidate.FurthestU) * candidate.Direction > 0)
+            candidate.FurthestU = u;
+        bool reachesEdge = candidate.Direction > 0 ? u >= .85 - 1e-9 : u <= .15 + 1e-9;
+        if (!reachesEdge) return null;
+        if (duration < MinimumDuration)
+        {
+            candidate = Start(u, v, frameTime);
+            return null;
+        }
+        if (!TryGetDepartureVector(frameTime, out _)) return null;
+        return Complete(frameTime);
+    }
+
+    private bool CompletesDeparture(DateTimeOffset frameTime)
+    {
+        double missingMilliseconds = (frameTime - _candidate.LastTime).TotalMilliseconds;
+        if (missingMilliseconds is < 60 or > 250 || _candidate.LastMovement <= .002 ||
+            !TryGetDepartureVector(frameTime, out double horizontalVelocity)) return false;
+        bool nearEdge = _candidate.Direction > 0 ? _candidate.LastU >= .75 : _candidate.LastU <= .25;
+        double projectedU = _candidate.LastU + horizontalVelocity * missingMilliseconds / 1000;
+        return nearEdge && (_candidate.Direction > 0 ? projectedU >= .85 : projectedU <= .15);
+    }
+
+    private bool TryGetDepartureVector(DateTimeOffset frameTime, out double horizontalVelocity)
+    {
+        horizontalVelocity = 0;
+        ref var candidate = ref _candidate;
+        var duration = frameTime - candidate.StartTime;
+        if (candidate.Observations < 4 || duration < MinimumDuration || duration > MaximumDuration ||
+            (candidate.LastU - candidate.StartU) * candidate.Direction < .35 - 1e-9) return false;
+        double variance = candidate.Observations * candidate.SumTimeSquared - candidate.SumTime * candidate.SumTime;
+        if (variance <= 1e-9) return false;
+        horizontalVelocity = (candidate.Observations * candidate.SumTimeU - candidate.SumTime * candidate.SumU) / variance;
+        double verticalVelocity = (candidate.Observations * candidate.SumTimeV - candidate.SumTime * candidate.SumV) / variance;
+        return horizontalVelocity * candidate.Direction > 0 && Math.Abs(verticalVelocity) <= Math.Abs(horizontalVelocity) * .6;
+    }
+
+    private BoardControlSwipe Complete(DateTimeOffset frameTime)
+    {
+        HasTraversalInProgress = false;
+        _candidate = default;
+        _rearmAt = frameTime + RearmDelay;
+        return BoardControlSwipe.Toggle;
     }
 
     public void Reset()
     {
         HasTraversalInProgress = false;
-        Array.Clear(_candidates);
+        _candidate = default;
         _lastFrameTime = null;
         _rearmAt = default;
     }
 
-    private int FindCandidate(long trackingId)
+    private static bool TryGetCenter(IReadOnlyList<BoardSwipeSample> samples, out double u, out double v)
     {
-        int empty = -1;
-        for (int i = 0; i < _candidates.Length; i++)
+        double minU = 1, maxU = 0, minV = 1, maxV = 0, sumU = 0, sumV = 0;
+        int count = 0;
+        for (int i = 0; i < samples.Count; i++)
         {
-            if (_candidates[i].TrackingId == trackingId) return i;
-            if (_candidates[i].TrackingId == 0) empty = i;
+            var sample = samples[i];
+            if (!double.IsFinite(sample.U) || !double.IsFinite(sample.V) ||
+                sample.U is < 0 or > 1 || sample.V is < 0 or > 1) continue;
+            minU = Math.Min(minU, sample.U); maxU = Math.Max(maxU, sample.U);
+            minV = Math.Min(minV, sample.V); maxV = Math.Max(maxV, sample.V);
+            sumU += sample.U; sumV += sample.V;
+            count++;
         }
-        return empty;
+        u = count > 0 ? sumU / count : 0;
+        v = count > 0 ? sumV / count : 0;
+        // Nearby components can be separate fingers or parts of one optical
+        // disturbance. Opposing edges or scattered changes are not one sweep.
+        return count > 0 && maxU - minU <= .12 && maxV - minV <= .22;
     }
 
-    private static Candidate Start(BoardSwipeSample sample, DateTimeOffset frameTime)
+    private static Candidate Start(double u, double v, DateTimeOffset frameTime)
     {
-        int direction = sample.U <= .25 ? 1 : sample.U >= .75 ? -1 : 0;
-        return direction == 0 ? default : new Candidate
+        return new Candidate
         {
-            TrackingId = sample.TrackingId,
-            Direction = direction,
-            StartU = sample.U,
-            FurthestU = sample.U,
-            MinV = sample.V,
-            MaxV = sample.V,
+            StartU = u,
+            FurthestU = u,
+            LastU = u,
+            LastV = v,
+            LastEvidenceU = u,
+            MinV = v,
+            MaxV = v,
             StartTime = frameTime,
             LastTime = frameTime,
+            SumU = u,
+            SumV = v,
             Observations = 1
         };
     }
 
     private struct Candidate
     {
-        public long TrackingId;
         public int Direction;
-        public double StartU, FurthestU, MinV, MaxV;
+        public double StartU, FurthestU, LastU, LastV, LastEvidenceU, LastMovement, MinV, MaxV;
+        public double SumTime, SumTimeSquared, SumU, SumV, SumTimeU, SumTimeV;
         public DateTimeOffset StartTime, LastTime;
         public int Observations;
     }

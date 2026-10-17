@@ -118,16 +118,20 @@ and rendered-reference BGRA buffers with dimensions, mapping, source UTC and
 diagnostics under the app's `HandAcquisitionSnapshots` directory. These private
 captures support exact replay and are not repository fixtures.
 
-`PaintDisturbanceTracker` compares native camera samples with a bounded history of
-generated Paint frames through the camera-to-board homography. It estimates one
-global render delay from unobstructed regions, compares that historical frame and
-its immediate neighbors, and tolerates interpolated exposure colours. Two fresh
-observations and a minimum board-UV residual area (7% of the measured Photo Copy
-control interior) are required before emitting a drop. The header is excluded;
-scene/calibration changes, stale frames and missing current history clear pending
-evidence. Held and moving obstructions have separate bounded emission cadences.
-This detects physical interference, not hand identity or a gesture. Run `--paint`
-for animation-history, noise, generic-object, perspective, cadence and reset checks.
+Paint uses the shared `BlackTipDetector` and `FootballMarkerTracker` path for the
+learned double-bar marker, reusing Water Garden's camera-specific bar profile.
+Fresh measured marker centres map through board calibration into a trailing ink
+path; stationary observations continue pouring. Lost or stale observations stop
+painting. Ordinary hands and untrained objects do not paint, and the legacy
+general-disturbance detector and generated-frame history have been removed.
+Caption-hold controls and bottom-strip swipes remain independent of marker input.
+
+`BlackTipVisionTests`, `BlackTipCoreAnchorTests`, `BlackTipDimGapTests`,
+`BlackTipMotionTests` and `FootballMarkerTrackerTests` cover shared detection,
+lighting tolerance and measured tracking. `MarkerSetupFirstUseTests` covers
+Paint's profile reuse and first-use setup policy. The DEBUG app commands
+`verify_paint_marker`, `verify_paint_drawer`, `verify_paint` and `verify_paint_save`
+check native ink trails, stationary pouring, controls, rendering and exports.
 
 During duplicate suppression, a fresh tracked fit with confidence at least .90
 and previous-bounds IoU at least .65 takes precedence over an overlapping search

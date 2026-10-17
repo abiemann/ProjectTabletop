@@ -82,7 +82,7 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException("An off-target pointing position clicked under the curled fingertip.");
         }
         return new { passed = true, freshQueuedPinchAccepted = true, resetRejectsOldInput = true,
-            handAndPaintQueuesRejectPreResetFrames = true, queueResetBoundaryPreservesFreshFrames = true,
+            handQueueRejectsPreResetFrames = true, queueResetBoundaryPreservesFreshFrames = true,
             pointingTargetRetained = true, offTargetCurlRejected = true,
             exactPinchSelectionRouteRetained = true, rejectedObservationsNeverFabricateOrOverwriteSelection = true };
 
@@ -105,9 +105,7 @@ public sealed partial class MainWindow
             var originalCutoff = _handInputNotBefore;
             bool originalEnabled = _handTrackingEnabled;
             var originalHandTask = _handWorker.WorkerTask;
-            var originalPaintTask = _paintWorker.WorkerTask;
             bool originalHandDetecting = _handWorker.IsBusy;
-            bool originalPaintDetecting = _paintWorker.IsBusy;
             try
             {
                 // Disable inference even if a regression removes the timestamp check.
@@ -122,14 +120,12 @@ public sealed partial class MainWindow
                     new CameraFrame(old.Width, old.Height, old.Stride, old.Bgra, now.AddTicks(1)) })
                 {
                     var expected = frame == old ? InputFrameQueueResult.PredatesReset : InputFrameQueueResult.Skipped;
-                    if (QueueHandDetection(frame, System.Diagnostics.Stopwatch.GetTimestamp()) != expected ||
-                        QueuePaintDetection(frame, System.Diagnostics.Stopwatch.GetTimestamp()) != expected)
-                        throw new InvalidOperationException("A hand or Paint queue admitted pre-reset pixels or rejected the reset boundary.");
+                    if (QueueHandDetection(frame, System.Diagnostics.Stopwatch.GetTimestamp()) != expected)
+                        throw new InvalidOperationException("A hand queue admitted pre-reset pixels or rejected the reset boundary.");
                 }
                 if (!ReferenceEquals(originalHandTask, _handWorker.WorkerTask) ||
-                    !ReferenceEquals(originalPaintTask, _paintWorker.WorkerTask) ||
-                    !originalHandDetecting && _handWorker.IsBusy || !originalPaintDetecting && _paintWorker.IsBusy)
-                    throw new InvalidOperationException("A rejected hand or Paint frame changed inference bookkeeping.");
+                    !originalHandDetecting && _handWorker.IsBusy)
+                    throw new InvalidOperationException("A rejected hand frame changed inference bookkeeping.");
             }
             finally
             {

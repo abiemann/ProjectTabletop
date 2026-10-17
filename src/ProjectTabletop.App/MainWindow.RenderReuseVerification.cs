@@ -88,78 +88,6 @@ public sealed partial class MainWindow
             paint.DisablePaintIdleStreaksForVerification();
             paint.ResetPaint();
             Draw(paint, projected);
-            Require(paint.GetPaintReferenceCacheForVerification() is { Readbacks: 0, Active: false },
-                "Paint downloaded camera reference pixels before input became available.");
-            paint.SetPaintInputAvailable(true);
-            Draw(paint, projected);
-            var first = paint.GetPaintReferenceCacheForVerification();
-            for (int index = 0; index < 9; index++)
-            {
-                now += TimeSpan.FromMilliseconds(125);
-                Draw(paint, projected);
-            }
-            var unchanged = paint.GetPaintReferenceCacheForVerification();
-            Require(first.Readbacks == 1 && unchanged.Readbacks == 1 &&
-                    unchanged.Frames.Length >= 7 && unchanged.Frames.Length <= 9 &&
-                    unchanged.Frames.All(frame => ReferenceEquals(first.Frames[0].Bgra, frame.Bgra)) &&
-                    unchanged.Frames.Select(frame => frame.PresentedAt).Distinct().Count() == unchanged.Frames.Length &&
-                    paint.GetPaintDisturbanceContext() is not null,
-                "Unchanged Paint frames lost latency timestamps or repeatedly downloaded identical pixels.");
-            var beforeDisable = unchanged.Revision;
-            paint.SetPaintInputAvailable(false);
-            for (int index = 0; index < 3; index++)
-            {
-                now += TimeSpan.FromMilliseconds(125);
-                Draw(paint, projected);
-            }
-            var disabled = paint.GetPaintReferenceCacheForVerification();
-            Require(!disabled.Active && disabled.Frames.Length == 0 && disabled.Readbacks == 1 &&
-                    disabled.Revision > beforeDisable && paint.GetPaintDisturbanceContext() is null,
-                "Paint retained usable camera history or read back images while input was unavailable.");
-            paint.SetPaintInputAvailable(true);
-            Draw(paint, projected);
-            var restarted = paint.GetPaintReferenceCacheForVerification();
-            Require(restarted.Readbacks == 2 && restarted.Frames.Length == 1 &&
-                    !ReferenceEquals(first.Frames[0].Bgra, restarted.Frames[0].Bgra) &&
-                    paint.GetPaintDisturbanceContext() is null,
-                "Paint reused pre-pause reference pixels or skipped its camera settling delay.");
-            now += TimeSpan.FromMilliseconds(125);
-            Require(paint.AddPaintDrop(new(.5, .5), .07, now), "Paint reference fixture rejected a real artwork change.");
-            Draw(paint, projected);
-            var changed = paint.GetPaintReferenceCacheForVerification();
-            Require(changed.Readbacks == 3 && !ReferenceEquals(restarted.Frames[0].Bgra, changed.Frames[^1].Bgra) &&
-                    !restarted.Frames[0].Bgra.AsSpan().SequenceEqual(changed.Frames[^1].Bgra),
-                "Changed Paint artwork kept stale camera reference pixels.");
-        }
-
-        using (var paint = NewScene(BoardScreen.Paint))
-        {
-            paint.DisablePaintIdleStreaksForVerification();
-            paint.ResetPaint();
-            paint.SetPaintInputAvailable(true);
-            Draw(paint, preview);
-            var small = paint.GetPaintReferenceCacheForVerification();
-            now += TimeSpan.FromMilliseconds(125);
-            Draw(paint, projected);
-            var grown = paint.GetPaintReferenceCacheForVerification();
-            Require(small.Readbacks == 1 && grown.Readbacks == 2 &&
-                    !ReferenceEquals(small.Frames[0].Bgra, grown.Frames[^1].Bgra),
-                "Paint reused low-resolution camera pixels after its native source target grew.");
-            using var replacementDevice = new CanvasDevice();
-            using var replacementOutput = new CanvasRenderTarget(replacementDevice, 480, 270, 96);
-            now += TimeSpan.FromMilliseconds(125);
-            Draw(paint, replacementOutput);
-            var changedDevice = paint.GetPaintReferenceCacheForVerification();
-            Require(changedDevice.Readbacks == 3 &&
-                    !ReferenceEquals(grown.Frames[^1].Bgra, changedDevice.Frames[^1].Bgra),
-                "Paint reused old-device pixels after its graphics resources changed.");
-        }
-
-        using (var paint = NewScene(BoardScreen.Paint))
-        {
-            paint.DisablePaintIdleStreaksForVerification();
-            paint.ResetPaint();
-            Draw(paint, projected);
             paint.GetHandAcquisitionContext(now);
             now += TimeSpan.FromMilliseconds(500);
             Draw(paint, projected);
@@ -183,9 +111,6 @@ public sealed partial class MainWindow
 
         return new { passed = true, globeProjectorAndPreviewShareNativeFrame = true,
             globeBothDrawingOrdersAndSameFrameActions = true, globeNativeGrowthAndDeviceChange = true,
-            paintUnchangedFramesReusePixelsAndKeepTimestamps = true,
-            paintUnavailableInputHasNoReadbacks = true, paintRestartRejectsOldHistory = true,
-            paintChangedArtworkRefreshesPixels = true, paintNativeGrowthAndDeviceChange = true,
             unrelatedThumbnailPublicationPreservesPaintAcquisition = true };
 
         SceneCompositor NewScene(BoardScreen screen)

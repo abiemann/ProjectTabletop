@@ -57,13 +57,14 @@ public sealed partial class MainWindow
             "Ready controls lost their actual rendered-letter reference regions.");
         object captionEvidence = CheckCaptions(hold, camera.GetPixelBytes());
         object controlExposure = await CheckControlExposure();
+        object footerLayout = await CheckFooterLayout();
         DrawPreview(scene, portrait);
         await Save(portrait, "ready-portrait");
 
         Draw(scene, camera);
         var readyPixels = BoardPixels(scene);
         var readyButtonBounds = Session(scene).Buttons.Select(button => button.Bounds).ToArray();
-        double readyPlate = ControlPlateLight(readyPixels);
+        double readyPlate = ControlPlateLight(scene, readyPixels);
         var beforePlay = now;
         Check(scene.ActivateStrykersRunButton("strykers-run-play") &&
             scene.StrykersRunState.Phase == StrykersRunPhase.Starting &&
@@ -79,7 +80,7 @@ public sealed partial class MainWindow
             "Fading controls or the moving rail accepted camera input.");
         var earlyPixels = BoardPixels(scene);
         double? earlyDotCenter = RailDotCenter(scene, earlyPixels);
-        double earlyPlate = ControlPlateLight(earlyPixels);
+        double earlyPlate = ControlPlateLight(scene, earlyPixels);
         Check(Session(scene).Buttons.Select(button => button.Bounds).SequenceEqual(readyButtonBounds) &&
             earlyPlate < readyPlate - 10 && earlyPlate > 20 && scene.StrykersRunRailAnimating &&
             scene.GetStrykersRunRailGeometry() is null,
@@ -90,7 +91,7 @@ public sealed partial class MainWindow
         var laterPixels = BoardPixels(scene);
         double? laterDotCenter = RailDotCenter(scene, laterPixels);
         Check(earlyDotCenter.HasValue && laterDotCenter.HasValue && laterDotCenter.Value < earlyDotCenter.Value - 5 &&
-            ControlPlateLight(laterPixels) < earlyPlate - 10 &&
+            ControlPlateLight(scene, laterPixels) < earlyPlate - 10 &&
             Session(scene).Buttons.Select(button => button.Bounds).SequenceEqual(readyButtonBounds) &&
             !scene.StrykersRunInputActive && scene.GetStrykersRunRailGeometry() is null,
             "The rail did not visibly scroll upward while stationary controls continued fading.");
@@ -147,14 +148,65 @@ public sealed partial class MainWindow
         Check(scene.GetStrykersRunRailGeometry(now) is null,
             "A queued frame from before input reset could enter the rail detector.");
         for (int step = 0; step < 5; step++) { now += TimeSpan.FromMilliseconds(100); Draw(scene, camera); }
-        Check(scene.StrykersRunState is { Phase: StrykersRunPhase.WaitingForInput, HeroAlive: true, TroopCount: 0 } &&
-            !scene.HandDetectionRequired && SameRun(paused, scene.StrykersRunState),
-            "Clearing the rail failed to freeze the run, demoted its hero or enabled hidden-caption processing.");
+        Check(scene.StrykersRunState is { Phase: StrykersRunPhase.WaitingForInput, RecoveringInput: true,
+                HeroAlive: true, TroopCount: 0 } && scene.HandDetectionRequired && SameRun(paused, scene.StrykersRunState),
+            "Clearing the rail failed to preserve the run and enable the paused EXIT captions.");
+        string[] pausedExitIds = ["strykers-run-exit", "strykers-run-exit-right"];
+        var pausedButtons = Session(scene).Buttons;
+        var pausedRailBounds = scene.StrykersRunRailBounds();
+        Check(pausedButtons.Select(button => button.Id).SequenceEqual(pausedExitIds) &&
+            pausedButtons.All(button => button is { Label: "EXIT", Enabled: true, Hold: BoardButtonHold.Once }) &&
+            pausedButtons[0].Bounds == new BoardRect(.015, field.Y + field.Height * .9075, .12, field.Height * .085) &&
+            pausedButtons[1].Bounds == new BoardRect(.865, field.Y + field.Height * .9075, .12, field.Height * .085) &&
+            pausedButtons[0].Bounds.X + pausedButtons[0].Bounds.Width < pausedRailBounds.X &&
+            pausedRailBounds.Right < pausedButtons[1].Bounds.X &&
+            Math.Abs(pausedRailBounds.X - (field.X + field.Width * .18)) < .000001 &&
+            Math.Abs(pausedRailBounds.Width - field.Width * .64) < .000001,
+            "Paused EXIT holds must sit beside both ends of the permanently shortened rail.");
+        var pausedHold = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No paused EXIT caption references.");
+        Check(pausedHold.Revision != hold.Revision && pausedHold.ButtonIds.SequenceEqual(pausedExitIds) &&
+            pausedHold.EnabledHoldIds.SetEquals(pausedExitIds) &&
+            pausedHold.ExpectedScene.BoardTriggerRegions?.Count == 2 &&
+            RailEqual(settledRailPixels, BoardPixels(scene), scene.StrykersRunRailBounds()),
+            "The paused EXIT controls reused ready captions, exposed PLAY or changed the rail pixels.");
+        DrawPreview(scene, portrait);
+        await Save(portrait, "paused-exit-portrait");
+        object pausedCaptionEvidence = CheckPausedCaptions(pausedHold, camera.GetPixelBytes());
         var resumedRail = scene.GetStrykersRunRailGeometry()!;
         Check(resumedRail.Revision != rail.Revision && !scene.SetStrykersRunRailPosition(.5f, now, rail.Revision) &&
             !scene.SetStrykersRunRailPosition(.5f, now.AddSeconds(-1), resumedRail.Revision) &&
             !ReferenceEquals(rail, scene.GetStrykersRunRailGeometry(now)),
             "A reset accepted an old geometry epoch or stale camera result.");
+
+        // A normal uncovered-rail observation pauses without resetting optical
+        // registration. Returning to the same rail must hide EXIT without a new run.
+        now += TimeSpan.FromMilliseconds(10);
+        Check(scene.SetStrykersRunRailPosition(1, now, resumedRail.Revision), "Fresh input could not resume the paused run.");
+        Draw(scene, camera);
+        Check(scene.StrykersRunState.Phase == StrykersRunPhase.Playing && SameRun(paused, scene.StrykersRunState) &&
+            Session(scene).Buttons.Count == 0 && !scene.HandDetectionRequired && scene.GetHoldButtonContext(now) is null &&
+            scene.ObserveHoldButtons(pausedHold, pausedExitIds, now, []).Count == 0 &&
+            scene.CurrentHoldProgress.Count == 0 && ReferenceEquals(resumedRail, scene.GetStrykersRunRailGeometry()),
+            "Resuming changed the run or rail epoch, retained EXIT or accepted its old caption context.");
+        now += TimeSpan.FromMilliseconds(10);
+        Check(scene.SetStrykersRunRailPosition(null, now, resumedRail.Revision), "An uncovered rail observation was rejected.");
+        for (int step = 0; step < 5; step++) { now += TimeSpan.FromMilliseconds(100); Draw(scene, camera); }
+        var uncoveredHold = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("EXIT did not return after lifting off the rail.");
+        Check(scene.StrykersRunState is { Phase: StrykersRunPhase.WaitingForInput, RecoveringInput: true } &&
+            SameRun(paused, scene.StrykersRunState) && scene.HandDetectionRequired &&
+            uncoveredHold.ButtonIds.SequenceEqual(pausedExitIds) && uncoveredHold.EnabledHoldIds.SetEquals(pausedExitIds) &&
+            ReferenceEquals(resumedRail, scene.GetStrykersRunRailGeometry()) &&
+            RailEqual(settledRailPixels, BoardPixels(scene), scene.StrykersRunRailBounds()),
+            "A normal input pause changed the run, reset rail registration or failed to restore only EXIT.");
+        now += TimeSpan.FromMilliseconds(10);
+        Check(scene.SetStrykersRunRailPosition(1, now, resumedRail.Revision), "Returning to an uncovered rail failed to resume.");
+        Draw(scene, camera);
+        Check(scene.StrykersRunState.Phase == StrykersRunPhase.Playing && SameRun(paused, scene.StrykersRunState) &&
+            Session(scene).Buttons.Count == 0 && !scene.HandDetectionRequired && scene.GetHoldButtonContext(now) is null &&
+            scene.ObserveHoldButtons(uncoveredHold, pausedExitIds, now, []).Count == 0 &&
+            scene.CurrentHoldProgress.Count == 0 && ReferenceEquals(resumedRail, scene.GetStrykersRunRailGeometry()) &&
+            RailEqual(settledRailPixels, BoardPixels(scene), scene.StrykersRunRailBounds()),
+            "Normal input resume reset the run or rail, retained caption processing or accepted a paused EXIT observation.");
 
         scene.SetBoardFacingDegrees(0);
         Draw(scene, camera);
@@ -185,6 +237,8 @@ public sealed partial class MainWindow
         RenderRaw(busy);
         await Save(portrait, "squad-sixty-four-monsters-and-gates");
         object allyRendering = await CheckAllies();
+        var sceneryRendering = await StrykersRunSceneryVerification.RunAsync(device, directory);
+        images.AddRange(sceneryRendering.Images);
         var campaignRendering = await StrykersRunCampaignVerification.RunAsync(device, directory);
         images.AddRange(campaignRendering.Images);
         renderedFrames += campaignRendering.RenderedFrames;
@@ -238,9 +292,10 @@ public sealed partial class MainWindow
         object timing = MeasureRendering();
         Check(_scene.CurrentBoardScreen == liveScreen && Session(_scene).NavigationRevision == liveNavigation &&
             !_camera.IsRunning && !_cameraWanted, "The isolated verifier changed the live board or camera state.");
-        return new { passed = true, directory, images, renderedFrames, captionEvidence, controlExposure, allyRendering, campaignRendering, wallFrames, settledWallComparison, sameTimeWallComparison, timing,
+        return new { passed = true, directory, images, renderedFrames, captionEvidence, pausedCaptionEvidence, controlExposure, footerLayout, allyRendering, campaignRendering, sceneryRendering, wallFrames, settledWallComparison, sameTimeWallComparison, timing,
             loneHero = true, perspective = true, railPixelsProtected = true, normalizedRailEdges = true,
             geometryEpochs = true, cameraTimeBarriers = true, inputFreeze = true, returningCaptionBarrier = true,
+            pausedExitOnly = true, pausedExitBothSides = true, pauseResumeKeepsRailEpoch = true, pausedExitCaptionBarrier = true,
             playerEdgeOrientation = true, savedFacingRestoredOnExit = true,
             handProcessingPhaseGate = true, readyRailHidden = true, fixedControlFade = true,
             railScrollWithoutDetection = true, marksCenteredInBlackFooter = true,
@@ -351,6 +406,9 @@ public sealed partial class MainWindow
             }
             Check(context.HeldButtons(damaged).Contains("strykers-run-play") && scene.CurrentHoldProgress.Count == 1,
                 "Actual corruption of the rendered PLAY letters failed to create partial hold evidence.");
+            Check(context.HeldButtons(damaged with { Hints = [], TextPatterns = damaged.TextPatterns!.Select(pattern =>
+                    pattern with { ControlCoverage = 0, ConfirmationFrames = 0 }).ToArray() }).Contains("strykers-run-play"),
+                "Stryker's PLAY required whole-plate damage or hand acquisition in addition to broken lettering.");
             var tinted = (byte[])empty.Clone();
             for (int pixel = 0; pixel < tinted.Length; pixel += 4)
                 for (int channel = 0; channel < 3; channel++) tinted[pixel + channel] = (byte)(tinted[pixel + channel] * .60 + 18);
@@ -360,6 +418,115 @@ public sealed partial class MainWindow
             scene.ObserveHoldButtons(context, [], now, context.ClearedButtons(intact));
             Check(scene.CurrentHoldProgress.Count == 0, "Intact lettering failed to cancel partial PLAY progress.");
             return new { generatedCaptionShapes = true, actualBrokenLetters = true, intactExposureCancels = true };
+        }
+
+        object CheckPausedCaptions(SceneCompositor.HoldButtonContext context, byte[] empty)
+        {
+            var evidence = new List<object>();
+            var railBounds = scene.StrykersRunRailBounds();
+            var railStart = CameraPoint(railBounds.X, railBounds.Y, inset, false);
+            var railEnd = CameraPoint(railBounds.Right, railBounds.Bottom, inset, false);
+            var railPixels = new Rect(railStart.X, railStart.Y, railEnd.X - railStart.X, railEnd.Y - railStart.Y);
+            for (int index = 0; index < context.ButtonIds.Count; index++)
+            {
+                string id = context.ButtonIds[index];
+                var button = Session(scene).Buttons[index];
+                var caption = context.ExpectedScene.BoardTriggerRegions![index];
+                Check(caption.X > button.Bounds.X && caption.Y > button.Bounds.Y &&
+                    caption.X + caption.Width < button.Bounds.X + button.Bounds.Width &&
+                    caption.Y + caption.Height < button.Bounds.Y + button.Bounds.Height,
+                    $"{id} has a caption reference clipped against its button edge.");
+                var tracker = new HandAcquisitionPresenceTracker();
+                HandAcquisitionPresenceResult Feed(byte[] pixels)
+                {
+                    now += TimeSpan.FromMilliseconds(100);
+                    return tracker.Update(1000, 900, 4000, pixels, context.SearchPolygon, context.ExpectedScene, now, now);
+                }
+                var clear = Feed(empty);
+                Check(context.ClearedButtons(clear).Order().SequenceEqual(context.ButtonIds.Order()) &&
+                    context.HeldButtons(clear).Count == 0 && clear.TextPatterns!.All(pattern => !pattern.CaptionClipped),
+                    $"The paired paused EXIT lettering was not fully readable before testing {id}.");
+                scene.ObserveHoldButtons(context, [], now, context.ClearedButtons(clear));
+                var broken = (byte[])empty.Clone();
+                var a = CameraPoint(caption.X + caption.Width * .24, caption.Y, inset, false);
+                var b = CameraPoint(caption.X + caption.Width * .76, caption.Y + caption.Height, inset, false);
+                for (int y = Math.Max(0, (int)a.Y); y < Math.Min(900, b.Y); y++)
+                for (int x = Math.Max(0, (int)a.X); x < Math.Min(1000, b.X); x++)
+                { int offset = (y * 1000 + x) * 4; broken[offset] = 58; broken[offset + 1] = 93; broken[offset + 2] = 169; broken[offset + 3] = 255; }
+                Check(Changed(empty, broken, 1000, railPixels) == 0,
+                    $"Covering the {id} lettering modified the synthetic control rail.");
+                HandAcquisitionPresenceResult damaged = clear;
+                for (int frame = 0; frame < 3; frame++)
+                {
+                    damaged = Feed(broken);
+                    Check(scene.ObserveHoldButtons(context, context.HeldButtons(damaged), now,
+                        context.ClearedButtons(damaged)).Count == 0, $"A short {id} obstruction exited the run.");
+                }
+                Check(context.HeldButtons(damaged).SequenceEqual([id]) && scene.CurrentHoldProgress.Count == 1,
+                    $"Actual broken {id} lettering did not independently create hold progress with the rail clear.");
+                clear = Feed(empty);
+                scene.ObserveHoldButtons(context, [], now, context.ClearedButtons(clear));
+                Check(scene.CurrentHoldProgress.Count == 0 && SameRun(paused, scene.StrykersRunState),
+                    $"Restoring intact {id} lettering failed to cancel its hold or changed the paused run.");
+                evidence.Add(new { id, caption, actualBrokenLetters = true, intactCancels = true, railUnchanged = true });
+            }
+            return evidence;
+        }
+
+        async Task<object> CheckFooterLayout()
+        {
+            using var current = MakeScene(.4, out _);
+            await current.EnsureStrykersRunResourcesAsync(device);
+            using var image = new CanvasRenderTarget(device, 1000, 900, 96);
+            var evidence = new List<object>();
+            foreach (double aspect in new[] { .4, 9d / 16, .79, 1, 16d / 9 })
+            {
+                current.SetDisplayAspect(aspect);
+                now += TimeSpan.FromMilliseconds(20);
+                Draw(current, image);
+                var bounds = current.StrykersRunFieldBounds();
+                var buttons = Session(current).Buttons;
+                Check(buttons.Select(button => button.Label).SequenceEqual(["EXIT", "PLAY"]) &&
+                    buttons.All(button => button is { Enabled: true, Hold: BoardButtonHold.Once }),
+                    $"The {aspect:0.###} board lost the shared ready EXIT/PLAY controls.");
+                for (int index = 0; index < buttons.Count; index++)
+                {
+                    var button = buttons[index].Bounds;
+                    double expectedX = bounds.X + bounds.Width * (index == 0 ? .10 : .58);
+                    Check(Math.Abs(button.X - expectedX) < .000001 &&
+                        Math.Abs(button.Width - bounds.Width * .32) < .000001 &&
+                        Math.Abs(button.Height - bounds.Height * .085) < .000001 &&
+                        Math.Abs(button.Y + button.Height / 2 - (bounds.Y + bounds.Height * .95)) < .000001 &&
+                        button.X >= bounds.X && button.X + button.Width <= bounds.Right &&
+                        button.Y >= bounds.Y + bounds.Height * .90 && button.Y + button.Height <= bounds.Bottom,
+                        $"The {aspect:0.###} board's {buttons[index].Label} is not centered inside its actual black footer.");
+                }
+                var context = current.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No footer caption reference.");
+                Check(context.EnabledHoldIds.SetEquals(["strykers-run-exit", "strykers-run-play"]) &&
+                    context.ExpectedScene.BoardTriggerRegions?.Count == 2,
+                    $"The {aspect:0.###} footer did not retain both generated caption references.");
+                for (int index = 0; index < buttons.Count; index++)
+                {
+                    var caption = context.ExpectedScene.BoardTriggerRegions![index];
+                    var button = buttons[index].Bounds;
+                    Check(caption.X > button.X && caption.Y > button.Y &&
+                        caption.X + caption.Width < button.X + button.Width &&
+                        caption.Y + caption.Height < button.Y + button.Height &&
+                        button.Contains(caption.X + caption.Width / 2, caption.Y + caption.Height / 2),
+                        $"The {aspect:0.###} footer caption escaped its rendered button and hit bounds.");
+                }
+                var intact = new HandAcquisitionPresenceTracker().Update(1000, 900, 4000, image.GetPixelBytes(),
+                    context.SearchPolygon, context.ExpectedScene, now, now);
+                Check(context.ClearedButtons(intact).Order().SequenceEqual(context.ButtonIds.Order()) &&
+                    context.HeldButtons(intact).Count == 0,
+                    $"The {aspect:0.###} footer's actual rendered lettering disagrees with its camera reference.");
+                using var preview = new CanvasRenderTarget(device, (float)(900 * aspect), 900, 96);
+                DrawPreview(current, preview);
+                await Save(preview, "footer-layout-" + aspect.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture));
+                evidence.Add(new { aspect, field = bounds, controls = buttons.Select(button => button.Bounds).ToArray(),
+                    captionsReadable = true, footerCentered = true });
+            }
+            return evidence;
         }
 
         async Task<object> CheckControlExposure()
@@ -391,7 +558,7 @@ public sealed partial class MainWindow
                 "Readable clipped lettering unnecessarily changed the Football palette.");
             now += TimeSpan.FromMilliseconds(100);
             var covered = safeUnreadable with { TextPatterns = [safeUnreadable.TextPatterns![0] with
-                { ShapeCorrupted = true, ControlCoverage = .15, ControlTriggerCoverage = .5, ConfirmationFrames = 2 }] };
+                { ShapeCorrupted = true, ControlCoverage = .01, ControlTriggerCoverage = .3, ConfirmationFrames = 0 }] };
             Check(!current.ObserveHoldControlExposure(context, covered, now),
                 "Qualified hand coverage changed the caption's optical reference.");
             now += TimeSpan.FromMilliseconds(100);
@@ -673,10 +840,14 @@ public sealed partial class MainWindow
         }
         static bool RailEqual(byte[] a, byte[] b, Rect rail) => Changed(a, b, 1000,
             new(rail.X * 1000 + 3, rail.Y * 1000 + 3, rail.Width * 1000 - 6, rail.Height * 1000 - 6)) == 0;
-        static double ControlPlateLight(byte[] pixels)
+        static double ControlPlateLight(SceneCompositor current, byte[] pixels)
         {
-            // Inside EXIT's unchanged plate, below the animated world and away from its lettering.
-            int pixel = (920 * 1000 + 130) * 4;
+            // The upper centre of the current EXIT plate remains blank as its
+            // fixed captions fade and the rail slides into the footer below it.
+            var bounds = Session(current).Buttons.Single(button => button.Id == "strykers-run-exit").Bounds;
+            int x = (int)((bounds.X + bounds.Width * .5) * 1000);
+            int y = (int)((bounds.Y + bounds.Height * .2) * 1000);
+            int pixel = (y * 1000 + x) * 4;
             return (pixels[pixel] + pixels[pixel + 1] + pixels[pixel + 2]) / 3d;
         }
         static double? RailDotCenter(SceneCompositor current, byte[] pixels)
