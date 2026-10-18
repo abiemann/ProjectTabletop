@@ -1,0 +1,203 @@
+{
+  "cameraWidth": 1920,
+  "cameraHeight": 1080,
+  "Stride": 7680,
+  "Width": 1000,
+  "Height": 1000,
+  "CameraToBoard": [
+    0.0010488662720900962,
+    -3.862982280229994e-05,
+    -0.591603272421857,
+    2.7317706682434365e-05,
+    0.001309071763811123,
+    -0.4297718729504302,
+    1.726906547041895e-05,
+    -4.462773842341623e-05,
+    1.0
+  ],
+  "BoardSearchRegions": [
+    {
+      "X": 0.110765625,
+      "Y": 0.30884375,
+      "Width": 0.12628124999999998,
+      "Height": 0.03206250000000005
+    },
+    {
+      "X": 0.550765625,
+      "Y": 0.309046875,
+      "Width": 0.07754687500000002,
+      "Height": 0.03185937500000002
+    },
+    {
+      "X": 0.110765625,
+      "Y": 0.50884375,
+      "Width": 0.1754375,
+      "Height": 0.03921874999999997
+    },
+    {
+      "X": 0.550765625,
+      "Y": 0.50884375,
+      "Width": 0.13845312499999995,
+      "Height": 0.03921874999999997
+    },
+    {
+      "X": 0.77350390625,
+      "Y": 0.127044921875,
+      "Width": 0.108501953125,
+      "Height": 0.035138671875
+    },
+    {
+      "X": 0.79673291015625,
+      "Y": 0.87301806640625,
+      "Width": 0.06653417968749997,
+      "Height": 0.05896386718750002
+    }
+  ],
+  "BoardReferenceRegions": [
+    {
+      "X": 0.092,
+      "Y": 0.262,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.532,
+      "Y": 0.262,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.092,
+      "Y": 0.4620000000000001,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.532,
+      "Y": 0.4620000000000001,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.6920000000000001,
+      "Y": 0.087,
+      "Width": 0.216,
+      "Height": 0.10600000000000001
+    },
+    {
+      "X": 0.752,
+      "Y": 0.862,
+      "Width": 0.156,
+      "Height": 0.08099999999999999
+    }
+  ],
+  "BoardTriggerRegions": [
+    {
+      "X": 0.110765625,
+      "Y": 0.30884375,
+      "Width": 0.12628124999999998,
+      "Height": 0.03206250000000005
+    },
+    {
+      "X": 0.550765625,
+      "Y": 0.309046875,
+      "Width": 0.07754687500000002,
+      "Height": 0.03185937500000002
+    },
+    {
+      "X": 0.110765625,
+      "Y": 0.50884375,
+      "Width": 0.1754375,
+      "Height": 0.03921874999999997
+    },
+    {
+      "X": 0.550765625,
+      "Y": 0.50884375,
+      "Width": 0.13845312499999995,
+      "Height": 0.03921874999999997
+    },
+    {
+      "X": 0.77350390625,
+      "Y": 0.127044921875,
+      "Width": 0.108501953125,
+      "Height": 0.035138671875
+    },
+    {
+      "X": 0.80473291015625,
+      "Y": 0.88101806640625,
+      "Width": 0.05053417968749996,
+      "Height": 0.042963867187500004
+    }
+  ],
+  "BoardControlReferenceRegions": [
+    {
+      "X": 0.092,
+      "Y": 0.262,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.532,
+      "Y": 0.262,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.092,
+      "Y": 0.4620000000000001,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.532,
+      "Y": 0.4620000000000001,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.6920000000000001,
+      "Y": 0.087,
+      "Width": 0.216,
+      "Height": 0.10600000000000001
+    },
+    {
+      "X": 0.752,
+      "Y": 0.862,
+      "Width": 0.156,
+      "Height": 0.08099999999999999
+    }
+  ],
+  "BoardVectorGlyphRegions": [
+    5
+  ],
+  "AllowsLocalForegroundContext": true,
+  "SearchPolygon": [
+    {
+      "X": 580.5727545992459,
+      "Y": 319.9906191309607
+    },
+    {
+      "X": 1536.1979668456927,
+      "Y": 300.11505448547337
+    },
+    {
+      "X": 1532.0497748125063,
+      "Y": 1041.203678959477
+    },
+    {
+      "X": 607.237426207813,
+      "Y": 1048.128780096831
+    }
+  ],
+  "ExpectedRasterFixture": "menu-page-two-clear-expected.bgra.gz",
+  "Provenance": {
+    "CameraSource": "camera-20261018-165302-039-1920x1080-12e77411155944fc931df4e385edc66e.png",
+    "CaptureRow": 570,
+    "CaptureLog": "artifacts/menu-up-20261018/up-hold-01.jsonl",
+    "CameraSha256": "3399e4170fbad3e5e9f66819eaeada8633119e5f6d4c42f3f409423d531f9ef8",
+    "ExpectedSha256": "7b399d243b7e62d047711bc3c12404255d2e23599ac6f17d10aa4f5a8a2c0c6a",
+    "ExpectedOrigin": "Reused existing menu-page-two-clear expected raster; visually matching page artwork, not a synchronized expected image captured with this camera frame.",
+    "CalibrationOrigin": "CameraToBoard reconstructed from current observed .005-to-.995 SearchPolygon, extrapolated projectively to full-board coordinates; see artifacts/menu-up-20261018/replay-current/snapshot.json.",
+    "Regression": "The finger covers the up arrow; Paint thumbnail is untouched. Its camera optical colour blend produced a false outside-control veto even after the bottom approach corridor was excluded."
+  }
+}

@@ -79,9 +79,11 @@ public sealed partial class SceneCompositor
                 if (_boardSession.Screen == BoardScreen.Menu)
                 {
                     var arrow = BoardSession.MenuScrollButtonBounds;
-                    // Ignore the arrow's own plate and its narrow optical edge.
+                    // The finger reaches this bottom-row arrow from the board
+                    // edge. Its approach below the plate is part of the press,
+                    // not a separate disturbance elsewhere on the menu.
                     scene = scene with { BoardDisturbanceExclusionRegion = new(
-                        arrow.X - .015, arrow.Y - .015, arrow.Width + .03, arrow.Height + .03) };
+                        arrow.X - .015, arrow.Y - .015, arrow.Width + .03, 1 - arrow.Y + .015) };
                 }
                 // Disabled artwork, changed captions or resized letters cannot
                 // arm a later enabled control. Verify this exact appearance

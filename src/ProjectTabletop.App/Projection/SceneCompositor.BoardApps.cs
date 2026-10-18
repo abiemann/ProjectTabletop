@@ -353,7 +353,7 @@ public sealed partial class SceneCompositor
                             PaintStatusBounds.Height * BoardSurfaceSize);
                         DrawGlassPanel(surface, statusBounds);
                         surface.DrawText(paintStatus, statusBounds,
-                            paintStatus == "Image Saved" ? AppPalette.IndicatorOn : AppPalette.Text, statusFormat);
+                            paintStatus == PaintSaveSuccessMessage ? AppPalette.IndicatorOn : AppPalette.Text, statusFormat);
                     }
                 }
                 else if (photoCopy)

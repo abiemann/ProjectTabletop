@@ -100,12 +100,12 @@ public sealed partial class MainWindow
             "Continuing to paint altered or invalidated the already captured artwork snapshot.");
         string? first = await SavePaintMemoryImageAsync(scene, firstImage, directory);
         Require(first is not null && Path.GetFileName(first).StartsWith("paint-", StringComparison.Ordinal) &&
-                scene.GetPaintSaveStatus(now) == "Image Saved" && scene.CanSavePaint,
+                scene.GetPaintSaveStatus(now) == "Saved to Pictures folder" && scene.CanSavePaint,
             "A successful Paint PNG did not report success and re-enable Save.");
         await AssertPng(first!, firstImage);
-        Require(scene.GetPaintSaveStatus(now.AddSeconds(3).AddTicks(-1)) == "Image Saved" &&
-                scene.GetPaintSaveStatus(now.AddSeconds(3)) != "Image Saved",
-            "The Image Saved message did not expire after three seconds.");
+        Require(scene.GetPaintSaveStatus(now.AddSeconds(3).AddTicks(-1)) == "Saved to Pictures folder" &&
+                scene.GetPaintSaveStatus(now.AddSeconds(3)) != "Saved to Pictures folder",
+            "The Saved to Pictures folder message did not expire after three seconds.");
         string staleDirectory = Path.Combine(directory, "already-completed");
         Require(await SavePaintMemoryImageAsync(scene, firstImage, staleDirectory) is null &&
                 !Directory.Exists(staleDirectory), "Replaying a completed snapshot published another file.");
@@ -160,13 +160,13 @@ public sealed partial class MainWindow
         catch (IOException) { failed = true; }
         byte[] markerAfterFailure = await File.ReadAllBytesAsync(blocked);
         Require(failed && scene.CanSavePaint && scene.GetPaintSaveStatus(now) is { } failureStatus &&
-                failureStatus != "Image Saved" && failureStatus != "Saving image…" &&
+                failureStatus != "Saved to Pictures folder" && failureStatus != "Saving image…" &&
                 marker.SequenceEqual(markerAfterFailure),
             "A failed Paint write reported success, damaged an existing file, or left Save busy.");
         var retryFrame = await HoldSave();
         Require(scene.TryTakePaintSaveRequest(retryFrame, out var retryImage), "Save could not retry after a write failure.");
         string? third = await SavePaintMemoryImageAsync(scene, retryImage, directory);
-        Require(third is not null && scene.GetPaintSaveStatus(now) == "Image Saved", "The Paint write retry failed.");
+        Require(third is not null && scene.GetPaintSaveStatus(now) == "Saved to Pictures folder", "The Paint write retry failed.");
         await AssertPng(third!, retryImage);
         Require(Directory.GetFiles(directory, "*.png").Length == 3 && Directory.GetFiles(directory, "*.tmp").Length == 0,
             "A failed or replayed Paint save published another PNG or left a temporary file.");

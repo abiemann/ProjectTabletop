@@ -14,6 +14,7 @@
     <Content Include="Fixtures/blackjack-idle-controls.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Fixtures/menu-control-reflectance-fit.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Fixtures/menu-page-two-clear.json;Fixtures/menu-page-two-clear-*.bgra.gz" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Fixtures/menu-page-two-paint-edge.json;Fixtures/menu-page-two-paint-edge-camera.bgra.gz" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Fixtures/menu-text-acquisition.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Fixtures/water-caption-hold.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Fixtures/drawer-ink.json;Fixtures/drawer-spread.json" CopyToOutputDirectory="PreserveNewest" />

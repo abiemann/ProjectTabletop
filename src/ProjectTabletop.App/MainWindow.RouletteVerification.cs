@@ -346,9 +346,12 @@ public sealed partial class MainWindow
             int span = (int)Math.Ceiling(coveredWidth * scale);
             int stripeHeight = (int)Math.Ceiling(coveredHeight * scale);
             int stripeWidth = Math.Max(2, (span - 9) / 4);
+            // Fingers enter from the viewer's edge; they do not end inside the
+            // button. Their approach must not count as a separate obstruction.
+            int entryEdge = (int)Math.Ceiling(fixture.CameraPoint(trigger.X + trigger.Width / 2, 1).Y);
             for (int finger = 0; finger < 4; finger++)
             for (int y = Math.Max(0, (int)center.Y - stripeHeight / 2);
-                y < Math.Min(fixture.Height, (int)center.Y + stripeHeight / 2); y++)
+                y < Math.Min(fixture.Height, entryEdge); y++)
             for (int x = Math.Max(0, (int)center.X - span / 2 + finger * (stripeWidth + 3));
                 x < Math.Min(fixture.Width, (int)center.X - span / 2 + finger * (stripeWidth + 3) + stripeWidth); x++)
             {

@@ -7,6 +7,7 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
+    private const string PaintSaveSuccessMessage = "Saved to Pictures folder";
     internal sealed record PaintMemoryImage(long Generation, long SaveId, int Width, int Height, byte[] BgraPixels);
     private sealed record PaintSaveRequest(DateTimeOffset FrameTime, long Generation);
     private PaintSaveRequest? _paintSaveRequest;
@@ -33,7 +34,7 @@ public sealed partial class SceneCompositor
         {
             SyncPaintSession();
             if (_paintSaving) return "Saving image…";
-            if (now < _paintSavedUntil) return "Image Saved";
+            if (now < _paintSavedUntil) return PaintSaveSuccessMessage;
             return _paintSaveError;
         }
     }

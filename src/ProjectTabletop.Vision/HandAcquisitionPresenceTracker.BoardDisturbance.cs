@@ -110,7 +110,11 @@ public sealed partial class HandAcquisitionPresenceTracker
             colorOffsets.TryGetValue(ColorKey(reference, index), out var offset);
             double error = Error(fit.Coefficients, reference, current, index, offset);
             if (error > threshold && _edgeColors?[index] is { } alternatives)
+            {
                 error = EdgeError(fit.Coefficients, alternatives, current, index, colorOffsets, error, threshold);
+                if (error > threshold)
+                    error = BoardColorMixtureError(fit.Coefficients, alternatives, current, index, colorOffsets, error, threshold);
+            }
             if (error <= threshold) continue;
             residual[index] = true;
             foregroundArea += _outsideControlAreas![index];
@@ -146,5 +150,60 @@ public sealed partial class HandAcquisitionPresenceTracker
                 return (true, fraction);
         }
         return (false, fraction);
+    }
+
+    private double BoardColorMixtureError(double[][] coefficients, double[] colors, double[] current, int index,
+        Dictionary<int, double[]> offsets, double best, double threshold)
+    {
+        // Camera filtering can mix two neighbouring hues, not just the darkest
+        // and brightest colour. Use only this cell's existing local palette;
+        // caption corruption keeps its separate, stricter comparison unchanged.
+        Span<double> predictions = stackalloc double[colors.Length];
+        Span<double> minimum = stackalloc double[3] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity };
+        Span<double> maximum = stackalloc double[3] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+        for (int color = 0; color < colors.Length; color += 3)
+        {
+            offsets.TryGetValue(ColorKey(colors, color / 3), out var offset);
+            for (int channel = 0; channel < 3; channel++)
+            {
+                predictions[color + channel] = Predict(coefficients[channel], colors[color], colors[color + 1],
+                    colors[color + 2], index, channel) + (offset?[channel] ?? 0);
+                minimum[channel] = Math.Min(minimum[channel], predictions[color + channel]);
+                maximum[channel] = Math.Max(maximum[channel], predictions[color + channel]);
+            }
+        }
+        double bestSquared = best * best * 3, thresholdSquared = threshold * threshold * 3;
+        double lowerBoundSquared = 0;
+        for (int channel = 0; channel < 3; channel++)
+        {
+            double value = current[index * 3 + channel];
+            double distance = Math.Max(minimum[channel] - value, Math.Max(0, value - maximum[channel]));
+            lowerBoundSquared += distance * distance;
+        }
+        // Every segment lies inside these bounds. Reject impossible mixtures
+        // cheaply; being inside the bounds never accepts a camera colour.
+        if (lowerBoundSquared > thresholdSquared) return best;
+        for (int first = 0; first < predictions.Length; first += 3)
+        for (int second = first + 3; second < predictions.Length; second += 3)
+        {
+            double numerator = 0, denominator = 0;
+            for (int channel = 0; channel < 3; channel++)
+            {
+                double delta = predictions[second + channel] - predictions[first + channel];
+                numerator += (current[index * 3 + channel] - predictions[first + channel]) * delta;
+                denominator += delta * delta;
+            }
+            double amount = denominator > 1e-10 ? Math.Clamp(numerator / denominator, 0, 1) : 0;
+            double squared = 0;
+            for (int channel = 0; channel < 3; channel++)
+            {
+                double error = current[index * 3 + channel] - predictions[first + channel] -
+                    amount * (predictions[second + channel] - predictions[first + channel]);
+                squared += error * error;
+            }
+            bestSquared = Math.Min(bestSquared, squared);
+            if (bestSquared <= thresholdSquared) return Math.Sqrt(bestSquared / 3);
+        }
+        return Math.Sqrt(bestSquared / 3);
     }
 }
