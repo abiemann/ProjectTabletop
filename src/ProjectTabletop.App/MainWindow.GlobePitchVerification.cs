@@ -137,6 +137,7 @@ public sealed partial class MainWindow
                 var lifted = Observe(Draw());
                 Check(lifted.Position is null && scene.SetGlobePitchRailPosition(null, now, rail.Revision),
                     "Lifting off the dots was not accepted as clear.");
+                if (test.Name == "landscape") await Save("pitch-" + touch.Expected);
                 now += TimeSpan.FromMilliseconds(200);
                 Check(Math.Abs(scene.GlobeState.ViewLatitudeDegrees - latitude) < .000001 &&
                         ReferenceEquals(rail, scene.GetGlobePitchRailGeometry()),

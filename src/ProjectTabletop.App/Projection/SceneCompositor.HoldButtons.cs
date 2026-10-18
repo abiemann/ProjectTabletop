@@ -283,16 +283,34 @@ public sealed partial class SceneCompositor
             var b = button.Bounds;
             double radius = Math.Min(BoardButtonCornerRadius(button) / BoardSurfaceSize,
                 Math.Min(b.Width, b.Height) / 2) + margin;
+            ExcludeRounded(new Rect(b.X - margin, b.Y - margin, b.Width + 2 * margin, b.Height + 2 * margin),
+                radius, radius);
+        }
+        if (pitchRail)
+        {
+            // Keep the entire rounded housing dark, including the label and
+            // pointer gutter, without restoring square spotlight cutouts.
+            var panel = GlobePitchPanelBounds();
+            const double margin = .006;
+            ExcludeRounded(new Rect(panel.X - margin, panel.Y - margin,
+                panel.Width + 2 * margin, panel.Height + 2 * margin),
+                GlobePitchPanelCornerRadius / BoardSurfaceSize / PaintBoardAspect() + margin,
+                GlobePitchPanelCornerRadius / BoardSurfaceSize + margin);
+        }
+        return area;
+
+        void ExcludeRounded(Rect bounds, double radiusX, double radiusY)
+        {
             var corners = new Vector2[HoldLightCornerDirections.Length];
             for (int index = 0; index < corners.Length; index++)
             {
                 int corner = index / 9;
-                double x = corner < 2 ? b.X + b.Width + margin - radius : b.X - margin + radius;
-                double y = corner is 0 or 3 ? b.Y - margin + radius : b.Y + b.Height + margin - radius;
+                double x = corner < 2 ? bounds.Right - radiusX : bounds.X + radiusX;
+                double y = corner is 0 or 3 ? bounds.Y + radiusY : bounds.Bottom - radiusY;
                 var direction = HoldLightCornerDirections[index];
                 // Map the curved outline point by point: an affine rounded
                 // rectangle would not follow a perspective-calibrated board.
-                var point = _boardSurfaceMap.Transform(new Point2(x + direction.X * radius, y + direction.Y * radius));
+                var point = _boardSurfaceMap.Transform(new Point2(x + direction.X * radiusX, y + direction.Y * radiusY));
                 corners[index] = new((float)(output.X + point.X * output.Width),
                     (float)(output.Y + point.Y * output.Height));
             }
@@ -301,22 +319,5 @@ public sealed partial class SceneCompositor
             area.Dispose();
             area = remaining;
         }
-        if (pitchRail)
-        {
-            // Dots are an optical control too. Keep illumination out of their
-            // stationary backing so it cannot erase marks and imitate a touch.
-            var rail = GlobePitchRailBounds();
-            const double margin = .006;
-            var corners = new[] { new Point2(rail.X - margin, rail.Y - margin), new Point2(rail.Right + margin, rail.Y - margin),
-                new Point2(rail.Right + margin, rail.Bottom + margin), new Point2(rail.X - margin, rail.Bottom + margin) }
-                .Select(point => _boardSurfaceMap.Transform(point))
-                .Select(point => new Vector2((float)(output.X + point.X * output.Width), (float)(output.Y + point.Y * output.Height)))
-                .ToArray();
-            using var hole = CanvasGeometry.CreatePolygon(ds.Device, corners);
-            var remaining = area.CombineWith(hole, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
-            area.Dispose();
-            area = remaining;
-        }
-        return area;
     }
 }

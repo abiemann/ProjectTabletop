@@ -71,7 +71,7 @@ public sealed partial class SceneCompositor
         }
 
         DrawGlobeControls(ds, buttons, hovered, selectionFeedback, drawerOpen, drawerProgress, boardAspect,
-            _holdControlBrightness);
+            _holdControlBrightness, state.ViewLatitudeDegrees);
 
         const string credit = "NASA EARTH & STAR MAP";
         var zoomLabel = state.TargetZoom.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "×";
@@ -100,14 +100,15 @@ public sealed partial class SceneCompositor
 
     private void DrawGlobeControls(CanvasDrawingSession ds, IReadOnlyList<BoardButton> buttons,
         IReadOnlyList<string> hovered, IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback,
-        bool drawerOpen = false, float drawerProgress = 1, double boardAspect = 1, double holdExposure = 1)
+        bool drawerOpen = false, float drawerProgress = 1, double boardAspect = 1, double holdExposure = 1,
+        double viewLatitudeDegrees = 0)
     {
         DrawBoardTitle(ds, "GLOBE");
         if (buttons.Count == 0) return;
         using var fade = CreateBoardControlsFadeLayer(ds);
         DrawBoardDrawerControls(ds, buttons, hovered, selectionFeedback, drawerOpen, drawerProgress, boardAspect,
             holdExposure);
-        if (drawerOpen) DrawGlobePitchRail(ds, drawerProgress);
+        if (drawerOpen) DrawGlobePitchRail(ds, drawerProgress, viewLatitudeDegrees);
     }
 
     private static void GlobeText(CanvasDrawingSession ds, string text, Rect rect, float size,

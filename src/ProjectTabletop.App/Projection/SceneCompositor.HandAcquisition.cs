@@ -497,7 +497,8 @@ public sealed partial class SceneCompositor
                     drawing.Clear(Colors.Black);
                     DrawGlobeControls(drawing, _boardSession.Buttons, [], [],
                         drawerOpen: _boardSession.GlobeDrawerOpen, drawerProgress: GlobeDrawerProgress(_globeClock()),
-                        boardAspect: PaintBoardAspect(), holdExposure: _holdControlBrightness);
+                        boardAspect: PaintBoardAspect(), holdExposure: _holdControlBrightness,
+                        viewLatitudeDegrees: _boardSession.GetGlobeSnapshot(_globeClock()).ViewLatitudeDegrees);
                 }
                 else if (photoCopy || paint)
                 {

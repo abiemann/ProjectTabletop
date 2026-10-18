@@ -1,5 +1,6 @@
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Geometry;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Vision;
 using Windows.Foundation;
@@ -14,6 +15,7 @@ public sealed partial class SceneCompositor
     private PatternRailGeometry? _globePitchRail;
     private long _globePitchEpoch;
     private DateTimeOffset _globePitchResetThrough, _globePitchSourceTime;
+    private const float GlobePitchPanelCornerRadius = 12;
 
     internal Rect GlobePitchRailBounds()
     {
@@ -22,6 +24,14 @@ public sealed partial class SceneCompositor
         // NASA credit. The stationary black backing excludes moving stars.
         double width = height * PatternRailGeometry.ReferenceHeight / PatternRailGeometry.ReferenceWidth / PaintBoardAspect();
         return new(.968 - width, .16, width, height);
+    }
+
+    private Rect GlobePitchPanelBounds()
+    {
+        var rail = GlobePitchRailBounds();
+        double aspect = PaintBoardAspect();
+        return new(rail.X - .022 / aspect, rail.Y - .036,
+            rail.Width + .030 / aspect, rail.Height + .044);
     }
 
     private bool SyncGlobePitchRail()
@@ -101,10 +111,29 @@ public sealed partial class SceneCompositor
             _boardSession.GlobePitchInputReady(frameTime);
     }
 
-    private void DrawGlobePitchRail(CanvasDrawingSession drawing, float drawerProgress)
+    private void DrawGlobePitchRail(CanvasDrawingSession drawing, float drawerProgress, double latitude)
     {
         var rail = GlobePitchRailBounds();
+        var panel = GlobePitchPanelBounds();
+        double aspect = PaintBoardAspect();
         using var entrance = drawerProgress < 1 ? drawing.CreateLayer(drawerProgress) : null;
+        drawing.FillRoundedRectangle(new Rect(panel.X * BoardSurfaceSize, panel.Y * BoardSurfaceSize,
+            panel.Width * BoardSurfaceSize, panel.Height * BoardSurfaceSize),
+            (float)(GlobePitchPanelCornerRadius / aspect), GlobePitchPanelCornerRadius, ThemeColor(0, 0, 0));
+        // Match Roulette's RED caption, including its physical aspect correction.
+        RouletteText(drawing, "PITCH", new Rect(rail.X * BoardSurfaceSize,
+            (rail.Y - .028) * BoardSurfaceSize, rail.Width * BoardSurfaceSize, 20),
+            13, ThemeColor(255, 255, 255), aspect);
+
+        // The pointer stays outside the stationary optical reference and follows
+        // the rendered latitude, including its easing and retained release value.
+        double position = Math.Clamp((latitude / ProjectTabletop.Interaction.GlobeState.MaximumViewLatitude + 1) / 2, 0, 1);
+        float y = (float)((rail.Bottom - rail.Height * position) * BoardSurfaceSize);
+        float tipX = (float)(rail.X * BoardSurfaceSize - 4 / aspect);
+        float backX = tipX - (float)(8 / aspect);
+        using var pointer = CanvasGeometry.CreatePolygon(drawing.Device,
+            [new(backX, y - 5), new(tipX, y), new(backX, y + 5)]);
+        drawing.FillGeometry(pointer, ThemeColor(255, 255, 255));
         var previous = drawing.Transform;
         drawing.Transform = Matrix3x2.CreateRotation(-MathF.PI / 2) *
             Matrix3x2.CreateTranslation((float)rail.X * BoardSurfaceSize, (float)rail.Bottom * BoardSurfaceSize) * previous;
