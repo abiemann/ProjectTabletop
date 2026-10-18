@@ -39,6 +39,7 @@ public sealed partial class MainWindow
     private void UpdateBoardAppStatus()
     {
         if (_closing) return;
+        RequestCameraPictureProfile();
         UpdateHandDetectionLogStatus();
         bool blackjack = _scene.CurrentBoardScreen == BoardScreen.Blackjack;
         bool crownDeed = _scene.CurrentBoardScreen == BoardScreen.CrownDeed;
@@ -103,7 +104,9 @@ public sealed partial class MainWindow
 
     private void PrepareBoardApp()
     {
+        _calibrationResults.Invalidate();
         _annotationMode = AnnotationMode.None;
+        FinishCameraPictureCalibration();
         _frozenFrame = null;
         _scene.ShowCalibrationTarget(-1, pieceTop: false);
         CameraCanvas.Invalidate();

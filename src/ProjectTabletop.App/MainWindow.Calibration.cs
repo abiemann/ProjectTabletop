@@ -14,11 +14,12 @@ public sealed partial class MainWindow
 
     private string CalibrationPath => Path.Combine(_appDataDirectory, "calibration.json");
 
-    private void BoardCorners_Click(object sender, RoutedEventArgs e)
+    private async void BoardCorners_Click(object sender, RoutedEventArgs e)
     {
         if (!CanBeginCalibration()) return;
-        if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
+        StopBoardSetup();
         InvalidateCalibration("Collecting four board-plane point pairs.");
+        if (!await PrepareManualCameraCalibrationAsync()) return;
         _annotationMode = AnnotationMode.BoardCalibration;
         _frozenFrame = null;
         _scene.ShowCalibrationTarget(0, pieceTop: false);
@@ -26,10 +27,10 @@ public sealed partial class MainWindow
             "Targets advance clockwise from top left.";
     }
 
-    private void TopPoints_Click(object sender, RoutedEventArgs e)
+    private async void TopPoints_Click(object sender, RoutedEventArgs e)
     {
         if (!CanBeginCalibration()) return;
-        if (Volatile.Read(ref _boardSetupActive)) EndBoardSetup();
+        StopBoardSetup();
         if (_boardCameraPoints.Count != 4)
         {
             CalibrationStatus = "Measure the four board-plane points first.";
@@ -39,11 +40,35 @@ public sealed partial class MainWindow
         _calibration = null;
         _scene.SetTopPlaneMap(null);
         _topCameraPoints.Clear();
+        if (!await PrepareManualCameraCalibrationAsync()) return;
         _annotationMode = AnnotationMode.TopCalibration;
         _frozenFrame = null;
         _scene.ShowCalibrationTarget(0, pieceTop: true);
         CalibrationStatus = "Raised top target 1 of 4. Move a piece until the projected crosshair " +
             "lands on its top center, then click that center in the camera view.";
+    }
+
+    private async Task<bool> PrepareManualCameraCalibrationAsync()
+    {
+        _annotationMode = AnnotationMode.None;
+        _scene.ShowCalibrationTarget(-1, pieceTop: false);
+        long generation = _calibrationResults.Capture();
+        long cameraVersion = Interlocked.Read(ref _cameraOperationVersion);
+        var board = _scene.CurrentBoardScreen;
+        try
+        {
+            await PrepareCameraPictureCalibrationAsync();
+            if (generation != _calibrationResults.Capture()) return false;
+            if (!_closing && cameraVersion == Interlocked.Read(ref _cameraOperationVersion) &&
+                board == _scene.CurrentBoardScreen && CanBeginCalibration()) return true;
+        }
+        catch (Exception ex)
+        {
+            if (generation != _calibrationResults.Capture()) return false;
+            if (!_closing) CalibrationStatus = "Cannot prepare camera for calibration: " + ex.Message;
+        }
+        if (!Volatile.Read(ref _boardSetupActive)) FinishCameraPictureCalibration();
+        return false;
     }
 
     private bool CanBeginCalibration()
@@ -87,6 +112,7 @@ public sealed partial class MainWindow
         _annotationMode = AnnotationMode.None;
         if (_boardCameraPoints.Count == 4 && _topCameraPoints.Count == 4) CreateCalibration();
         else CalibrationStatus = "Board points recorded. Now measure four points on the raised piece top.";
+        FinishCameraPictureCalibration();
     }
 
     private void CreateCalibration()
@@ -140,6 +166,7 @@ public sealed partial class MainWindow
         _topCameraPoints.Clear();
         _scene.SetTopPlaneMap(null);
         _scene.ShowCalibrationTarget(-1, pieceTop: false);
+        if (!Volatile.Read(ref _boardSetupActive)) FinishCameraPictureCalibration();
         if (_initialized) CalibrationStatus = reason;
     }
 
@@ -181,6 +208,9 @@ public sealed partial class MainWindow
             return;
         }
         _calibrationResults.Invalidate();
+        _annotationMode = AnnotationMode.None;
+        _scene.ShowCalibrationTarget(-1, pieceTop: false);
+        FinishCameraPictureCalibration();
         var generation = _calibrationResults.Capture();
         var cameraVersion = Interlocked.Read(ref _cameraOperationVersion);
         var output = _output;

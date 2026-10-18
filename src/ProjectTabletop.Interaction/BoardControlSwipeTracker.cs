@@ -43,7 +43,11 @@ public sealed class BoardControlSwipeTracker
             // Brief empty frames may occur between unrelated optical component
             // IDs. Ambiguous simultaneous disturbances must not be joined.
             if (samples.Count != 0) _candidate = default;
-            else if (CompletesDeparture(frameTime)) return Complete(frameTime);
+            else
+            {
+                _candidate.HadMissingFrames = true;
+                if (!_candidate.PendingBridge && CompletesDeparture(frameTime)) return Complete(frameTime);
+            }
             return null;
         }
         ref var candidate = ref _candidate;
@@ -75,11 +79,28 @@ public sealed class BoardControlSwipeTracker
         double maxV = Math.Max(candidate.MaxV, v);
         double movement = (u - candidate.LastU) * candidate.Direction;
         double reversal = (candidate.FurthestU - u) * candidate.Direction;
-        if (duration > MaximumDuration || Math.Abs(u - candidate.LastU) > .40)
+        if (duration > MaximumDuration || Math.Abs(u - candidate.LastU) > .40 &&
+            !TryBeginGapBridge(ref candidate, u, v, frameTime))
         {
             candidate = Start(u, v, frameTime);
             return null;
         }
+        if (candidate.PendingBridge)
+        {
+            double bridgeSeconds = (frameTime - candidate.BridgeTime).TotalSeconds;
+            double bridgeProgress = (u - candidate.BridgeU) * candidate.Direction;
+            // Reacquisition is provisional. A stationary endpoint or one flash
+            // cannot stand in for the missing middle of a sweep.
+            if (frameTime - candidate.BridgeTime > MaximumGap || movement < -.035 ||
+                bridgeProgress < -.035 || bridgeProgress > candidate.BridgeSpeed * 2 * bridgeSeconds + .035 ||
+                Math.Abs(v - candidate.BridgeV) > Math.Max(.035, Math.Abs(bridgeProgress) * .6))
+            {
+                candidate = Start(u, v, frameTime);
+                return null;
+            }
+            if (bridgeProgress >= .035) candidate.PendingBridge = false;
+        }
+        candidate.HadMissingFrames = false;
         if (reversal > .10)
         {
             // A new sweep in the opposite direction starts at the observed
@@ -116,6 +137,7 @@ public sealed class BoardControlSwipeTracker
             candidate.SumTimeU += seconds * u;
             candidate.SumTimeV += seconds * v;
         }
+        if (candidate.PendingBridge) return null;
         if (candidate.Observations >= 3 && movement > .002 &&
             (u - candidate.StartU) * candidate.Direction >= .10)
             HasTraversalInProgress = true;
@@ -142,6 +164,29 @@ public sealed class BoardControlSwipeTracker
         return nearEdge && (_candidate.Direction > 0 ? projectedU >= .85 : projectedU <= .15);
     }
 
+    private static bool TryBeginGapBridge(ref Candidate candidate, double u, double v, DateTimeOffset frameTime)
+    {
+        double progress = (candidate.LastU - candidate.StartU) * candidate.Direction;
+        double gapSeconds = (frameTime - candidate.LastTime).TotalSeconds;
+        double jump = (u - candidate.LastU) * candidate.Direction;
+        if (candidate.PendingBridge || !candidate.HadMissingFrames || candidate.Observations < 4 ||
+            progress < .15 || candidate.LastMovement <= .002 ||
+            candidate.LastTime - candidate.StartTime < MinimumDuration ||
+            !TryFitVelocity(candidate, out double velocity) || jump <= 0 ||
+            Math.Abs(v - candidate.LastV) > jump * .6 ||
+            jump > Math.Abs(velocity) * 2 * gapSeconds + .035) return false;
+        // Permit bounded acceleration during an observed gap, then require
+        // independently observed movement on the far side before joining it.
+        // Measure that local confirmation from the reacquired position; drift
+        // across the gap has already passed the cross-gap slope check above.
+        candidate.PendingBridge = true;
+        candidate.BridgeU = u;
+        candidate.BridgeV = v;
+        candidate.BridgeTime = frameTime;
+        candidate.BridgeSpeed = Math.Abs(velocity);
+        return true;
+    }
+
     private bool TryGetDepartureVector(DateTimeOffset frameTime, out double horizontalVelocity)
     {
         horizontalVelocity = 0;
@@ -149,6 +194,12 @@ public sealed class BoardControlSwipeTracker
         var duration = frameTime - candidate.StartTime;
         if (candidate.Observations < 4 || duration < MinimumDuration || duration > MaximumDuration ||
             (candidate.LastU - candidate.StartU) * candidate.Direction < .35 - 1e-9) return false;
+        return TryFitVelocity(candidate, out horizontalVelocity);
+    }
+
+    private static bool TryFitVelocity(in Candidate candidate, out double horizontalVelocity)
+    {
+        horizontalVelocity = 0;
         double variance = candidate.Observations * candidate.SumTimeSquared - candidate.SumTime * candidate.SumTime;
         if (variance <= 1e-9) return false;
         horizontalVelocity = (candidate.Observations * candidate.SumTimeU - candidate.SumTime * candidate.SumU) / variance;
@@ -219,5 +270,8 @@ public sealed class BoardControlSwipeTracker
         public double SumTime, SumTimeSquared, SumU, SumV, SumTimeU, SumTimeV;
         public DateTimeOffset StartTime, LastTime;
         public int Observations;
+        public bool HadMissingFrames, PendingBridge;
+        public double BridgeU, BridgeV, BridgeSpeed;
+        public DateTimeOffset BridgeTime;
     }
 }

@@ -239,12 +239,15 @@ public sealed partial class MainWindow
             case "verify_photo_copy_proportions":
                 return await VerifyPhotoCopyProportionsAsync();
 #endif
+            case "get_camera_controls":
+                return await _camera.GetControlsAsync();
             case "get_status":
                 var frame = Volatile.Read(ref _latestCameraFrame);
                 return new
                 {
                     cameraRunning = _camera.IsRunning,
                     cameraStatus = CameraStatusText.Text,
+                    cameraPictureProfile = GetCameraPictureProfileStatus(),
                     cameraDevice = SelectedCamera?.Device.DisplayName,
                     cameraFrameUtc = frame?.Timestamp,
                     cameraWidth = frame?.Width,

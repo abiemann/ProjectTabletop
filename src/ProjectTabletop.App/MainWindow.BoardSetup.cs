@@ -106,6 +106,9 @@ public sealed partial class MainWindow
     {
         var request = Interlocked.Increment(ref _boardSetupRequestVersion);
         _boardSetupStartRequest = request;
+        _calibrationResults.Invalidate();
+        _annotationMode = AnnotationMode.None;
+        _scene.ShowCalibrationTarget(-1, pieceTop: false);
         BoardSetupButton.Content = "Cancel board setup";
         try
         {
@@ -126,6 +129,8 @@ public sealed partial class MainWindow
             await WarmMenuPreviewResourcesAsync();
             if (request != _boardSetupRequestVersion || _closing) return;
 
+            await PrepareCameraPictureCalibrationAsync();
+            if (request != _boardSetupRequestVersion || _closing) return;
             Volatile.Write(ref _boardSetupActive, true);
             ClearBoardPreview();
             BoardSetupButton.Content = "End board setup";
@@ -150,7 +155,10 @@ public sealed partial class MainWindow
         {
             if (!_closing && !Volatile.Read(ref _boardSetupActive) &&
                 request == _boardSetupRequestVersion)
+            {
+                FinishCameraPictureCalibration();
                 BoardSetupButton.Content = "Start board setup";
+            }
         }
     }
 
@@ -161,6 +169,7 @@ public sealed partial class MainWindow
         Volatile.Write(ref _trustedBoardPrior, null);
         ClearBoardPreview();
         _scene.SetBoardSetup(false);
+        FinishCameraPictureCalibration();
         BoardSetupButton.Content = "Start board setup";
         RescanBoardButton.IsEnabled = false;
         BoardSetupStatusText.Text = _scene.HasBoardMediaClip
@@ -200,6 +209,8 @@ public sealed partial class MainWindow
             if (!await OpenProjectionOutputAsync() || request != _boardSetupRequestVersion ||
                 !Volatile.Read(ref _boardSetupActive) || _closing) return;
             RequireProjectionOutput();
+            await PrepareCameraPictureCalibrationAsync();
+            if (request != _boardSetupRequestVersion || !Volatile.Read(ref _boardSetupActive) || _closing) return;
         }
         catch (Exception ex)
         {
@@ -694,6 +705,7 @@ public sealed partial class MainWindow
             // Keep the final clip/map and diagnostics, then reveal the selected board app.
             // EndBoardSetup clears scan history, which is still useful for a later rescan.
             Volatile.Write(ref _boardSetupActive, false);
+            FinishCameraPictureCalibration();
             ClearBoardFrameReferences();
             BoardSetupButton.Content = "Start board setup";
             RescanBoardButton.IsEnabled = true;

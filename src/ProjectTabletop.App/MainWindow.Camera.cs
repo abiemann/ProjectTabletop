@@ -205,6 +205,7 @@ public sealed partial class MainWindow
     {
         if (!_initialized || SelectedCamera is not { } selected ||
             _selectedCameraId == selected.Device.Id) return;
+        CancelCameraPictureRequest();
         _selectedCameraId = selected.Device.Id;
         LoadSelectedCameraFrameRate();
         ClearHandTracking();
@@ -242,6 +243,7 @@ public sealed partial class MainWindow
         if (_cameraStartTask is { IsCompleted: false } && _cameraWanted &&
             _cameraStartingDeviceId == choice.Device.Id && _cameraStartingRate == _requestedCameraFramesPerSecond &&
             _cameraStartingVersion == _cameraOperationVersion) return _cameraStartTask;
+        CancelCameraPictureRequest();
         _cameraWanted = true;
         _cameraWantedDeviceId = choice.Device.Id;
         var version = Interlocked.Increment(ref _cameraOperationVersion);
@@ -260,6 +262,8 @@ public sealed partial class MainWindow
             if (_closing || !_cameraWanted || _cameraManualRestartRequired || version != _cameraOperationVersion) return false;
             if (_camera.IsRunning && _camera.ActiveDeviceId == choice.Device.Id &&
                 _camera.RequestedFramesPerSecond == requestedRate) return true;
+            if (_camera.IsRunning) await RestoreCameraPictureDefaultAsync();
+            if (_closing || !_cameraWanted || _cameraManualRestartRequired || version != _cameraOperationVersion) return false;
             ClearHandTracking();
             ResetMarkerTracking("camera-restarted", choice.Device.Id);
             _scene.ClearBoardMediaClip();
@@ -272,11 +276,13 @@ public sealed partial class MainWindow
             ClearLatestCameraFrame();
             CameraCanvas.Invalidate();
             await _camera.StartAsync(choice.Device.Id, requestedRate);
+            await InitializeCameraPictureSessionAsync();
             if (version != _cameraOperationVersion || !_cameraWanted || _closing)
             {
                 // Still inside the operation gate: a superseded start must release
                 // its device before a queued replacement or shutdown can proceed.
-                await _camera.StopAsync();
+                try { await RestoreCameraPictureDefaultAsync(); }
+                finally { await _camera.StopAsync(); }
                 return false;
             }
             // A native failure callback can arrive while initialization is
@@ -309,13 +315,18 @@ public sealed partial class MainWindow
             }
             return false;
         }
-        finally { _cameraOperation.Release(); }
+        finally
+        {
+            _cameraOperation.Release();
+            RequestCameraPictureProfile();
+        }
     }
 
     private async void StopCamera_Click(object sender, RoutedEventArgs e) => await StopCameraAsync();
 
     internal async Task StopCameraAsync()
     {
+        CancelCameraPictureRequest();
         _cameraWanted = false;
         ClearHandTracking();
         ResetMarkerTracking("camera-stopped");
@@ -325,7 +336,8 @@ public sealed partial class MainWindow
         try
         {
             _scene.ClearBoardMediaClip();
-            await _camera.StopAsync();
+            try { await RestoreCameraPictureDefaultAsync(); }
+            finally { await _camera.StopAsync(); }
             ResetCameraHealth();
             ClearBoardPreview();
             _frozenFrame = null;
@@ -374,6 +386,7 @@ public sealed partial class MainWindow
         Volatile.Write(ref _latestCameraFrame, frame);
         RequestCameraPreviewRedraw();
         if (_cameraManualRestartRequired) return;
+        if (frame.Timestamp.UtcTicks < Interlocked.Read(ref _cameraInputNotBeforeTicks)) return;
         // This only reserves an independent worker; all caption/scene access
         // happens inside it, so hand scheduling cannot delay the next caption.
         var detectionTick = Stopwatch.GetTimestamp();
@@ -514,9 +527,11 @@ public sealed partial class MainWindow
         }
         if (_annotationMode is not (AnnotationMode.BoardCalibration or AnnotationMode.TopCalibration))
         {
+            _calibrationResults.Invalidate();
             _pieceOutline.Clear();
             _pieceFront = null;
             _annotationMode = AnnotationMode.PieceOutline;
+            FinishCameraPictureCalibration();
         }
         CameraCanvas.Invalidate();
         SetStatus($"Snapshot frozen at {_frozenFrame.Width} × {_frozenFrame.Height}. Mark the selected piece or calibration point.");
@@ -548,14 +563,18 @@ public sealed partial class MainWindow
 
     private void OutlineMode_Click(object sender, RoutedEventArgs e)
     {
+        _calibrationResults.Invalidate();
         _annotationMode = AnnotationMode.PieceOutline;
+        FinishCameraPictureCalibration();
         _scene.ShowCalibrationTarget(-1, pieceTop: false);
         SetStatus("Click vertices around one piece on a frozen snapshot. Click Front point when done.");
     }
 
     private void FrontMode_Click(object sender, RoutedEventArgs e)
     {
+        _calibrationResults.Invalidate();
         _annotationMode = AnnotationMode.PieceFront;
+        FinishCameraPictureCalibration();
         _scene.ShowCalibrationTarget(-1, pieceTop: false);
         SetStatus("Click a point at the front of that piece, away from its center.");
     }

@@ -395,7 +395,7 @@ public sealed partial class MainWindow
                             return;
                         }
                         if (_closing || generation != _footballInputGeneration || !_cameraWanted || !_camera.IsRunning ||
-                            _cameraHealthWarning || IsBoardScanMeasuring || _camera.ActiveDeviceId != cameraId ||
+                            _cameraHealthWarning || _cameraOperation.CurrentCount == 0 || IsBoardScanMeasuring || _camera.ActiveDeviceId != cameraId ||
                             !_scene.FootballInputActive) return;
                         var now = MonotonicClock.UtcNow;
                         double processingMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;

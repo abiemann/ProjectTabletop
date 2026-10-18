@@ -143,7 +143,8 @@ public sealed partial class MainWindow
 
     // Called before any camera or board-state change. A result already in flight
     // can finish, but cannot publish into the new camera/registration generation.
-    private void ClearHandTracking([CallerMemberName] string reason = "")
+    private void ClearHandTracking([CallerMemberName] string reason = "",
+        bool preserveBoardAnimations = false, bool preserveRecording = false)
     {
         ResetPieceDetections();
         ResetFootballInput();
@@ -167,11 +168,11 @@ public sealed partial class MainWindow
 #endif
             _handWorker.ResetCadence();
             _holdWorker.ResetCadence();
-            _scene.ClearHandTips();
+            _scene.ClearHandTips(preserveBoardAnimations: preserveBoardAnimations);
             _scene.InvalidatePhotoCopyCapture();
             LogHandTrackingEvent("tracking_reset", new { reason });
             _handInputNotBefore = _handVideoNotBefore = MonotonicClock.UtcNow;
-            _handVideoRecorder?.Stop("tracking_reset:" + reason);
+            if (!preserveRecording) _handVideoRecorder?.Stop("tracking_reset:" + reason);
         }
         if (_initialized && !_closing)
             DispatcherQueue.TryEnqueue(() => { if (!_closing) CameraCanvas.Invalidate(); });
@@ -242,7 +243,7 @@ public sealed partial class MainWindow
                         {
                             lock (_handGate)
                                 if (!_closing && generation == _handGeneration && _handTrackingEnabled &&
-                                    _cameraWanted && _camera.IsRunning &&
+                                    _cameraWanted && _camera.IsRunning && _cameraOperation.CurrentCount != 0 &&
                                     !Volatile.Read(ref _cameraHealthWarning) && !IsBoardScanMeasuring)
                                     _scene.CompleteHandAcquisition(acquisitionContext, acquisitionHints.LightingHints,
                                         [], frame.Timestamp, projectedWhiteClipped: acquisitionHints.Presence?.ProjectedWhiteClipped);
@@ -262,7 +263,7 @@ public sealed partial class MainWindow
                         lock (_handGate)
                         {
                             if (_closing || generation != _handGeneration || !_handTrackingEnabled ||
-                                !_cameraWanted || !_camera.IsRunning ||
+                                !_cameraWanted || !_camera.IsRunning || _cameraOperation.CurrentCount == 0 ||
                                 Volatile.Read(ref _cameraHealthWarning) || IsBoardScanMeasuring || !_scene.HandDetectionRequired ||
                                 _scene.CurrentBoardScreen == BoardScreen.StrykersRun)
                             {
@@ -270,6 +271,7 @@ public sealed partial class MainWindow
                                     inferenceMilliseconds, frameInterval, detectorTrace, hands, visibleHands, [],
                                     _closing ? "closing" : generation != _handGeneration ? "generation_changed" :
                                     !_handTrackingEnabled ? "tracking_disabled" : !_cameraWanted || !_camera.IsRunning ? "camera_stopped" :
+                                    _cameraOperation.CurrentCount == 0 ? "camera_changing" :
                                     Volatile.Read(ref _cameraHealthWarning) ? "camera_unhealthy" :
                                     IsBoardScanMeasuring ? "board_scan" : "caption_controls_hidden");
                                 return;

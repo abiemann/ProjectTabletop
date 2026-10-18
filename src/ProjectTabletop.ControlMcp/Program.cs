@@ -20,7 +20,7 @@ if (args.Length == 0)
 
 if (args.Length < 2 || args[0] != "--once" || args.Length > 3)
 {
-    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|set_stick_tracking|learn_double_bar_marker|get_stick_tip|capture_stick_tip|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|show_crown_deed|show_globe|show_slots|show_settings|show_paint|blackjack_action|crown_deed_action|globe_action|slots_action|slots_demo|capture_blackjack_preview|capture_crown_deed_preview|capture_globe_preview|capture_slots_preview|shutdown> [JSON object]");
+    Console.Error.WriteLine("Usage: ProjectTabletop.ControlMcp --once <get_status|get_camera_controls|start_board_scan|rescan_board|black_output|capture_raw_frame|capture_projection_preview|stop_scan|start_camera|stop_camera|open_output|set_background_media|set_hand_tracking|set_stick_tracking|learn_double_bar_marker|get_stick_tip|capture_stick_tip|show_test_grid|show_board_menu|show_hand_tracking_test|show_photo_copy|show_blackjack|show_crown_deed|show_globe|show_slots|show_settings|show_paint|blackjack_action|crown_deed_action|globe_action|slots_action|slots_demo|capture_blackjack_preview|capture_crown_deed_preview|capture_globe_preview|capture_slots_preview|shutdown> [JSON object]");
     return 2;
 }
 
@@ -144,6 +144,7 @@ static async Task RunMcpAsync()
         ToolCollection =
         [
             Tool("get_status", "Read camera, output, cardboard scan, and fingertip tracking status from the local ProjectTabletop app."),
+            Tool("get_camera_controls", "Read supported exposure, ISO, white balance, brightness and contrast ranges and current values from the existing running webcam. Reports unsupported controls separately; does not change settings, start or restart capture."),
             Tool("start_board_scan", "Show the white projector scan and begin detecting the physical cardboard."),
             Tool("rescan_board", "Restart white-flood cardboard detection and projector registration while board setup is active."),
             Tool("black_output", "Show full black on the existing projector output while keeping the webcam running."),

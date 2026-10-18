@@ -1,7 +1,9 @@
 #if DEBUG
+using System.Numerics;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Effects;
 using ProjectTabletop.App.Projection;
+using ProjectTabletop.App.Projection.GlobeRendering;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
 using ProjectTabletop.Vision;
@@ -52,7 +54,8 @@ public sealed partial class MainWindow
             "The Earth did not visibly approach during its entrance.");
         // Measure the limb during approach while it is wholly visible and
         // clear of the controls. The opening view leaves the surrounding sky visible.
-        var circle = CheckCircularLimb(approachingPixels, farPixels, width, height, CameraPoint(.5, .5),
+        byte[] approachingSky = SkyReference(scene, width, height, inset, approaching);
+        var circle = CheckCircularLimb(approachingPixels, approachingSky, width, height, CameraPoint(.5, .5),
             335 * approaching.Zoom / 1000 * height * .93 * (1 - inset));
         now += TimeSpan.FromSeconds(2.45);
         byte[] arrivedPixels = await Capture("earth-native-4k");
@@ -127,8 +130,8 @@ public sealed partial class MainWindow
         Act("globe-zoom-out"); now += GlobeState.ControlTransitionDuration;
         Require(Math.Abs(scene.GlobeState.Zoom - beforeZoom.Zoom) < .000001,
             "Zoom - did not restore the previous scale.");
-        Require(scene.GetGlobeRenderDiagnostics(width / (double)height, scene.GlobeState).StarFieldRenderCount == 1,
-            "Earth rotation, zoom or drawer interaction regenerated the static native sky.");
+        Require(scene.GetGlobeRenderDiagnostics(width / (double)height, scene.GlobeState).SkyTextureLoadCount == 1,
+            "Earth rotation, zoom or drawer interaction reloaded the celestial-sphere texture.");
         var beforeRemovedActions = scene.GlobeState;
         Require(!scene.ActivateGlobeButton("globe-rotate-left") &&
                 !scene.ActivateGlobeButton("globe-rotate-right") &&
@@ -138,7 +141,7 @@ public sealed partial class MainWindow
         var squareCircle = await CheckAlternateAspect(2160, 2160, "square", requireHandleClearance: true);
         var measuredBoardCircle = await CheckAlternateAspect(2777, 2160, "measured-board", requireHandleClearance: true);
         var portraitCircle = await CheckAlternateAspect(2160, 3840, "portrait", requireHandleClearance: true);
-        var shootingStars = await VerifyGlobeShootingStarsAsync(directory, images);
+        var shootingStars = await VerifyGlobeShootingStarsAsync(directory, images, SceneRenderer(scene));
 
         Act("globe-drawer-close");
         CheckClosedDrawer();
@@ -164,7 +167,7 @@ public sealed partial class MainWindow
         return new { passed = true, nativeWidth = width, nativeHeight = height, directory, images,
             distantEntranceAndSlowSpin = true, zoomControlsAndRemovedManualRotation = true,
             circle, squareCircle, measuredBoardCircle, portraitCircle, texture, landscapeHandle, sky, shootingStars,
-            staticNativeSkyReusedAcrossRotationAndZoom = true, starsRemainBehindHiddenControls = true,
+            celestialSphereTextureReusedAcrossRotationAndZoom = true, starsRemainBehindHiddenControls = true,
             compactClosedDrawerAndOpenActions = true, drawerDurationMilliseconds = 300,
             bottomDrawerEmergesBelowViewport = true, singleRenderedBottomActionRow = true,
             defaultHandleClearOfEarthOnRectangularBoards = true,
@@ -226,9 +229,9 @@ public sealed partial class MainWindow
         async Task<object> CheckStarField(byte[] first, byte[] rotated)
         {
             var diagnostics = scene.GetGlobeRenderDiagnostics(width / (double)height, scene.GlobeState);
-            Require(diagnostics.StarFieldWidth > 3000 && diagnostics.StarFieldHeight > 1700 &&
-                    diagnostics.StarFieldRenderCount == 1 && diagnostics.NativeStarCount > 10000,
-                "The sky lacks a cached native-resolution field of individually rendered stars.");
+            Require(diagnostics.SkyTextureWidth == 16384 && diagnostics.SkyTextureHeight == 8192 &&
+                    diagnostics.SkyTextureLoadCount == 1,
+                "The celestial sphere did not retain its complete 16K NASA panorama.");
             var firstPoint = CameraPoint(.205, .835);
             var lastPoint = CameraPoint(.98, .905);
             int changingSkyPixels = 0, roundingSkyPixels = 0, maximumSkyChannelDelta = 0;
@@ -240,14 +243,27 @@ public sealed partial class MainWindow
                     Math.Max(Math.Abs(first[offset + 1] - rotated[offset + 1]),
                         Math.Abs(first[offset + 2] - rotated[offset + 2])));
                 maximumSkyChannelDelta = Math.Max(maximumSkyChannelDelta, delta);
-                // Direct2D's final image sampling can round a sparse set of
-                // channel values one level differently on a repeated draw.
-                // Any larger change still fails the stationary-sky check.
+                // Ignore one-level final-sampling rounding when measuring
+                // genuine motion of the celestial sphere over twenty seconds.
                 if (delta == 1) roundingSkyPixels++;
                 else if (delta > 1) changingSkyPixels++;
             }
-            Require(changingSkyPixels == 0,
-                "The background moved or twinkled while Earth rotated, changing the swipe baseline.");
+            Require(changingSkyPixels > 1000,
+                "The celestial sphere did not visibly rotate over twenty seconds.");
+            var handle = scene.CurrentBoardButtons.Single().Bounds;
+            var captionStart = CameraPoint(handle.X + .04, handle.Y + .02);
+            var captionEnd = CameraPoint(handle.X + handle.Width - .04, handle.Y + handle.Height - .02);
+            int changingCaptionPixels = 0;
+            for (int y = (int)Math.Ceiling(captionStart.Y); y < captionEnd.Y; y++)
+            for (int x = (int)Math.Ceiling(captionStart.X); x < captionEnd.X; x++)
+            {
+                int offset = (y * width + x) * 4;
+                if (Math.Max(Math.Abs(first[offset] - rotated[offset]),
+                    Math.Max(Math.Abs(first[offset + 1] - rotated[offset + 1]),
+                        Math.Abs(first[offset + 2] - rotated[offset + 2]))) > 1) changingCaptionPixels++;
+            }
+            Require(changingCaptionPixels == 0,
+                "Celestial-sphere rotation moved or changed the stationary control caption.");
 
             // Verify the actual sky under the arrow, not just the exposed area
             // beside it. A hidden drawer must still have stars across its band.
@@ -281,8 +297,9 @@ public sealed partial class MainWindow
             Require(scene.BoardButtonsVisible && scene.CurrentBoardButtons.Single().Id == "globe-drawer-open",
                 "The Globe sky check did not restore its control handle.");
             await Capture("milky-way-and-stars-controls-restored");
-            return new { diagnostics.StarFieldWidth, diagnostics.StarFieldHeight,
-                diagnostics.StarFieldRenderCount, diagnostics.NativeStarCount, changingSkyPixels, roundingSkyPixels,
+            return new { diagnostics.SkyTextureWidth, diagnostics.SkyTextureHeight,
+                diagnostics.SkyTextureLoadCount, diagnostics.SkySourceWidth, diagnostics.SkySourceHeight,
+                changingSkyPixels, roundingSkyPixels, changingCaptionPixels,
                 maximumSkyChannelDelta, bottomStripStarPeaks = peaks, nativeFineStarPeaks = finePeaks };
 
             int Brightness(int x, int y)
@@ -996,7 +1013,6 @@ public sealed partial class MainWindow
             await portrait.EnsureGlobeResourcesAsync(target.Device);
             using (var drawing = portraitTarget.CreateDrawingSession())
                 portrait.Draw(drawing, portraitWidth, portraitHeight, preview: false, runningSlowly: false);
-            byte[] portraitFarPixels = portraitTarget.GetPixelBytes();
             portraitNow += TimeSpan.FromSeconds(.65);
             using (var drawing = portraitTarget.CreateDrawingSession())
                 portrait.Draw(drawing, portraitWidth, portraitHeight, preview: false, runningSlowly: false);
@@ -1005,7 +1021,8 @@ public sealed partial class MainWindow
                 "Portrait Globe drawing escaped the physical board clip.");
             var center = new PixelPoint(portraitWidth * (.035 + .93 * (portraitInset / 2 + .5 * (1 - portraitInset))),
                 portraitHeight * (.035 + .93 * (portraitInset / 2 + .5 * (1 - portraitInset))));
-            object limb = CheckCircularLimb(pixels, portraitFarPixels, portraitWidth, portraitHeight, center,
+            byte[] matchingSky = SkyReference(portrait, portraitWidth, portraitHeight, portraitInset, portrait.GlobeState);
+            object limb = CheckCircularLimb(pixels, matchingSky, portraitWidth, portraitHeight, center,
                 .335 * portrait.GlobeState.Zoom * Math.Min(portraitWidth, portraitHeight) * .93 * (1 - portraitInset));
             portraitNow += TimeSpan.FromSeconds(2.45);
             using (var drawing = portraitTarget.CreateDrawingSession())
@@ -1107,7 +1124,8 @@ public sealed partial class MainWindow
         {
             // Native atmosphere pixels supply an independent circular-limb
             // measurement, beyond checking the renderer's scale formula. The
-            // same-aspect far-away frame excludes the stationary blue nebula.
+            // same-aspect far-away frame uses the identical sky rotation, so
+            // moving blue stars cannot masquerade as Earth's atmospheric rim.
             int halfSearch = (int)(expectedRadius * 1.12);
             int left = FindLimb(true, -1), right = FindLimb(true, 1);
             int top = FindLimb(false, -1), bottom = FindLimb(false, 1);
@@ -1128,17 +1146,43 @@ public sealed partial class MainWindow
                         int y = (int)center.Y + (horizontal ? cross : direction * distance);
                         if (x < 0 || y < 0 || x >= physicalWidth || y >= physicalHeight) continue;
                         int offset = (y * physicalWidth + x) * 4;
-                        int change = Math.Max(Math.Abs(pixels[offset] - backgroundPixels[offset]),
-                            Math.Max(Math.Abs(pixels[offset + 1] - backgroundPixels[offset + 1]),
-                                Math.Abs(pixels[offset + 2] - backgroundPixels[offset + 2])));
-                        if (change > 8 && pixels[offset] > 18 && pixels[offset + 1] > 10 &&
-                            pixels[offset] > pixels[offset + 2] * 1.25) blue++;
+                        // Measure added atmospheric blue, not the final pixel's
+                        // colour: a bright warm sky can mask the same blue rim.
+                        int blueChange = pixels[offset] - backgroundPixels[offset];
+                        int greenChange = pixels[offset + 1] - backgroundPixels[offset + 1];
+                        int redChange = pixels[offset + 2] - backgroundPixels[offset + 2];
+                        if (blueChange > 8 && greenChange > 2 && blueChange > redChange * 1.25) blue++;
                     }
                     // A point star cannot pass this contiguous limb support.
                     if (blue >= 5) return (int)(horizontal ? center.X : center.Y) + direction * distance;
                 }
                 throw new InvalidOperationException("A native Earth atmospheric limb is missing.");
             }
+        }
+        static GlobeSurfaceRenderer SceneRenderer(SceneCompositor source) =>
+            (GlobeSurfaceRenderer)(typeof(SceneCompositor).GetField("_globeRenderer",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(source)
+                ?? throw new InvalidOperationException("The fixture's Globe renderer was not loaded."));
+        static byte[] SkyReference(SceneCompositor source, int referenceWidth, int referenceHeight,
+            double referenceInset, GlobeSnapshot state)
+        {
+            // Reuse the scene's 16K texture rather than allocating a second copy
+            // just to isolate the atmosphere from the moving sky in this fixture.
+            var renderer = SceneRenderer(source);
+            using var reference = new CanvasRenderTarget(renderer.Device, referenceWidth, referenceHeight, 96);
+            using (var drawing = reference.CreateDrawingSession())
+            {
+                drawing.Clear(Microsoft.UI.Colors.Black);
+                drawing.Transform = Matrix3x2.CreateScale((float)(referenceWidth * .93 * (1 - referenceInset) / 1000),
+                        (float)(referenceHeight * .93 * (1 - referenceInset) / 1000)) *
+                    Matrix3x2.CreateTranslation((float)(referenceWidth * (.035 + .93 * referenceInset / 2)),
+                        (float)(referenceHeight * (.035 + .93 * referenceInset / 2)));
+                Require(renderer.DrawFrame(drawing, .01f, (float)state.RotationDegrees,
+                    referenceWidth / (double)referenceHeight, (float)state.ViewLatitudeDegrees, state.ElapsedSeconds,
+                    GlobeSurfaceRenderer.GetSkyRotationRadians(state.ElapsedSeconds)),
+                    "The matching-angle sky reference could not draw its texture.");
+            }
+            return reference.GetPixelBytes();
         }
         PixelPoint CameraPoint(double u, double v) => new(width * (.035 + .93 * (inset / 2 + u * (1 - inset))),
             height * (.035 + .93 * (inset / 2 + v * (1 - inset))));

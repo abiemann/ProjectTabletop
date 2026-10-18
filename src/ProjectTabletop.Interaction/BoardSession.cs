@@ -228,20 +228,26 @@ public sealed partial class BoardSession
     public void ShowSettings(DateTimeOffset? now = null) => Show(BoardScreen.Settings, now ?? MonotonicClock.UtcNow);
 
     /// <summary>Clear hover and reject observations/pulses that predate a camera or calibration reset.</summary>
-    public void ResetInput(DateTimeOffset now)
+    public void ResetInput(DateTimeOffset now, bool preserveBoardAnimations = false)
     {
         ClearFootballInput(now);
         TickFootball(now);
         ClearStrykersRunInput(now);
         TickStrykersRun(now);
         ResetMenuScrollMotion(now);
-        ClearBlackjackPresentationHold();
-        AdvanceBlackjackPresentation(now);
-        ClearCrownDeedPresentationHold();
-        ClearCrownDeedDrawerUi();
-        AdvanceCrownDeedPresentation(now);
-        ClearBottomDrawers(now);
-        ClearHolds();
+        // Picture-setting transitions invalidate camera evidence, not ongoing deals,
+        // dice/entrance presentation or the user's open controls drawer.
+        if (!preserveBoardAnimations)
+        {
+            ClearBlackjackPresentationHold();
+            AdvanceBlackjackPresentation(now);
+            ClearCrownDeedPresentationHold();
+            ClearCrownDeedDrawerUi();
+            AdvanceCrownDeedPresentation(now);
+            ClearBottomDrawers(now);
+        }
+        if (preserveBoardAnimations) ResetHoldCaptionEvidence(inputNotBefore: now);
+        else ClearHolds();
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreFramesThrough = Later(_ignoreFramesThrough, now);

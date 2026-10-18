@@ -12,7 +12,7 @@ public sealed partial class MainWindow
         lock (_markerTrackingGate)
         {
             if (_closing || generation != _markerTrackingGeneration || !_markerTrackingEnabled || !_cameraWanted ||
-                _cameraHealthWarning || _camera.ActiveDeviceId != _markerTrackingCameraId ||
+                _cameraHealthWarning || _cameraOperation.CurrentCount == 0 || _camera.ActiveDeviceId != _markerTrackingCameraId ||
                 !WandMarkerBoardSelected || _scene.CurrentBoardScreen != _markerTrackingSceneBoard ||
                 CurrentWandMarkerInputRevision != _markerTrackingSceneRevision) return;
             var now = MonotonicClock.UtcNow;

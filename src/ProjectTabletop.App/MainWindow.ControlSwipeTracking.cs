@@ -7,7 +7,9 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
-    private static readonly TimeSpan ControlSwipeInterval = TimeSpan.FromMilliseconds(32);
+    // Keep intermediate positions in quick sweeps: 32 ms skips alternate frames
+    // on a 40 fps camera. The independent worker still drops busy arrivals.
+    private static readonly TimeSpan ControlSwipeInterval = TimeSpan.FromMilliseconds(16);
     private readonly FrameWorker _controlSwipeWorker = new();
     private readonly object _controlSwipeGate = new();
     private long _controlSwipeGeneration;

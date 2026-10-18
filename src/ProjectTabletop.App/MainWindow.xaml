@@ -48,6 +48,12 @@
                             <Button Content="Stop" Click="StopCamera_Click" />
                         </StackPanel>
                         <TextBlock x:Name="CameraStatusText" Text="Camera stopped" TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <ToggleSwitch x:Name="CameraPictureProfilesToggle" Header="Automatic camera picture profiles"
+                                      Toggled="CameraPictureProfiles_Toggled" />
+                        <TextBlock x:Name="CameraPictureStatusText" TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <Button x:Name="CaptureCameraPictureDefaultButton" Content="Use current settings as Default"
+                                IsEnabled="False" Click="CaptureCameraPictureDefault_Click"
+                                ToolTipService.ToolTip="Turn automatic profiles off before saving your own camera picture settings." />
                         <NumberBox x:Name="ProjectorLatencyNumberBox" Header="Projector latency (ms)" Value="17"
                                    Minimum="0" Maximum="2000" SmallChange="1" SpinButtonPlacementMode="Compact"
                                    ValueChanged="ProjectorLatency_ValueChanged"

@@ -6,6 +6,7 @@ using ProjectTabletop.Interaction;
 using Windows.Graphics.Imaging;
 using Windows.Media.Capture;
 using Windows.Media.Capture.Frames;
+using Windows.Media.Devices;
 using Windows.Media.MediaProperties;
 
 namespace ProjectTabletop.App.Camera;
@@ -48,6 +49,231 @@ public sealed class CameraCaptureService : IAsyncDisposable
     private int _sourceBitmapPixelFormat = -1;
 
     public sealed record CaptureStageTiming(string Stage, double LastMilliseconds, double MaximumMilliseconds);
+    public sealed record CameraControlInfo(string Api, string Unit, string Status, bool? Supported = null,
+        double? Minimum = null, double? Maximum = null, double? Step = null, double? Value = null,
+        bool? Automatic = null, bool? AutoSupported = null, string? Preset = null, string? Error = null);
+    public sealed record CameraControlsSnapshot(bool CameraRunning, long Epoch, DateTimeOffset QueriedUtc,
+        string Status, IReadOnlyDictionary<string, CameraControlInfo> Controls, string? Error = null);
+    public sealed record CameraImageValues(double? Brightness, double? Contrast);
+    public sealed record CameraImageControlResult(string Status, long Epoch, bool Changed,
+        CameraImageValues Before, CameraImageValues After, bool RollbackAttempted = false,
+        bool RollbackSucceeded = false, string? Error = null);
+    private sealed record ImageControlWrite(string Name, MediaDeviceControl Control,
+        double Before, double Target, double Step);
+
+    /// <summary>
+    /// Changes only supplied brightness/contrast values in the expected existing camera session.
+    /// Changed is conservative: any setter attempt requires fresh input baselines, even after rollback.
+    /// The caller coalesces board requests; this operation never opens or restarts the camera.
+    /// </summary>
+    public Task<CameraImageControlResult> SetImageControlsAsync(string expectedDeviceId, long expectedEpoch,
+        double? brightness = null, double? contrast = null, CancellationToken cancellationToken = default) => Task.Run(async () =>
+    {
+        var writes = new List<ImageControlWrite>(2);
+        var attempted = new List<ImageControlWrite>(2);
+        var before = new CameraImageValues(null, null);
+        var after = before;
+        MediaCapture? capture = null;
+        CameraImageControlResult Result(string status, string? error = null, bool rollbackAttempted = false,
+            bool rollbackSucceeded = false) => new(status, Interlocked.Read(ref _epoch), attempted.Count > 0,
+                before, after, rollbackAttempted, rollbackSucceeded, error);
+        bool SameSession() => _running && ReferenceEquals(capture, _capture) &&
+            expectedEpoch == Interlocked.Read(ref _epoch) &&
+            StringComparer.Ordinal.Equals(expectedDeviceId, ActiveDeviceId);
+
+        try { await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        { return Result("cancelled"); }
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_disposed || !_running || _capture is null) return Result("camera_not_running");
+            capture = _capture;
+            if (!SameSession()) return Result("stale_session");
+            var controller = capture.VideoDeviceController;
+            var requested = new (string Name, double? Value, Func<MediaDeviceControl> Resolve)[]
+            {
+                ("brightness", brightness, () => controller.Brightness),
+                ("contrast", contrast, () => controller.Contrast)
+            };
+            // Validate and capture every original value before the first setter, so a partial
+            // failure can restore the same session without touching exposure or white balance.
+            foreach (var request in requested)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (request.Value is not { } target) continue;
+                var control = request.Resolve();
+                var capabilities = control.Capabilities;
+                if (!capabilities.Supported) return Result("unsupported", $"{request.Name} is unsupported.");
+                double min = capabilities.Min, max = capabilities.Max, step = capabilities.Step;
+                if (!double.IsFinite(min) || !double.IsFinite(max) || !double.IsFinite(step) ||
+                    max < min || step <= 0)
+                    return Result("unavailable", $"{request.Name} has no usable driver range.");
+                if (!ImageControlValueAllowed(target, min, max, step))
+                    return Result("invalid_value", $"{request.Name} must match its advertised range and step.");
+                if (capabilities.AutoModeSupported && (!control.TryGetAuto(out bool automatic) || automatic))
+                    return Result("unavailable", $"{request.Name} must already be in a known manual mode.");
+                if (!control.TryGetValue(out double original) || !ImageControlValueAllowed(original, min, max, step))
+                    return Result("unavailable", $"{request.Name} has no safely restorable current value.");
+                writes.Add(new(request.Name, control, original, target, step));
+                before = request.Name == "brightness" ? before with { Brightness = original } : before with { Contrast = original };
+                after = before;
+            }
+            foreach (var write in writes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (ImageControlValuesMatch(write.Before, write.Target, write.Step)) continue;
+                if (_disposed || !SameSession()) throw new InvalidOperationException("Camera session changed before applying image controls.");
+                attempted.Add(write);
+                if (!write.Control.TrySetValue(write.Target))
+                    throw new InvalidOperationException($"The driver rejected {write.Name}.");
+                if (!write.Control.TryGetValue(out double actual) || !ImageControlValuesMatch(actual, write.Target, write.Step))
+                    throw new InvalidOperationException($"The driver did not confirm {write.Name}.");
+            }
+            if (!SameSession()) throw new InvalidOperationException("Camera session changed during image controls.");
+            after = ReadBack();
+            foreach (var write in writes)
+            {
+                double? actual = write.Name == "brightness" ? after.Brightness : after.Contrast;
+                if (actual is null || !ImageControlValuesMatch(actual.Value, write.Target, write.Step))
+                    throw new InvalidOperationException($"The driver could not verify the final {write.Name} value.");
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            return Result(attempted.Count == 0 ? "unchanged" : "applied");
+        }
+        catch (Exception ex)
+        {
+            // Disposal waits on this gate. A native failure can still invalidate the epoch;
+            // never roll back into a failed or different session after that happens.
+            bool rollbackAttempted = attempted.Count > 0 && SameSession();
+            bool restored = rollbackAttempted;
+            if (rollbackAttempted)
+            {
+                for (int i = attempted.Count - 1; i >= 0; i--)
+                {
+                    var write = attempted[i];
+                    try
+                    {
+                        if (!SameSession() || !write.Control.TrySetValue(write.Before) ||
+                            !write.Control.TryGetValue(out double actual) ||
+                            !ImageControlValuesMatch(actual, write.Before, write.Step)) restored = false;
+                    }
+                    catch { restored = false; }
+                }
+            }
+            after = SameSession() ? ReadBack() : new(null, null);
+            bool cancelled = ex is OperationCanceledException && cancellationToken.IsCancellationRequested;
+            string error = cancelled ? "The image-control request was superseded." :
+                ex is InvalidOperationException ? ex.Message : $"Image controls failed (0x{ex.HResult:X8}).";
+            return Result(rollbackAttempted && !restored ? "rollback_failed" : cancelled ? "cancelled" : "failed", error,
+                rollbackAttempted, restored);
+        }
+        finally { _lifecycle.Release(); }
+
+        CameraImageValues ReadBack()
+        {
+            var values = new CameraImageValues(null, null);
+            foreach (var write in writes)
+            {
+                double? value = null;
+                try
+                {
+                    if (write.Control.TryGetValue(out double actual) && double.IsFinite(actual)) value = actual;
+                }
+                catch { /* Unknown is reported as null, never as the requested value. */ }
+                values = write.Name == "brightness" ? values with { Brightness = value } : values with { Contrast = value };
+            }
+            return values;
+        }
+    });
+
+    private static bool ImageControlValuesMatch(double first, double second, double step) =>
+        double.IsFinite(first) && double.IsFinite(second) && Math.Abs(first - second) <= Math.Max(1e-7, step * 1e-6);
+
+    private static bool ImageControlValueAllowed(double value, double min, double max, double step) =>
+        double.IsFinite(value) && value >= min && value <= max &&
+        Math.Abs((value - min) / step - Math.Round((value - min) / step)) <= 1e-6;
+
+    /// <summary>
+    /// Reads controls sequentially from the existing capture, without changing settings or opening a camera.
+    /// Driver queries run off the UI/frame paths; the lifecycle gate prevents disposal during the query.
+    /// </summary>
+    public Task<CameraControlsSnapshot> GetControlsAsync() => Task.Run(() =>
+    {
+        var controls = new Dictionary<string, CameraControlInfo>();
+        CameraControlsSnapshot Snapshot(string status, string? error = null) =>
+            new(_running, Interlocked.Read(ref _epoch), DateTimeOffset.UtcNow, status, controls, error);
+        if (!_lifecycle.Wait(0)) return Snapshot("busy");
+        try
+        {
+            if (_disposed || !_running || _capture is null) return Snapshot("camera_not_running");
+            var controller = _capture.VideoDeviceController;
+            Read("exposure", "ExposureControl", "seconds", () =>
+            {
+                var control = controller.ExposureControl;
+                return control.Supported
+                    ? new("ExposureControl", "seconds", "available", true,
+                        control.Min.TotalSeconds, control.Max.TotalSeconds, control.Step.TotalSeconds,
+                        control.Value.TotalSeconds, control.Auto)
+                    : new("ExposureControl", "seconds", "unsupported", false);
+            });
+            Read("isoSpeed", "IsoSpeedControl", "ISO", () =>
+            {
+                var control = controller.IsoSpeedControl;
+                return control.Supported
+                    ? new("IsoSpeedControl", "ISO", "available", true, control.Min, control.Max, control.Step,
+                        control.Value, control.Auto)
+                    : new("IsoSpeedControl", "ISO", "unsupported", false);
+            });
+            Read("whiteBalance", "WhiteBalanceControl", "kelvin", () =>
+            {
+                var control = controller.WhiteBalanceControl;
+                if (!control.Supported) return new("WhiteBalanceControl", "kelvin", "unsupported", false);
+                var preset = control.Preset;
+                return new("WhiteBalanceControl", "kelvin", "available", true,
+                    control.Min, control.Max, control.Step, control.Value,
+                    preset == ColorTemperaturePreset.Auto, Preset: preset.ToString());
+            });
+            Read("brightness", "Brightness", "driver_units", () => ReadLegacy(controller.Brightness, "Brightness", "driver_units"));
+            Read("contrast", "Contrast", "driver_units", () => ReadLegacy(controller.Contrast, "Contrast", "driver_units"));
+            // Legacy controls remain useful when the driver omits their modern counterparts.
+            Read("legacyExposure", "Exposure", "log2_seconds", () => ReadLegacy(controller.Exposure, "Exposure", "log2_seconds"));
+            Read("legacyWhiteBalance", "WhiteBalance", "kelvin", () => ReadLegacy(controller.WhiteBalance, "WhiteBalance", "kelvin"));
+            controls["gain"] = new("VideoDeviceController", "driver_units", "not_exposed",
+                Error: "The typed Windows camera API has no gain control; ISO speed is reported separately.");
+            return Snapshot("queried");
+        }
+        catch (Exception ex)
+        {
+            return Snapshot("unavailable", $"Camera controls could not be read (0x{ex.HResult:X8}).");
+        }
+        finally { _lifecycle.Release(); }
+
+        void Read(string name, string api, string unit, Func<CameraControlInfo> read)
+        {
+            try { controls[name] = read(); }
+            catch (Exception ex)
+            {
+                controls[name] = new(api, unit, "unavailable",
+                    Error: $"The driver could not report this control (0x{ex.HResult:X8}).");
+            }
+        }
+
+        static CameraControlInfo ReadLegacy(MediaDeviceControl control, string api, string unit)
+        {
+            var capabilities = control.Capabilities;
+            if (!capabilities.Supported) return new(api, unit, "unsupported", false);
+            bool hasValue = control.TryGetValue(out double value);
+            bool autoSupported = capabilities.AutoModeSupported;
+            bool? automatic = autoSupported && control.TryGetAuto(out bool enabled) ? enabled : null;
+            return new(api, unit, hasValue ? "available" : "value_unavailable", true,
+                Finite(capabilities.Min), Finite(capabilities.Max), Finite(capabilities.Step),
+                hasValue ? Finite(value) : null, automatic, autoSupported);
+        }
+
+        static double? Finite(double value) => double.IsFinite(value) ? value : null;
+    });
+
     public sealed record CaptureDiagnostics(long Epoch, long ReaderStarts, DateTimeOffset? LastReaderStartedUtc,
         long Arrivals, long Acquired, long Copied, long Published, long ConsumerStarted, long ConsumerCompleted,
         long BusyDrops, long RateDrops, long EmptyFrames, long ObsoleteDrops, long CaptureErrors, long ConsumerErrors, long NativeFailures,

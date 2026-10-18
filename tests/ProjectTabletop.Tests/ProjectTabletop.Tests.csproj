@@ -43,5 +43,8 @@
     <Compile Include="..\..\src\ProjectTabletop.App\Settings\DoubleBarProfileSelection.cs" Link="App\DoubleBarProfileSelection.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Settings\DoubleBarMarkerSettings.cs" Link="App\DoubleBarMarkerSettings.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Settings\CameraFrameRateSettingsStore.cs" Link="App\CameraFrameRateSettingsStore.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Settings\CameraPictureProfilePolicy.cs" Link="App\CameraPictureProfilePolicy.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Settings\CameraPictureSettingsStore.cs" Link="App\CameraPictureSettingsStore.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\MainWindow.CameraPictureProfiles.cs" Link="App\MainWindow.CameraPictureProfiles.cs" />
   </ItemGroup>
 </Project>

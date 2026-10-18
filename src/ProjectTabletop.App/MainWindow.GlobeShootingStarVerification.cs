@@ -7,11 +7,16 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
-    private static async Task<object> VerifyGlobeShootingStarsAsync(string directory, List<string> images)
+    private static async Task<object> VerifyGlobeShootingStarsAsync(string directory, List<string> images,
+        GlobeSurfaceRenderer renderer)
     {
-        var device = CanvasDevice.GetSharedDevice();
-        using var renderer = new GlobeSurfaceRenderer(device);
+        var device = renderer.Device;
         await renderer.EnsureReadyAsync();
+        Require(renderer.SkyTextureWidth == 16384 && renderer.SkyTextureHeight == 8192 &&
+            renderer.SkyTextureLoadCount == 1, "The sphere fixture did not retain the complete 16K panorama.");
+        Require(Math.Abs(GlobeSurfaceRenderer.GetSkyRotationRadians(20) - Math.PI / 300) < .000001 &&
+            GlobeSurfaceRenderer.GetSkyRotationRadians(12000) == 0,
+            "Celestial-sphere rotation lost its 0.03-degree-per-second clock.");
         double first = GlobeShootingStar.GetStartTime(0);
         double duration = GlobeShootingStar.GetDuration(0);
         double peak = first + duration * .5;
@@ -53,7 +58,7 @@ public sealed partial class MainWindow
             double aspect = width / (double)height;
             byte[] quiet = Draw(target, 0);
             await Save(target, "shooting-star-" + name + "-quiet");
-            int cacheCount = renderer.StarFieldRenderCount;
+            int textureLoads = renderer.SkyTextureLoadCount;
             byte[] active = Draw(target, peak);
             await Save(target, "shooting-star-" + name + "-active");
             int changed = 0, bottomChanges = 0, earthChanges = 0;
@@ -90,11 +95,12 @@ public sealed partial class MainWindow
                 if (Math.Pow(x + .5 - width * .5, 2) + Math.Pow(y + .5 - height * .5, 2) <
                     largeRadius * largeRadius * .94 && Delta(zoomedQuiet, zoomedActive, (y * width + x) * 4) > 1)
                     occlusionChanges++;
-            Require(occlusionChanges == 0 && renderer.StarFieldRenderCount == cacheCount,
-                "Earth did not hide the shooting star, or its motion rebuilt the cached sky: " + name);
+            Require(occlusionChanges == 0 && renderer.SkyTextureLoadCount == textureLoads,
+                "Earth did not hide the shooting star, or its motion reloaded the sky: " + name);
+            var sphere = await CheckSphere(target, quiet, name);
             checks.Add(new { name, width, height, changedPixels = changed,
                 bounds = new { left, top, right, bottom }, bottomChanges, earthChanges, occlusionChanges,
-                cachedSkyReused = true, deterministicClock = true });
+                skyTextureReused = true, deterministicClock = true, sphere });
         }
 
         // Inspect motion at a fixed Earth pose, including the quiet lead-in and
@@ -107,18 +113,57 @@ public sealed partial class MainWindow
             }
         return new { passed = true, firstAppearanceSeconds = first, durationSeconds = duration,
             checks, motionFrames = 30, motionFramesPerSecond = 29 / (duration + .2),
-            bottomQuarterUnchanged = true, earthOcclusion = true, staticSkyCachePreserved = true };
+            cometLeavesBottomQuarterUnchangedAtFixedSky = true, earthOcclusion = true,
+            celestialSphereTextureReused = true, sphereRotationPeriodSeconds = 12000 };
 
-        byte[] Draw(CanvasRenderTarget target, double elapsed, float zoom = .6f)
+        byte[] Draw(CanvasRenderTarget target, double elapsed, float zoom = .6f, float skyRotation = 0)
         {
             using (var drawing = target.CreateDrawingSession())
             {
                 drawing.Transform = Matrix3x2.CreateScale((float)target.Size.Width / 1000,
                     (float)target.Size.Height / 1000);
-                Require(renderer.Draw(drawing, zoom, 55.3f, target.Size.Width / target.Size.Height,
-                    34.0522f, elapsed), "Shooting-star fixture could not draw Globe textures.");
+                // Hold the celestial sphere still while isolating comet motion;
+                // its independent rotation is checked explicitly below.
+                Require(renderer.DrawFrame(drawing, zoom, 55.3f, target.Size.Width / target.Size.Height,
+                    34.0522f, elapsed, skyRotation), "Shooting-star fixture could not draw Globe textures.");
             }
             return target.GetPixelBytes();
+        }
+        async Task<object> CheckSphere(CanvasRenderTarget target, byte[] initial, string name)
+        {
+            int width = (int)target.Size.Width, height = (int)target.Size.Height;
+            float angle = GlobeSurfaceRenderer.GetSkyRotationRadians(20);
+            byte[] rotated = Draw(target, 0, skyRotation: angle);
+            await Save(target, "celestial-sphere-" + name + "-after-20-seconds");
+            int skyChanges = 0, bottomSkyChanges = 0, earthChanges = 0;
+            double radius = .335 * .6 * Math.Min(width, height);
+            for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                int delta = Delta(initial, rotated, (y * width + x) * 4);
+                double distanceSquared = Math.Pow(x + .5 - width * .5, 2) + Math.Pow(y + .5 - height * .5, 2);
+                if (distanceSquared < radius * radius * .94 && delta > 1) earthChanges++;
+                if (distanceSquared <= radius * radius * 1.1 || delta <= 8) continue;
+                skyChanges++;
+                if (y >= height * .75) bottomSkyChanges++;
+            }
+            Require(skyChanges > 100 && bottomSkyChanges > 20 && earthChanges == 0,
+                "The sphere did not rotate behind the fixed Earth across the whole sky: " + name);
+            Require(Changed(rotated, Draw(target, 0, skyRotation: angle)) == 0,
+                "A fixed sphere angle rendered differently on repeated draws: " + name);
+            int wrapChanges = Changed(initial, Draw(target, 0,
+                skyRotation: GlobeSurfaceRenderer.GetSkyRotationRadians(12000)));
+            int phaseWrapChanges = Changed(rotated, Draw(target, 0,
+                skyRotation: GlobeSurfaceRenderer.GetSkyRotationRadians(12020)));
+            Require(wrapChanges == 0 && phaseWrapChanges == 0,
+                "The sphere's 12000-second clock wrap changed its orientation: " + name);
+            byte[] beforeWrap = Draw(target, 0, skyRotation: GlobeSurfaceRenderer.GetSkyRotationRadians(11999.9));
+            byte[] afterWrap = Draw(target, 0, skyRotation: GlobeSurfaceRenderer.GetSkyRotationRadians(12000.1));
+            int seamChanges = Changed(beforeWrap, afterWrap, 8);
+            Require(seamChanges < skyChanges && renderer.SkyTextureLoadCount == 1,
+                "The celestial sphere jumped at its longitude seam or reloaded its panorama: " + name);
+            return new { skyChanges, bottomSkyChanges, earthChanges, wrapChanges, phaseWrapChanges,
+                seamChanges, renderer.SkyTextureWidth, renderer.SkyTextureHeight, renderer.SkyTextureLoadCount };
         }
         async Task Save(CanvasRenderTarget target, string name)
         {

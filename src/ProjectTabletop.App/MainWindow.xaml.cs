@@ -74,6 +74,7 @@ public sealed partial class MainWindow : Window
         _dispatchInputResult = action => DispatcherQueue.TryEnqueue(() => action());
         _scene.LicensesRequested += () => DispatcherQueue.TryEnqueue(() => _ = ShowLicensesAsync());
         _scene.BoardOpened += BoardOpenedForStickTracking;
+        _scene.BoardOpened += BoardOpenedForCameraPicture;
         _scene.FootballAudioRequested += FootballAudioRequested;
         _scene.WaterGardenAudioChanged += WaterGardenAudioChanged;
         AppPalette.ApplyTitleBar(AppWindow.TitleBar);
@@ -95,6 +96,7 @@ public sealed partial class MainWindow : Window
         InitializeProjectionSettings();
         InitializeDisplayAudio();
         InitializeCameraFrameRates();
+        InitializeCameraPictureProfiles();
         _ = RefreshCamerasAsync();
         _ = TryLoadAutosavedVisionAsync();
         _ = InitializeCrownDeedSaveAsync();
@@ -247,6 +249,8 @@ public sealed partial class MainWindow : Window
     {
         if (_closing) return;
         _closing = true;
+        CancelCameraPictureRequest();
+        _scene.BoardOpened -= BoardOpenedForCameraPicture;
         _markerSetupTimer?.Stop();
         CancelMarkerSetup(null);
         ApplyProjectionPreviewState();
@@ -277,7 +281,13 @@ public sealed partial class MainWindow : Window
         _output?.Close();
         _camera.FrameReceived -= Camera_FrameReceived;
         _camera.CaptureFailed -= Camera_CaptureFailed;
-        await _camera.DisposeAsync();
+        await _cameraOperation.WaitAsync();
+        try
+        {
+            try { await RestoreCameraPictureDefaultAsync(); }
+            finally { await _camera.DisposeAsync(); }
+        }
+        finally { _cameraOperation.Release(); }
         ClearLatestCameraFrame();
         _bitmapFrameLease?.Dispose();
         _bitmapFrameLease = null;

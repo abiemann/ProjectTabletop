@@ -16,7 +16,8 @@ public sealed partial class SceneCompositor
 
     internal sealed record GlobeRenderDiagnostics(bool Ready, int SurfaceWidth, int SurfaceHeight,
         int CloudWidth, int CloudHeight, double CenterU, double CenterV, double RadiusU, double RadiusV,
-        string? Error, int StarFieldWidth, int StarFieldHeight, int StarFieldRenderCount, int NativeStarCount);
+        string? Error, int SkyTextureWidth, int SkyTextureHeight, int SkyTextureLoadCount,
+        int SkySourceWidth, int SkySourceHeight);
 
     internal GlobeRenderDiagnostics GetGlobeRenderDiagnostics(double boardAspect, GlobeSnapshot state)
     {
@@ -28,8 +29,9 @@ public sealed partial class SceneCompositor
                 _globeRenderer?.SurfaceHeight ?? 0, _globeRenderer?.CloudWidth ?? 0, _globeRenderer?.CloudHeight ?? 0,
                 .5, .5, boardAspect >= 1 ? radius / boardAspect : radius,
                 boardAspect >= 1 ? radius : radius * boardAspect, _globeRenderer?.Error,
-                _globeRenderer?.StarFieldWidth ?? 0, _globeRenderer?.StarFieldHeight ?? 0,
-                _globeRenderer?.StarFieldRenderCount ?? 0, _globeRenderer?.NativeStarCount ?? 0);
+                _globeRenderer?.SkyTextureWidth ?? 0, _globeRenderer?.SkyTextureHeight ?? 0,
+                _globeRenderer?.SkyTextureLoadCount ?? 0,
+                _globeRenderer?.SkySourceWidth ?? 0, _globeRenderer?.SkySourceHeight ?? 0);
         }
     }
 
@@ -71,7 +73,7 @@ public sealed partial class SceneCompositor
         DrawGlobeControls(ds, buttons, hovered, selectionFeedback, drawerOpen, drawerProgress, boardAspect,
             _holdControlBrightness);
 
-        const string credit = "NASA EARTH OBSERVATIONS";
+        const string credit = "NASA EARTH & STAR MAP";
         var zoomLabel = state.TargetZoom.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "×";
         var zoomCaption = zoomLabel + "  ·  SLOW EASTWARD ROTATION";
         // Anchor the actual two-line group to the bottom-right, independently

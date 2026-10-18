@@ -17,10 +17,13 @@ public sealed class BoardDisturbanceTracker
     private readonly int[] _offsets = new int[Cells], _queue = new int[Cells], _componentStart = new int[Cells];
     private readonly byte[] _samples = new byte[Cells * 3], _previous = new byte[Cells * 3];
     private readonly float[] _background = new float[Cells * 3], _noise = new float[Cells], _foregroundAge = new float[Cells];
+    private readonly float[] _detailBackground = new float[Cells], _detailOnsetBackground = new float[Cells];
+    private readonly byte[] _detailArmed = new byte[Cells];
     private readonly byte[] _foreground = new byte[Cells], _connected = new byte[Cells], _protected = new byte[Cells];
     private readonly byte[] _componentProtection = new byte[Cells];
     private readonly int[] _redHistogram = new int[511], _greenHistogram = new int[511], _blueHistogram = new int[511];
     private readonly PixelPoint[] _corners = new PixelPoint[4];
+    private readonly DetailLoss[] _detailColumns = new DetailLoss[Columns];
     private readonly Candidate[] _candidates = new Candidate[4];
     private readonly Track[] _tracks = new Track[2];
     private readonly bool[] _matchedTracks = new bool[2], _matchedCandidates = new bool[4];
@@ -73,6 +76,7 @@ public sealed class BoardDisturbanceTracker
         }
         // The median ignores small foreground objects while compensating camera exposure/white balance.
         int redShift = Median(_redHistogram), greenShift = Median(_greenHistogram), blueShift = Median(_blueHistogram);
+        float luminanceShift = (redShift + greenShift + blueShift) / 3f;
         bool warming = frameTime < _warmUntil;
         int foregroundCount = 0;
         Array.Clear(_protected);
@@ -91,6 +95,13 @@ public sealed class BoardDisturbanceTracker
             float backgroundLuminance = (_background[c] + redShift + _background[c + 1] + greenShift +
                 _background[c + 2] + blueShift) / 3;
             float luminanceFloor = Math.Clamp(backgroundLuminance * .60f, 14, 40);
+            // Require a recent, abrupt loss before retaining sparse detail.
+            // A slow fade across the scenery must not become a moving hand
+            // merely because its older residuals fall out of the reference.
+            float detailThreshold = Math.Max(luminanceFloor, _noise[i] * 5 + 14);
+            float sampleLuminance = (_samples[c] + _samples[c + 1] + _samples[c + 2]) / 3f;
+            if (_detailBackground[i] + luminanceShift - sampleLuminance <= detailThreshold) _detailArmed[i] = 0;
+            else if (_detailOnsetBackground[i] + luminanceShift - sampleLuminance > detailThreshold) _detailArmed[i] = 1;
             bool foreground = !warming && (chroma > Math.Max(24, _noise[i] * 4 + 8) ||
                 luminance > Math.Max(luminanceFloor, _noise[i] * 5 + 14));
             if (foreground) { _foreground[i] = 1; foregroundCount++; }
@@ -101,17 +112,25 @@ public sealed class BoardDisturbanceTracker
             Initialize(frameTime);
             return _observations;
         }
-        BoardMotionObservation? sparseDetail = FindComponents((redShift + greenShift + blueShift) / 3f);
+        BoardMotionObservation? sparseDetail = FindComponents(luminanceShift);
         MatchComponents(frameTime);
         if (_observations.Count == 0 && sparseDetail is { } detail) _observations.Add(detail);
         float backgroundRate = (float)(1 - Math.Exp(-elapsed / (warming ? .12 : 2.5)));
         float stationaryRate = (float)(1 - Math.Exp(-elapsed / .10));
         float noiseRate = (float)(1 - Math.Exp(-elapsed / .7));
+        float detailRate = (float)(1 - Math.Exp(-elapsed / .5));
+        float onsetRate = (float)(1 - Math.Exp(-elapsed / .2));
         for (int i = 0; i < Cells; i++)
         {
             if (_offsets[i] < 0) continue;
             int c = i * 3;
             byte protection = _componentProtection[_componentStart[i]];
+            // Sparse detail uses a recent reference as well as the original
+            // background: a slowly fading star must not remain an occlusion.
+            // Update after classification, preserving the first hand arrival.
+            float luminance = (_samples[c] + _samples[c + 1] + _samples[c + 2]) / 3f;
+            _detailBackground[i] += (luminance - luminanceShift - _detailBackground[i]) * detailRate;
+            _detailOnsetBackground[i] += (luminance - luminanceShift - _detailOnsetBackground[i]) * onsetRate;
             _foregroundAge[i] = _protected[i] == 0 || protection == 1 ? 0 : _foregroundAge[i] + (float)elapsed;
             if (_protected[i] == 0 || protection == 2 || _foregroundAge[i] > .65)
             {
@@ -200,6 +219,19 @@ public sealed class BoardDisturbanceTracker
             int offset = _offsets[i];
             if (offset < 0) continue;
             int c = i * 3;
+            // Fine projected stars can fall between the band's sparse samples.
+            // Preserve the brightest real pixel in a bounded local footprint,
+            // keeping its RGB channels together instead of inventing a colour.
+            int x = offset % _stride / 4, y = offset / _stride;
+            int peak = offset, maximum = -1;
+            for (int dy = Math.Max(-1, -y); dy <= Math.Min(1, _height - 1 - y); dy++)
+            for (int dx = Math.Max(-2, -x); dx <= Math.Min(2, _width - 1 - x); dx++)
+            {
+                int adjacent = offset + dy * _stride + dx * 4;
+                int brightness = bgra[adjacent] + bgra[adjacent + 1] + bgra[adjacent + 2];
+                if (brightness > maximum) { maximum = brightness; peak = adjacent; }
+            }
+            offset = peak;
             _samples[c] = bgra[offset + 2];
             _samples[c + 1] = bgra[offset + 1];
             _samples[c + 2] = bgra[offset];
@@ -209,6 +241,10 @@ public sealed class BoardDisturbanceTracker
     private void Initialize(DateTimeOffset frameTime)
     {
         for (int i = 0; i < _samples.Length; i++) _background[i] = _samples[i];
+        for (int i = 0; i < Cells; i++)
+            _detailBackground[i] = (_samples[i * 3] + _samples[i * 3 + 1] + _samples[i * 3 + 2]) / 3f;
+        _detailBackground.CopyTo(_detailOnsetBackground, 0);
+        Array.Clear(_detailArmed);
         _samples.CopyTo(_previous, 0);
         Array.Fill(_noise, 4);
         Array.Clear(_foregroundAge);
@@ -229,8 +265,8 @@ public sealed class BoardDisturbanceTracker
     private BoardMotionObservation? FindComponents(float luminanceShift)
     {
         _candidateCount = 0;
-        int detailCells = 0, detailLeft = Columns, detailRight = 0, detailTop = Rows, detailBottom = 0;
-        long detailX = 0, detailY = 0;
+        DetailLoss details = default;
+        Array.Clear(_detailColumns);
         Array.Clear(_connected);
         Array.Clear(_componentProtection);
         // Remove isolated sampling noise without dilating separate ripples into a hand-sized blob.
@@ -278,11 +314,11 @@ public sealed class BoardDisturbanceTracker
                 // positions and direction; this does not need a hand-sized blob.
                 if (count >= 8 && width >= 2 && height >= 2 && width <= Columns * .34 &&
                     count <= _validCells * .018 &&
-                    IsLostBrightDetail(count, left, right, top, bottom, luminanceShift))
+                    LostBrightDetail(count, left, right, top, bottom, luminanceShift) is { } losses)
                 {
-                    detailCells += count; detailX += sumX; detailY += sumY;
-                    detailLeft = Math.Min(detailLeft, left); detailRight = Math.Max(detailRight, right);
-                    detailTop = Math.Min(detailTop, top); detailBottom = Math.Max(detailBottom, bottom);
+                    for (int i = 0; i < count; i++) _connected[_queue[i]] = 3;
+                    details.Merge(losses);
+                    _detailColumns[(int)(losses.X / losses.Count)].Merge(losses);
                 }
                 continue;
             }
@@ -307,22 +343,66 @@ public sealed class BoardDisturbanceTracker
             }
             _candidates[insert] = candidate;
         }
+        if (_candidateCount != 0) return null;
+        // Fine stars can disappear as isolated samples. Preserve the existing
+        // component-sized surround for larger features; count only additional
+        // qualified losses here, including those removed by the noise filter.
+        for (int index = 0; index < Cells; index++)
+        {
+            if (_foreground[index] == 0 || _connected[index] == 3) continue;
+            int x = index % Columns, y = index / Columns;
+            if (LostBrightDetail(1, x, x, y, y, luminanceShift, index) is { } loss)
+            {
+                details.Merge(loss);
+                _detailColumns[x].Merge(loss);
+            }
+        }
+        // One independently drifting fine star must not veto a much larger
+        // local occlusion. Keep all evidence unless one compact cluster owns
+        // at least 80%, with only a single small sampling footprint elsewhere.
+        // Comparable clusters and scattered/global flicker still fail below.
+        if (details.Count >= 8 && details.Right - details.Left + 1 > Columns * .34)
+        {
+            int window = (int)(Columns * .34), sum = 0, maximum = 0, start = 0;
+            for (int x = 0; x < Columns; x++)
+            {
+                sum += _detailColumns[x].Count;
+                if (x >= window) sum -= _detailColumns[x - window].Count;
+                if (sum > maximum) { maximum = sum; start = Math.Max(0, x - window + 1); }
+            }
+            if (maximum >= 8 && maximum >= details.Count * .80 && details.Count - maximum <= 4)
+            {
+                DetailLoss local = default, remote = default;
+                for (int x = 0; x < Columns; x++)
+                {
+                    if (_detailColumns[x].Count == 0) continue;
+                    if (x >= start && x < start + window) local.Merge(_detailColumns[x]);
+                    else remote.Merge(_detailColumns[x]);
+                }
+                if (remote.Right - remote.Left + 1 <= 3 && remote.Bottom - remote.Top + 1 <= 3)
+                    details = local;
+            }
+        }
         // Scattered flicker or a scene-wide exposure change is not one local
         // disturbance. Keep the normal filled-component path unchanged.
-        return _candidateCount == 0 && detailCells >= 8 && detailRight - detailLeft + 1 <= Columns * .34 &&
-            detailBottom - detailTop + 1 <= Rows * .85
-            ? new BoardMotionObservation(0, (detailX / (double)detailCells + .5) / Columns,
-                (detailY / (double)detailCells + .5) / Rows) : null;
+        return details.Count >= 2 && details.Right - details.Left + 1 <= Columns * .34 &&
+            details.Bottom - details.Top + 1 <= Rows * .85
+            ? new BoardMotionObservation(0, (details.X / (double)details.Count + .5) / Columns,
+                (details.Y / (double)details.Count + .5) / Rows) : null;
     }
 
-    private bool IsLostBrightDetail(int count, int left, int right, int top, int bottom, float luminanceShift)
+    private DetailLoss? LostBrightDetail(int count, int left, int right, int top, int bottom, float luminanceShift,
+        int isolatedSample = -1)
     {
         // A narrow ring measures the original local surface without reading or
         // copying the camera again. Bright canvases retain their original gate.
+        // Neighboring samples can include the same fine star's footprint.
+        int padding = isolatedSample >= 0 ? 1 : 2;
+        if (isolatedSample >= 0) { left--; right++; top--; bottom++; }
         float surround = 0;
         int surroundingCells = 0;
-        for (int y = Math.Max(0, top - 2); y <= Math.Min(Rows - 1, bottom + 2); y++)
-        for (int x = Math.Max(0, left - 2); x <= Math.Min(Columns - 1, right + 2); x++)
+        for (int y = Math.Max(0, top - padding); y <= Math.Min(Rows - 1, bottom + padding); y++)
+        for (int x = Math.Max(0, left - padding); x <= Math.Min(Columns - 1, right + padding); x++)
         {
             if (x >= left && x <= right && y >= top && y <= bottom) continue;
             int index = y * Columns + x;
@@ -331,17 +411,20 @@ public sealed class BoardDisturbanceTracker
             surround += (_background[c] + _background[c + 1] + _background[c + 2]) / 3 + luminanceShift;
             surroundingCells++;
         }
-        if (surroundingCells == 0 || (surround /= surroundingCells) > 48) return false;
-        int lost = 0;
+        if (surroundingCells == 0 || (surround /= surroundingCells) > 48) return null;
+        DetailLoss loss = default;
         for (int i = 0; i < count; i++)
         {
-            int index = _queue[i], c = index * 3;
+            int index = isolatedSample >= 0 ? isolatedSample : _queue[i], c = index * 3;
             float background = (_background[c] + _background[c + 1] + _background[c + 2]) / 3 + luminanceShift;
             float sample = (_samples[c] + _samples[c + 1] + _samples[c + 2]) / 3f;
             float threshold = Math.Max(Math.Clamp(background * .60f, 14, 40), _noise[index] * 5 + 14);
-            if (_noise[index] <= 8 && background - surround >= 18 && background - sample > threshold) lost++;
+            if (_noise[index] <= 8 && background - surround >= 18 && background - sample > threshold &&
+                _detailArmed[index] != 0 && _detailBackground[index] + luminanceShift - sample > threshold)
+                loss.Merge(new DetailLoss { Count = 1, X = index % Columns, Y = index / Columns,
+                    Left = index % Columns, Right = index % Columns, Top = index / Columns, Bottom = index / Columns });
         }
-        return lost >= 6 && lost >= count * .60;
+        return loss.Count >= (isolatedSample >= 0 ? 1 : 6) && loss.Count >= count * .60 ? loss : null;
     }
 
     private void MatchComponents(DateTimeOffset frameTime)
@@ -403,6 +486,20 @@ public sealed class BoardDisturbanceTracker
         // or neither protection track can be matched. It does not require continuous identity.
         for (int c = 0; c < _candidateCount; c++)
             _observations.Add(new(_candidateTrackingIds[c], _candidates[c].U, _candidates[c].V));
+    }
+
+    private struct DetailLoss
+    {
+        public int Count, Left, Right, Top, Bottom;
+        public long X, Y;
+
+        public void Merge(DetailLoss loss)
+        {
+            if (Count == 0) { this = loss; return; }
+            Count += loss.Count; X += loss.X; Y += loss.Y;
+            Left = Math.Min(Left, loss.Left); Right = Math.Max(Right, loss.Right);
+            Top = Math.Min(Top, loss.Top); Bottom = Math.Max(Bottom, loss.Bottom);
+        }
     }
 
     private readonly record struct Candidate(double U, double V, int Area, int ComponentStart);

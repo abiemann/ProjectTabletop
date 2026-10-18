@@ -197,6 +197,166 @@ public class BoardControlSwipeTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RecordedCentralLossNeedsContinuedMotionBeforeJoiningTheSweep(bool reverse)
+    {
+        var tracker = new BoardControlSwipeTracker();
+        // One continuous hand was captured on both sides of a dark-sky gap.
+        int[] times = [0, 50, 99, 124, 149, 174, 200, 224, 249, 300, 349];
+        double[] positions = [.9158, .8971, .8637, .8499, .8377, .8131, .8041, .7909, .7823, .7564, .6969];
+        double[] heights = [.9482, .9444, .9424, .9387, .9396, .9389, .9383, .9387, .9386, .9235, .9472];
+        double Direction(double u) => reverse ? 1 - u : u;
+        for (int i = 0; i < times.Length; i++)
+            Assert.Null(Observe(tracker, times[i], Direction(positions[i]), heights[i]));
+        for (int time = 375; time < 749; time += 25) Missing(tracker, time);
+        Assert.Null(Observe(tracker, 749, Direction(.1738), .9215));
+        Assert.False(tracker.HasTraversalInProgress);
+        Assert.Null(Observe(tracker, 775, Direction(.1623), .9251));
+        // Reaching the edge alone cannot confirm the provisional reacquisition.
+        Assert.Null(Observe(tracker, 799, Direction(.1496), .9261));
+        Assert.Equal(BoardControlSwipe.Toggle, Observe(tracker, 824, Direction(.1374), .9272));
+        Assert.Null(Observe(tracker, 849, Direction(.1241), .9284));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RecordedVerticalDriftAcrossGapStillNeedsLocalCorroboration(bool reverse)
+    {
+        var tracker = new BoardControlSwipeTracker();
+        // Recorded continuous sweep: the star-loss centroid changes height
+        // while the hand crosses the missing middle, then continues normally.
+        int[] times = [0, 26, 50, 150, 175, 200, 226, 250, 275, 300, 325, 350, 375, 400, 425];
+        double[] positions = [.005208, .030382, .032434, .100430, .143682, .156113, .183160,
+            .220129, .273037, .277699, .291867, .373698, .373816, .391809, .421007];
+        double[] heights = [.898750, .916250, .885966, .919375, .931766, .935164, .932292,
+            .919596, .920529, .922443, .921106, .905781, .890398, .882216, .866042];
+        double Direction(double u) => reverse ? 1 - u : u;
+        for (int i = 0; i < times.Length; i++)
+            Assert.Null(Observe(tracker, times[i], Direction(positions[i]), heights[i]));
+        for (int time = 450; time < 700; time += 25) Missing(tracker, time);
+        Assert.Null(Observe(tracker, 700, Direction(.842222), .939675));
+        Assert.False(tracker.HasTraversalInProgress);
+        Assert.Equal(BoardControlSwipe.Toggle, Observe(tracker, 775, Direction(.917316), .948812));
+        Assert.Null(Observe(tracker, 800, Direction(.944878), .928750));
+    }
+
+    [Theory]
+    [InlineData(.90)] // steeper than the allowed cross-gap slope
+    [InlineData(.73)] // shallow enough across the gap, but exceeds the total vertical span
+    public void ReacquisitionCannotMoveToAnIncompatibleVerticalLocation(double height)
+    {
+        var tracker = EstablishedGap();
+        Assert.Null(Observe(tracker, 750, .17, height));
+        Assert.Null(Observe(tracker, 825, .12, height));
+        Missing(tracker, 900);
+    }
+
+    [Theory]
+    [InlineData(.13, .65)] // diagonal movement after a valid shifted reacquisition
+    [InlineData(.23, .57)] // reversal after a valid shifted reacquisition
+    public void ShiftedReacquisitionStillRequiresCompatibleLocalMotion(double nextU, double nextV)
+    {
+        var tracker = EstablishedGap();
+        Assert.Null(Observe(tracker, 750, .17, .57));
+        Assert.False(tracker.HasTraversalInProgress);
+        Assert.Null(Observe(tracker, 800, nextU, nextV));
+        Assert.Null(Observe(tracker, 850, .12, .57));
+        Missing(tracker, 925);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReacquiredEndpointCannotCompleteByHoldingOrDisappearing(bool disappear)
+    {
+        var tracker = EstablishedGap();
+        Assert.Null(Observe(tracker, 750, .12));
+        Assert.False(tracker.HasTraversalInProgress);
+        for (int time = 775; time <= 1500; time += 25)
+        {
+            if (disappear) Missing(tracker, time);
+            else Assert.Null(Observe(tracker, time, .12));
+            Assert.False(tracker.HasTraversalInProgress);
+        }
+    }
+
+    [Theory]
+    [InlineData(0)] // no actual empty frames
+    [InlineData(1)] // instantaneous, implausibly fast jump
+    [InlineData(2)] // opposite direction
+    [InlineData(3)] // different vertical location
+    [InlineData(4)] // expired gap
+    [InlineData(5)] // insufficient established movement
+    [InlineData(6)] // stationary before the gap
+    public void UncorroboratedOrIncompatibleGapsDoNotJoinTwoAppearances(int failure)
+    {
+        var tracker = new BoardControlSwipeTracker();
+        double[] positions = failure == 5 ? [.90, .86, .82, .78] : [.95, .88, .81, .74];
+        for (int i = 0; i < positions.Length; i++) Assert.Null(Observe(tracker, i * 100, positions[i]));
+        if (failure == 6) Assert.Null(Observe(tracker, 325, .74));
+        if (failure != 0) Missing(tracker, failure == 1 ? 310 : 450);
+        int returnTime = failure == 1 ? 325 : failure == 4 ? 901 : 750;
+        double first = failure == 2 ? .98 : .12;
+        double height = failure == 3 ? .8 : .5;
+        Assert.Null(Observe(tracker, returnTime, first, height));
+        Assert.Null(Observe(tracker, returnTime + 75, failure == 2 ? .94 : .08, height));
+        Missing(tracker, returnTime + 150);
+    }
+
+    [Theory]
+    [InlineData(0)] // reversal after reacquisition
+    [InlineData(1)] // diagonal post-gap movement
+    [InlineData(2)] // implausibly fast post-gap movement
+    [InlineData(3)] // ambiguous simultaneous disturbances
+    [InlineData(4)] // stale input
+    [InlineData(5)] // explicit reset
+    [InlineData(6)] // pending confirmation expires despite stationary samples
+    public void PendingGapCannotSurviveIncompatibleEvidence(int failure)
+    {
+        var tracker = EstablishedGap();
+        Assert.Null(Observe(tracker, 750, .17));
+        switch (failure)
+        {
+            case 0: Assert.Null(Observe(tracker, 800, .23)); break;
+            case 1: Assert.Null(Observe(tracker, 800, .13, .58)); break;
+            case 2: Assert.Null(Observe(tracker, 751, .03)); break;
+            case 3:
+                var ambiguous = Start.AddMilliseconds(775);
+                Assert.Null(tracker.Update([new(0, .1, .5), new(1, .9, .5)], ambiguous, ambiguous));
+                break;
+            case 4:
+                var stale = Start.AddMilliseconds(775);
+                Assert.Null(tracker.Update([new(0, .16, .5)], stale, stale.AddMilliseconds(351)));
+                break;
+            case 5: tracker.Reset(); break;
+            case 6:
+                for (int time = 775; time <= 1400; time += 25) Assert.Null(Observe(tracker, time, .17));
+                break;
+        }
+        int next = failure == 6 ? 1450 : 850;
+        Assert.Null(Observe(tracker, next, .12));
+        Assert.Null(Observe(tracker, next + 75, .08));
+        Missing(tracker, next + 150);
+    }
+
+    private static BoardControlSwipeTracker EstablishedGap()
+    {
+        var tracker = new BoardControlSwipeTracker();
+        double[] positions = [.95, .88, .81, .74];
+        for (int i = 0; i < positions.Length; i++) Assert.Null(Observe(tracker, i * 100, positions[i]));
+        Missing(tracker, 450);
+        return tracker;
+    }
+
+    private static void Missing(BoardControlSwipeTracker tracker, int milliseconds)
+    {
+        var time = Start.AddMilliseconds(milliseconds);
+        Assert.Null(tracker.Update([], time, time));
+    }
+
+    [Theory]
     [InlineData(.48, .58, .68, .8)]
     [InlineData(.1, .2, .3, .4)]
     public void ShortMovementsAreNotCommands(double a, double b, double c, double d)

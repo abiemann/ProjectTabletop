@@ -29,9 +29,26 @@ and [cloud JPEG](https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57747/
 NASA imagery is used under its [media usage guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/).
 NASA does not endorse this application.
 
-The separate Milky Way backdrop is original generated illustrative artwork, not
-NASA imagery or a scientifically mapped sky. Its generation prompt and source
-details are in `GlobeRendering/Assets/SKY.md` in the app package.
+## NASA Deep Star Maps 2020
+
+The separate Globe sky uses [Deep Star Maps 2020](https://svs.gsfc.nasa.gov/4851/),
+a visualization of measured star positions, brightness and colours from
+astronomical catalogues. Credit: **NASA/Goddard Space Flight Center Scientific
+Visualization Studio. Gaia DR2: ESA/Gaia/DPAC.**
+
+The [original 16384 × 8192 galactic-coordinate EXR](https://svs.gsfc.nasa.gov/vis/a000000/a004800/a004851/starmap_2020_16k_gal.exr)
+is retained as four 4096 × 8192 PNG longitude tiles, with exposure adjustment
+and sRGB encoding for display. No generated or synthetic stars are added.
+The app samples the map as a slowly rotating celestial sphere, without regional
+dimming, and draws separate decorative comets. The presentation is not a view
+of the user's location or current sky.
+Source and output checksums, projection parameters and preparation details are in
+`GlobeRendering/Assets/SKY.md` in the app package.
+
+NASA imagery is used under its [media usage guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/).
+The Gaia contribution is acknowledged according to the
+[Gaia DR2 credit and citation instructions](https://gea.esac.esa.int/archive/documentation/GDR2/Miscellaneous/sec_credit_and_citation_instructions/).
+NASA and ESA do not endorse this application.
 
 ## Fluid Paint by David Li
 

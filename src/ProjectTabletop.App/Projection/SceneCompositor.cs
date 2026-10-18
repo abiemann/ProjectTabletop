@@ -140,10 +140,10 @@ public sealed partial class SceneCompositor : IDisposable
         }
     }
 
-    public void ClearHandTips(bool resetInput = true)
-        => ClearHandTipsCore(resetInput, cancelCrownDeedEntrance: true);
+    public void ClearHandTips(bool resetInput = true, bool preserveBoardAnimations = false)
+        => ClearHandTipsCore(resetInput, cancelCrownDeedEntrance: !preserveBoardAnimations, preserveBoardAnimations);
 
-    private void ClearHandTipsCore(bool resetInput, bool cancelCrownDeedEntrance)
+    private void ClearHandTipsCore(bool resetInput, bool cancelCrownDeedEntrance, bool preserveBoardAnimations = false)
     {
         lock (_gate)
         {
@@ -157,10 +157,13 @@ public sealed partial class SceneCompositor : IDisposable
                 _handVisualResetThrough = MonotonicClock.UtcNow;
                 ClearHandSpotlights();
                 ResetHoldControlExposure();
-                _boardSession.ResetInput(MonotonicClock.UtcNow);
+                _boardSession.ResetInput(MonotonicClock.UtcNow, preserveBoardAnimations);
                 ClearStrykersRunObservations();
-                CancelBlackjackDeal();
-                CancelCrownDeedDiceAnimation();
+                if (!preserveBoardAnimations)
+                {
+                    CancelBlackjackDeal();
+                    CancelCrownDeedDiceAnimation();
+                }
                 if (!cancelCrownDeedEntrance && _crownDeedEntranceStartedAt is { } started && !_crownDeedEntranceCompleted)
                     _boardSession.HoldCrownDeedPresentationUntil(started.AddMilliseconds(CrownDeedEntranceDurationMilliseconds));
             }

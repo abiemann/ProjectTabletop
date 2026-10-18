@@ -11,10 +11,8 @@ internal sealed class GlobeSurfaceRenderer : IDisposable
 {
     private readonly object _gate = new();
     private readonly Task<SurfaceTextures> _loading;
-    private readonly PixelShaderEffect<EarthSurfaceShader> _effect = new();
+    private readonly PixelShaderEffect<EarthSurfaceShader>[] _effects = [new(), new(), new()];
     private SurfaceTextures? _textures;
-    private CanvasRenderTarget? _starField;
-    private double _starFieldAspect;
     private bool _disposed;
 
     public GlobeSurfaceRenderer(CanvasDevice device)
@@ -30,10 +28,11 @@ internal sealed class GlobeSurfaceRenderer : IDisposable
     public int SurfaceHeight => _textures is null ? 0 : (int)_textures.Day.SizeInPixels.Height;
     public int CloudWidth => _textures is null ? 0 : (int)_textures.Clouds.SizeInPixels.Width;
     public int CloudHeight => _textures is null ? 0 : (int)_textures.Clouds.SizeInPixels.Height;
-    public int StarFieldWidth => _starField is null ? 0 : (int)_starField.SizeInPixels.Width;
-    public int StarFieldHeight => _starField is null ? 0 : (int)_starField.SizeInPixels.Height;
-    public int StarFieldRenderCount { get; private set; }
-    internal int NativeStarCount { get; private set; }
+    public int SkySourceWidth => _textures is null ? 0 : (int)_textures.Sky[0].SizeInPixels.Width * 4;
+    public int SkySourceHeight => _textures is null ? 0 : (int)_textures.Sky[0].SizeInPixels.Height;
+    public int SkyTextureWidth => SkySourceWidth;
+    public int SkyTextureHeight => SkySourceHeight;
+    public int SkyTextureLoadCount => _textures is null ? 0 : 1;
 
     public async Task EnsureReadyAsync()
     {
@@ -47,6 +46,17 @@ internal sealed class GlobeSurfaceRenderer : IDisposable
 
     public bool Draw(CanvasDrawingSession drawing, float zoom, float rotationDegrees, double aspect,
         float viewLatitudeDegrees = 0, double elapsedSeconds = 0)
+        => DrawFrame(drawing, zoom, rotationDegrees, aspect, viewLatitudeDegrees, elapsedSeconds,
+            GetSkyRotationRadians(elapsedSeconds));
+
+    // Keep the double-precision clock bounded before sending it to the GPU.
+    // 0.03 degrees per second: one turn in three hours and twenty minutes.
+    public static float GetSkyRotationRadians(double elapsedSeconds) =>
+        (float)((Math.Max(0, double.IsFinite(elapsedSeconds) ? elapsedSeconds : 0) % 12000)
+            * (Math.PI * 2 / 12000));
+
+    internal bool DrawFrame(CanvasDrawingSession drawing, float zoom, float rotationDegrees, double aspect,
+        float viewLatitudeDegrees, double elapsedSeconds, float skyRotationRadians)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!_loading.IsCompletedSuccessfully) return false;
@@ -56,67 +66,57 @@ internal sealed class GlobeSurfaceRenderer : IDisposable
         var radii = new Float2(aspect >= 1 ? radius / (float)aspect : radius,
             aspect >= 1 ? radius : radius * (float)aspect);
         var transform = drawing.Transform;
-        float xScale = new Vector2(transform.M11, transform.M12).Length();
-        float yScale = new Vector2(transform.M21, transform.M22).Length();
+        float xScale = Math.Max(.001f, new Vector2(transform.M11, transform.M12).Length());
+        float yScale = Math.Max(.001f, new Vector2(transform.M21, transform.M22).Length());
         float edgeWidth = .75f / Math.Max(1, Math.Min(xScale * radii.X, yScale * radii.Y));
-        EnsureStarField(xScale, yScale, aspect);
-        _effect.Sources[0] = _textures.Day;
-        _effect.Sources[1] = _textures.Clouds;
-        _effect.Sources[2] = _starField;
         var shootingStar = GlobeShootingStar.Sample(elapsedSeconds, aspect);
-        _effect.ConstantBuffer = new EarthSurfaceShader(
-            new Float2((float)_textures.Day.Size.Width, (float)_textures.Day.Size.Height),
-            new Float2((float)_textures.Clouds.Size.Width, (float)_textures.Clouds.Size.Height),
-            new Float2(StarFieldWidth, StarFieldHeight),
-            new Float2(500, 500), radii, rotationDegrees * (MathF.PI / 180), edgeWidth,
-            viewLatitudeDegrees * (MathF.PI / 180),
-            new Float2(shootingStar.HeadUv.X, shootingStar.HeadUv.Y),
-            new Float2(shootingStar.Direction.X, shootingStar.Direction.Y),
-            new Float2(shootingStar.PhysicalScale.X, shootingStar.PhysicalScale.Y),
-            shootingStar.TailLength, shootingStar.Opacity);
-        // A source rectangle bounds the otherwise texture-sized effect. The
-        // drawing transform gives Direct2D its real destination sampling rate.
-        drawing.DrawImage(_effect, new Rect(0, 0, 1000, 1000), new Rect(0, 0, 1000, 1000));
-        return true;
-    }
-
-    private void EnsureStarField(float xScale, float yScale, double aspect)
-    {
-        int width = (int)Math.Clamp(Math.Ceiling(xScale * 1000), 1, Device.MaximumBitmapSizeInPixels);
-        int height = (int)Math.Clamp(Math.Ceiling(yScale * 1000), 1, Device.MaximumBitmapSizeInPixels);
-        // Smaller previews reuse the native sky. Only a new device, board
-        // aspect or increased pixel density needs the artwork sampled again.
-        if (_starField is not null && Math.Abs(aspect - _starFieldAspect) < .000001 &&
-            StarFieldWidth >= width && StarFieldHeight >= height) return;
-        var sky = _textures!.Sky;
-        // Centre-crop to the physical board's aspect, not the cache's raster
-        // aspect: accumulated pixel reservations can differ from its shape.
-        // Covering square/portrait boards this way keeps individual stars round.
-        double cropWidth = Math.Min(sky.Size.Width, sky.Size.Height * aspect);
-        double cropHeight = cropWidth / aspect;
-        var crop = new Rect((sky.Size.Width - cropWidth) / 2, (sky.Size.Height - cropHeight) / 2,
-            cropWidth, cropHeight);
-        var replacement = new CanvasRenderTarget(Device, width, height, 96);
-        int nativeStarCount;
+        var blend = drawing.Blend;
         try
         {
-            using (var drawing = replacement.CreateDrawingSession())
+            for (int layer = 0; layer < _effects.Length; layer++)
             {
-                drawing.DrawImage(sky, new Rect(0, 0, width, height), crop, 1,
-                    CanvasImageInterpolation.HighQualityCubic);
-                nativeStarCount = GlobeStarField.Draw(drawing, width, height, aspect);
+                var effect = _effects[layer];
+                effect.Sources[0] = _textures.Day;
+                effect.Sources[1] = _textures.Clouds;
+                for (int i = 0; i < _textures.Sky.Length; i++)
+                    effect.Sources[i + 2] = _textures.Sky[i];
+                effect.ConstantBuffer = new EarthSurfaceShader(
+                    new Float2((float)_textures.Day.Size.Width, (float)_textures.Day.Size.Height),
+                    new Float2((float)_textures.Clouds.Size.Width, (float)_textures.Clouds.Size.Height),
+                    new Float2(SkyTextureWidth, SkyTextureHeight),
+                    new Float2((float)Math.Min(1, aspect), (float)Math.Min(1, 1 / aspect)),
+                    layer == 0 ? new Float2(1, 1) : new Float2(1 / xScale, 1 / yScale),
+                    new Float2(.25f / xScale, .25f / yScale), layer,
+                    skyRotationRadians,
+                    new Float2(500, 500), radii, rotationDegrees * (MathF.PI / 180), edgeWidth,
+                    viewLatitudeDegrees * (MathF.PI / 180),
+                    new Float2(shootingStar.HeadUv.X, shootingStar.HeadUv.Y),
+                    new Float2(shootingStar.Direction.X, shootingStar.Direction.Y),
+                    new Float2(shootingStar.PhysicalScale.X, shootingStar.PhysicalScale.Y),
+                    shootingStar.TailLength, shootingStar.Opacity);
+                if (layer == 0)
+                {
+                    // Preserve the approved moving sky and comet rasterization;
+                    // changing its sampling footprint can disturb swipe detection.
+                    drawing.Blend = CanvasBlend.SourceOver;
+                    drawing.DrawImage(effect, new Rect(0, 0, 1000, 1000), new Rect(0, 0, 1000, 1000));
+                }
+                else
+                {
+                    // Evaluate Earth at destination resolution, then add its
+                    // atmospheric scattering without blurring the background.
+                    drawing.Transform = Matrix3x2.CreateScale(1 / xScale, 1 / yScale) * transform;
+                    drawing.Blend = layer == 1 ? CanvasBlend.SourceOver : CanvasBlend.Add;
+                    drawing.DrawImage(effect, Vector2.Zero, new Rect(0, 0, 1000 * xScale, 1000 * yScale));
+                }
             }
         }
-        catch
+        finally
         {
-            replacement.Dispose();
-            throw;
+            drawing.Transform = transform;
+            drawing.Blend = blend;
         }
-        _starField?.Dispose();
-        _starField = replacement;
-        _starFieldAspect = aspect;
-        NativeStarCount = nativeStarCount;
-        StarFieldRenderCount++;
+        return true;
     }
 
     public void Dispose()
@@ -125,8 +125,7 @@ internal sealed class GlobeSurfaceRenderer : IDisposable
         {
             if (_disposed) return;
             _disposed = true;
-            _effect.Dispose();
-            _starField?.Dispose();
+            foreach (var effect in _effects) effect.Dispose();
             _textures?.Dispose();
             if (_textures is null)
                 _ = _loading.ContinueWith(task =>
@@ -140,31 +139,38 @@ internal sealed class GlobeSurfaceRenderer : IDisposable
     private static async Task<SurfaceTextures> LoadTexturesAsync(CanvasDevice device)
     {
         string assets = Path.Combine(AppContext.BaseDirectory, "GlobeRendering", "Assets");
-        CanvasBitmap? day = null, clouds = null, sky = null;
+        CanvasBitmap? day = null, clouds = null;
+        var sky = new CanvasBitmap[4];
         try
         {
             day = await CanvasBitmap.LoadAsync(device, Path.Combine(assets, "earth-day-8192.png"), 96).AsTask().ConfigureAwait(false);
             clouds = await CanvasBitmap.LoadAsync(device, Path.Combine(assets, "earth-clouds-2048.jpg"), 96).AsTask().ConfigureAwait(false);
-            sky = await CanvasBitmap.LoadAsync(device, Path.Combine(assets, "milky-way-sky.png"), 96).AsTask().ConfigureAwait(false);
+            // Lossless longitude tiles retain the 16K source while staying
+            // within an 8192-pixel bitmap limit and normal repository limits.
+            for (int i = 0; i < sky.Length; i++)
+                sky[i] = await CanvasBitmap.LoadAsync(device,
+                    Path.Combine(assets, $"milky-way-sky-{i}.png"), 96).AsTask().ConfigureAwait(false);
             return new(day, clouds, sky);
         }
         catch
         {
-            day?.Dispose(); clouds?.Dispose(); sky?.Dispose();
+            day?.Dispose(); clouds?.Dispose();
+            foreach (var tile in sky) tile?.Dispose();
             throw;
         }
     }
 
-    private sealed class SurfaceTextures(CanvasBitmap day, CanvasBitmap clouds, CanvasBitmap sky) : IDisposable
+    private sealed class SurfaceTextures(CanvasBitmap day, CanvasBitmap clouds, CanvasBitmap[] sky) : IDisposable
     {
         private int _disposed;
         public CanvasBitmap Day { get; } = day;
         public CanvasBitmap Clouds { get; } = clouds;
-        public CanvasBitmap Sky { get; } = sky;
+        public CanvasBitmap[] Sky { get; } = sky;
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-            Day.Dispose(); Clouds.Dispose(); Sky.Dispose();
+            Day.Dispose(); Clouds.Dispose();
+            foreach (var tile in Sky) tile.Dispose();
         }
     }
 }

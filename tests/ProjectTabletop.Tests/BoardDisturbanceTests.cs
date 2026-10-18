@@ -251,6 +251,107 @@ public sealed class BoardDisturbanceTests(ITestOutputHelper output)
         Assert.Empty(Update(tracker, clear, ref time));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LocalPaleStarLossesCanCrossWhileOneRemoteStarDrifts(bool reverse)
+    {
+        byte[] clear = TexturedPaleStars();
+        const int remoteX = 12, remoteY = 12;
+        Paint(clear, remoteX, remoteY, 1, 1, 140, 140, 140);
+        AssertPaleStarSwipe(clear, reverse, noisyOcclusion: false, frameMilliseconds: 33,
+            (frame, index) =>
+            {
+                // A star moving independently of the hand leaves a distant
+                // loss. It must not enlarge the hand's region to the whole band.
+                Paint(frame, remoteX, remoteY, 1, 1, 22, 22, 22);
+                Paint(frame, remoteX + 2 + index / 6, remoteY, 1, 1, 140, 140, 140);
+            });
+    }
+
+    [Theory]
+    [InlineData(false, 33)]
+    [InlineData(true, 33)]
+    [InlineData(false, 66)]
+    [InlineData(true, 66)]
+    public void FluctuatingOcclusionOfPaleStarsDoesNotEraseTheMovingHand(bool reverse, int frameMilliseconds)
+    {
+        // The projected light changes on a moving hand. These variations are
+        // part of the occlusion, not evidence that the clear sky became noisy.
+        AssertPaleStarSwipe(TexturedPaleStars(), reverse, noisyOcclusion: true, frameMilliseconds);
+    }
+
+    [Fact]
+    public void WidespreadPaleStarFlickerOnTexturedSkyDoesNotBecomeLocalMotion()
+    {
+        var tracker = new BoardDisturbanceTracker();
+        byte[] clear = TexturedPaleStars();
+        DateTimeOffset time = Warm(tracker, clear);
+        for (int i = 0; i < 120; i++)
+        {
+            byte[] frame = (byte[])clear.Clone();
+            for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width; x++)
+            {
+                int c = y * Stride + x * 4;
+                int noise = (x * 13 + y * 11 + i * 7) % 5 - 2;
+                int shade = clear[c] > 60 && i % 12 < 6 ? 24 : clear[c];
+                for (int channel = 0; channel < 3; channel++)
+                    frame[c + channel] = (byte)Math.Clamp(shade + noise + (i % 30 < 15 ? 4 : -3), 0, 255);
+            }
+            Assert.Empty(Update(tracker, frame, ref time));
+        }
+    }
+
+    private static void AssertPaleStarSwipe(byte[] clear, bool reverse, bool noisyOcclusion,
+        int frameMilliseconds, Action<byte[], int>? addRemoteMotion = null)
+    {
+        var tracker = new BoardDisturbanceTracker();
+        var gestures = new BoardControlSwipeTracker();
+        DateTimeOffset time = Warm(tracker, clear);
+        var samples = new List<BoardSwipeSample>(4);
+        int toggles = 0, observed = 0;
+        const int frames = 36;
+        for (int i = 0; i < frames; i++)
+        {
+            double center = reverse ? .10 + .80 * i / (frames - 1) : .90 - .80 * i / (frames - 1);
+            byte[] frame = (byte[])clear.Clone();
+            for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width; x++)
+            {
+                int c = y * Stride + x * 4;
+                int noise = (x * 13 + y * 11 + i * 7) % 5 - 2;
+                bool covered = Math.Abs(x - center * Width) <= 35 && y is >= 25 and < 75;
+                int shade = covered ? noisyOcclusion && i % 2 == 0 ? 36 : 14 : clear[c];
+                for (int channel = 0; channel < 3; channel++)
+                    frame[c + channel] = (byte)Math.Clamp(shade + noise, 0, 255);
+            }
+            addRemoteMotion?.Invoke(frame, i);
+            time = time.AddMilliseconds(frameMilliseconds);
+            IReadOnlyList<BoardMotionObservation> found = tracker.Update(Width, Height, Stride, frame, Corners, time, time);
+            samples.Clear();
+            foreach (var detail in found)
+            {
+                Assert.InRange(detail.U, center - .11, center + .11);
+                samples.Add(new(detail.TrackingId, detail.U, .82 + .18 * detail.V));
+            }
+            if (found.Count != 0) observed++;
+            if (gestures.Update(samples, time, time) is not null) toggles++;
+        }
+        Assert.True(observed >= frames / 2, $"Only {observed}/{frames} hand positions were observed.");
+        Assert.Equal(1, toggles);
+        // Lifting is not a reverse swipe, even after the sky was temporarily
+        // hidden and the distant star has moved independently.
+        for (int i = 0; i < 20; i++)
+        {
+            time = time.AddMilliseconds(frameMilliseconds);
+            samples.Clear();
+            foreach (var detail in tracker.Update(Width, Height, Stride, clear, Corners, time, time))
+                samples.Add(new(detail.TrackingId, detail.U, .82 + .18 * detail.V));
+            Assert.Null(gestures.Update(samples, time, time));
+        }
+    }
+
     [Fact]
     public void SparseDetailRejectsNewBrightObjectsRipplesAndScatteredStarFlicker()
     {
@@ -285,6 +386,94 @@ public sealed class BoardDisturbanceTests(ITestOutputHelper output)
                 if (clear[c] > 60)
                     for (int channel = 0; channel < 3; channel++) frame[c + channel] = (byte)(i % 2 == 0 ? 12 : 170);
             Assert.Empty(Update(tracker, frame, ref time));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SinglePixelStarLossesSupplyBothSwipeDirections(bool reverse)
+    {
+        var tracker = new BoardDisturbanceTracker();
+        var gestures = new BoardControlSwipeTracker();
+        byte[] clear = FineStars();
+        DateTimeOffset time = Warm(tracker, clear);
+        var samples = new List<BoardSwipeSample>(4);
+        int toggles = 0, observed = 0;
+        // Continue to the physical edge: a sparse star's position can trail
+        // the centre of the occluding hand until the next star is covered.
+        for (int i = 0; i < 36; i++)
+        {
+            double center = reverse ? .11 + i * .025 : .89 - i * .025;
+            byte[] frame = (byte[])clear.Clone();
+            Paint(frame, (int)(center * Width) - 23, 23, 46, 55, 6, 6, 6);
+            samples.Clear();
+            foreach (var detail in Update(tracker, frame, ref time))
+            {
+                Assert.InRange(detail.U, center - .08, center + .08);
+                samples.Add(new(detail.TrackingId, detail.U, .82 + .18 * detail.V));
+            }
+            if (samples.Count > 0) observed++;
+            if (gestures.Update(samples, time, time) is not null) toggles++;
+        }
+        Assert.True(observed >= 20);
+        Assert.Equal(1, toggles);
+        Assert.Empty(Update(tracker, clear, ref time));
+    }
+
+    [Fact]
+    public void FineStarFlickerAndExposureChangesDoNotSupplyLocalMotion()
+    {
+        var tracker = new BoardDisturbanceTracker();
+        byte[] clear = FineStars();
+        DateTimeOffset time = Warm(tracker, clear);
+        for (int i = 0; i < 120; i++)
+        {
+            byte[] frame = (byte[])clear.Clone();
+            for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width; x++)
+            {
+                int c = y * Stride + x * 4;
+                int noise = (x * 13 + y * 11 + i * 7) % 7 - 3;
+                int shade = clear[c] > 60 && (i % 2 == 0 || x > Width / 2) ? 8 : clear[c];
+                for (int channel = 0; channel < 3; channel++)
+                    frame[c + channel] = (byte)Math.Clamp(shade + noise + (i % 30 < 15 ? 5 : -3), 0, 255);
+            }
+            Paint(frame, 20 + i * 2, 70, 1, 1, 220, 180, 60);
+            Assert.Empty(Update(tracker, frame, ref time));
+        }
+    }
+
+    [Fact]
+    public void OversampledMovingSingleStarCannotSupplyASwipe()
+    {
+        const int width = 96, height = 24, stride = width * 4;
+        PixelPoint[] corners = [new(0, 0), new(width - 1, 0), new(width - 1, height - 1), new(0, height - 1)];
+        byte[] dark = new byte[stride * height];
+        Array.Fill(dark, (byte)8);
+        byte[] clear = (byte[])dark.Clone();
+        for (int channel = 0; channel < 3; channel++) clear[12 * stride + 12 * 4 + channel] = 170;
+        var tracker = new BoardDisturbanceTracker();
+        var gestures = new BoardControlSwipeTracker();
+        var samples = new List<BoardSwipeSample>(4);
+        DateTimeOffset time = Start;
+        for (int i = 0; i < 12; i++)
+        {
+            time = time.AddMilliseconds(33);
+            tracker.Update(width, height, stride, clear, corners, time, time);
+        }
+        for (int i = 0; i < 80; i++)
+        {
+            byte[] frame = (byte[])dark.Clone();
+            for (int channel = 0; channel < 3; channel++) frame[12 * stride + (15 + i) * 4 + channel] = 170;
+            time = time.AddMilliseconds(33);
+            samples.Clear();
+            foreach (var detail in tracker.Update(width, height, stride, frame, corners, time, time))
+            {
+                Assert.InRange(detail.U, .08, .17);
+                samples.Add(new(detail.TrackingId, detail.U, .82 + .18 * detail.V));
+            }
+            Assert.Null(gestures.Update(samples, time, time));
         }
     }
 
@@ -548,6 +737,33 @@ public sealed class BoardDisturbanceTests(ITestOutputHelper output)
         Paint(frame, 0, 0, Width, Height, 8, 8, 8);
         for (int i = 1; i <= 9; i++)
             Paint(frame, (int)(Width * i / 10d) - 4, 37 + i % 3 * 3, 8, 12, 170, 170, 170);
+        return frame;
+    }
+
+    private static byte[] FineStars()
+    {
+        byte[] frame = new byte[Stride * Height];
+        Paint(frame, 0, 0, Width, Height, 8, 8, 8);
+        for (int i = 1; i < 18; i++)
+            Paint(frame, Width * i / 18, 29 + i * 7 % 32, 1, 1, 170, 170, 170);
+        return frame;
+    }
+
+    private static byte[] TexturedPaleStars()
+    {
+        byte[] frame = new byte[Stride * Height];
+        for (int y = 0; y < Height; y++)
+        for (int x = 0; x < Width; x++)
+        {
+            byte shade = (byte)(18 + (x / 12 + y / 8) % 9);
+            Paint(frame, x, y, 1, 1, shade, shade, shade);
+        }
+        for (int x = 18; x < Width - 8; x += 24)
+        for (int row = 0; row < 2; row++)
+        {
+            byte shade = (byte)(80 + (x / 24 + row) % 3 * 10);
+            Paint(frame, x, 32 + row * 24, 5, 7, shade, shade, shade);
+        }
         return frame;
     }
 
