@@ -16,7 +16,7 @@ public sealed partial class SceneCompositor
 
     internal sealed record GlobeRenderDiagnostics(bool Ready, int SurfaceWidth, int SurfaceHeight,
         int CloudWidth, int CloudHeight, double CenterU, double CenterV, double RadiusU, double RadiusV,
-        string? Error, int StarFieldWidth, int StarFieldHeight, int StarFieldRenderCount);
+        string? Error, int StarFieldWidth, int StarFieldHeight, int StarFieldRenderCount, int NativeStarCount);
 
     internal GlobeRenderDiagnostics GetGlobeRenderDiagnostics(double boardAspect, GlobeSnapshot state)
     {
@@ -29,7 +29,7 @@ public sealed partial class SceneCompositor
                 .5, .5, boardAspect >= 1 ? radius / boardAspect : radius,
                 boardAspect >= 1 ? radius : radius * boardAspect, _globeRenderer?.Error,
                 _globeRenderer?.StarFieldWidth ?? 0, _globeRenderer?.StarFieldHeight ?? 0,
-                _globeRenderer?.StarFieldRenderCount ?? 0);
+                _globeRenderer?.StarFieldRenderCount ?? 0, _globeRenderer?.NativeStarCount ?? 0);
         }
     }
 

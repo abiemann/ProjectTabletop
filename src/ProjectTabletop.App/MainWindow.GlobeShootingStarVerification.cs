@@ -24,9 +24,22 @@ public sealed partial class MainWindow
             if (i > 0)
                 Require(start - GlobeShootingStar.GetStartTime(i - 1) is >= 10 and <= 22,
                     "Shooting stars lost their occasional spacing.");
-            Require(life is >= .8 and <= 1.2 &&
+            Require(life is >= 1.36 and <= 2.041 &&
                 !GlobeShootingStar.Sample(start + life + .01, 1).Active,
                 "A shooting star remained active beyond its brief lifetime.");
+            foreach (double aspect in new[] { .2, 1080 / 1920d, 1, 1543 / 1200d, 3840 / 2160d, 5 })
+            {
+                var arrival = GlobeShootingStar.Sample(start + life * .001, aspect);
+                var departure = GlobeShootingStar.Sample(start + life * .999, aspect);
+                double distance = ((departure.HeadUv - arrival.HeadUv) * arrival.PhysicalScale).Length() / .998;
+                Require(distance is >= .407 and <= .715,
+                    "The shooting-star path lost its extended physical travel distance.");
+                var tail = arrival.HeadUv - arrival.Direction * arrival.TailLength / arrival.PhysicalScale;
+                Require(Math.Min(tail.X, departure.HeadUv.X) >= .055 &&
+                    Math.Max(tail.X, departure.HeadUv.X) <= .945 &&
+                    tail.Y >= .095 && departure.HeadUv.Y <= .69,
+                    "An extended shooting-star path clips an edge or reaches the control/swipe band.");
+            }
         }
 
         var checks = new List<object>();

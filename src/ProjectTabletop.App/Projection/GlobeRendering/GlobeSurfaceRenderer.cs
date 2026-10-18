@@ -33,6 +33,7 @@ internal sealed class GlobeSurfaceRenderer : IDisposable
     public int StarFieldWidth => _starField is null ? 0 : (int)_starField.SizeInPixels.Width;
     public int StarFieldHeight => _starField is null ? 0 : (int)_starField.SizeInPixels.Height;
     public int StarFieldRenderCount { get; private set; }
+    internal int NativeStarCount { get; private set; }
 
     public async Task EnsureReadyAsync()
     {
@@ -96,11 +97,15 @@ internal sealed class GlobeSurfaceRenderer : IDisposable
         var crop = new Rect((sky.Size.Width - cropWidth) / 2, (sky.Size.Height - cropHeight) / 2,
             cropWidth, cropHeight);
         var replacement = new CanvasRenderTarget(Device, width, height, 96);
+        int nativeStarCount;
         try
         {
             using (var drawing = replacement.CreateDrawingSession())
+            {
                 drawing.DrawImage(sky, new Rect(0, 0, width, height), crop, 1,
                     CanvasImageInterpolation.HighQualityCubic);
+                nativeStarCount = GlobeStarField.Draw(drawing, width, height, aspect);
+            }
         }
         catch
         {
@@ -110,6 +115,7 @@ internal sealed class GlobeSurfaceRenderer : IDisposable
         _starField?.Dispose();
         _starField = replacement;
         _starFieldAspect = aspect;
+        NativeStarCount = nativeStarCount;
         StarFieldRenderCount++;
     }
 

@@ -227,8 +227,8 @@ public sealed partial class MainWindow
         {
             var diagnostics = scene.GetGlobeRenderDiagnostics(width / (double)height, scene.GlobeState);
             Require(diagnostics.StarFieldWidth > 3000 && diagnostics.StarFieldHeight > 1700 &&
-                    diagnostics.StarFieldRenderCount == 1,
-                "The star field was not cached once at native board resolution.");
+                    diagnostics.StarFieldRenderCount == 1 && diagnostics.NativeStarCount > 10000,
+                "The sky lacks a cached native-resolution field of individually rendered stars.");
             var firstPoint = CameraPoint(.205, .835);
             var lastPoint = CameraPoint(.98, .905);
             int changingSkyPixels = 0, roundingSkyPixels = 0, maximumSkyChannelDelta = 0;
@@ -255,7 +255,7 @@ public sealed partial class MainWindow
             Require(!scene.BoardButtonsVisible && scene.CurrentBoardButtons.Count == 0,
                 "The Globe sky check did not hide its control handle.");
             byte[] hidden = await Capture("milky-way-and-stars-controls-hidden");
-            int[] peaks = new int[8];
+            int[] peaks = new int[8], finePeaks = new int[8];
             var bandStart = CameraPoint(.02, .835);
             var bandEnd = CameraPoint(.98, .905);
             for (int y = (int)Math.Ceiling(bandStart.Y) + 4; y < bandEnd.Y - 4; y++)
@@ -269,16 +269,21 @@ public sealed partial class MainWindow
                 if (value - surroundings < 22) continue;
                 int section = Math.Clamp((int)((x - bandStart.X) * peaks.Length / (bandEnd.X - bandStart.X)), 0, peaks.Length - 1);
                 peaks[section]++;
+                int nearby = (Brightness(x - 2, y) + Brightness(x + 2, y) +
+                    Brightness(x, y - 2) + Brightness(x, y + 2)) / 4;
+                if (value - nearby >= 30) finePeaks[section]++;
             }
             Require(peaks.Sum() >= 40 && peaks.All(count => count >= 3),
                 "The hidden bottom control band lacks distributed bright star detail: " + string.Join(", ", peaks));
+            Require(finePeaks.Sum() >= 40 && finePeaks.All(count => count >= 3),
+                "The native bottom-band stars lack crisp cores within two pixels: " + string.Join(", ", finePeaks));
             ToggleControls();
             Require(scene.BoardButtonsVisible && scene.CurrentBoardButtons.Single().Id == "globe-drawer-open",
                 "The Globe sky check did not restore its control handle.");
             await Capture("milky-way-and-stars-controls-restored");
             return new { diagnostics.StarFieldWidth, diagnostics.StarFieldHeight,
-                diagnostics.StarFieldRenderCount, changingSkyPixels, roundingSkyPixels,
-                maximumSkyChannelDelta, bottomStripStarPeaks = peaks };
+                diagnostics.StarFieldRenderCount, diagnostics.NativeStarCount, changingSkyPixels, roundingSkyPixels,
+                maximumSkyChannelDelta, bottomStripStarPeaks = peaks, nativeFineStarPeaks = finePeaks };
 
             int Brightness(int x, int y)
             {

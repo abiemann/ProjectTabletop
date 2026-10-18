@@ -27,12 +27,12 @@ internal readonly partial struct EarthSurfaceShader(
         Float2 p = D2D.GetScenePosition().XY;
         Float3 background = D2D.SampleInputAtPosition(2,
             Hlsl.Clamp(p / 1000 * starFieldSize, new Float2(.5f, .5f), starFieldSize - .5f)).XYZ;
-        // Full-bright sky frames the dimmer centre. Preserve the lower swipe
-        // strip and restore the top eighth, with a soft upper transition.
-        if (p.Y > 125 && p.Y < 750)
+        // Keep both outer quarters bright for the long board edges. Feather
+        // inward to the existing half-bright centre without a visible seam.
+        if (p.Y > 250 && p.Y < 750)
         {
-            float blend = 1 - Hlsl.SmoothStep(125, 250, p.Y)
-                + Hlsl.SmoothStep(500, 750, p.Y);
+            float blend = 1 - Hlsl.SmoothStep(250, 325, p.Y)
+                + Hlsl.SmoothStep(675, 750, p.Y);
             background *= .5f + .5f * blend;
 
             // Sub-8-bit, screen-stationary dither softens transition banding.
