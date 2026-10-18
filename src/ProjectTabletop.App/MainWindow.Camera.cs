@@ -414,12 +414,13 @@ public sealed partial class MainWindow
     {
         if (!arrival.BoardSetupActive && QueueMarkerSetupFrame(frame)) return;
         var now = Stopwatch.GetTimestamp();
-        // This board needs only its rail and stationary captions. Do not queue
-        // unrelated full-frame detectors or the hand model behind its artwork.
-        if (!arrival.BoardSetupActive && _scene.CurrentBoardScreen == BoardScreen.StrykersRun)
+        // Both dot rails use one independent worker. Stryker's Run needs only
+        // its rail and stationary captions; Globe keeps its normal hand paths.
+        var screen = _scene.CurrentBoardScreen;
+        if (!arrival.BoardSetupActive && screen is BoardScreen.StrykersRun or BoardScreen.Globe)
         {
-            QueueStrykersRunDetection(frame);
-            return;
+            QueuePatternRailDetection(frame);
+            if (screen == BoardScreen.StrykersRun) return;
         }
         QueueMarkerDetection(frame);
         QueueFootballDetection(frame);

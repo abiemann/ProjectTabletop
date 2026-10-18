@@ -98,6 +98,12 @@ public sealed partial class SceneCompositor
     {
         lock (_gate)
         {
+            var now = _globeClock();
+            _boardSession.TickGlobe(now);
+            _boardSession.TickControlVisibility(now);
+            var rail = GlobePitchRailBounds();
+            if (_boardSession.GlobePitchInputReady(now) && rail.Contains(new(u, v)))
+                return _boardSession.SetGlobePitchPosition(Math.Clamp((rail.Bottom - v) / rail.Height, 0, 1), now);
             var button = _boardSession.Buttons.FirstOrDefault(item => item.Enabled && item.Bounds.Contains(u, v));
             return button is not null && ActivateGlobeButton(button.Id);
         }

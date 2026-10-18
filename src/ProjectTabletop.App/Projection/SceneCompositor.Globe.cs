@@ -107,6 +107,7 @@ public sealed partial class SceneCompositor
         using var fade = CreateBoardControlsFadeLayer(ds);
         DrawBoardDrawerControls(ds, buttons, hovered, selectionFeedback, drawerOpen, drawerProgress, boardAspect,
             holdExposure);
+        if (drawerOpen) DrawGlobePitchRail(ds, drawerProgress);
     }
 
     private static void GlobeText(CanvasDrawingSession ds, string text, Rect rect, float size,

@@ -274,7 +274,8 @@ public sealed partial class SceneCompositor
     {
         if (_boardSurfaceMap is null) return null;
         var holds = _boardSession.Buttons.Where(button => button.IsHold).ToArray();
-        if (holds.Length == 0) return null;
+        bool pitchRail = _boardSession.GlobeDrawerOpen && (_boardSession.ButtonsVisible || BoardControlsAnimating);
+        if (holds.Length == 0 && !pitchRail) return null;
         var area = CanvasGeometry.CreateRectangle(ds.Device, output);
         foreach (var button in holds)
         {
@@ -295,6 +296,22 @@ public sealed partial class SceneCompositor
                 corners[index] = new((float)(output.X + point.X * output.Width),
                     (float)(output.Y + point.Y * output.Height));
             }
+            using var hole = CanvasGeometry.CreatePolygon(ds.Device, corners);
+            var remaining = area.CombineWith(hole, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
+            area.Dispose();
+            area = remaining;
+        }
+        if (pitchRail)
+        {
+            // Dots are an optical control too. Keep illumination out of their
+            // stationary backing so it cannot erase marks and imitate a touch.
+            var rail = GlobePitchRailBounds();
+            const double margin = .006;
+            var corners = new[] { new Point2(rail.X - margin, rail.Y - margin), new Point2(rail.Right + margin, rail.Y - margin),
+                new Point2(rail.Right + margin, rail.Bottom + margin), new Point2(rail.X - margin, rail.Bottom + margin) }
+                .Select(point => _boardSurfaceMap.Transform(point))
+                .Select(point => new Vector2((float)(output.X + point.X * output.Width), (float)(output.Y + point.Y * output.Height)))
+                .ToArray();
             using var hole = CanvasGeometry.CreatePolygon(ds.Device, corners);
             var remaining = area.CombineWith(hole, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
             area.Dispose();

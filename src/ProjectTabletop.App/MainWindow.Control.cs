@@ -335,6 +335,7 @@ public sealed partial class MainWindow
                     blackjack = _scene.BlackjackState,
                     crownDeed = _scene.CrownDeedState,
                     globe = _scene.GlobeState,
+                    globePitchInput = GlobePitchInputState(),
                     slots = SlotsStatus(),
                     roulette = RouletteStatus(),
                     globeDrawer = _scene.GetGlobeDrawerDiagnostics(MonotonicClock.UtcNow),

@@ -159,6 +159,7 @@ public sealed partial class SceneCompositor : IDisposable
                 ResetHoldControlExposure();
                 _boardSession.ResetInput(MonotonicClock.UtcNow, preserveBoardAnimations);
                 ClearStrykersRunObservations();
+                ClearGlobePitchInput();
                 if (!preserveBoardAnimations)
                 {
                     CancelBlackjackDeal();

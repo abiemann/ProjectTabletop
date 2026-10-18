@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Vision;
 
-/// <summary>The stationary Stryker's Run input rail, mapped from its canonical raster to the camera.
+/// <summary>A stationary dotted input rail, mapped from its canonical raster to the camera.
 /// Corners are top-left, top-right, bottom-right, bottom-left in rail coordinates, including after board rotation.</summary>
 public sealed record PatternRailGeometry(long Revision, IReadOnlyList<PixelPoint> CameraCorners)
 {

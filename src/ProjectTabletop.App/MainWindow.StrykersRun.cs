@@ -15,9 +15,12 @@ public sealed partial class MainWindow
     private readonly FrameWorker _strykersRunWorker = new();
     private readonly PatternRailDetector _strykersRunDetector = new();
     private readonly object _strykersRunInputGate = new();
-    private long _strykersRunGeneration, _strykersRunDetectorEpoch = -1;
+    private long _strykersRunGeneration;
+    private PatternRailGeometry? _patternRailDetectorGeometry;
     private PatternRailObservation? _strykersRunLastObservation;
     private double _strykersRunProcessingMilliseconds;
+    private PatternRailObservation? _globePitchLastObservation;
+    private double _globePitchProcessingMilliseconds;
 #if DEBUG
     private sealed record StrykersRunDiagnosticSnapshot(CameraFrame Frame, PatternRailObservation Observation,
         PatternRailGeometry Geometry, PatternRailDiagnostics Diagnostics, long Generation, DateTimeOffset ProcessedAt)
@@ -47,14 +50,18 @@ public sealed partial class MainWindow
     {
         Interlocked.Increment(ref _strykersRunGeneration);
         _scene.ClearStrykersRunInput();
+        _scene.ClearGlobePitchInput();
         Volatile.Write(ref _strykersRunLastObservation, null);
+        Volatile.Write(ref _globePitchLastObservation, null);
         _strykersRunWorker.ResetCadence();
 #if DEBUG
         ClearStrykersRunDiagnosticSnapshot();
 #endif
     }
 
-    private void QueueStrykersRunDetection(CameraFrame frame)
+    // Stryker's Run and Globe never share the screen, so they share the same
+    // independent worker and detector instead of copying or queuing camera frames.
+    private void QueuePatternRailDetection(CameraFrame frame)
     {
         if (_closing || !_cameraWanted || !_camera.IsRunning || _cameraOperation.CurrentCount == 0 ||
             Volatile.Read(ref _cameraHealthWarning) || Volatile.Read(ref _boardSetupActive)) return;
@@ -64,8 +71,8 @@ public sealed partial class MainWindow
         // just-finished slide from being learned as the stationary dot matrix.
         var visibleThrough = (frame.ArrivedAt ?? frame.Timestamp).Subtract(
             TimeSpan.FromTicks(Volatile.Read(ref _projectionReferenceMinimumAgeTicks)));
-        var geometry = _scene.GetStrykersRunRailGeometry(frame.Timestamp, visibleThrough);
-        if (geometry is null) return;
+        var screen = _scene.CurrentBoardScreen;
+        PatternRailGeometry? geometry = null;
         long generation = Interlocked.Read(ref _strykersRunGeneration);
         _strykersRunWorker.TryRun(tick, TimeSpan.Zero, frame, _ =>
         {
@@ -75,22 +82,29 @@ public sealed partial class MainWindow
                     Volatile.Read(ref _cameraHealthWarning)) return;
                 var now = MonotonicClock.UtcNow;
                 if (frame.Timestamp > now || now - frame.Timestamp > StrykersRunGame.InputFreshness) return;
-                if (!ReferenceEquals(geometry, _scene.GetStrykersRunRailGeometry(frame.Timestamp, visibleThrough))) return;
+                // Resolve calibrated geometry on this worker, never behind a
+                // compositor/GPU lock on the camera delivery thread.
+                if (_scene.CurrentBoardScreen != screen) return;
+                geometry = CurrentGeometry();
+                if (geometry is null) return;
                 PatternRailObservation observation;
                 long started = Stopwatch.GetTimestamp();
                 lock (_strykersRunInputGate)
                 {
                     if (generation != Interlocked.Read(ref _strykersRunGeneration)) return;
-                    if (_strykersRunDetectorEpoch != geometry.Revision)
+                    // Epoch numbers are local to each board. Object identity
+                    // also forces new optical registration when boards switch.
+                    if (!ReferenceEquals(_patternRailDetectorGeometry, geometry))
                     {
                         _strykersRunDetector.Reset();
-                        _strykersRunDetectorEpoch = geometry.Revision;
+                        _patternRailDetectorGeometry = geometry;
                     }
                     observation = _strykersRunDetector.Observe(frame.Bgra, frame.Width, frame.Height, frame.Stride,
                         geometry, frame.Timestamp);
 #if DEBUG
                     var previous = _strykersRunDiagnosticSnapshot;
-                    _strykersRunDiagnosticSnapshot = _boardHandDiagnosticLogging && !_closing &&
+                    _strykersRunDiagnosticSnapshot = screen == BoardScreen.StrykersRun &&
+                        _boardHandDiagnosticLogging && !_closing &&
                         generation == Interlocked.Read(ref _strykersRunGeneration)
                         ? new(frame, observation, geometry, _strykersRunDetector.GetDiagnostics(), generation, MonotonicClock.UtcNow)
                         : null;
@@ -102,19 +116,48 @@ public sealed partial class MainWindow
                 if (_closing || generation != Interlocked.Read(ref _strykersRunGeneration) ||
                     Volatile.Read(ref _cameraHealthWarning) ||
                     frame.Timestamp > now || now - frame.Timestamp > StrykersRunGame.InputFreshness) return;
-                if (!_scene.SetStrykersRunRailPosition(observation.Position, frame.Timestamp, geometry.Revision)) return;
-                Volatile.Write(ref _strykersRunLastObservation, observation);
-                Volatile.Write(ref _strykersRunProcessingMilliseconds, milliseconds);
+                if (!Publish(observation.Position)) return;
+                if (screen == BoardScreen.Globe)
+                {
+                    Volatile.Write(ref _globePitchLastObservation, observation);
+                    Volatile.Write(ref _globePitchProcessingMilliseconds, milliseconds);
+                }
+                else
+                {
+                    Volatile.Write(ref _strykersRunLastObservation, observation);
+                    Volatile.Write(ref _strykersRunProcessingMilliseconds, milliseconds);
+                }
             }
             catch (Exception exception)
             {
-                AppLog.Write("Stryker's Run control strip", exception);
+                AppLog.Write(screen == BoardScreen.Globe ? "Globe pitch strip" : "Stryker's Run control strip", exception);
                 if (!_closing && generation == Interlocked.Read(ref _strykersRunGeneration) &&
                     !Volatile.Read(ref _cameraHealthWarning))
-                    _scene.SetStrykersRunRailPosition(null, frame.Timestamp, geometry.Revision);
+                    Publish(null);
             }
         });
+
+        PatternRailGeometry? CurrentGeometry() => screen switch
+        {
+            BoardScreen.StrykersRun => _scene.GetStrykersRunRailGeometry(frame.Timestamp, visibleThrough),
+            BoardScreen.Globe => _scene.GetGlobePitchRailGeometry(frame.Timestamp, visibleThrough),
+            _ => null
+        };
+
+        bool Publish(float? position) => geometry is not null && _scene.CurrentBoardScreen == screen && (screen switch
+        {
+            BoardScreen.StrykersRun => _scene.SetStrykersRunRailPosition(position, frame.Timestamp, geometry.Revision),
+            BoardScreen.Globe => _scene.SetGlobePitchRailPosition(position, frame.Timestamp, geometry.Revision),
+            _ => false
+        });
     }
+
+    private object GlobePitchInputState() => new
+    {
+        input = Volatile.Read(ref _globePitchLastObservation),
+        processingMilliseconds = Volatile.Read(ref _globePitchProcessingMilliseconds),
+        railCameraCorners = _scene.GetGlobePitchRailGeometry()?.CameraCorners
+    };
 
     private object StrykersRunControlState()
     {

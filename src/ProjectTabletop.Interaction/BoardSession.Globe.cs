@@ -33,6 +33,23 @@ public sealed partial class BoardSession
     /// <summary>Enables settled drawer controls once, rejecting observations made during its entrance.</summary>
     public bool TickGlobe(DateTimeOffset now) => AdvanceBottomDrawer(_globeDrawer, BoardScreen.Globe, now);
 
+    /// <summary>Stationary rail projection boundary; changes when its drawer or visibility changes, not on zoom.</summary>
+    public DateTimeOffset GlobePitchReferenceNotBefore => Later(_globeDrawer.InputReadyAfter, _controlsInputReadyAfter);
+
+    /// <summary>Whether the stationary rail is fully visible, independently of action-frame barriers.</summary>
+    public bool GlobePitchAvailable(DateTimeOffset now) =>
+        GlobeDrawerOpen && _globeDrawer.OpeningReady && ButtonsVisible && _controlFadeStartedAt is null &&
+        _globe.HasFinishedEntrance(now);
+
+    /// <summary>Only fresh observations of the fully displayed pitch rail can steer Earth.</summary>
+    public bool GlobePitchInputReady(DateTimeOffset frameTime) =>
+        GlobePitchAvailable(frameTime) && frameTime > _globeDrawer.InputReadyAfter &&
+        frameTime > _controlsInputReadyAfter && frameTime > _ignoreFramesThrough;
+
+    /// <summary>Retains the chosen pitch on release, closing the drawer, or hiding controls.</summary>
+    public bool SetGlobePitchPosition(double position, DateTimeOffset frameTime) =>
+        GlobePitchInputReady(frameTime) && _globe.SetPitchPosition(position, frameTime);
+
     private IReadOnlyList<BoardButton> CurrentGlobeButtons()
     {
         if (!GlobeDrawerOpen) return Array.AsReadOnly(new[]

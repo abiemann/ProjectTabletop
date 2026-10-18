@@ -256,18 +256,7 @@ public sealed partial class SceneCompositor
         using var clip = drawing.CreateLayer(1, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
         var rectangle = new Rect(rail.X * BoardSurfaceSize, top * BoardSurfaceSize,
             rail.Width * BoardSurfaceSize, rail.Height * BoardSurfaceSize);
-        drawing.FillRectangle(rectangle, Color.FromArgb(255, 0, 0, 0));
-        float radiusX = (float)rectangle.Width * PatternRailGeometry.DotRadius / PatternRailGeometry.ReferenceWidth;
-        float radiusY = (float)rectangle.Height * PatternRailGeometry.DotRadius / PatternRailGeometry.ReferenceHeight;
-        for (int column = 0; column < PatternRailGeometry.Columns; column++)
-        {
-            float x = (float)(rectangle.X + rectangle.Width * PatternRailGeometry.ColumnCenter(column) /
-                PatternRailGeometry.ReferenceWidth);
-            drawing.FillEllipse(new(x, (float)(rectangle.Y + rectangle.Height * PatternRailGeometry.DotY1ForColumn(column) /
-                PatternRailGeometry.ReferenceHeight)), radiusX, radiusY, Color.FromArgb(255, 255, 255, 255));
-            drawing.FillEllipse(new(x, (float)(rectangle.Y + rectangle.Height * PatternRailGeometry.DotY2ForColumn(column) /
-                PatternRailGeometry.ReferenceHeight)), radiusX, radiusY, Color.FromArgb(255, 255, 255, 255));
-        }
+        DrawPatternRail(drawing, rectangle);
     }
 
     private void DrawStrykersRunControls(CanvasDrawingSession drawing)

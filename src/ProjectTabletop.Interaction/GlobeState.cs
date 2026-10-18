@@ -20,6 +20,7 @@ public sealed class GlobeState
     public const double MaximumViewLatitude = 60;
     public static readonly TimeSpan EntranceDuration = TimeSpan.FromSeconds(3);
     public static readonly TimeSpan ControlTransitionDuration = TimeSpan.FromMilliseconds(350);
+    public static readonly TimeSpan PitchTransitionDuration = TimeSpan.FromMilliseconds(120);
 
     private readonly double _homeRotation;
     private DateTimeOffset? _startedAt;
@@ -29,6 +30,10 @@ public sealed class GlobeState
     private double _targetZoom = DefaultZoom;
     private double _rotationFrom;
     private double _targetRotation;
+    private DateTimeOffset _pitchTransitionAt;
+    private DateTimeOffset _pitchObservedAt;
+    private double _pitchFrom;
+    private double _targetPitch;
     public long Revision { get; private set; }
     public double HomeRotationDegrees => _homeRotation;
     /// <summary>Latitude held at the disk's centre; north positive.</summary>
@@ -44,6 +49,7 @@ public sealed class GlobeState
         if (!double.IsFinite(homeLatitudeDegrees)) throw new ArgumentOutOfRangeException(nameof(homeLatitudeDegrees));
         _homeRotation = ((-homeLongitudeDegrees) % 360 + 360) % 360;
         HomeLatitudeDegrees = Math.Clamp(homeLatitudeDegrees, -MaximumViewLatitude, MaximumViewLatitude);
+        _pitchFrom = _targetPitch = HomeLatitudeDegrees;
     }
 
     public void Start(DateTimeOffset now)
@@ -53,6 +59,8 @@ public sealed class GlobeState
         _lastActionAt = now;
         _zoomFrom = _targetZoom = DefaultZoom;
         _rotationFrom = _targetRotation = _homeRotation;
+        _pitchTransitionAt = _pitchObservedAt = now;
+        _pitchFrom = _targetPitch = HomeLatitudeDegrees;
         Revision++;
     }
 
@@ -65,7 +73,25 @@ public sealed class GlobeState
         double zoom = Lerp(_zoomFrom, _targetZoom, progress) * entranceScale;
         double rotation = Lerp(_rotationFrom, _targetRotation, progress) + elapsed * RotationDegreesPerSecond;
         rotation = (rotation % 360 + 360) % 360;
-        return new(_targetZoom, zoom, rotation, intro, elapsed, Revision, HomeLatitudeDegrees);
+        return new(_targetZoom, zoom, rotation, intro, elapsed, Revision, PitchAt(now));
+    }
+
+    public bool HasFinishedEntrance(DateTimeOffset now) =>
+        _startedAt is { } started && now >= started + EntranceDuration;
+
+    /// <summary>Sets a bottom-to-top rail position without disturbing zoom, spin or caption evidence.</summary>
+    public bool SetPitchPosition(double position, DateTimeOffset now)
+    {
+        if (_startedAt is null || now < _pitchObservedAt || !double.IsFinite(position) || position is < 0 or > 1)
+            return false;
+        _pitchObservedAt = now;
+        double target = (position * 2 - 1) * MaximumViewLatitude;
+        // Repeated stationary observations must not keep restarting the easing.
+        if (target == _targetPitch) return true;
+        _pitchFrom = PitchAt(now);
+        _targetPitch = target;
+        _pitchTransitionAt = now;
+        return true;
     }
 
     public bool CanHandleAction(string id) => _startedAt is not null && (id switch
@@ -97,6 +123,12 @@ public sealed class GlobeState
 
     private double TransitionProgress(DateTimeOffset now) =>
         EaseOut(Math.Clamp((now - _transitionAt).TotalSeconds / ControlTransitionDuration.TotalSeconds, 0, 1));
+    private double PitchAt(DateTimeOffset now)
+    {
+        if (now >= _pitchTransitionAt + PitchTransitionDuration) return _targetPitch;
+        if (now <= _pitchTransitionAt) return _pitchFrom;
+        return Lerp(_pitchFrom, _targetPitch, EaseOut((now - _pitchTransitionAt) / PitchTransitionDuration));
+    }
     private static double EaseOut(double progress) => 1 - Math.Pow(1 - progress, 3);
     private static double Lerp(double first, double last, double amount) => first + (last - first) * amount;
 }
