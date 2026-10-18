@@ -91,6 +91,11 @@ public sealed partial class MainWindow
             "The main menu enabled swipe commands.");
         scene.ShowStrykersRun();
         Require(scene.GetControlSwipeContext(now) is null, "Stryker's Run enabled swipe detection.");
+        scene.ShowRoulette();
+        Require(scene.GetControlSwipeContext(now) is null && session.ButtonsVisible &&
+                scene.CurrentBoardButtons.Count == 58 && !session.SetButtonsVisible(false, now) &&
+                !scene.CompleteControlSwipe(stale, BoardControlSwipe.Toggle, false, now),
+            "Roulette enabled swipe detection or hid its controls.");
 
         scene.ShowCrownDeed();
         scene.ClearHandTips();
@@ -237,7 +242,7 @@ public sealed partial class MainWindow
             bounds => new Rect(bounds.X * size, bounds.Y * size, bounds.Width * size, bounds.Height * size));
         return new { passed = true, playerFacingAngles = new[] { 0, 90, 180 },
             disturbanceOnly = true, eitherDirectionTogglesVisibility = true,
-            hiddenBandRetained = true, excludedMenuAndStryker = true,
+            hiddenBandRetained = true, excludedMenuAndStryker = true, excludedRoulette = true,
             excludedFootballPlay = true, cameraNavigationCalibrationAndVisibilityBarriers = true,
             coordinateSwipeSuppressesHolds = true, restoredCaptionRequiresClear = true,
             markerStrokesIgnored = true, markerQuietMilliseconds = SceneCompositor.ControlSwipeMarkerQuietPeriod.TotalMilliseconds,

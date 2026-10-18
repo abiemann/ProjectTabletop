@@ -156,49 +156,53 @@ public class BoardControlVisibilityTests
     }
 
     [Fact]
-    public void RouletteHidesOnlyFooterWhileChipsAndBettingTargetsRemainUsable()
+    public void RouletteRejectsVisibilityChangesAndKeepsAllControlsUsable()
     {
         var board = new BoardSession(roulette: new RouletteGame(1));
         board.ShowRoulette(At(0));
         Assert.True(board.ActivateButton("roulette-red", At(10)));
-        var footerIds = board.Buttons.Where(button => button.IsHold).Select(button => button.Id).ToArray();
-        var tableIds = board.Buttons.Where(button => !button.IsHold).Select(button => button.Id).ToArray();
-        Assert.Equal(5, footerIds.Length);
-        Assert.Equal(53, tableIds.Length);
+        var buttons = board.Buttons.ToArray();
+        Assert.Equal(58, buttons.Length);
+        Assert.Equal(5, buttons.Count(button => button.IsHold));
         long navigation = board.NavigationRevision;
+        long revision = board.Revision;
 
-        Assert.True(board.SetButtonsVisible(false, At(20)));
-        Assert.Equal(tableIds, board.Buttons.Select(button => button.Id));
-        Assert.Equal(58, board.GetVisibleButtons(At(170)).Count);
-        Assert.Equal(.5, board.GetButtonsOpacity(At(170)), 10);
-        Assert.True(board.ActivateButton("roulette-chip-5", At(30)));
+        Assert.False(board.ControlSwipesEnabled);
+        Assert.False(board.SetButtonsVisible(false, At(20)));
+        Assert.False(board.SetButtonsVisible(true, At(170)));
+        Assert.True(board.ButtonsVisible);
+        Assert.Equal(buttons, board.Buttons);
+        Assert.Equal(buttons, board.GetVisibleButtons(At(170)));
+        Assert.Equal(1, board.GetButtonsOpacity(At(170)));
+        Assert.False(board.ControlVisibilityAnimating(At(170)));
+        Assert.False(board.TickControlVisibility(At(320)));
+        Assert.Equal(revision, board.Revision);
+
+        Assert.True(board.ActivateButton("roulette-chip-5", At(330)));
         Assert.Equal(5, board.RouletteState.Chip);
-        Assert.True(board.TickControlVisibility(At(320)));
-        Assert.Equal(tableIds, board.GetVisibleButtons(At(320)).Select(button => button.Id));
-        Assert.True(board.ActivateButton("roulette-number-17", At(330)));
+        Assert.True(board.ActivateButton("roulette-number-17", At(350)));
         Assert.Equal(30, board.RouletteState.TotalBet);
 
-        // The normal closed-fingers/sideways-index gesture still works on the
-        // remaining targets; hiding the footer must not merely retain artwork.
+        // Rejected visibility requests must leave the normal closed-fingers /
+        // sideways-index selection gesture and direct caption holds available.
         SelectByIndex("roulette-chip-100", 400);
         Assert.Equal(100, board.RouletteState.Chip);
         SelectByIndex("roulette-number-8", 800);
         Assert.Equal(130, board.RouletteState.TotalBet);
 
-        int time = 1200;
-        foreach (string id in footerIds)
-        {
-            Assert.False(board.ActivateButton(id, At(time)));
-            Assert.Empty(board.ObserveHeldButtons([], At(time), At(time), [id]));
-            for (int elapsed = 100; elapsed <= 1300; elapsed += 200)
-                Assert.Empty(board.ObserveHeldButtons([id], At(time + elapsed), At(time + elapsed), []));
-            time += 1400;
-        }
-        Assert.Empty(board.HoldProgress(At(time)));
         Assert.Equal(BoardScreen.Roulette, board.Screen);
         Assert.Equal(RoulettePhase.Betting, board.RouletteState.Phase);
         Assert.Equal(130, board.RouletteState.TotalBet);
         Assert.Equal(navigation, board.NavigationRevision);
+
+        const string exit = "roulette-exit";
+        board.ObserveHeldButtons([], At(1200), At(1200), [exit]);
+        for (int ms = 1300; ms < 2300; ms += 200)
+            Assert.Empty(board.ObserveHeldButtons([exit], At(ms), At(ms), []));
+        Assert.False(board.SetButtonsVisible(false, At(2200)));
+        Assert.NotEmpty(board.HoldProgress(At(2200)));
+        Assert.Equal([exit], board.ObserveHeldButtons([exit], At(2300), At(2300), []));
+        Assert.Equal(BoardScreen.Menu, board.Screen);
 
         void SelectByIndex(string id, int start)
         {
@@ -214,37 +218,6 @@ public class BoardControlVisibilityTests
             Assert.Null(board.Update([separated], At(start + 220), At(start + 220)));
             Assert.Equal(id, board.Update([separated], At(start + 320), At(start + 320))?.ButtonId);
         }
-    }
-
-    [Fact]
-    public void RestoredRouletteFooterRequiresFreshClearCaptionAndAFullHold()
-    {
-        var board = new BoardSession();
-        board.ShowRoulette(At(0));
-        const string exit = "roulette-exit";
-        board.ObserveHeldButtons([], At(10), At(10), [exit]);
-        for (int ms = 20; ms <= 820; ms += 200)
-            Assert.Empty(board.ObserveHeldButtons([exit], At(ms), At(ms), []));
-        Assert.NotEmpty(board.HoldProgress(At(820)));
-        Assert.True(board.SetButtonsVisible(false, At(850)));
-        Assert.Empty(board.HoldProgress(At(850)));
-        Assert.True(board.SetButtonsVisible(true, At(1200)));
-        Assert.Equal(53, board.Buttons.Count);
-        Assert.Equal(58, board.GetVisibleButtons(At(1350)).Count);
-        Assert.False(board.ActivateButton(exit, At(1350)));
-
-        // Clear frames from before the fade settled cannot arm its new caption.
-        Assert.Empty(board.ObserveHeldButtons([], At(1400), At(1520), [exit]));
-        Assert.Empty(board.ObserveHeldButtons([], At(1500), At(1530), [exit]));
-        Assert.Equal(58, board.Buttons.Count);
-        for (int ms = 1600; ms <= 2600; ms += 200)
-            Assert.Empty(board.ObserveHeldButtons([exit], At(ms), At(ms), []));
-        Assert.Equal(BoardScreen.Roulette, board.Screen);
-        board.ObserveHeldButtons([], At(2700), At(2700), [exit]);
-        for (int ms = 2800; ms < 3800; ms += 200)
-            Assert.Empty(board.ObserveHeldButtons([exit], At(ms), At(ms), []));
-        Assert.Equal([exit], board.ObserveHeldButtons([exit], At(3800), At(3800), []));
-        Assert.Equal(BoardScreen.Menu, board.Screen);
     }
 
     [Fact]

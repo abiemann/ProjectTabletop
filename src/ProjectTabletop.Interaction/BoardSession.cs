@@ -124,8 +124,7 @@ public sealed partial class BoardSession
         BoardScreen.Roulette => "Roulette",
         _ => throw new InvalidOperationException("Unknown board screen.")
     };
-    public IReadOnlyList<BoardButton> Buttons => !ButtonsVisible || _controlFadeStartedAt is not null
-        ? PersistentButtons : CurrentButtons;
+    public IReadOnlyList<BoardButton> Buttons => !ButtonsVisible || _controlFadeStartedAt is not null ? [] : CurrentButtons;
 
     private IReadOnlyList<BoardButton> CurrentButtons => Screen switch
     {

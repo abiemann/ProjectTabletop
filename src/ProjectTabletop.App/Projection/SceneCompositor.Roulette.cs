@@ -104,14 +104,9 @@ public sealed partial class SceneCompositor
         if (buttons.Count == 0) return;
         foreach (var button in buttons)
         {
-            if (button.IsHold) continue;
             DrawRouletteButton(ds, button, game, hovered.Contains(button.Id), aspect, _holdControlBrightness);
-            DrawButtonFingerSelectionFeedback(ds, button, feedback, RouletteGold);
+            if (!button.IsHold) DrawButtonFingerSelectionFeedback(ds, button, feedback, RouletteGold);
         }
-        using var fade = CreateBoardControlsFadeLayer(ds);
-        foreach (var button in buttons)
-            if (button.IsHold)
-                DrawRouletteButton(ds, button, game, hovered.Contains(button.Id), aspect, _holdControlBrightness);
     }
 
     private static void DrawRouletteButton(CanvasDrawingSession ds, BoardButton button,

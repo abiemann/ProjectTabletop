@@ -7,20 +7,15 @@ public sealed partial class BoardSession
     private DateTimeOffset? _controlFadeStartedAt;
     private double _controlFadeFromOpacity = 1;
 
-    /// <summary>Target visibility of the swipe-controlled group; Roulette's betting controls stay visible.</summary>
+    /// <summary>Target visibility. Rendering samples the shared fade; input waits until it settles.</summary>
     public bool ButtonsVisible { get; private set; } = true;
 
-    /// <summary>The launcher stays visible; Stryker's Run owns its automatic control transitions.</summary>
-    public bool ControlSwipesEnabled => Screen is not (BoardScreen.Menu or BoardScreen.StrykersRun);
+    /// <summary>The launcher and Roulette stay visible; Stryker's Run owns its control transitions.</summary>
+    public bool ControlSwipesEnabled => Screen is not (BoardScreen.Menu or BoardScreen.Roulette or BoardScreen.StrykersRun);
 
     /// <summary>Current controls for rendering, including their dynamic enabled state while fading.</summary>
     public IReadOnlyList<BoardButton> GetVisibleButtons(DateTimeOffset now) =>
-        ButtonsVisible || ControlVisibilityAnimating(now) ? CurrentButtons : PersistentButtons;
-
-    // Roulette's chip selectors and betting grid are the playing surface.
-    // A bottom-row swipe toggles only its five long-press footer controls.
-    private IReadOnlyList<BoardButton> PersistentButtons => Screen == BoardScreen.Roulette
-        ? CurrentButtons.Where(button => !button.IsHold).ToArray() : [];
+        ButtonsVisible || ControlVisibilityAnimating(now) ? CurrentButtons : [];
 
     /// <summary>Pure presentation sample shared by every control on the board.</summary>
     public double GetButtonsOpacity(DateTimeOffset now)
@@ -49,7 +44,7 @@ public sealed partial class BoardSession
 
     /// <summary>Hides or restores controls without changing the board, game or drawer state.
     /// Restored captions require fresh clear evidence before another hold can begin.
-    /// The main menu and Stryker's Run retain their existing control behavior.</summary>
+    /// The main menu, Roulette and Stryker's Run retain their existing control behavior.</summary>
     public bool SetButtonsVisible(bool visible, DateTimeOffset now)
     {
         TickControlVisibility(now);
