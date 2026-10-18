@@ -98,10 +98,10 @@ public sealed partial class MainWindow
         Require(scene.GetHandAcquisitionContext(now) is
                 { ObserveMotion: false, IlluminatedHint: null, ExpectedScene: null } &&
                 scene.ActiveHandSpotlightCount == 0 &&
-                !scene.ActivateGlobeButton("globe-exit") && !scene.ActivateGlobeButton("globe-zoom-in"),
+                !scene.ActivateGlobeButton("globe-exit") && !scene.ActivateGlobeButton("globe-model"),
             "Globe's moving drawer supplied an acquisition reference, light or active action.");
         now = openedAt.AddMilliseconds(299);
-        Require(!scene.ActivateGlobeButton("globe-zoom-out") && !scene.ActivateGlobeButton("globe-exit"),
+        Require(!scene.ActivateGlobeButton("globe-model") && !scene.ActivateGlobeButton("globe-exit"),
             "Globe's drawer actions enabled before the 300 ms opening finished.");
         now = openedAt.AddMilliseconds(300);
         scene.TickGlobe(now);
@@ -113,30 +113,29 @@ public sealed partial class MainWindow
         foreach (var button in scene.CurrentBoardButtons.Where(button => button.Id != "globe-drawer-close"))
             Require(ChangedFraction(drawerStartPixels, drawerOpenPixels, button.Bounds) > .75,
                 "Globe's settled bottom row did not visibly render the " + button.Label + " glass button.");
-        // The opening view is the minimum zoom. Zoom in twice so Zoom - has
-        // room for its two timed activations, then let the view settle.
-        Act("globe-zoom-in"); Act("globe-zoom-in");
-        now += GlobeState.ControlTransitionDuration + TimeSpan.FromSeconds(1);
+        now += TimeSpan.FromSeconds(1);
         scene.TickGlobe(now);
         await CheckAcquisition();
         CheckHoldButtonLightClip();
 
         var beforeZoom = scene.GlobeState;
-        Act("globe-zoom-in"); now += GlobeState.ControlTransitionDuration;
+        SetZoom(.5f); now += GlobeState.ZoomRailTransitionDuration;
         var zoomed = scene.GlobeState;
         byte[] zoomPixels = await Capture("earth-zoom-in");
-        Require(zoomed.Zoom > beforeZoom.Zoom * 1.2 && ChangedPixels(spunPixels, zoomPixels) > 100000,
-            "Zoom + did not smoothly enlarge the Earth.");
-        Act("globe-zoom-out"); now += GlobeState.ControlTransitionDuration;
+        Require(Math.Abs(zoomed.Zoom - (GlobeState.MinimumZoom + GlobeState.MaximumZoom) / 2) < .000001 &&
+                ChangedPixels(spunPixels, zoomPixels) > 100000,
+            "The absolute zoom rail did not smoothly enlarge Earth to its midpoint.");
+        SetZoom(0); now += GlobeState.ZoomRailTransitionDuration;
         Require(Math.Abs(scene.GlobeState.Zoom - beforeZoom.Zoom) < .000001,
-            "Zoom - did not restore the previous scale.");
+            "The zoom rail's bottom did not restore the opening scale.");
         Require(scene.GetGlobeRenderDiagnostics(width / (double)height, scene.GlobeState).SkyTextureLoadCount == 1,
             "Earth rotation, zoom or drawer interaction reloaded the celestial-sphere texture.");
         var beforeRemovedActions = scene.GlobeState;
         Require(!scene.ActivateGlobeButton("globe-rotate-left") &&
                 !scene.ActivateGlobeButton("globe-rotate-right") &&
+                !scene.ActivateGlobeButton("globe-zoom-in") && !scene.ActivateGlobeButton("globe-zoom-out") &&
                 scene.GlobeState == beforeRemovedActions,
-            "A removed manual Rotate target still changes the Globe.");
+            "A removed Rotate or Zoom button target still changes the Globe.");
         // The 0.6× opening leaves room for both the sky and handle at every aspect.
         var squareCircle = await CheckAlternateAspect(2160, 2160, "square", requireHandleClearance: true);
         var measuredBoardCircle = await CheckAlternateAspect(2777, 2160, "measured-board", requireHandleClearance: true);
@@ -147,8 +146,8 @@ public sealed partial class MainWindow
         CheckClosedDrawer();
         await Capture("controls-drawer-reclosed");
         Require(!scene.ActivateGlobeButton("globe-exit") &&
-                !scene.ActivateGlobeButton("globe-zoom-in") &&
-                !scene.ActivateGlobeButton("globe-zoom-out"),
+                !scene.ActivateGlobeButton("globe-model") &&
+                !scene.ActivateGlobeButton("globe-model-night"),
             "A hidden Globe drawer control remained active after closing.");
         Act("globe-drawer-open");
         now += TimeSpan.FromMilliseconds(300);
@@ -165,7 +164,7 @@ public sealed partial class MainWindow
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
             "Isolated Globe verification changed the user's camera, projector, calibration or board.");
         return new { passed = true, nativeWidth = width, nativeHeight = height, directory, images,
-            distantEntranceAndSlowSpin = true, zoomControlsAndRemovedManualRotation = true,
+            distantEntranceAndSlowSpin = true, absoluteZoomRailAndRemovedStepButtons = true,
             circle, squareCircle, measuredBoardCircle, portraitCircle, texture, landscapeHandle, sky, shootingStars,
             celestialSphereTextureReusedAcrossRotationAndZoom = true, starsRemainBehindHiddenControls = true,
             compactClosedDrawerAndOpenActions = true, drawerDurationMilliseconds = 300,
@@ -184,24 +183,30 @@ public sealed partial class MainWindow
         {
             Require(scene.ActivateGlobeButton(id), "The native Globe view rejected " + id + ".");
         }
+        void SetZoom(float position)
+        {
+            var rail = scene.GetGlobeZoomRailGeometry() ?? throw new InvalidOperationException("No settled zoom rail.");
+            now += TimeSpan.FromMilliseconds(100);
+            Require(scene.SetGlobeZoomRailPosition(position, now, rail.Revision), "Fresh absolute zoom was rejected.");
+        }
         void CheckClosedDrawer() => Require(!scene.GlobeDrawerOpen && scene.CurrentBoardButtons.Count == 1 &&
                 scene.CurrentBoardButtons.Single() is { Id: "globe-drawer-open", Label: "^", Enabled: true } handle &&
                 handle.Bounds == new BoardRect(.01, .87, .18, .12),
             "Globe's closed drawer does not contain only its enabled space-themed up arrow.");
         void CheckOpenDrawer()
         {
-            string[] ids = ["globe-drawer-close", "globe-exit", "globe-zoom-out", "globe-zoom-in"];
-            string[] captions = ["v", "Exit", "Zoom -", "Zoom +"];
+            bool expanded = scene.CurrentBoardButtons.Any(button => button.Id == "globe-model-clouds");
+            string[] ids = expanded
+                ? ["globe-drawer-close", "globe-exit", "globe-model", "globe-model-clouds", "globe-model-no-clouds", "globe-model-night"]
+                : ["globe-drawer-close", "globe-exit", "globe-model"];
+            string[] captions = expanded ? ["V", "EXIT", "MODEL", "CLOUDS", "NO CLOUDS", "NIGHT"] : ["V", "EXIT", "MODEL"];
             Require(scene.GlobeDrawerOpen && scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(ids) &&
-                    scene.CurrentBoardButtons.Select(button => button.Label).SequenceEqual(captions) &&
-                    // Zoom - is unavailable at the minimum, which is also the opening view.
-                    scene.CurrentBoardButtons.All(button => button.Enabled || button.Id == "globe-zoom-out" &&
-                        scene.GlobeState.TargetZoom <= GlobeState.MinimumZoom) &&
+                    scene.CurrentBoardButtons.Select(button => button.Label.ToUpperInvariant()).SequenceEqual(captions) &&
+                    scene.CurrentBoardButtons.All(button => button.Enabled || button.Id == "globe-model" && expanded) &&
                     scene.CurrentBoardButtons.Single(button => button.Id == "globe-drawer-close").Bounds == new BoardRect(.01, .87, .18, .12) &&
                     scene.CurrentBoardButtons.Single(button => button.Id == "globe-exit").Bounds == new BoardRect(.20, .87, .155, .12) &&
-                    scene.CurrentBoardButtons.Single(button => button.Id == "globe-zoom-out").Bounds == new BoardRect(.365, .87, .155, .12) &&
-                    scene.CurrentBoardButtons.Single(button => button.Id == "globe-zoom-in").Bounds == new BoardRect(.53, .87, .155, .12),
-                "Globe's settled drawer lacks its down arrow and the three requested actions.");
+                    scene.CurrentBoardButtons.Single(button => button.Id == "globe-model").Bounds == new BoardRect(.365, .87, .155, .12),
+                "Globe's settled drawer lacks its down arrow, EXIT, MODEL or expanded choices.");
         }
         void CheckDrawerProgress(double expected)
         {
@@ -437,10 +442,9 @@ public sealed partial class MainWindow
                 {
                     Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && scene.GlobeState.Revision == revision,
                         "Qualified obstruction lit or immediately activated the hold " + button.Label + " button.");
-                    if (button.Hold == BoardButtonHold.Repeat) CheckHoldToRepeat(button, occupied, empty);
-                    else if (button.Id == "globe-exit") CheckExitHoldEvidence(button, occupied);
+                    if (button.Id == "globe-exit") CheckExitHoldEvidence(button, occupied);
                     else CheckLongPress(button, occupied);
-                    // Its zooms or drawer toggles changed the Globe; let acquisition settle again.
+                    // Drawer/model expansion changed controls; let acquisition settle again.
                     Draw(); scene.GetHandAcquisitionContext(now);
                     now += TimeSpan.FromSeconds(1);
                     tested.Add(button.Label);
@@ -494,15 +498,17 @@ public sealed partial class MainWindow
         }
         void CheckLongPress(BoardButton button, byte[] occupied)
         {
-            // Fingers resting on the drawer handle toggle it once after a second,
-            // through the actual detector and scene timing, without any light.
+            // Both the drawer handle and MODEL act once after a second through
+            // actual caption corruption, without requiring a hand spotlight.
             bool wasOpen = scene.GlobeDrawerOpen;
+            bool model = button.Id == "globe-model";
             var hold = scene.GetHoldButtonContext(now);
             Require(hold is not null && hold.ButtonIds.Contains(button.Id),
                 "Globe did not provide a hold context for its " + button.Label + " handle.");
             var tracker = new HandAcquisitionPresenceTracker();
             var started = now;
             var activations = new List<double>();
+            byte[] empty = Draw();
             for (int frame = 0; frame <= 12; frame++)
             {
                 double at = (now - started).TotalMilliseconds;
@@ -510,24 +516,30 @@ public sealed partial class MainWindow
                     hold.SearchPolygon, hold.ExpectedScene, now, now));
                 Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null,
                     "A held drawer handle switched on a search light.");
+                if (frame == 5) CheckHoldRim(button, empty, warm: true);
                 if (scene.ObserveHoldButtons(hold, held, now).Contains(button.Id)) activations.Add(at);
                 now += TimeSpan.FromMilliseconds(100);
             }
-            Require(activations.SequenceEqual([1000d]) && scene.GlobeDrawerOpen != wasOpen &&
+            Require(activations.SequenceEqual([1000d]) &&
+                    (model ? scene.CurrentBoardButtons.Any(choice => choice.Id == "globe-model-night") : scene.GlobeDrawerOpen != wasOpen) &&
                     scene.CurrentBoardScreen == BoardScreen.Globe,
-                $"Holding the {button.Label} handle did not toggle the drawer exactly once at one second: " +
+                $"Holding {button.Label} did not act exactly once at one second: " +
                 string.Join(", ", activations) + ".");
-            // Restore the drawer state the remaining controls expect.
-            Require(scene.ActivateGlobeButton(wasOpen ? "globe-drawer-open" : "globe-drawer-close"),
-                "The handle fixture could not restore its drawer.");
+            // MODEL remains expanded for the visit. Restore only drawer state.
+            if (!model)
+                Require(scene.ActivateGlobeButton(wasOpen ? "globe-drawer-open" : "globe-drawer-close"),
+                    "The handle fixture could not restore its drawer.");
             now += TimeSpan.FromMilliseconds(400);
             scene.TickGlobe(now);
             Require(scene.GlobeDrawerOpen == wasOpen, "The handle fixture left the drawer in the wrong state.");
+            // MODEL adds new buttons, unlike the handle's restored appearance.
+            // Render that exact settled control set before asking for its optical
+            // reference; the previous GPU frame correctly cannot describe it.
+            byte[] clear = Draw();
             // The spent handle re-arms only once the camera sees the fingers lifted.
             var lifted = scene.GetHoldButtonContext(now);
-            Require(lifted is not null, "Globe did not provide a hold context after restoring its drawer.");
+            Require(lifted is not null, "Globe did not provide a hold context after rendering the restored " + button.Id + " controls.");
             var liftTracker = new HandAcquisitionPresenceTracker();
-            byte[] clear = Draw();
             for (int frame = 0; frame < 5; frame++)
             {
                 var held = lifted!.HeldButtons(liftTracker.Update(width, height, width * 4, clear,
@@ -535,45 +547,6 @@ public sealed partial class MainWindow
                 Require(held.Count == 0 && scene.ObserveHoldButtons(lifted, held, now).Count == 0,
                     "An uncovered Globe handle reported hold evidence.");
                 now += TimeSpan.FromMilliseconds(100);
-            }
-        }
-        void CheckHoldToRepeat(BoardButton button, byte[] occupied, byte[] empty)
-        {
-            // Fingers held over the caption activate once after a second, then
-            // each further second, through the actual detector and scene timing.
-            var hold = scene.GetHoldButtonContext(now);
-            Require(hold is not null && hold.ButtonIds.Contains(button.Id),
-                "Globe did not provide a hold context for " + button.Label + ".");
-            var tracker = new HandAcquisitionPresenceTracker();
-            var started = now;
-            double zoomBefore = scene.GlobeState.TargetZoom;
-            double step = button.Id == "globe-zoom-in" ? GlobeState.ZoomStep : 1 / GlobeState.ZoomStep;
-            var activations = new List<double>();
-            for (int frame = 0; frame <= 21; frame++)
-            {
-                double at = (now - started).TotalMilliseconds;
-                if (frame == 5) CheckHoldRim(button, empty, warm: true);
-                if (FeedHold(occupied).Contains(button.Id)) activations.Add(at);
-            }
-            Require(activations.SequenceEqual([1000d, 2000d]) &&
-                    Math.Abs(scene.GlobeState.TargetZoom - zoomBefore * step * step) < 1e-9,
-                $"Holding {button.Label} did not activate exactly at one and two seconds: {string.Join(", ", activations)}.");
-            for (int frame = 0; frame < 4; frame++)
-                Require(FeedHold(empty).Count == 0, "An uncovered hold button activated.");
-            CheckHoldRim(button, empty, warm: false);
-            for (int frame = 0; frame < 9; frame++)
-                Require(FeedHold(occupied).Count == 0, "A hold released for 400 ms kept its earlier timer.");
-            Require(Math.Abs(scene.GlobeState.TargetZoom - zoomBefore * step * step) < 1e-9 &&
-                    scene.CurrentBoardScreen == BoardScreen.Globe && scene.GlobeDrawerOpen,
-                "Hold evidence changed the Globe beyond its two timed activations.");
-
-            IReadOnlyList<string> FeedHold(byte[] pixels)
-            {
-                var held = hold!.HeldButtons(tracker.Update(width, height, width * 4, pixels,
-                    hold.SearchPolygon, hold.ExpectedScene, now, now));
-                var activated = scene.ObserveHoldButtons(hold, held, now);
-                now += TimeSpan.FromMilliseconds(100);
-                return activated;
             }
         }
         // Halfway through a hold, the narrow rim touches the rounded button edge;
@@ -598,7 +571,7 @@ public sealed partial class MainWindow
         {
             // A hand spotlight beside a hold button must not paint over it: its
             // projected caption is the camera's only evidence of a press.
-            var zoom = scene.CurrentBoardButtons.Single(button => button.Id == "globe-zoom-in");
+            var zoom = scene.CurrentBoardButtons.Single(button => button.Id == "globe-exit");
             var top = CameraPoint(zoom.Bounds.X + zoom.Bounds.Width / 2, zoom.Bounds.Y);
             byte[] before = Draw();
             PixelPoint[] shape =
@@ -615,7 +588,7 @@ public sealed partial class MainWindow
             var above = CameraPoint(zoom.Bounds.X + zoom.Bounds.Width / 2, zoom.Bounds.Y - .03);
             Require(scene.ActiveHandSpotlightCount == 1 && ChangedFraction(before, after, zoom.Bounds) < .02 &&
                     WhiteNear(after, above) > WhiteNear(before, above) + 200,
-                "A hand spotlight covered a hold-to-repeat button, or vanished beside it.");
+                "A hand spotlight covered EXIT, or vanished beside it.");
         }
         void CheckIntactChevron(BoardButton button, int index, HandTrackingBounds trigger, byte[] clean,
             SceneCompositor.HandAcquisitionContext context)

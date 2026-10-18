@@ -269,7 +269,7 @@ public sealed partial class BoardSession
         ClearCrownDeedDrawerUi();
         AdvanceCrownDeedPresentation(now);
         ClearBottomDrawers(now);
-        if (screen == BoardScreen.Globe) _globe.Start(now);
+        if (screen == BoardScreen.Globe) InitializeGlobe(now);
         ClearHolds();
         Screen = screen;
         ResetControlVisibility(now);

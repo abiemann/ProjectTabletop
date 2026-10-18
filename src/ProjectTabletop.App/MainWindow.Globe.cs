@@ -23,8 +23,8 @@ public sealed partial class MainWindow
         _scene.ShowGlobe();
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
-        SetStatus("Globe ready. Open the left drawer for Exit, zoom and the dotted pitch bar on the right. " +
-            "Touch the dots higher or lower to tilt Earth. Laptop clicks also work.");
+        SetStatus("Globe ready. Open the drawer for EXIT and MODEL. The left dotted bar controls ZOOM; " +
+            "the right controls PITCH. MODEL offers CLOUDS, NO CLOUDS and NIGHT. Laptop clicks also work.");
     }
 
     private async Task<string> SaveGlobePreviewAsync()

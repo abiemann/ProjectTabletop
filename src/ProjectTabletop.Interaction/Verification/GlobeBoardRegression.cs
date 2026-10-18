@@ -9,129 +9,107 @@ internal static class GlobeBoardRegression
         CheckDrawerAndSmoothControls();
         CheckNavigationAndPinches();
         CheckFourFingerSelection();
-        CheckHoldToRepeat();
-        CheckInterruptedRepeatHold();
-        CheckStrictCaptionRepeat();
+        CheckModelHolds();
+        CheckInterruptedModelHold();
+        CheckStrictCaptionReadiness();
         CheckLongPressHandle();
         CheckSimultaneousHolds();
         CheckHoldProgress();
         Console.WriteLine("Globe verification passed: pure entrance/spin frames, bounded smooth zoom, hidden rotation " +
             "controls, timed drawer targets, pinch and four-finger gestures ignored by every hold control, reset barriers, " +
-            "hold-to-repeat zoom timing, clear-caption readiness and reference resets, gaps and stale frames, " +
+            "single-action model holds, clear-caption readiness and reference resets, gaps and stale frames, " +
             "long-press drawer handle with release, long-press Exit.");
     }
 
-    private static void CheckHoldToRepeat()
+    private static void CheckModelHolds()
     {
         var board = new BoardSession(); board.ShowGlobe(Time(0));
-        string[] zoomIn = ["globe-zoom-in"];
-        Require(board.ObserveHeldButtons(zoomIn, Time(1000), Time(1000)).Count == 0,
-            "A hidden hold button accepted evidence while the drawer was closed.");
+        string[] model = ["globe-model"];
+        Require(board.ObserveHeldButtons(model, Time(1000), Time(1000)).Count == 0,
+            "A hidden model button accepted evidence while the drawer was closed.");
         Require(board.ActivateButton("globe-drawer-open", Time(3000)) && board.TickGlobe(Time(3300)),
             "The hold fixture could not open the drawer.");
-        Require(Button(board, "globe-zoom-in").Hold == BoardButtonHold.Repeat &&
-            Button(board, "globe-zoom-out").Hold == BoardButtonHold.Repeat &&
-            Button(board, "globe-exit").Hold == BoardButtonHold.Once &&
-            Button(board, "globe-drawer-close").Hold == BoardButtonHold.Once,
-            "Globe's zooms should repeat, and its handle and Exit act once per long press.");
+        Require(board.Buttons.All(button => button.Hold == BoardButtonHold.Once),
+            "Globe's controls must act once per long press.");
         IReadOnlyList<string> Hold(string[] ids, int time) => board.ObserveHeldButtons(ids, Time(time), Time(time + 40));
         for (int time = 4000; time < 5000; time += 100)
-            Require(Hold(zoomIn, time).Count == 0, "A hold activated before a full second of caption evidence.");
-        Require(Hold(zoomIn, 5000).SequenceEqual(zoomIn) && Near(board.GetGlobeSnapshot(Time(5100)).TargetZoom, GlobeState.DefaultZoom * 1.25),
-            "One second of held evidence did not zoom exactly once.");
-        Require(Hold(zoomIn, 5000).Count == 0 && Hold(zoomIn, 4900).Count == 0,
+            Require(Hold(model, time).Count == 0, "MODEL activated before a full second of caption evidence.");
+        Require(Hold(model, 5000).SequenceEqual(model) && board.GlobeModelExpanded &&
+            !Button(board, "globe-model").Enabled, "A full hold did not expand and disable MODEL.");
+        Require(Hold(model, 5000).Count == 0 && Hold(model, 4900).Count == 0,
             "A repeated or delayed frame advanced the hold.");
-        for (int time = 5100; time < 6000; time += 100)
-            Require(time is > 5300 and < 5500 || Hold(zoomIn, time).Count == 0,
-                "A continued hold repeated before another second; a 200 ms evidence gap released it.");
-        Require(Hold(zoomIn, 6000).SequenceEqual(zoomIn) && Near(board.GetGlobeSnapshot(Time(6400)).TargetZoom, GlobeState.DefaultZoom * 1.25 * 1.25),
-            "A continued hold did not repeat after each further second.");
-        Require(Hold([], 6400).Count == 0, "An uncovered frame activated a hold.");
-        for (int time = 6500; time < 7500; time += 100)
-            Require(Hold(zoomIn, time).Count == 0, "A released hold kept its previous progress.");
-        Require(Hold(zoomIn, 7500).SequenceEqual(zoomIn),
-            "A gap over 350 ms did not restart the one-second hold.");
-        Require(Hold(["globe-exit", "globe-drawer-close"], 7600).Count == 0 && board.GlobeDrawerOpen &&
-            board.Screen == BoardScreen.Globe, "One frame of evidence activated Exit or toggled the handle.");
-        Require(board.ObserveHeldButtons(zoomIn, Time(8500), Time(9000)).Count == 0,
+        for (int time = 5100; time < 7000; time += 100)
+            Require(Hold(model, time).Count == 0 && board.GlobeModelExpanded,
+                "Keeping MODEL covered repeated its action.");
+        string[] night = ["globe-model-night"];
+        for (int time = 7100; time < 8100; time += 100)
+            Require(Hold(night, time).Count == 0, "NIGHT acted before a full second.");
+        Require(Hold(night, 8100).SequenceEqual(night) && board.GetGlobeSnapshot(Time(8200)).Model == GlobeModel.Night,
+            "The model choice did not select NIGHT.");
+        for (int time = 8200; time < 9500; time += 100)
+            Require(Hold(night, time).Count == 0, "The model choice repeated without a lift.");
+        Require(Hold(["globe-exit", "globe-drawer-close"], 9600).Count == 0 && board.GlobeDrawerOpen &&
+            board.Screen == BoardScreen.Globe, "Ambiguous evidence activated Exit or toggled the handle.");
+        Require(board.ObserveHeldButtons(["globe-model-clouds"], Time(10500), Time(11000)).Count == 0,
             "Stale hold evidence activated a button.");
-        string[] zoomOut = ["globe-zoom-out"];
-        for (int time = 10000; time < 11000; time += 100)
-            Require(Hold(zoomOut, time).Count == 0, "Zoom - activated before a full second.");
-        Require(Hold(zoomOut, 11000).SequenceEqual(zoomOut),
-            "Zoom - did not share the hold-to-repeat behaviour.");
         board.ShowMenu(Time(11100)); board.ShowGlobe(Time(11200));
-        Require(board.ObserveHeldButtons(zoomIn, Time(12500), Time(12500)).Count == 0,
-            "Leaving Globe retained a hold or its drawer.");
+        Require(!board.GlobeModelExpanded && board.GetGlobeSnapshot(Time(11200)).Model == GlobeModel.Clouds &&
+            board.ObserveHeldButtons(night, Time(12500), Time(12500)).Count == 0,
+            "Leaving Globe retained a model, expanded choices or an actionable hidden caption.");
     }
 
-    private static void CheckInterruptedRepeatHold()
+    private static void CheckInterruptedModelHold()
     {
         var board = new BoardSession(); board.ShowGlobe(Time(0));
         Require(board.ActivateButton("globe-drawer-open", Time(100)) && board.TickGlobe(Time(400)),
-            "The interrupted repeat fixture could not open the drawer.");
-        IReadOnlyList<string> Hold(int time) => board.ObserveHeldButtons(["globe-zoom-in"], Time(time), Time(time));
-        for (int time = 1000; time < 2000; time += 100)
-            Require(Hold(time).Count == 0, "The repeat fixture acted before a second.");
-        Require(Hold(2000).SequenceEqual(["globe-zoom-in"]), "The repeat fixture did not zoom once.");
-        Require(Hold(2100).Count == 0 && Hold(2200).Count == 0, "The zoom repeated before its next second.");
-        double beforeGap = board.GetGlobeSnapshot(Time(2200)).TargetZoom;
-        Require(board.HoldProgress(Time(3500)).Count == 0 && Hold(3500).Count == 0 &&
-            Near(board.GetGlobeSnapshot(Time(3500)).TargetZoom, beforeGap),
-            "A returning positive frame caught up a zoom repeat across a camera gap.");
+            "The interrupted model fixture could not open the drawer.");
+        IReadOnlyList<string> Hold(int time) => board.ObserveHeldButtons(["globe-model"], Time(time), Time(time));
+        for (int time = 1000; time <= 1600; time += 100)
+            Require(Hold(time).Count == 0, "The model fixture acted before a second.");
+        Require(board.HoldProgress(Time(3500)).Count == 0 && Hold(3500).Count == 0 && !board.GlobeModelExpanded,
+            "A returning positive frame caught up a model hold across a camera gap.");
         for (int time = 3600; time < 4500; time += 100)
-            Require(Hold(time).Count == 0, "A camera gap shortened the next repeating hold.");
-        Require(Hold(4500).SequenceEqual(["globe-zoom-in"]), "The restarted zoom did not act after a fresh second.");
+            Require(Hold(time).Count == 0, "A camera gap shortened the next model hold.");
+        Require(Hold(4500).SequenceEqual(["globe-model"]), "The restarted model hold did not act after a fresh second.");
         Require(Hold(4500).Count == 0 && Hold(4499).Count == 0,
-            "Repeated or out-of-order evidence repeated the zoom action.");
-        for (int time = 4600; time < 5500; time += 100)
-            Require(Hold(time).Count == 0, "A restarted continuous zoom repeated early.");
-        Require(Hold(5500).SequenceEqual(["globe-zoom-in"]) &&
-            Near(board.GetGlobeSnapshot(Time(5500)).TargetZoom, beforeGap * 1.25 * 1.25),
-            "The restarted continuous hold did not resume one zoom per second.");
+            "Repeated or out-of-order evidence repeated the model action.");
     }
 
-    private static void CheckStrictCaptionRepeat()
+    private static void CheckStrictCaptionReadiness()
     {
         var board = new BoardSession(); board.ShowGlobe(Time(0));
-        Require(board.ActivateButton("globe-drawer-open", Time(100)) && board.TickGlobe(Time(400)),
-            "The strict-caption repeat fixture could not open the drawer.");
+        Require(board.ActivateButton("globe-drawer-open", Time(100)) && board.TickGlobe(Time(400)) &&
+            board.ActivateButton("globe-model", Time(500)), "The strict-caption fixture could not open model choices.");
         IReadOnlyList<string> Hold(int time) =>
-            board.ObserveHeldButtons(["globe-zoom-in"], Time(time), Time(time), []);
+            board.ObserveHeldButtons(["globe-model-night"], Time(time), Time(time), []);
         IReadOnlyList<string> Clear(int time) =>
-            board.ObserveHeldButtons([], Time(time), Time(time), ["globe-zoom-in"]);
-        Require(Clear(1000).Count == 0, "A clear Globe caption activated Zoom +.");
-        for (int time = 1100; time < 2100; time += 100)
-            Require(Hold(time).Count == 0, "A cleared Globe caption shortened the first hold.");
-        Require(Hold(2100).SequenceEqual(["globe-zoom-in"]), "A strict hold did not zoom after its first second.");
-
-        // A sibling's enabled state or appearance can change after a zoom. Its
-        // replacement reference must not interrupt this unchanged repeat hold.
-        board.ResetHoldCaptionEvidence(["globe-zoom-out"]);
-        for (int time = 2200; time < 3100; time += 100)
-            Require(Hold(time).Count == 0, "A strict zoom repeated before its next second.");
-        Require(Hold(3100).SequenceEqual(["globe-zoom-in"]) &&
-            Near(board.GetGlobeSnapshot(Time(3100)).TargetZoom, GlobeState.DefaultZoom * 1.25 * 1.25),
-            "Resetting an unrelated caption interrupted a strict repeat or consumed its readiness.");
-
+            board.ObserveHeldButtons([], Time(time), Time(time), ["globe-model-night"]);
+        Require(Clear(1000).Count == 0, "A clear model caption activated NIGHT.");
+        for (int time = 1100; time <= 1500; time += 100)
+            Require(Hold(time).Count == 0, "A cleared caption shortened the model hold.");
+        board.ResetHoldCaptionEvidence(["globe-model-clouds"]);
+        for (int time = 1600; time < 2100; time += 100)
+            Require(Hold(time).Count == 0, "A strict model hold completed early.");
+        Require(Hold(2100).SequenceEqual(["globe-model-night"]) && board.GetGlobeSnapshot(Time(2100)).Model == GlobeModel.Night,
+            "Resetting an unrelated caption interrupted the model hold or consumed readiness.");
+        Clear(2200); Clear(2600);
         board.ResetHoldCaptionEvidence();
-        for (int time = 3200; time <= 4500; time += 100)
+        for (int time = 2700; time <= 4000; time += 100)
             Require(Hold(time).Count == 0 && board.HoldProgress(Time(time)).Count == 0,
-                "A replaced control reference reused a previous clear caption or partial hold.");
-        Require(Clear(4600).Count == 0, "A replacement reference's clear caption activated Zoom +.");
-        board.ResetHoldCaptionEvidence(["globe-zoom-in"]);
-        Require(board.ObserveHeldButtons([], Time(4600), Time(4650), ["globe-zoom-in"]).Count == 0 &&
-            board.ObserveHeldButtons([], Time(4599), Time(4650), ["globe-zoom-in"]).Count == 0,
+                "A replaced reference reused a previous clear caption or partial hold.");
+        Require(Clear(4100).Count == 0, "A replacement reference's clear caption activated NIGHT.");
+        board.ResetHoldCaptionEvidence(["globe-model-night"]);
+        Require(board.ObserveHeldButtons([], Time(4100), Time(4150), ["globe-model-night"]).Count == 0 &&
+            board.ObserveHeldButtons([], Time(4099), Time(4150), ["globe-model-night"]).Count == 0,
             "Repeated or out-of-order clearance activated a replacement reference.");
-        for (int time = 4700; time <= 6000; time += 100)
+        for (int time = 4200; time <= 5500; time += 100)
             Require(Hold(time).Count == 0 && board.HoldProgress(Time(time)).Count == 0,
                 "An obsolete clear frame re-armed the changed control reference.");
-        Require(Clear(6100).Count == 0, "Fresh clearance activated a reset Globe caption.");
-        for (int time = 6200; time < 7200; time += 100)
-            Require(Hold(time).Count == 0, "A reset Globe caption reused previous hold progress.");
-        Require(Hold(7200).SequenceEqual(["globe-zoom-in"]) &&
-            Near(board.GetGlobeSnapshot(Time(7200)).TargetZoom, GlobeState.DefaultZoom * Math.Pow(1.25, 3)),
-            "A fresh clear reference followed by a full strict hold failed to zoom.");
+        Require(Clear(5600).Count == 0, "Fresh clearance activated a reset model caption.");
+        for (int time = 5700; time < 6700; time += 100)
+            Require(Hold(time).Count == 0, "A reset model caption reused previous hold progress.");
+        Require(Hold(6700).SequenceEqual(["globe-model-night"]),
+            "A fresh clear reference followed by a full strict hold failed to select the model.");
     }
 
     // On-board feedback: how far each held button is toward acting.
@@ -142,15 +120,15 @@ internal static class GlobeBoardRegression
             "The hold-progress fixture could not open the drawer.");
         IReadOnlyList<string> Hold(string[] ids, int time) => board.ObserveHeldButtons(ids, Time(time), Time(time));
         Require(board.HoldProgress(Time(1000)).Count == 0, "Progress appeared before any hold.");
-        for (int time = 1000; time <= 1500; time += 100) Hold(["globe-zoom-in"], time);
-        Require(board.HoldProgress(Time(1500)) is [{ ButtonId: "globe-zoom-in", Progress: > .45 and < .55 }],
+        for (int time = 1000; time <= 1500; time += 100) Hold(["globe-model"], time);
+        Require(board.HoldProgress(Time(1500)) is [{ ButtonId: "globe-model", Progress: > .45 and < .55 }],
             "Half a second of holding did not show half progress.");
-        for (int time = 1600; time <= 2000; time += 100) Hold(["globe-zoom-in"], time);
-        Require(board.HoldProgress(Time(2200)) is [{ ButtonId: "globe-zoom-in", Progress: > .15 and < .25 }],
-            "A repeating hold did not restart its progress after acting.");
+        for (int time = 1600; time <= 2000; time += 100) Hold(["globe-model"], time);
+        Require(board.HoldProgress(Time(2200)).Count == 0 && board.GlobeModelExpanded,
+            "A single-action model hold kept progress after acting.");
         Require(board.HoldProgress(Time(2400)).Count == 0, "Progress outlived the hold's camera evidence.");
-        Hold(["globe-zoom-in"], 2500); Hold(["globe-zoom-in"], 2800);
-        Hold(["globe-zoom-in", "globe-exit"], 2900);
+        Hold(["globe-model-night"], 2500); Hold(["globe-model-night"], 2800);
+        Hold(["globe-model-night", "globe-exit"], 2900);
         Require(board.HoldProgress(Time(2900)).Count == 0, "An ambiguous two-caption frame kept hold progress.");
     }
 
@@ -162,12 +140,12 @@ internal static class GlobeBoardRegression
             "The simultaneous-hold fixture could not open the drawer.");
         IReadOnlyList<string> Hold(string[] ids, int time) => board.ObserveHeldButtons(ids, Time(time), Time(time));
         for (int time = 1000; time <= 3000; time += 100)
-            Require(Hold(["globe-zoom-in", "globe-exit"], time).Count == 0 && board.Screen == BoardScreen.Globe &&
+            Require(Hold(["globe-model", "globe-exit"], time).Count == 0 && board.Screen == BoardScreen.Globe &&
                 Near(board.GetGlobeSnapshot(Time(time)).TargetZoom, GlobeState.DefaultZoom),
                 "Two covered long-press captions activated a button.");
         for (int time = 3100; time < 4100; time += 100)
-            Require(Hold(["globe-zoom-in"], time).Count == 0, "An ambiguous hold shortened the next long press.");
-        Require(Hold(["globe-zoom-in"], 4100).SequenceEqual(["globe-zoom-in"]),
+            Require(Hold(["globe-model"], time).Count == 0, "An ambiguous hold shortened the next long press.");
+        Require(Hold(["globe-model"], 4100).SequenceEqual(["globe-model"]),
             "A single covered caption did not act after its own second.");
     }
 
@@ -305,12 +283,12 @@ internal static class GlobeBoardRegression
             "A hidden Globe control remained executable.");
         Require(board.ActivateButton("globe-drawer-open", Time(4000)) && board.GlobeDrawerOpen &&
             board.GlobeDrawerOpenedAt == Time(4000), "The drawer handle did not open a timed drawer.");
-        string[] ids = ["globe-drawer-close", "globe-exit", "globe-zoom-out", "globe-zoom-in"];
-        string[] labels = ["v", "Exit", "Zoom -", "Zoom +"];
+        string[] ids = ["globe-drawer-close", "globe-exit", "globe-model"];
+        string[] labels = ["v", "Exit", "MODEL"];
         Require(board.Buttons.Select(button => button.Id).SequenceEqual(ids) &&
             board.Buttons.Select(button => button.Label).SequenceEqual(labels), "The open drawer contains incorrect controls.");
         BoardRect[] bounds = [new(.01, .87, .18, .12), new(.20, .87, .155, .12),
-            new(.365, .87, .155, .12), new(.53, .87, .155, .12)];
+            new(.365, .87, .155, .12)];
         Require(board.Buttons.Select(button => button.Bounds).SequenceEqual(bounds) &&
             Button(board, "globe-drawer-close").Bounds == new BoardRect(.01, .87, .18, .12),
             "Drawer controls did not form one bottom row beside the fixed handle.");
@@ -332,30 +310,22 @@ internal static class GlobeBoardRegression
             board.Buttons.Where(button => button.Id != "globe-drawer-close").All(button => !button.Enabled) &&
             !board.ActivateButton("globe-exit", Time(4150)) && !board.ActivateButton("globe-zoom-in", Time(4299)),
             "Drawer sampling changed state or a moving control became executable.");
-        // The opening view is the minimum zoom, so only Zoom - stays unavailable.
+        // All buttons enable once the drawer has settled.
         Require(!board.TickGlobe(Time(4299)) && board.TickGlobe(Time(4300)) && !board.TickGlobe(Time(4301)) &&
-            board.Buttons.All(button => button.Enabled != (button.Id == "globe-zoom-out")) && Near(board.GetGlobeDrawerProgress(Time(4100)), 1) && opened == 1,
+            board.Buttons.All(button => button.Enabled) && Near(board.GetGlobeDrawerProgress(Time(4100)), 1) && opened == 1,
             "Settled drawer controls did not enable once, or the drawer restarted the Earth.");
 
         GlobeSnapshot before = board.GetGlobeSnapshot(Time(4400));
-        Require(board.ActivateButton("globe-zoom-in", Time(4400)), "Zoom + did not accept a settled laptop selection.");
+        Require(board.SetGlobeZoomPosition(.5, Time(4400)), "The zoom rail did not accept a settled position.");
         GlobeSnapshot instant = board.GetGlobeSnapshot(Time(4400));
-        GlobeSnapshot halfway = board.GetGlobeSnapshot(Time(4575));
-        GlobeSnapshot final = board.GetGlobeSnapshot(Time(4750));
-        Require(Near(instant.Zoom, before.Zoom) && Near(instant.TargetZoom, GlobeState.DefaultZoom * 1.25) && halfway.Zoom > instant.Zoom &&
-            halfway.Zoom < final.Zoom && Near(final.Zoom, GlobeState.DefaultZoom * 1.25), "Zooming jumped immediately or failed to settle smoothly.");
-        Require(board.ActivateButton("globe-zoom-in", Time(4750)) && board.ActivateButton("globe-zoom-in", Time(4750)),
-            "Consecutive zoom selections were lost.");
-        Require(Near(board.GetGlobeSnapshot(Time(5100)).TargetZoom, GlobeState.DefaultZoom * Math.Pow(1.25, 3)),
-            "Quick selections failed to accumulate zoom targets.");
-        for (int time = 5500; time < 15000; time += 400) board.ActivateButton("globe-zoom-in", Time(time));
-        Require(Near(board.GetGlobeSnapshot(Time(15000)).Zoom, GlobeState.MaximumZoom) &&
-            !Button(board, "globe-zoom-in").Enabled && !board.ActivateButton("globe-zoom-in", Time(15000)),
-            "Zoom exceeded its maximum or left the capped control enabled.");
-        for (int time = 16000; time < 36000; time += 400) board.ActivateButton("globe-zoom-out", Time(time));
-        Require(Near(board.GetGlobeSnapshot(Time(36000)).Zoom, GlobeState.MinimumZoom) &&
-            !Button(board, "globe-zoom-out").Enabled && !board.ActivateButton("globe-zoom-out", Time(36000)),
-            "Zoom exceeded its minimum or left the capped control enabled.");
+        GlobeSnapshot halfway = board.GetGlobeSnapshot(Time(4460));
+        GlobeSnapshot final = board.GetGlobeSnapshot(Time(4520));
+        Require(Near(instant.Zoom, before.Zoom) && Near(instant.TargetZoom, 1.8) && halfway.Zoom > instant.Zoom &&
+            halfway.Zoom < final.Zoom && Near(final.Zoom, 1.8), "Zooming jumped immediately or failed to settle smoothly.");
+        Require(board.SetGlobeZoomPosition(1, Time(5000)) && Near(board.GetGlobeSnapshot(Time(5120)).Zoom, GlobeState.MaximumZoom) &&
+            !board.SetGlobeZoomPosition(1.01, Time(5200)), "The zoom rail exceeded its maximum.");
+        Require(board.SetGlobeZoomPosition(0, Time(5500)) && Near(board.GetGlobeSnapshot(Time(5620)).Zoom, GlobeState.MinimumZoom) &&
+            !board.SetGlobeZoomPosition(-.01, Time(5700)), "The zoom rail exceeded its minimum.");
         revision = board.Revision;
         Require(!board.ActivateButton("globe-rotate-right", Time(37000)) &&
             !board.ActivateButton("globe-rotate-left", Time(38000)) && !board.ActivateButton("unknown", Time(39000)) &&
@@ -389,7 +359,7 @@ internal static class GlobeBoardRegression
             board.ObserveHeldButtons(["globe-exit"], Time(400), Time(400)).Count == 0 && board.TickGlobe(Time(480)),
             "Exit accepted hold evidence during the drawer's entrance.");
         long eventId = 3;
-        foreach (string id in new[] { "globe-exit", "globe-zoom-in", "globe-zoom-out", "globe-drawer-close" })
+        foreach (string id in new[] { "globe-exit", "globe-model", "globe-drawer-close" })
         {
             int time = 500 + (int)eventId * 40;
             BoardButton control = Button(board, id);
@@ -420,7 +390,7 @@ internal static class GlobeBoardRegression
     {
         var board = new BoardSession(); board.ShowGlobe(Time(0));
         // No Globe control answers the finger gesture: grouped fingers cannot
-        // arm, hover or select the handle, Exit or the zooms.
+        // arm, hover or select the handle, Exit or MODEL.
         BoardHandSample handle = Together(Button(board, "globe-drawer-open"));
         for (int time = 100; time <= 1300; time += 100)
             Require(At(board, time, time < 1200 ? handle : Apart(handle)) is null &&
@@ -429,7 +399,7 @@ internal static class GlobeBoardRegression
         Require(board.ActivateButton("globe-drawer-open", Time(1300)) && board.TickGlobe(Time(1600)),
             "The drawer could not open.");
         int start = 1700;
-        foreach (string id in new[] { "globe-exit", "globe-zoom-in", "globe-zoom-out", "globe-drawer-close" })
+        foreach (string id in new[] { "globe-exit", "globe-model", "globe-drawer-close" })
         {
             BoardHandSample fingers = Together(Button(board, id));
             for (int time = start; time <= start + 1300; time += 100)

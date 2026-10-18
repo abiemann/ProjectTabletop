@@ -201,7 +201,7 @@ public sealed partial class MainWindow
                 using (var drawing = globe.CreateDrawingSession())
                 {
                     drawing.Clear(Microsoft.UI.Colors.Transparent);
-                    globeDraw.Invoke(scene, [drawing, buttons, Array.Empty<string>(), Array.Empty<BoardFingerSelectionFeedback>(), true, 1f, width / (double)height, 1d]);
+                    globeDraw.Invoke(scene, [drawing, buttons, Array.Empty<string>(), Array.Empty<BoardFingerSelectionFeedback>(), true, 1f, width / (double)height, 1d, 0d]);
                 }
                 byte[] aPixels = photo.GetPixelBytes(), bPixels = globe.GetPixelBytes();
                 for (int y = 866; y < 995; y++)

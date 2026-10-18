@@ -108,8 +108,8 @@ public sealed partial class SceneCompositor
                 bool sameGeometry = _holdSceneKey is { } previous && previous.Screen == key.Screen && previous.Navigation == key.Navigation &&
                     previous.Aspect == key.Aspect && previous.ControlBrightness == key.ControlBrightness && Equals(previous.CameraMap, key.CameraMap) &&
                     Equals(previous.SurfaceMap, key.SurfaceMap);
-                // A sibling becoming enabled must not interrupt a continuous
-                // Globe zoom hold whose own caption and surface are unchanged.
+                // A sibling changing availability must not interrupt a hold
+                // whose own caption and surface are unchanged.
                 string[]? changedIds = sameGeometry ? appearances.Keys.Union(_holdControlAppearances.Keys)
                     .Where(id => !appearances.TryGetValue(id, out var current) ||
                         !_holdControlAppearances.TryGetValue(id, out var prior) || current != prior).ToArray() : null;
@@ -158,6 +158,7 @@ public sealed partial class SceneCompositor
                     if (activated.Contains("paint-save")) QueuePaintSaveRequest(frameTime);
                 }
                 QueuePhotoCopyHoldAction(activated, frameTime);
+                foreach (var id in activated) RetryGlobeModelAfterAction(id);
                 SyncPhotoCopySession();
             }
             return activated;
@@ -274,8 +275,8 @@ public sealed partial class SceneCompositor
     {
         if (_boardSurfaceMap is null) return null;
         var holds = _boardSession.Buttons.Where(button => button.IsHold).ToArray();
-        bool pitchRail = _boardSession.GlobeDrawerOpen && (_boardSession.ButtonsVisible || BoardControlsAnimating);
-        if (holds.Length == 0 && !pitchRail) return null;
+        bool globeRails = _boardSession.GlobeDrawerOpen && (_boardSession.ButtonsVisible || BoardControlsAnimating);
+        if (holds.Length == 0 && !globeRails) return null;
         var area = CanvasGeometry.CreateRectangle(ds.Device, output);
         foreach (var button in holds)
         {
@@ -286,16 +287,19 @@ public sealed partial class SceneCompositor
             ExcludeRounded(new Rect(b.X - margin, b.Y - margin, b.Width + 2 * margin, b.Height + 2 * margin),
                 radius, radius);
         }
-        if (pitchRail)
+        if (globeRails)
         {
             // Keep the entire rounded housing dark, including the label and
             // pointer gutter, without restoring square spotlight cutouts.
-            var panel = GlobePitchPanelBounds();
             const double margin = .006;
-            ExcludeRounded(new Rect(panel.X - margin, panel.Y - margin,
-                panel.Width + 2 * margin, panel.Height + 2 * margin),
-                GlobePitchPanelCornerRadius / BoardSurfaceSize / PaintBoardAspect() + margin,
-                GlobePitchPanelCornerRadius / BoardSurfaceSize + margin);
+            for (int index = 0; index < 2; index++)
+            {
+                var panel = GlobeRailPanelBounds(zoom: index == 1);
+                ExcludeRounded(new Rect(panel.X - margin, panel.Y - margin,
+                    panel.Width + 2 * margin, panel.Height + 2 * margin),
+                    GlobePitchPanelCornerRadius / BoardSurfaceSize / PaintBoardAspect() + margin,
+                    GlobePitchPanelCornerRadius / BoardSurfaceSize + margin);
+            }
         }
         return area;
 

@@ -4,20 +4,22 @@ public sealed partial class BoardSession
 {
     public static readonly TimeSpan GlobeDrawerOpeningDuration = BottomDrawerOpeningDuration;
     private readonly GlobeState _globe;
-    // The handle and its three actions share one bottom row, left of the
-    // bottom-right credit. The wide, tall handle keeps opposite glass margins
-    // for the camera's colour fit and clears Earth's limb at 1.5× zoom on
-    // rectangular boards; a square board's limb reaches its upper-right corner.
-    // Fingers on this edge row leave the wrist outside the camera view, so hand
-    // tracking kept dropping mid-gesture. Every control here is a hold button:
-    // the handle and Exit act once per long press, the zooms repeat.
+    private bool _globeModelExpanded;
+    // The model choices share MODEL's size and begin directly above it. Every
+    // button uses caption holds; zoom and pitch are independent dotted rails.
     private static readonly IReadOnlyList<BoardButton> GlobeDrawerButtons = Array.AsReadOnly(new[]
     {
         new BoardButton("globe-exit", "Exit", new(.20, .87, .155, .12), BoardScreen.Menu, Hold: BoardButtonHold.Once),
-        new BoardButton("globe-zoom-out", "Zoom -", new(.365, .87, .155, .12), BoardScreen.Globe, Hold: BoardButtonHold.Repeat),
-        new BoardButton("globe-zoom-in", "Zoom +", new(.53, .87, .155, .12), BoardScreen.Globe, Hold: BoardButtonHold.Repeat)
+        new BoardButton("globe-model", "MODEL", new(.365, .87, .155, .12), BoardScreen.Globe, Hold: BoardButtonHold.Once)
+    });
+    private static readonly IReadOnlyList<BoardButton> GlobeModelButtons = Array.AsReadOnly(new[]
+    {
+        new BoardButton("globe-model-clouds", "CLOUDS", new(.365, .735, .155, .12), BoardScreen.Globe, Hold: BoardButtonHold.Once),
+        new BoardButton("globe-model-no-clouds", "NO CLOUDS", new(.53, .735, .155, .12), BoardScreen.Globe, Hold: BoardButtonHold.Once),
+        new BoardButton("globe-model-night", "NIGHT", new(.695, .735, .155, .12), BoardScreen.Globe, Hold: BoardButtonHold.Once)
     });
     public bool GlobeDrawerOpen => Screen == BoardScreen.Globe && _globeDrawer.Open;
+    public bool GlobeModelExpanded => Screen == BoardScreen.Globe && _globeModelExpanded;
     public DateTimeOffset? GlobeDrawerOpenedAt => GlobeDrawerOpen ? _globeDrawer.OpenedAt : null;
     public double GlobeHomeRotationDegrees => _globe.HomeRotationDegrees;
     public double GlobeHomeLatitudeDegrees => _globe.HomeLatitudeDegrees;
@@ -50,6 +52,16 @@ public sealed partial class BoardSession
     public bool SetGlobePitchPosition(double position, DateTimeOffset frameTime) =>
         GlobePitchInputReady(frameTime) && _globe.SetPitchPosition(position, frameTime);
 
+    /// <summary>The zoom rail shares the pitch rail's settled, fresh-frame input policy.</summary>
+    public bool SetGlobeZoomPosition(double position, DateTimeOffset frameTime) =>
+        GlobePitchInputReady(frameTime) && _globe.SetZoomPosition(position, frameTime);
+
+    private void InitializeGlobe(DateTimeOffset now)
+    {
+        _globeModelExpanded = false;
+        _globe.Start(now);
+    }
+
     private IReadOnlyList<BoardButton> CurrentGlobeButtons()
     {
         if (!GlobeDrawerOpen) return Array.AsReadOnly(new[]
@@ -62,8 +74,10 @@ public sealed partial class BoardSession
         };
         buttons.AddRange(GlobeDrawerButtons.Select(button => button with
         {
-            Enabled = _globeDrawer.OpeningReady && (button.Id == "globe-exit" || _globe.CanHandleAction(button.Id))
+            Enabled = _globeDrawer.OpeningReady && (button.Id == "globe-exit" || !_globeModelExpanded)
         }));
+        if (_globeModelExpanded)
+            buttons.AddRange(GlobeModelButtons.Select(button => button with { Enabled = _globeDrawer.OpeningReady }));
         return buttons.AsReadOnly();
     }
 
@@ -80,9 +94,22 @@ public sealed partial class BoardSession
             Show(BoardScreen.Menu, now);
             return true;
         }
-        if (button.Id is not ("globe-zoom-in" or "globe-zoom-out") || !_globe.HandleAction(button.Id, now)) return false;
-        // Zoom repeats retain their hold; only a changed drawer resets caption
-        // readiness and partial progress through BottomDrawerInputBarrier.
+        if (button.Id == "globe-model")
+        {
+            if (_globeModelExpanded) return false;
+            _globeModelExpanded = true;
+            // New captions require a clear observation after they appear.
+            BottomDrawerInputBarrier(_globeDrawer, now);
+            return true;
+        }
+        GlobeModel? model = button.Id switch
+        {
+            "globe-model-clouds" => GlobeModel.Clouds,
+            "globe-model-no-clouds" => GlobeModel.NoClouds,
+            "globe-model-night" => GlobeModel.Night,
+            _ => null
+        };
+        if (!_globeModelExpanded || model is null || !_globe.SelectModel(model.Value, now)) return false;
         BottomDrawerGestureBarrier(now);
         return true;
     }

@@ -96,6 +96,23 @@ internal static class BoardInteractionRegression
                         .SequenceEqual(["menu"]) && session.Screen == BoardScreen.Menu,
                     "Photo Copy's drawer Exit did not return to the launcher.");
             }
+            else if (button.Destination == BoardScreen.Blackjack)
+            {
+                var exit = session.Buttons.Single(item => item.Id == "menu");
+                Require(exit.Hold == BoardButtonHold.Once &&
+                    Update(session, time + 20, Over(exit, ++eventId, time + 20)) is null &&
+                    session.Screen == BoardScreen.Blackjack, "A pinch selected Blackjack's long-press EXIT.");
+                // Photo Copy's preceding EXIT shares this ID and physical area.
+                // Observe a full release before arming Blackjack's caption.
+                session.ObserveHeldButtons([], Time(time + 30), Time(time + 30), [exit.Id]);
+                session.ObserveHeldButtons([], Time(time + 400), Time(time + 400), [exit.Id]);
+                for (int held = 450; held < 1450; held += 250)
+                    Require(session.ObserveHeldButtons([exit.Id], Time(time + held), Time(time + held), []).Count == 0,
+                        "Blackjack's EXIT acted before a full caption hold.");
+                Require(session.ObserveHeldButtons([exit.Id], Time(time + 1450), Time(time + 1450), [])
+                        .SequenceEqual([exit.Id]) && session.Screen == BoardScreen.Menu,
+                    "Blackjack's long-press EXIT did not return to the launcher.");
+            }
             else if (button.Destination == BoardScreen.WaterGarden)
             {
                 Require(session.Buttons.Single() is { Id: "water-drawer-open", Hold: BoardButtonHold.Once } &&

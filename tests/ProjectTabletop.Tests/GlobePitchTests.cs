@@ -134,37 +134,39 @@ public class GlobePitchTests
     }
 
     [Fact]
-    public void ContinuousPitchInputPreservesAnIndependentZoomHold()
+    public void ContinuousPitchInputPreservesAnIndependentModelHold()
     {
         var board = ReadyBoard();
-        const string zoom = "globe-zoom-in";
-        board.ObserveHeldButtons([], At(4000), At(4000), [zoom]);
+        Assert.True(board.ActivateButton("globe-model", At(3500)));
+        const string model = "globe-model-night";
+        board.ObserveHeldButtons([], At(4000), At(4000), [model]);
         long revision = board.Revision;
         long globeRevision = board.GetGlobeSnapshot(At(4000)).Revision;
         for (int ms = 4100; ms < 5100; ms += 100)
         {
-            Assert.Empty(board.ObserveHeldButtons([zoom], At(ms), At(ms), []));
+            Assert.Empty(board.ObserveHeldButtons([model], At(ms), At(ms), []));
             Assert.True(board.SetGlobePitchPosition((ms - 4100) / 1000d, At(ms + 1)));
             Assert.Equal(revision, board.Revision);
             Assert.Equal(globeRevision, board.GetGlobeSnapshot(At(ms + 1)).Revision);
         }
         Assert.NotEmpty(board.HoldProgress(At(5001)));
-        Assert.Equal([zoom], board.ObserveHeldButtons([zoom], At(5100), At(5100), []));
+        Assert.Equal([model], board.ObserveHeldButtons([model], At(5100), At(5100), []));
         Assert.True(board.GlobePitchAvailable(At(5100)));
         Assert.False(board.GlobePitchInputReady(At(5100)));
-        Assert.Equal(GlobeState.DefaultZoom * GlobeState.ZoomStep, board.GetGlobeSnapshot(At(5450)).Zoom);
+        Assert.Equal(GlobeModel.Night, board.GetGlobeSnapshot(At(5450)).Model);
         Assert.True(board.SetGlobePitchPosition(.5, At(5101)));
         Assert.Equal(0, board.GetGlobeSnapshot(At(5221)).ViewLatitudeDegrees);
     }
 
     [Fact]
-    public void ZoomKeepsTheStationaryRailAvailableWhileRejectingEarlierCameraFrames()
+    public void ModelChoiceKeepsTheStationaryRailAvailableWhileRejectingEarlierCameraFrames()
     {
         var board = ReadyBoard();
-        Assert.True(board.GlobePitchAvailable(At(3300)));
-        Assert.False(board.GlobePitchInputReady(At(3300)));
+        Assert.True(board.ActivateButton("globe-model", At(3350)));
+        Assert.True(board.GlobePitchAvailable(At(3350)));
+        Assert.False(board.GlobePitchInputReady(At(3350)));
         var boundary = board.GlobePitchReferenceNotBefore;
-        Assert.True(board.ActivateButton("globe-zoom-in", At(3400)));
+        Assert.True(board.ActivateButton("globe-model-night", At(3400)));
         Assert.True(board.GlobePitchAvailable(At(3400)));
         Assert.False(board.GlobePitchInputReady(At(3399)));
         Assert.False(board.GlobePitchInputReady(At(3400)));
@@ -173,7 +175,7 @@ public class GlobePitchTests
         Assert.True(board.GlobePitchInputReady(At(3401)));
         Assert.True(board.SetGlobePitchPosition(1, At(3401)));
 
-        Assert.True(board.ActivateButton("globe-zoom-out", At(3500)));
+        Assert.True(board.ActivateButton("globe-model-clouds", At(3500)));
         Assert.True(board.GlobePitchAvailable(At(3500)));
         Assert.False(board.GlobePitchInputReady(At(3500)));
         Assert.Equal(boundary, board.GlobePitchReferenceNotBefore);
@@ -185,7 +187,7 @@ public class GlobePitchTests
     {
         var board = ReadyBoard();
         Assert.Equal(At(3300), board.GlobePitchReferenceNotBefore);
-        Assert.True(board.ActivateButton("globe-zoom-in", At(3400)));
+        Assert.True(board.SetGlobeZoomPosition(1, At(3400)));
         Assert.True(board.SetGlobePitchPosition(.75, At(3401)));
         Assert.Equal(At(3300), board.GlobePitchReferenceNotBefore);
 
@@ -204,7 +206,7 @@ public class GlobePitchTests
         Assert.Equal(At(5200), board.GlobePitchReferenceNotBefore);
         Assert.True(board.TickGlobe(At(5500)));
         Assert.Equal(At(5500), board.GlobePitchReferenceNotBefore);
-        Assert.True(board.ActivateButton("globe-zoom-out", At(5600)));
+        Assert.True(board.SetGlobeZoomPosition(0, At(5600)));
         Assert.Equal(At(5500), board.GlobePitchReferenceNotBefore);
     }
 

@@ -336,6 +336,8 @@ public sealed partial class MainWindow
                     crownDeed = _scene.CrownDeedState,
                     globe = _scene.GlobeState,
                     globePitchInput = GlobePitchInputState(),
+                    globeZoomInput = GlobeZoomInputState(),
+                    globeRenderer = _scene.GetGlobeRenderDiagnostics(_scene.GlobePreviewAspect, _scene.GlobeState),
                     slots = SlotsStatus(),
                     roulette = RouletteStatus(),
                     globeDrawer = _scene.GetGlobeDrawerDiagnostics(MonotonicClock.UtcNow),

@@ -7,7 +7,7 @@ public sealed partial class SceneCompositor
     public bool GlobeDrawerOpen { get { lock (_gate) return _boardSession.GlobeDrawerOpen; } }
 
     public sealed record GlobeDrawerDiagnostics(bool Open, DateTimeOffset? OpenedAt,
-        double DurationMilliseconds, double Progress, bool Animating);
+        double DurationMilliseconds, double Progress, bool Animating, bool ModelExpanded);
 
     public bool TickGlobe(DateTimeOffset now)
     {
@@ -29,7 +29,8 @@ public sealed partial class SceneCompositor
         {
             bool animating = HasGlobeDrawerAnimation(now);
             return new(_boardSession.GlobeDrawerOpen, _boardSession.GlobeDrawerOpenedAt,
-                BoardSession.GlobeDrawerOpeningDuration.TotalMilliseconds, GlobeDrawerProgress(now), animating);
+                BoardSession.GlobeDrawerOpeningDuration.TotalMilliseconds, GlobeDrawerProgress(now), animating,
+                _boardSession.GlobeModelExpanded);
         }
     }
 }

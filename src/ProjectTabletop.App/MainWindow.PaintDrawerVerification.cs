@@ -251,7 +251,7 @@ public sealed partial class MainWindow
             {
                 drawing.Clear(Microsoft.UI.Colors.Transparent);
                 typeof(SceneCompositor).GetMethod("DrawGlobeControls", flags)!.Invoke(scene,
-                    [drawing, controls, Array.Empty<string>(), Array.Empty<BoardFingerSelectionFeedback>(), true, 1f, 1d, 1d]);
+                    [drawing, controls, Array.Empty<string>(), Array.Empty<BoardFingerSelectionFeedback>(), true, 1f, 1d, 1d, 0d]);
             }
             byte[] actual = paint.GetPixelBytes(), reference = globe.GetPixelBytes();
             // Globe also draws its board title. Compare the complete row,

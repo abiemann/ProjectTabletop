@@ -131,6 +131,11 @@ public sealed partial class SceneCompositor
         ds.FillGeometry(geometry, button.Enabled ? ThemeColor(0, 0, 0) : ThemeColor(91, 100, 107));
     }
 
+    // Keep the shared physical font size on narrow boards. Drawing and optical
+    // caption bounds must use the same explicit line break for this longer label.
+    private static string DrawerButtonCaption(BoardButton button) =>
+        button.Id == "globe-model-no-clouds" ? "NO\nCLOUDS" : button.Label;
+
     private static Rect DrawerButtonTextRectangle(BoardButton button)
     {
         var bounds = button.Bounds;
@@ -161,7 +166,7 @@ public sealed partial class SceneCompositor
             hovered ? ThemeColor(103, 224, 255) : ThemeColor(117, 151, 173), hovered ? 2.5f : 1.2f);
         ds.DrawLine((float)rect.X + 17, (float)rect.Y + 2, (float)rect.Right - 17, (float)rect.Y + 2,
             ThemeColor(255, 255, 255, 160), 1);
-        DrawHoldButtonCaption(ds, button.Label, DrawerButtonTextRectangle(button), button.Enabled
+        DrawHoldButtonCaption(ds, DrawerButtonCaption(button), DrawerButtonTextRectangle(button), button.Enabled
             ? ThemeColor(50, 55, 59) : ThemeColor(111, 119, 125), boardAspect);
     }
 }

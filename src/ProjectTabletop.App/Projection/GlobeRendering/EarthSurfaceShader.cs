@@ -24,7 +24,7 @@ namespace ProjectTabletop.App.Projection.GlobeRendering;
 [D2DGeneratedPixelShaderDescriptor]
 internal readonly partial struct EarthSurfaceShader(
     Float2 daySize, Float2 cloudSize, Float2 skySize, Float2 skyAspect, Float2 sceneUnitsPerPixel,
-    Float2 pixelSubpixel, int layer,
+    Float2 pixelSubpixel, int layer, int model,
     float skyRotationRadians, Float2 center, Float2 radii,
     float rotationRadians, float edgeWidth, float viewLatitudeRadians,
     Float2 shootingStarHead, Float2 shootingStarDirection, Float2 shootingStarScale,
@@ -136,23 +136,29 @@ internal readonly partial struct EarthSurfaceShader(
                 Hlsl.Pow(Hlsl.Abs(surface.Y), 2.2f), Hlsl.Pow(Hlsl.Abs(surface.Z), 2.2f));
 
             Float3 sun = Hlsl.Normalize(new Float3(-0.48f, 0.31f, 0.82f));
-            Float2 cloudUv = new Float2(Hlsl.Frac(uv.X + 0.004f), uv.Y);
-            float cloud = D2D.SampleInputAtPosition(1,
-                Hlsl.Clamp(cloudUv * cloudSize, new Float2(0.5f, 0.5f), cloudSize - 0.5f)).X;
-            cloud = Hlsl.Saturate((cloud - 0.04f) * 1.18f);
-            Float2 shadowUv = new Float2(Hlsl.Frac(cloudUv.X - 0.0018f),
-                Hlsl.Clamp(cloudUv.Y + 0.0012f, 0, 1));
-            float shadow = D2D.SampleInputAtPosition(1,
-                Hlsl.Clamp(shadowUv * cloudSize, new Float2(0.5f, 0.5f), cloudSize - 0.5f)).X;
-            linearSurface *= 1 - Hlsl.Saturate(shadow - cloud) * 0.45f;
-            linearSurface = Hlsl.Lerp(linearSurface, new Float3(0.87f, 0.91f, 0.96f), cloud * 0.88f);
+            float cloud = 0;
+            if (model == 0)
+            {
+                Float2 cloudUv = new Float2(Hlsl.Frac(uv.X + 0.004f), uv.Y);
+                cloud = D2D.SampleInputAtPosition(1,
+                    Hlsl.Clamp(cloudUv * cloudSize, new Float2(0.5f, 0.5f), cloudSize - 0.5f)).X;
+                cloud = Hlsl.Saturate((cloud - 0.04f) * 1.18f);
+                Float2 shadowUv = new Float2(Hlsl.Frac(cloudUv.X - 0.0018f),
+                    Hlsl.Clamp(cloudUv.Y + 0.0012f, 0, 1));
+                float shadow = D2D.SampleInputAtPosition(1,
+                    Hlsl.Clamp(shadowUv * cloudSize, new Float2(0.5f, 0.5f), cloudSize - 0.5f)).X;
+                linearSurface *= 1 - Hlsl.Saturate(shadow - cloud) * 0.45f;
+                linearSurface = Hlsl.Lerp(linearSurface, new Float3(0.87f, 0.91f, 0.96f), cloud * 0.88f);
+            }
 
             // Lighting is applied to linear reflectance, then converted back for
             // the display. Night illumination stays soft rather than an ink-black
             // cutout, and the day/night terminator has a narrow twilight band.
             float incidence = Hlsl.Dot(normal, sun);
             float diffuse = 0.012f + Hlsl.Saturate(incidence) * 0.97f;
-            Float3 lit = linearSurface * diffuse;
+            // Black Marble is already a nighttime composite: its city lights
+            // are emissive, so they must not be multiplied by daytime lighting.
+            Float3 lit = model == 2 ? linearSurface : linearSurface * diffuse;
 
             // Ocean color supplies a conservative water mask for a small solar
             // reflection. Land and the imagery's cloud layer remain matte.
@@ -161,7 +167,7 @@ internal readonly partial struct EarthSurfaceShader(
             Float3 halfway = Hlsl.Normalize(sun + new Float3(0, 0, 1));
             float reflection = Hlsl.Pow(Hlsl.Saturate(Hlsl.Dot(normal, halfway)), 95)
                 * ocean * Hlsl.SmoothStep(0, 0.15f, incidence) * 0.2f;
-            lit += new Float3(0.66f, 0.80f, 1) * reflection;
+            if (model != 2) lit += new Float3(0.66f, 0.80f, 1) * reflection;
             float rim = Hlsl.Pow(Hlsl.Abs(1 - normal.Z), 3.7f)
                 * Hlsl.SmoothStep(-0.17f, 0.22f, incidence);
             lit += new Float3(0.016f, 0.075f, 0.18f) * rim;

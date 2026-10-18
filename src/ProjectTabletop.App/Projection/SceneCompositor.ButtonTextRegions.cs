@@ -93,7 +93,7 @@ public sealed partial class SceneCompositor
         if (_boardSession.Screen == BoardScreen.Slots) return SlotButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Menu && button.Id == "settings") return SettingsCogTextRegion(device, button);
         if (_boardSession.Screen is BoardScreen.Globe or BoardScreen.Paint)
-            return HoldButtonCaptionRegion(device, button, DrawerButtonTextRectangle(button));
+            return HoldButtonCaptionRegion(device, button, DrawerButtonTextRectangle(button), DrawerButtonCaption(button));
         if (_boardSession.Screen == BoardScreen.CrownDeed)
         {
             var rectangle = CrownDeedButtonTextRectangle(button);
@@ -112,7 +112,7 @@ public sealed partial class SceneCompositor
             return ButtonInkRegion(button, layout.DrawBounds, spec.Bounds.X, spec.Bounds.Y);
         }
         if (_boardSession.Screen == BoardScreen.PhotoCopy)
-            return HoldButtonCaptionRegion(device, button, DrawerButtonTextRectangle(button));
+            return HoldButtonCaptionRegion(device, button, DrawerButtonTextRectangle(button), DrawerButtonCaption(button));
         using var label = BoardButtonTextFormat();
         bool menu = _boardSession.Screen == BoardScreen.Menu ||
             _boardSession.Screen == BoardScreen.Settings && button.Destination == BoardScreen.HandTracking;

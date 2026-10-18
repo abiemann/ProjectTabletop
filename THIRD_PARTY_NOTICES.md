@@ -29,6 +29,21 @@ and [cloud JPEG](https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57747/
 NASA imagery is used under its [media usage guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/).
 NASA does not endorse this application.
 
+## NASA Black Marble 2016 imagery
+
+Globe's optional NIGHT model uses the 2016 global colour composite from
+[NASA's Earth at Night / Black Marble maps](https://science.nasa.gov/earth/earth-observatory/earth-at-night/maps/).
+Credit: **NASA Earth Observatory images by Joshua Stevens, using Suomi NPP VIIRS
+data from Miguel Román, NASA GSFC.** The observations are a cloud-free composite
+from 2016, not live nighttime conditions.
+
+The [13500 × 6750 source JPEG](https://assets.science.nasa.gov/content/dam/science/esd/eo/images/imagerecords/144000/144898/BlackMarble_2016_3km.jpg)
+is resampled once to an 8192 × 4096 RGB PNG for the app's texture-size limit.
+No generated imagery or lights are added. Source/output hashes and preparation
+details are in `GlobeRendering/Assets/EARTH_MODELS.md` in the app package.
+NASA imagery is used under its [media usage guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/).
+NASA does not endorse this application.
+
 ## NASA Deep Star Maps 2020
 
 The separate Globe sky uses [Deep Star Maps 2020](https://svs.gsfc.nasa.gov/4851/),

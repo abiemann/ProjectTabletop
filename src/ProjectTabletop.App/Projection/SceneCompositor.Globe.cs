@@ -17,7 +17,8 @@ public sealed partial class SceneCompositor
     internal sealed record GlobeRenderDiagnostics(bool Ready, int SurfaceWidth, int SurfaceHeight,
         int CloudWidth, int CloudHeight, double CenterU, double CenterV, double RadiusU, double RadiusV,
         string? Error, int SkyTextureWidth, int SkyTextureHeight, int SkyTextureLoadCount,
-        int SkySourceWidth, int SkySourceHeight);
+        int SkySourceWidth, int SkySourceHeight, GlobeModel SelectedModel, GlobeModel? LoadedModel,
+        bool IsLoading, int ModelTextureLoadCount, int ResidentModelTextureCount, int ResidentModelCount);
 
     internal GlobeRenderDiagnostics GetGlobeRenderDiagnostics(double boardAspect, GlobeSnapshot state)
     {
@@ -31,13 +32,16 @@ public sealed partial class SceneCompositor
                 boardAspect >= 1 ? radius : radius * boardAspect, _globeRenderer?.Error,
                 _globeRenderer?.SkyTextureWidth ?? 0, _globeRenderer?.SkyTextureHeight ?? 0,
                 _globeRenderer?.SkyTextureLoadCount ?? 0,
-                _globeRenderer?.SkySourceWidth ?? 0, _globeRenderer?.SkySourceHeight ?? 0);
+                _globeRenderer?.SkySourceWidth ?? 0, _globeRenderer?.SkySourceHeight ?? 0,
+                state.Model, _globeRenderer?.LoadedModel, _globeRenderer?.IsLoading == true,
+                _globeRenderer?.ModelTextureLoadCount ?? 0, _globeRenderer?.ResidentModelTextureCount ?? 0,
+                _globeRenderer?.ResidentModelCount ?? 0);
         }
     }
 
     internal Task EnsureGlobeResourcesAsync(CanvasDevice device)
     {
-        lock (_gate) return GetGlobeRenderer(device).EnsureReadyAsync();
+        lock (_gate) return GetGlobeRenderer(device).EnsureReadyAsync(_boardSession.GetGlobeSnapshot(_globeClock()).Model);
     }
 
     private GlobeSurfaceRenderer GetGlobeRenderer(CanvasDevice device)
@@ -63,11 +67,11 @@ public sealed partial class SceneCompositor
     {
         var renderer = GetGlobeRenderer(ds.Device);
         if (!renderer.Draw(ds, (float)state.Zoom, (float)state.RotationDegrees, boardAspect,
-            (float)state.ViewLatitudeDegrees, state.ElapsedSeconds))
+            (float)state.ViewLatitudeDegrees, state.ElapsedSeconds, state.Model))
         {
-            ds.Clear(ThemeColor(2, 5, 11));
-            GlobeText(ds, renderer.Error is null ? "Loading Earth imagery…" : "Earth imagery could not load",
-                new Rect(140, 395, 720, 80), 24, AppPalette.MutedText);
+            if (!renderer.SkyReady) ds.Clear(ThemeColor(2, 5, 11));
+            GlobeText(ds, renderer.Error is null ? "Loading…" : "Earth imagery could not load",
+                new Rect(140, 460, 720, 80), 24, AppPalette.MutedText);
         }
 
         DrawGlobeControls(ds, buttons, hovered, selectionFeedback, drawerOpen, drawerProgress, boardAspect,
@@ -98,6 +102,13 @@ public sealed partial class SceneCompositor
         }
     }
 
+    private void RetryGlobeModelAfterAction(string id)
+    {
+        if (_boardSession.Screen == BoardScreen.Globe &&
+            id is "globe-model-clouds" or "globe-model-no-clouds" or "globe-model-night")
+            _globeRenderer?.RetryFailedModel(_boardSession.GetGlobeSnapshot(_globeClock()).Model);
+    }
+
     private void DrawGlobeControls(CanvasDrawingSession ds, IReadOnlyList<BoardButton> buttons,
         IReadOnlyList<string> hovered, IReadOnlyList<BoardFingerSelectionFeedback> selectionFeedback,
         bool drawerOpen = false, float drawerProgress = 1, double boardAspect = 1, double holdExposure = 1,
@@ -108,7 +119,27 @@ public sealed partial class SceneCompositor
         using var fade = CreateBoardControlsFadeLayer(ds);
         DrawBoardDrawerControls(ds, buttons, hovered, selectionFeedback, drawerOpen, drawerProgress, boardAspect,
             holdExposure);
-        if (drawerOpen) DrawGlobePitchRail(ds, drawerProgress, viewLatitudeDegrees);
+        if (drawerOpen)
+        {
+            var state = _boardSession.GetGlobeSnapshot(_globeClock());
+            DrawGlobeRail(ds, drawerProgress, false,
+                (viewLatitudeDegrees / ProjectTabletop.Interaction.GlobeState.MaximumViewLatitude + 1) / 2);
+            DrawGlobeRail(ds, drawerProgress, true,
+                (state.Zoom - ProjectTabletop.Interaction.GlobeState.MinimumZoom) /
+                (ProjectTabletop.Interaction.GlobeState.MaximumZoom - ProjectTabletop.Interaction.GlobeState.MinimumZoom));
+            var model = buttons.FirstOrDefault(button => button.Id == "globe-model");
+            if (model is not null && _boardSession.GlobeModelExpanded)
+            {
+                // The caret is decorative, outside MODEL's stationary caption.
+                // Follow the same slide as the expanded rows.
+                float rowTop = (float)buttons.Where(button => !IsBoardDrawerHandle(button))
+                    .Min(button => button.Bounds.Y) * BoardSurfaceSize;
+                double slide = BoardDrawerSlide(drawerProgress, rowTop);
+                GlobeText(ds, "^", new Rect(model.Bounds.X * BoardSurfaceSize,
+                    model.Bounds.Y * BoardSurfaceSize + slide + 9,
+                    model.Bounds.Width * BoardSurfaceSize, 22), 20, ThemeColor(0, 0, 0));
+            }
+        }
     }
 
     private static void GlobeText(CanvasDrawingSession ds, string text, Rect rect, float size,

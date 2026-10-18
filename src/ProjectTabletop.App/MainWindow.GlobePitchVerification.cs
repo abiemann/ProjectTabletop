@@ -57,7 +57,8 @@ public sealed partial class MainWindow
             await scene.EnsureGlobeResourcesAsync(target.Device);
             now += GlobeState.EntranceDuration + TimeSpan.FromMilliseconds(100);
             Draw();
-            Check(scene.GetGlobePitchRailGeometry() is null, test.Name + ": the closed drawer exposed a pitch rail.");
+            Check(scene.GetGlobePitchRailGeometry() is null && scene.GetGlobeZoomRailGeometry() is null,
+                test.Name + ": the closed drawer exposed an input rail.");
             Check(scene.ActivateGlobeButton("globe-drawer-open"), "The fixture could not open Globe's drawer.");
             Draw();
             Check(scene.GetGlobePitchRailGeometry() is null, "The just-opened drawer accepted rail input.");
@@ -68,6 +69,7 @@ public sealed partial class MainWindow
             scene.TickGlobe(now);
             Draw();
             var rail = scene.GetGlobePitchRailGeometry() ?? throw new InvalidOperationException("No settled Globe pitch rail.");
+            var zoomRail = scene.GetGlobeZoomRailGeometry() ?? throw new InvalidOperationException("No settled Globe zoom rail.");
             var readyAt = now;
             now += TimeSpan.FromMilliseconds(100);
             Check(scene.GetGlobePitchRailGeometry(now, readyAt) is null &&
@@ -90,22 +92,34 @@ public sealed partial class MainWindow
             }
             var canonicalMap = Homography.FromFourPoints([new(0, 0), new(1, 0), new(1, 1), new(0, 1)],
                 rail.CameraCorners.Select(point => new Point2(point.X, point.Y)).ToArray());
+            var zoomMap = Homography.FromFourPoints([new(0, 0), new(1, 0), new(1, 1), new(0, 1)],
+                zoomRail.CameraCorners.Select(point => new Point2(point.X, point.Y)).ToArray());
             byte[] clear = Draw();
             CheckDotCenters(clear);
+            CheckDotCenters(clear, zoomMap);
             await Save("drawer-open");
             var detector = new PatternRailDetector();
+            var zoomDetector = new PatternRailDetector();
             var initial = Observe(clear);
+            var initialZoom = ObserveZoom(clear);
             Check(initial is { Reliable: true, Position: null, DamageCount: 0 },
                 test.Name + ": the actual rendered dots did not register as intact: " + initial.Reason);
+            Check(initialZoom is { Reliable: true, Position: null, DamageCount: 0 },
+                test.Name + ": rendered zoom dots did not register as intact: " + initialZoom.Reason);
 
             now += TimeSpan.FromSeconds(20);
             byte[] movingSky = Draw();
             Check(ChangedPixels(clear, movingSky) > 1000, "The animated sky fixture did not change its background.");
             CheckRailUnchanged(clear, movingSky);
+            CheckRailUnchanged(clear, movingSky, zoomMap);
             var skyObservation = Observe(movingSky);
+            var zoomSkyObservation = ObserveZoom(movingSky);
             Check(skyObservation is { Reliable: true, Position: null, DamageCount: 0 } &&
                     ReferenceEquals(rail, scene.GetGlobePitchRailGeometry()),
                 "Sky/Earth animation generated pitch input or reset optical registration.");
+            Check(zoomSkyObservation is { Reliable: true, Position: null, DamageCount: 0 } &&
+                    ReferenceEquals(zoomRail, scene.GetGlobeZoomRailGeometry()),
+                "Sky/Earth animation generated zoom input or reset optical registration.");
 
             var contacts = new List<object>();
             foreach (var touch in new[] { (First: 0, Count: 3, Expected: -60d),
@@ -124,6 +138,10 @@ public sealed partial class MainWindow
                         Math.Abs(position - (touch.First + touch.Count / 2d) / PatternRailGeometry.Columns) < .025,
                     test.Name + ": rendered rail contact was lost or reversed: " + observed);
                 Check(scene.SetGlobePitchRailPosition(observed.Position, now, rail.Revision), "Fresh pitch contact was rejected.");
+                var untouchedZoom = ObserveZoom(touched);
+                Check(untouchedZoom.Position is null && scene.SetGlobeZoomRailPosition(null, now, zoomRail.Revision) &&
+                        scene.GlobeState.TargetZoom == GlobeState.DefaultZoom,
+                    "Pitch contact moved zoom or consumed the other rail's same-frame timestamp.");
                 var acceptedAt = now;
                 Check(!scene.SetGlobePitchRailPosition(.5f, acceptedAt, rail.Revision) &&
                         !scene.SetGlobePitchRailPosition(.5f, acceptedAt.AddTicks(-1), rail.Revision) &&
@@ -145,6 +163,60 @@ public sealed partial class MainWindow
                 contacts.Add(new { observed.Position, latitude, observed.Reason });
             }
 
+            var zoomContacts = new List<object>();
+            double retainedPitch = scene.GlobeState.ViewLatitudeDegrees;
+            foreach (var touch in new[] { (First: 0, Count: 3, Expected: GlobeState.MinimumZoom),
+                (First: 23, Count: 3, Expected: (GlobeState.MinimumZoom + GlobeState.MaximumZoom) / 2),
+                (First: 46, Count: 3, Expected: GlobeState.MaximumZoom) })
+            {
+                now += TimeSpan.FromMilliseconds(20);
+                Check(ObserveZoom(Draw()).Position is null, "The uncovered zoom rail retained a contact.");
+                byte[] touched = Cover(touch.First, touch.Count, zoomMap);
+                now += TimeSpan.FromMilliseconds(20);
+                Check(ObserveZoom(touched).Position is null, "Zoom accepted an unconfirmed one-frame contact.");
+                now += TimeSpan.FromMilliseconds(20);
+                var observed = ObserveZoom(touched);
+                Check(observed is { Position: not null, Reliable: true, Ambiguous: false } &&
+                        scene.SetGlobeZoomRailPosition(observed.Position, now, zoomRail.Revision),
+                    test.Name + ": a real zoom-dot obstruction was rejected: " + observed.Reason);
+                var untouchedPitch = Observe(touched);
+                Check(untouchedPitch.Position is null && scene.SetGlobePitchRailPosition(null, now, rail.Revision),
+                    "Zoom contact corrupted pitch or consumed the pitch rail's same-frame timestamp.");
+                Check(!scene.SetGlobeZoomRailPosition(.5f, now, zoomRail.Revision) &&
+                        !scene.SetGlobeZoomRailPosition(.5f, now.AddTicks(-1), zoomRail.Revision) &&
+                        !scene.SetGlobeZoomRailPosition(.5f, now.AddMilliseconds(1), zoomRail.Revision) &&
+                        !scene.SetGlobeZoomRailPosition(.5f, now.AddMilliseconds(-251), zoomRail.Revision),
+                    "Equal, reordered, future or stale observations changed zoom.");
+                now += TimeSpan.FromMilliseconds(150);
+                Check(Math.Abs(scene.GlobeState.Zoom - touch.Expected) < .05 &&
+                        Math.Abs(scene.GlobeState.ViewLatitudeDegrees - retainedPitch) < .000001,
+                    "Absolute zoom missed its limit/midpoint or disturbed the retained pitch.");
+                double retainedZoom = scene.GlobeState.Zoom;
+                Check(ObserveZoom(Draw()).Position is null && scene.SetGlobeZoomRailPosition(null, now, zoomRail.Revision),
+                    "A lifted zoom contact was rejected.");
+                now += TimeSpan.FromMilliseconds(150);
+                Check(Math.Abs(scene.GlobeState.Zoom - retainedZoom) < .000001 &&
+                        ReferenceEquals(zoomRail, scene.GetGlobeZoomRailGeometry()),
+                    "Release reset absolute zoom or its optical registration.");
+                zoomContacts.Add(new { observed.Position, zoom = scene.GlobeState.Zoom, observed.Reason });
+            }
+            now += TimeSpan.FromMilliseconds(20);
+            byte[] bothTouched = Cover(23, 3);
+            bothTouched = Cover(23, 3, zoomMap, redraw: false);
+            now += TimeSpan.FromMilliseconds(20);
+            Observe(bothTouched); ObserveZoom(bothTouched);
+            now += TimeSpan.FromMilliseconds(20);
+            var bothPitch = Observe(bothTouched);
+            var bothZoom = ObserveZoom(bothTouched);
+            Check(bothPitch.Position is not null && bothZoom.Position is not null &&
+                    scene.SetGlobePitchRailPosition(bothPitch.Position, now, rail.Revision) &&
+                    scene.SetGlobeZoomRailPosition(bothZoom.Position, now, zoomRail.Revision),
+                "Simultaneous confirmed rail contacts were not independently accepted from the same camera frame.");
+            now += TimeSpan.FromMilliseconds(150);
+            Check(Math.Abs(scene.GlobeState.ViewLatitudeDegrees) < 2.5 &&
+                    Math.Abs(scene.GlobeState.Zoom - (GlobeState.MinimumZoom + GlobeState.MaximumZoom) / 2) < .05,
+                "Simultaneous contacts did not settle at independent pitch/zoom targets.");
+
             byte[] beforeLight = Draw();
             using (var drawing = target.CreateDrawingSession())
             using (var clip = (CanvasGeometry?)lightClipMethod.Invoke(scene, [drawing, output]))
@@ -154,70 +226,87 @@ public sealed partial class MainWindow
             }
             byte[] lit = target.GetPixelBytes();
             CheckRailUnchanged(beforeLight, lit);
+            CheckRailUnchanged(beforeLight, lit, zoomMap);
             var litObservation = Observe(lit);
             Check(litObservation.Position is null && litObservation.Reliable,
                 "A shared search/hand spotlight corrupted the pitch rail.");
+            Check(ObserveZoom(lit) is { Position: null, Reliable: true },
+                "A shared search/hand spotlight corrupted the zoom rail.");
             await Save("spotlight-protected");
             Draw();
 
             if (test.Name == "landscape")
             {
-                Check(scene.ActivateGlobeButton("globe-zoom-in"), "The unchanged Zoom + action failed.");
+                Check(scene.ActivateGlobeButton("globe-model"), "MODEL could not reveal its choices.");
+                now += TimeSpan.FromMilliseconds(1);
+                Check(scene.ActivateGlobeButton("globe-model-night"), "NIGHT could not be selected for the hold fixture.");
+                await scene.EnsureGlobeResourcesAsync(target.Device);
                 now += TimeSpan.FromMilliseconds(500);
                 Draw();
-                var hold = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No Globe zoom caption context.");
-                Check(hold.EnabledHoldIds.Contains("globe-zoom-in") && hold.EnabledHoldIds.Contains("globe-zoom-out"),
-                    "The pitch rail removed the existing zoom hold buttons.");
-                double zoom = scene.GlobeState.TargetZoom;
-                scene.ObserveHoldButtons(hold, [], now, ["globe-zoom-in"]);
-                int zoomActivations = 0;
+                rail = scene.GetGlobePitchRailGeometry() ?? throw new InvalidOperationException("MODEL expansion lost pitch geometry.");
+                zoomRail = scene.GetGlobeZoomRailGeometry() ?? throw new InvalidOperationException("MODEL expansion lost zoom geometry.");
+                now += TimeSpan.FromMilliseconds(100);
+                var hold = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No Globe model caption context.");
+                Check(hold.EnabledHoldIds.Contains("globe-model-night") && hold.EnabledHoldIds.Contains("globe-exit"),
+                    "The rails removed the model or EXIT hold buttons.");
+                scene.ObserveHoldButtons(hold, [], now, ["globe-model-night"]);
+                int modelActivations = 0;
                 for (int frame = 0; frame <= 10; frame++)
                 {
                     now += TimeSpan.FromMilliseconds(100);
                     if (frame == 4)
-                        Check(scene.SetGlobePitchRailPosition(.4f, now, rail.Revision), "Pitch input failed during a zoom hold.");
+                        Check(scene.SetGlobePitchRailPosition(.4f, now, rail.Revision) &&
+                                scene.SetGlobeZoomRailPosition(.4f, now, zoomRail.Revision),
+                            "Same-frame pitch/zoom input failed during a model caption hold.");
                     Draw();
                     Check(scene.GetHoldButtonContext(now)?.Revision == hold.Revision,
-                        "Changing pitch reset stationary caption references during a zoom hold.");
-                    zoomActivations += scene.ObserveHoldButtons(hold, ["globe-zoom-in"], now, []).Count;
+                        "Changing pitch/zoom reset stationary caption references during a model hold.");
+                    modelActivations += scene.ObserveHoldButtons(hold, ["globe-model-night"], now, []).Count;
                 }
-                Check(zoomActivations == 1 && scene.GlobeState.TargetZoom > zoom,
-                    $"Pitch input interrupted the normal zoom hold: activations={zoomActivations}, " +
-                    $"zoomBefore={zoom}, zoomAfter={scene.GlobeState.TargetZoom}.");
+                Check(modelActivations == 1 && scene.GlobeState.Model == GlobeModel.Night,
+                    $"Rail input interrupted the normal model hold: activations={modelActivations}.");
                 // The action rejects camera frames at/before its timestamp,
-                // but the rail itself has not moved or changed appearance.
-                var afterZoomRail = scene.GetGlobePitchRailGeometry();
-                Check(ReferenceEquals(rail, afterZoomRail),
-                    $"Zoom reset the stationary rail: originalEpoch={rail.Revision}, " +
-                    $"afterZoomEpoch={afterZoomRail?.Revision}, time={now:O}.");
-                Check(scene.GetGlobePitchRailGeometry(now) is null,
-                    "A camera frame at the zoom action's timestamp bypassed its fresh-input barrier.");
+                // but neither stationary rail moved or changed appearance.
+                Check(ReferenceEquals(rail, scene.GetGlobePitchRailGeometry()) &&
+                        ReferenceEquals(zoomRail, scene.GetGlobeZoomRailGeometry()),
+                    "A model choice reset stationary optical rail registration.");
+                Check(scene.GetGlobePitchRailGeometry(now) is null && scene.GetGlobeZoomRailGeometry(now) is null,
+                    "A camera frame at the model action's timestamp bypassed its fresh-input barrier.");
                 now += TimeSpan.FromMilliseconds(1);
-                Check(ReferenceEquals(rail, scene.GetGlobePitchRailGeometry(now)),
-                    "A fresh post-zoom frame lost the unchanged rail's optical registration.");
+                Check(ReferenceEquals(rail, scene.GetGlobePitchRailGeometry(now)) &&
+                        ReferenceEquals(zoomRail, scene.GetGlobeZoomRailGeometry(now)),
+                    "A fresh post-model frame lost unchanged rail registration.");
 
                 Check(session.SetButtonsVisible(false, now), "Could not hide Globe controls for the input-barrier test.");
-                Check(scene.GetGlobePitchRailGeometry() is null &&
-                        !scene.SetGlobePitchRailPosition(0, now.AddTicks(-1), rail.Revision),
+                Check(scene.GetGlobePitchRailGeometry() is null && scene.GetGlobeZoomRailGeometry() is null &&
+                        !scene.SetGlobePitchRailPosition(0, now.AddTicks(-1), rail.Revision) &&
+                        !scene.SetGlobeZoomRailPosition(0, now.AddTicks(-1), zoomRail.Revision),
                     "A hiding rail accepted an in-flight contact.");
                 now += TimeSpan.FromMilliseconds(301);
                 Draw();
-                Check(scene.GetGlobePitchRailGeometry() is null, "A hidden rail still exposed input geometry.");
+                Check(scene.GetGlobePitchRailGeometry() is null && scene.GetGlobeZoomRailGeometry() is null,
+                    "A hidden rail still exposed input geometry.");
                 Check(session.SetButtonsVisible(true, now), "Could not restore Globe controls.");
                 now += TimeSpan.FromMilliseconds(150);
                 Draw();
-                Check(scene.GetGlobePitchRailGeometry() is null, "Fading-in dots accepted contact before settling.");
+                Check(scene.GetGlobePitchRailGeometry() is null && scene.GetGlobeZoomRailGeometry() is null,
+                    "Fading-in dots accepted contact before settling.");
                 now += TimeSpan.FromMilliseconds(151);
                 Draw();
                 var restored = scene.GetGlobePitchRailGeometry() ?? throw new InvalidOperationException("Restored dots lacked geometry.");
+                var restoredZoom = scene.GetGlobeZoomRailGeometry() ?? throw new InvalidOperationException("Restored zoom dots lacked geometry.");
                 Check(restored.Revision != rail.Revision &&
-                        !scene.SetGlobePitchRailPosition(0, now, rail.Revision),
+                        restoredZoom.Revision != zoomRail.Revision &&
+                        !scene.SetGlobePitchRailPosition(0, now, rail.Revision) &&
+                        !scene.SetGlobeZoomRailPosition(0, now, zoomRail.Revision),
                     "Restored dots reused or accepted the hidden rail epoch.");
                 now += TimeSpan.FromMilliseconds(100);
-                Check(scene.SetGlobePitchRailPosition(0, now, restored.Revision), "Fresh restored dots did not accept input.");
+                Check(scene.SetGlobePitchRailPosition(0, now, restored.Revision) &&
+                        scene.SetGlobeZoomRailPosition(0, now, restoredZoom.Revision), "Fresh restored dots did not accept input.");
                 Check(scene.ActivateGlobeButton("globe-drawer-close") && scene.GetGlobePitchRailGeometry() is null &&
-                        !scene.SetGlobePitchRailPosition(1, now, restored.Revision),
-                    "Closing the drawer left pitch active.");
+                        scene.GetGlobeZoomRailGeometry() is null && !scene.SetGlobePitchRailPosition(1, now, restored.Revision) &&
+                        !scene.SetGlobeZoomRailPosition(1, now, restoredZoom.Revision),
+                    "Closing the drawer left a rail active.");
                 now += TimeSpan.FromMilliseconds(20);
                 Check(scene.ActivateGlobeButton("globe-drawer-open"), "Could not reopen Globe's drawer.");
                 now += TimeSpan.FromMilliseconds(301);
@@ -254,7 +343,7 @@ public sealed partial class MainWindow
                     "Leaving Globe retained active pitch input.");
             }
             results.Add(new { test.Name, test.Width, test.Height, test.Facing, test.Skewed,
-                railBounds = bounds, contacts });
+                railBounds = bounds, contacts, zoomContacts });
 
             byte[] Draw()
             {
@@ -264,43 +353,45 @@ public sealed partial class MainWindow
             }
             PatternRailObservation Observe(byte[] pixels) =>
                 detector.Observe(pixels, test.Width, test.Height, test.Width * 4, rail, now);
-            byte[] Cover(int first, int count)
+            PatternRailObservation ObserveZoom(byte[] pixels) =>
+                zoomDetector.Observe(pixels, test.Width, test.Height, test.Width * 4, zoomRail, now);
+            byte[] Cover(int first, int count, Homography? map = null, bool redraw = true)
             {
-                Draw();
+                if (redraw) Draw();
                 double left = first / (double)PatternRailGeometry.Columns;
                 double right = (first + count) / (double)PatternRailGeometry.Columns;
                 Vector2[] polygon = new[] { new Point2(left, 0), new Point2(right, 0), new Point2(right, 1), new Point2(left, 1) }
-                    .Select(point => canonicalMap.Transform(point)).Select(point => new Vector2((float)point.X, (float)point.Y)).ToArray();
+                    .Select(point => (map ?? canonicalMap).Transform(point)).Select(point => new Vector2((float)point.X, (float)point.Y)).ToArray();
                 using (var drawing = target.CreateDrawingSession())
                 using (var shape = CanvasGeometry.CreatePolygon(target.Device, polygon))
                     drawing.FillGeometry(shape, Windows.UI.Color.FromArgb(255, 176, 143, 119));
                 return target.GetPixelBytes();
             }
-            void CheckDotCenters(byte[] pixels)
+            void CheckDotCenters(byte[] pixels, Homography? map = null)
             {
                 for (int column = 0; column < PatternRailGeometry.Columns; column++)
                 foreach (int y in new[] { PatternRailGeometry.DotY1ForColumn(column), PatternRailGeometry.DotY2ForColumn(column) })
                 {
                     int index = Pixel(PatternRailGeometry.ColumnCenter(column) / (double)PatternRailGeometry.ReferenceWidth,
-                        y / (double)PatternRailGeometry.ReferenceHeight);
+                        y / (double)PatternRailGeometry.ReferenceHeight, map);
                     Check(pixels[index] > 190 && pixels[index + 1] > 190 && pixels[index + 2] > 190,
                         test.Name + ": a drawn dot disagrees with its canonical detector coordinates.");
                 }
             }
-            void CheckRailUnchanged(byte[] before, byte[] after)
+            void CheckRailUnchanged(byte[] before, byte[] after, Homography? map = null)
             {
                 for (int column = 0; column < PatternRailGeometry.Columns; column++)
                 foreach (double across in new[] { .12, .34, .5, .66, .88 })
                 {
-                    int index = Pixel((column + .5) / PatternRailGeometry.Columns, across);
+                    int index = Pixel((column + .5) / PatternRailGeometry.Columns, across, map);
                     Check(before.AsSpan(index, 4).SequenceEqual(after.AsSpan(index, 4)),
                         test.Name + ": animation or light modified the protected stationary dots/backing.");
                     protectedSamples++;
                 }
             }
-            int Pixel(double u, double v)
+            int Pixel(double u, double v, Homography? map = null)
             {
-                var point = canonicalMap.Transform(new(u, v));
+                var point = (map ?? canonicalMap).Transform(new(u, v));
                 int x = Math.Clamp((int)point.X, 0, test.Width - 1), y = Math.Clamp((int)point.Y, 0, test.Height - 1);
                 return (y * test.Width + x) * 4;
             }
@@ -317,7 +408,8 @@ public sealed partial class MainWindow
         return new { passed = true, directory, images, assertions, protectedSamples, results,
             actualRenderedRailDetection = true, bottomToTopPitch = true, releaseKeepsPitch = true,
             staleAndHiddenInputRejected = true, drawerSwipeResetAndRotationEpochs = true,
-            ordinaryZoomHoldPreserved = true, protectedFromSkyAndSpotlights = true, liveHardwareUnchanged = true };
+            absoluteZoomAndPitchIndependent = true, sameFrameRailInputs = true,
+            ordinaryModelHoldPreserved = true, protectedFromSkyAndSpotlights = true, liveHardwareUnchanged = true };
 
         void Check(bool valid, string message)
         {

@@ -185,7 +185,7 @@ public sealed partial class BoardSession
             // drawer in place so the new Swirl/Copy captions remain available.
             if (Screen != BoardScreen.PhotoCopy || button.Id != "capture-again") ClearBottomDrawers(now);
             Screen = button.Destination;
-            if (Screen == BoardScreen.Globe) _globe.Start(now);
+            if (Screen == BoardScreen.Globe) InitializeGlobe(now);
             Revision++;
             NavigationRevision++;
             if (Screen == BoardScreen.WaterGarden) RequestWaterGardenReset();

@@ -89,7 +89,11 @@ public sealed partial class SceneCompositor
         {
             if (_boardSession.Screen != BoardScreen.Globe || IsBoardRevealActive) return false;
             bool changed = _boardSession.ActivateButton(id, _globeClock());
-            if (changed) SyncPhotoCopySession();
+            if (changed)
+            {
+                RetryGlobeModelAfterAction(id);
+                SyncPhotoCopySession();
+            }
             return changed;
         }
     }
@@ -104,6 +108,9 @@ public sealed partial class SceneCompositor
             var rail = GlobePitchRailBounds();
             if (_boardSession.GlobePitchInputReady(now) && rail.Contains(new(u, v)))
                 return _boardSession.SetGlobePitchPosition(Math.Clamp((rail.Bottom - v) / rail.Height, 0, 1), now);
+            rail = GlobeZoomRailBounds();
+            if (_boardSession.GlobePitchInputReady(now) && rail.Contains(new(u, v)))
+                return _boardSession.SetGlobeZoomPosition(Math.Clamp((rail.Bottom - v) / rail.Height, 0, 1), now);
             var button = _boardSession.Buttons.FirstOrDefault(item => item.Enabled && item.Bounds.Contains(u, v));
             return button is not null && ActivateGlobeButton(button.Id);
         }
