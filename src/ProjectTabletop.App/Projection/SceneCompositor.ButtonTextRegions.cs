@@ -65,8 +65,6 @@ public sealed partial class SceneCompositor
 
     private HandTrackingBounds BoardButtonSearchRegion(BoardButton button, HandTrackingBounds caption)
     {
-        if (_boardSession.Screen == BoardScreen.Roulette && button.Id.StartsWith("roulette-chip-", StringComparison.Ordinal))
-            return RouletteChipSearchRegion(button);
         var plate = BoardButtonPlateRegion(button);
         // Gesture controls acquire from broken lettering. Decorative tile area
         // must not dilute the measured caption damage below the evidence floor.

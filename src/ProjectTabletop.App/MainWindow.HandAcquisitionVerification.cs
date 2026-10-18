@@ -83,7 +83,7 @@ public sealed partial class MainWindow
         now += TimeSpan.FromMilliseconds(600);
         var ready = scene.GetHandAcquisitionContext(now)!;
         Require(ready.ObserveMotion, "The settled Blackjack button area did not start watching.");
-        var center = BoardPoint(.55, .83);
+        var center = BoardPoint(.84, .0765);
         var hint = new HandAcquisitionHint(new(center.X - 140, center.Y - 140, 280, 280),
             center, 82, now, .05, ControlCoverage: .10, ControlTriggerCoverage: .10);
         var baseline = Draw();
@@ -94,6 +94,13 @@ public sealed partial class MainWindow
         Require(ready.StationarySearchCenters?.Length == scene.CurrentBoardButtons.Count,
             "Stationary button searches must include every Blackjack control.");
         long gameRevision = scene.BlackjackState.Revision;
+        foreach (var coin in scene.CurrentBoardButtons.Where(button => button.Id.StartsWith("bj-bet-", StringComparison.Ordinal) || button.Id == "menu"))
+        {
+            var coinCenter = BoardPoint(coin.Bounds.X + coin.Bounds.Width / 2, coin.Bounds.Y + coin.Bounds.Height / 2);
+            scene.CompleteHandAcquisition(ready, [hint with { Center = coinCenter }], [], now);
+            Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && scene.BlackjackState.Revision == gameRevision,
+                "The long-press " + coin.Id + " control started a hand-search light or changed the wager.");
+        }
         foreach (double? coverage in new double?[] { null, .069999, double.NaN,
                      double.PositiveInfinity, double.NegativeInfinity })
         {
@@ -122,11 +129,11 @@ public sealed partial class MainWindow
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is not null,
             "Fresh foreground covering exactly 7% of a control did not get acquisition illumination.");
         var lit = Draw();
-        Require(IsWhite(lit, center) && !IsWhite(baseline, center), "The acquisition light did not cover the bottom button.");
+        Require(IsWhite(lit, center) && !IsWhite(baseline, center), "The acquisition light did not cover the Your Chips caption.");
         // Without a measured outline, light the hand reaching in from the viewer's edge too.
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint?.ValidatedCandidateBounds is { } expectedHand &&
-            expectedHand.Y + expectedHand.Height > center.Y + 40 && IsWhite(lit, BoardPoint(.55, .95)) &&
-            !IsWhite(baseline, BoardPoint(.55, .95)),
+            expectedHand.Y + expectedHand.Height > center.Y + 40 && IsWhite(lit, BoardPoint(.84, .23)) &&
+            !IsWhite(baseline, BoardPoint(.84, .23)),
             "A caption-only hint did not extend its light over the reaching hand toward the viewer.");
         Require(lit.Take(4).SequenceEqual(new byte[] { 0, 0, 0, 255 }), "Search light escaped the board clip.");
         Require(scene.BlackjackState.Revision == gameRevision && scene.ActiveHandSpotlightCount == 0 &&
@@ -233,17 +240,17 @@ public sealed partial class MainWindow
         now += TimeSpan.FromMilliseconds(600);
         Draw();
         ready = scene.GetHandAcquisitionContext(now)!;
-        // Player-turn actions are long-press buttons and stay unlit; Exit keeps gesture assistance.
-        scene.CompleteHandAcquisition(ready, [hint with { ObservedAt = now }], [], now);
+        // Player-turn actions and EXIT stay unlit; the ordinary counter keeps gesture assistance.
+        scene.CompleteHandAcquisition(ready, [hint with { Center = BoardPoint(.55, .83), ObservedAt = now }], [], now);
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && !IsWhite(Draw(), center),
             "A long-press player action was lit.");
-        var exitCenter = BoardPoint(.15, .10);
-        var exitHint = hint with { SearchBounds = new(exitCenter.X - 140, Math.Max(0, exitCenter.Y - 140), 280, 280),
-            Center = exitCenter, ObservedAt = now };
-        scene.CompleteHandAcquisition(ready, [exitHint], [], now);
-        Require(IsWhite(Draw(), exitCenter), "Player-turn Exit did not allow assistance.");
+        var counterCenter = BoardPoint(.84, .0765);
+        var counterHint = hint with { SearchBounds = new(counterCenter.X - 140, Math.Max(0, counterCenter.Y - 140), 280, 280),
+            Center = counterCenter, ObservedAt = now };
+        scene.CompleteHandAcquisition(ready, [counterHint], [], now);
+        Require(IsWhite(Draw(), counterCenter), "The ordinary Your Chips counter did not allow assistance.");
         Require(scene.ActivateBlackjackButton("bj-hit"), "The fixture could not HIT.");
-        Require(!IsWhite(Draw(), exitCenter) && scene.GetHandAcquisitionContext(now) is { ObserveMotion: false },
+        Require(!IsWhite(Draw(), counterCenter) && scene.GetHandAcquisitionContext(now) is { ObserveMotion: false },
             "A card flight kept the obsolete light or enabled motion scanning.");
         now += TimeSpan.FromMilliseconds(800);
         Draw(); // Observe the completed HIT before requesting its new control template.
@@ -252,7 +259,7 @@ public sealed partial class MainWindow
         Draw();
         ready = scene.GetHandAcquisitionContext(now)!;
         Require(ready.ObserveMotion, "Motion watching did not recover after the HIT animation.");
-        // Finish the round so later checks use the betting row's gesture controls.
+        // Finish the round before checking navigation and ordinary-control acquisition again.
         Require(scene.ActivateBlackjackButton("bj-stand"), "The fixture could not stand.");
         for (int step = 0; step < 20 && scene.BlackjackState.Phase != BlackjackPhase.RoundOver; step++)
         {
@@ -295,7 +302,7 @@ public sealed partial class MainWindow
         ready = scene.GetHandAcquisitionContext(now)!;
         var connectedGameRevision = scene.BlackjackState.Revision;
         var candidate = hint with { ObservedAt = now,
-            CandidateBounds = new(center.X - 65, center.Y - 160, 130, 180) };
+            CandidateBounds = new(center.X - 65, center.Y - 20, 130, 180) };
         scene.CompleteHandAcquisition(ready, [candidate], [], now);
         var connected = scene.GetHandAcquisitionContext(now)!;
         var palmCenter = candidate.IlluminationCenter;
@@ -339,11 +346,11 @@ public sealed partial class MainWindow
         Require(LitSearchView(new(900, 300, 300, 300), TimeSpan.FromMilliseconds(350), 1920, 1080) is null &&
             LitSearchView(litCrop, TimeSpan.FromMilliseconds(-150), 1920, 1080) is null,
             "A small crop or a frame before the light was given a corner view.");
-        VerifyCaptionHeightPriority(reverseCamera: false);
-        VerifyCaptionHeightPriority(reverseCamera: true);
+        await VerifyCaptionHeightPriorityAsync(reverseCamera: false);
+        await VerifyCaptionHeightPriorityAsync(reverseCamera: true);
         scene.SetBoardSetup(true);
         Require(scene.GetHandAcquisitionContext(now) is null, "Calibration did not cancel assistance.");
-        return new { passed = true, reachingHandLight = true, lostHandSearchCrop = true, litSearchCornerViews = true, bottomButtonLit = true, motionCannotSelect = true,
+        return new { passed = true, reachingHandLight = true, lostHandSearchCrop = true, litSearchCornerViews = true, gestureCaptionLit = true, bettingCoinsAndExitStayUnlit = true, motionCannotSelect = true,
             expiresWithoutFeedback = true, handHandover = true, staleAndSceneRejection = true,
             animationQuiet = true, executeSuppressionPreserved = true, boardClip = true,
             generatedUnlitReference = true, stationarySearchCenters = true, acceptedNativeHandSkipsFallbackLight = true,
@@ -354,7 +361,7 @@ public sealed partial class MainWindow
             higherCaptionReplacesLowerSearchWithoutSelection = true,
             connectedContextLightsPalmAndControlWithoutSelecting = true };
 
-        void VerifyCaptionHeightPriority(bool reverseCamera)
+        async Task VerifyCaptionHeightPriorityAsync(bool reverseCamera)
         {
             var priorityNow = now;
             using var priorityScene = new SceneCompositor(blackjackClock: () => priorityNow);
@@ -366,11 +373,12 @@ public sealed partial class MainWindow
                     ? [new(1, 1), new(0, 1), new(0, 0), new(1, 0)]
                     : [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
             priorityScene.SetBoardSetup(false);
-            priorityScene.ShowBlackjack();
+            priorityScene.ShowBoardMenu();
+            await priorityScene.EnsureMenuPreviewResourcesAsync(priorityTarget.Device);
             var watching = Settle();
-            var lower = Caption("bj-bet-10");
-            var higher = Caption("menu");
-            var hold = Caption("bj-deal");
+            var lower = Caption("crown-deed");
+            var higher = Caption("football");
+            var hold = Caption("menu-scroll-down");
             Require(reverseCamera ? higher.Center.Y > lower.Center.Y : higher.Center.Y < lower.Center.Y,
                 "Caption priority fixture did not reverse camera Y independently of board height.");
             long revision = priorityScene.BlackjackState.Revision;
@@ -381,7 +389,7 @@ public sealed partial class MainWindow
                 illuminatedPresence: false);
             priorityNow += TimeSpan.FromMilliseconds(1000);
             watching = priorityScene.GetHandAcquisitionContext(priorityNow)!;
-            lower = Caption("bj-bet-10"); higher = Caption("menu"); hold = Caption("bj-deal");
+            lower = Caption("crown-deed"); higher = Caption("football"); hold = Caption("menu-scroll-down");
             var invalidHigher = new[] { higher with { ObservedAt = priorityNow.AddMilliseconds(-1) },
                 higher with { ControlCoverage = .069999 }, higher with { ControlTriggerCoverage = .069999 },
                 higher with { ControlCoverage = double.NaN }, hold };
@@ -390,7 +398,7 @@ public sealed partial class MainWindow
             Require(lowerSearch.IlluminatedHint?.Center == lower.Center,
                 "Stale, insufficient, nonfinite or hold evidence displaced the valid lower caption.");
             priorityNow += TimeSpan.FromMilliseconds(500);
-            lower = Caption("bj-bet-10"); higher = Caption("menu");
+            lower = Caption("crown-deed"); higher = Caption("football");
             priorityScene.CompleteHandAcquisition(lowerSearch,
                 [.. invalidHigher.Select(item => item with { ObservedAt = item == invalidHigher[0]
                     ? priorityNow.AddMilliseconds(-1) : priorityNow }), lower], [], priorityNow, illuminatedPresence: true);
@@ -404,18 +412,19 @@ public sealed partial class MainWindow
             var higherStart = higherSearch.IlluminationStartedAt;
             priorityNow += TimeSpan.FromMilliseconds(100);
             double lightLevel = priorityScene.SearchLightLevel;
-            priorityScene.CompleteHandAcquisition(lowerSearch, [Caption("bj-reset")], [], priorityNow,
+            priorityScene.CompleteHandAcquisition(lowerSearch, [Caption("water-garden")], [], priorityNow,
                 illuminatedPresence: true, illuminatedWhite: 254);
             Require(priorityScene.GetHandAcquisitionContext(priorityNow)?.IlluminationStartedAt == higherStart &&
                     priorityScene.SearchLightLevel == lightLevel,
                 "An in-flight callback from the previous light replaced or dimmed the new search.");
             priorityNow += TimeSpan.FromMilliseconds(400);
-            higher = Caption("menu");
+            higher = Caption("football");
             var jitter = higher with { Center = new(higher.Center.X, higher.Center.Y + (reverseCamera ? 1 : -1)) };
-            priorityScene.CompleteHandAcquisition(higherSearch, [Caption("bj-bet-10"), jitter, higher], [], priorityNow,
+            priorityScene.CompleteHandAcquisition(higherSearch, [Caption("crown-deed"), jitter, higher], [], priorityNow,
                 illuminatedPresence: true);
             Require(priorityScene.GetHandAcquisitionContext(priorityNow) is { IlluminatedHint: { } kept } stable &&
                     kept.Center == higher.Center && stable.IlluminationStartedAt == higherStart &&
+                    priorityScene.CurrentBoardScreen == BoardScreen.Menu &&
                     priorityScene.BlackjackState.Revision == revision && priorityScene.HoveredBoardButtons.Count == 0 &&
                     priorityScene.ActiveHandSpotlightCount == 0,
                 "Lower disturbance or same-caption jitter moved the light or manufactured an input action.");

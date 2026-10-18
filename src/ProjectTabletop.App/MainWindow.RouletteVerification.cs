@@ -843,9 +843,11 @@ public sealed partial class MainWindow
             Height * (.035 + .93 * (_inset / 2 + v * (1 - _inset))));
         private PixelPoint LocalToCamera(Vector2 point)
         {
-            double aspect = Width / (double)Height, fit = Math.Min(1, aspect * 1.22);
-            return CameraPoint(.274 + (point.X - 200) * fit / aspect / 1000,
-                .294 + (point.Y - 200) * fit / 1000);
+            double aspect = Width / (double)Height,
+                fit = Math.Min(1, aspect * SceneCompositor.RouletteBoardWheelWidthFit);
+            var center = SceneCompositor.RouletteBoardWheelCenter;
+            return CameraPoint(center.X / 1000 + (point.X - 200) * fit / aspect / 1000,
+                center.Y / 1000 + (point.Y - 200) * fit / 1000);
         }
         public void Dispose() { Scene.Dispose(); Target.Dispose(); }
         private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }

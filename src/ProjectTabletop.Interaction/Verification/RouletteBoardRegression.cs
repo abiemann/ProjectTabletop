@@ -7,9 +7,10 @@ internal static class RouletteBoardRegression
     public static void Run()
     {
         CheckLayoutAndBetSelection();
+        CheckChipSelection();
         CheckHoldsAndReadiness();
         CheckExitAndResume();
-        Console.WriteLine("Roulette board verification passed: 49 disjoint betting targets, four chip denominations, " +
+        Console.WriteLine("Roulette board verification passed: 49 disjoint betting targets, four separated right-side gesture chips, " +
             "five bottom caption holds, gesture betting but no gesture Spin, fresh clear-caption readiness, " +
             "ambiguous/released hold rejection, busy controls, navigation retention and exactly-once resumed settlement.");
     }
@@ -40,6 +41,20 @@ internal static class RouletteBoardRegression
                 "Roulette hold captions do not have clear hand gaps.");
         Require(RouletteGame.BetTargets.All(target => !buttons.Single(button => button.Id == target.Id).IsHold),
             "A tiny betting cell requires an ambiguous caption hold.");
+        var chips = buttons.Where(button => button.Id.StartsWith("roulette-chip-", StringComparison.Ordinal)).ToArray();
+        Require(chips.Length == 4 && chips.All(button => !button.IsHold && button.Bounds.X > .65 &&
+            button.Bounds.Y + button.Bounds.Height < BoardSession.RouletteTableBounds.Y),
+            "Roulette's denomination chips must remain gesture controls to the right and above the betting grid.");
+        for (int first = 0; first < chips.Length; first++)
+        for (int second = first + 1; second < chips.Length; second++)
+        {
+            var a = chips[first].Bounds;
+            var b = chips[second].Bounds;
+            double horizontalGap = Math.Max(a.X, b.X) - Math.Min(a.X + a.Width, b.X + b.Width);
+            double verticalGap = Math.Max(a.Y, b.Y) - Math.Min(a.Y + a.Height, b.Y + b.Height);
+            Require(horizontalGap >= .019 || verticalGap >= .034,
+                "Roulette's denomination chips no longer have clear space for independent hand selection.");
+        }
         var one = BoardSession.RouletteBetBounds(new(RouletteBetKind.Straight, 1));
         var three = BoardSession.RouletteBetBounds(new(RouletteBetKind.Straight, 3));
         var thirtySix = BoardSession.RouletteBetBounds(new(RouletteBetKind.Straight, 36));
@@ -61,6 +76,40 @@ internal static class RouletteBoardRegression
         var pinchSpin = new BoardHandSample(spin.X + spin.Width / 2, spin.Y + spin.Height / 2, spinAt.AddSeconds(1), 2);
         Require(board.Update([pinchSpin], spinAt, spinAt) is null && game.Phase == RoulettePhase.Betting,
             "A pinch bypassed the Spin caption hold.");
+    }
+
+    private static void CheckChipSelection()
+    {
+        var game = new RouletteGame(1);
+        var board = new BoardSession(roulette: game);
+        board.ShowRoulette(Origin);
+        int milliseconds = 100;
+        long eventId = 0;
+        foreach (decimal value in RouletteGame.ChipOptions)
+        {
+            string id = RouletteGame.ChipAction(value);
+            var chip = board.Buttons.Single(button => button.Id == id);
+            long revision = game.Revision;
+            for (int elapsed = 0; elapsed <= 1200; elapsed += 100)
+            {
+                var frame = Origin.AddMilliseconds(milliseconds + elapsed);
+                Require(board.ObserveHeldButtons([id], frame, frame).Count == 0 && game.Revision == revision,
+                    "Resting on a Roulette denomination selected it as a long-press button.");
+            }
+            milliseconds += 1300;
+            var now = Origin.AddMilliseconds(milliseconds);
+            var pinch = new BoardHandSample(chip.Bounds.X + chip.Bounds.Width / 2,
+                chip.Bounds.Y + chip.Bounds.Height / 2, now.AddSeconds(1), ++eventId);
+            Require(board.Update([pinch], now, now)?.ButtonId == id && game.Snapshot.Chip == value &&
+                game.Balance == RouletteGame.StartingBalance && game.TotalBet == 0 && game.Revision == revision + 1,
+                "A gesture at a relocated chip did not select only its denomination.");
+            Require(board.Update([pinch], now.AddMilliseconds(100), now.AddMilliseconds(100)) is null &&
+                game.Revision == revision + 1 && !board.Buttons.Single(button => button.Id == id).Enabled,
+                "A held chip gesture replayed selection or the selected denomination remained enabled.");
+            milliseconds += 200;
+        }
+        Require(board.ActivateButton("roulette-chip-5", Origin.AddMilliseconds(milliseconds)) && game.Snapshot.Chip == 5 &&
+            game.TotalBet == 0, "The relocated denomination stopped accepting immediate pointer/control clicks.");
     }
 
     private static void CheckHoldsAndReadiness()

@@ -7,7 +7,7 @@ public sealed partial class BoardSession
     private DateTimeOffset? _controlFadeStartedAt;
     private double _controlFadeFromOpacity = 1;
 
-    /// <summary>Target visibility. Rendering samples the shared fade; input waits until it settles.</summary>
+    /// <summary>Target visibility of the swipe-controlled group; Roulette's betting controls stay visible.</summary>
     public bool ButtonsVisible { get; private set; } = true;
 
     /// <summary>The launcher stays visible; Stryker's Run owns its automatic control transitions.</summary>
@@ -15,7 +15,12 @@ public sealed partial class BoardSession
 
     /// <summary>Current controls for rendering, including their dynamic enabled state while fading.</summary>
     public IReadOnlyList<BoardButton> GetVisibleButtons(DateTimeOffset now) =>
-        ButtonsVisible || ControlVisibilityAnimating(now) ? CurrentButtons : [];
+        ButtonsVisible || ControlVisibilityAnimating(now) ? CurrentButtons : PersistentButtons;
+
+    // Roulette's chip selectors and betting grid are the playing surface.
+    // A bottom-row swipe toggles only its five long-press footer controls.
+    private IReadOnlyList<BoardButton> PersistentButtons => Screen == BoardScreen.Roulette
+        ? CurrentButtons.Where(button => !button.IsHold).ToArray() : [];
 
     /// <summary>Pure presentation sample shared by every control on the board.</summary>
     public double GetButtonsOpacity(DateTimeOffset now)

@@ -117,24 +117,30 @@ internal static class BlackjackDealRegression
 
     private static void CheckLifecycleAndDealer()
     {
-        foreach (bool gesture in new[] { false, true })
+        foreach (bool hold in new[] { false, true })
         {
             var board = Board();
             board.ActivateButton("bj-deal", Time(100));
             board.HoldBlackjackPresentationUntil(Time(2000));
-            bool navigated = gesture
-                ? board.Update([Pinch(Button(board, "menu"), 1, 300)], Time(300), Time(300))?.ButtonId == "menu"
+            Require(board.Update([Pinch(Button(board, "menu"), 1, 200)], Time(200), Time(200)) is null &&
+                board.Screen == BoardScreen.Blackjack, "A pinch activated long-press Exit during presentation.");
+            if (hold)
+                for (int time = 300; time < 1300; time += 100)
+                    Require(board.ObserveHeldButtons(["menu"], Time(time), Time(time)).Count == 0,
+                        "Exit acted before a one-second caption hold during presentation.");
+            bool navigated = hold
+                ? board.ObserveHeldButtons(["menu"], Time(1300), Time(1300)).SequenceEqual(["menu"])
                 : board.ActivateButton("menu", Time(300));
             Require(navigated && board.Screen == BoardScreen.Menu, "Presentation blocked Exit.");
-            board.ShowBlackjack(Time(400));
+            board.ShowBlackjack(Time(1400));
             Require(Button(board, "bj-hit").Enabled, "Menu navigation left a presentation lock behind.");
             board.HoldBlackjackPresentationUntil(Time(2000));
-            board.ShowHandTrackingTest(Time(500)); board.ShowBlackjack(Time(600));
+            board.ShowHandTrackingTest(Time(1500)); board.ShowBlackjack(Time(1600));
             Require(Button(board, "bj-hit").Enabled, "Programmatic navigation left a presentation lock behind.");
             board.HoldBlackjackPresentationUntil(Time(2000));
-            board.ResetInput(Time(700));
+            board.ResetInput(Time(1700));
             Require(Button(board, "bj-hit").Enabled, "ResetInput retained the presentation lock.");
-            board.HoldBlackjackPresentationUntil(Time(699));
+            board.HoldBlackjackPresentationUntil(Time(1699));
             Require(Button(board, "bj-hit").Enabled, "An already expired hold disabled controls.");
         }
 

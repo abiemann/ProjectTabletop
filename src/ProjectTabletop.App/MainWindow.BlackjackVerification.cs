@@ -1,5 +1,6 @@
 #if DEBUG
 using System.Numerics;
+using System.Reflection;
 using Microsoft.Graphics.Canvas;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
@@ -26,6 +27,13 @@ public sealed partial class MainWindow
         using var scene = new SceneCompositor(Game(10, 6, 5, 10, 3, 5));
         var inset = Align(scene, [new(.035f, .035f), new(.965f, .035f), new(.965f, .965f), new(.035f, .965f)]);
 
+        // Blackjack is on page two; settle that page before selecting its card.
+        var board = (BoardSession)typeof(SceneCompositor).GetField("_boardSession",
+            BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scene)!;
+        Require(board.ActivateButton("menu-scroll-down", MonotonicClock.UtcNow),
+            "The Blackjack fixture could not open the second menu page.");
+        await Task.Delay(BoardSession.MenuScrollDuration + TimeSpan.FromMilliseconds(20));
+        board.TickMenu(MonotonicClock.UtcNow);
         await Pinch("blackjack", 1);
         Require(scene.CurrentBoardScreen == BoardScreen.Blackjack && scene.BlackjackState.Phase == BlackjackPhase.Betting,
             "The menu gesture did not open the Blackjack betting table.");
@@ -40,7 +48,7 @@ public sealed partial class MainWindow
 
         await Task.Delay(2);
         var chips = scene.CurrentBoardButtons.Single(button => button.Id == "bj-reset");
-        scene.SetHandCursors([new(PointAt(chips), DateTimeOffset.MinValue)], DateTimeOffset.UtcNow);
+        scene.SetHandCursors([new(PointAt(chips), DateTimeOffset.MinValue)], MonotonicClock.UtcNow);
         var chipsHovered = DrawPreview(scene);
         Require(scene.HoveredBoardButtons.SequenceEqual(["bj-reset"]) &&
                 DifferentPixels(betting, chipsHovered, chips.Bounds) > 100 &&
@@ -52,20 +60,52 @@ public sealed partial class MainWindow
         await Task.Delay(2);
         // Deal is a one-time long-press: a fingertip neither highlights nor pinches it.
         var dealButton = scene.CurrentBoardButtons.Single(button => button.Id == "bj-deal");
-        scene.SetHandCursors([new(PointAt(dealButton), DateTimeOffset.MinValue)], DateTimeOffset.UtcNow);
+        scene.SetHandCursors([new(PointAt(dealButton), DateTimeOffset.MinValue)], MonotonicClock.UtcNow);
         Require(scene.HoveredBoardButtons.Count == 0, "A fingertip highlighted the long-press Deal button.");
         scene.ClearHandTips(resetInput: false);
-        await Task.Delay(2);
-        var wager = scene.CurrentBoardButtons.Single(button => button.Id == "bj-bet-50");
-        scene.SetHandCursors([new(PointAt(wager), DateTimeOffset.MinValue)], DateTimeOffset.UtcNow);
-        Require(scene.HoveredBoardButtons.SequenceEqual(["bj-bet-50"]),
-            "Hover does not follow the shared Blackjack button rectangle.");
-        var hovered = DrawPreview(scene);
-        Require(DifferentPixels(betting, hovered, wager.Bounds) > 100,
-            "The 50 wager has no visible hover feedback.");
-        await Save("betting-hover");
-        scene.ClearHandTips(resetInput: false);
-
+        foreach (string id in new[] { "bj-bet-10", "bj-bet-25", "bj-bet-50", "bj-bet-100", "menu" })
+        {
+            await Task.Delay(2);
+            var coin = scene.CurrentBoardButtons.Single(button => button.Id == id);
+            decimal selectedBet = scene.BlackjackState.SelectedBet;
+            scene.SetHandCursors([new(PointAt(coin), DateTimeOffset.MinValue)], MonotonicClock.UtcNow);
+            Require(coin.Hold == BoardButtonHold.Once && scene.HoveredBoardButtons.Count == 0 &&
+                    DifferentPixels(betting, DrawPreview(scene), coin.Bounds) == 0,
+                "A fingertip highlighted the long-press " + id + " control.");
+            await Pinch(id, 2);
+            Require(scene.CurrentBoardScreen == BoardScreen.Blackjack && scene.BlackjackState.SelectedBet == selectedBet,
+                "A pinch activated the long-press " + id + " control.");
+            scene.ClearHandTips(resetInput: false);
+        }
+        // Exercise real rendered number damage through the shared detector and
+        // hold path, independently of the round fixture's starting wager.
+        using (var coinScene = new SceneCompositor(Game(10, 6, 5, 10)))
+        {
+            Align(coinScene, [new(.035f, .035f), new(.965f, .035f), new(.965f, .965f), new(.035f, .965f)], cameraSize: size);
+            coinScene.ShowBlackjack();
+            byte[] DrawCoins()
+            {
+                using (var drawing = target.CreateDrawingSession())
+                    coinScene.Draw(drawing, size, size, preview: false, runningSlowly: false);
+                return target.GetPixelBytes();
+            }
+            var captionHold = new PhotoCopyCaptionHoldFixture(coinScene, DrawCoins, size);
+            await captionHold.CheckReleaseCancelsAsync("bj-bet-50");
+            await captionHold.HoldAsync("bj-bet-50");
+            Require(coinScene.BlackjackState.SelectedBet == 50 && captionHold.SuccessfulHolds == 1 &&
+                    captionHold.BrokenCaptionFrames > 0,
+                "Corrupting the rendered 50 coin did not complete exactly one caption hold.");
+            await captionHold.HoldAsync("bj-bet-100");
+            Require(coinScene.BlackjackState.SelectedBet == 100 && captionHold.SuccessfulHolds == 2,
+                "The widest coin number did not complete its rendered-caption hold.");
+            var coin = coinScene.CurrentBoardButtons.Single(button => button.Id == "bj-bet-25");
+            Require(coinScene.ActivateBlackjackAt(coin.Bounds.X + coin.Bounds.Width / 2,
+                    coin.Bounds.Y + coin.Bounds.Height / 2) && coinScene.BlackjackState.SelectedBet == 25,
+                "The laptop pointer no longer selects a betting coin immediately.");
+            await captionHold.HoldAsync("menu");
+            Require(coinScene.CurrentBoardScreen == BoardScreen.Menu && captionHold.SuccessfulHolds == 3,
+                "A rendered EXIT caption hold did not return to the main menu.");
+        }
         await Pinch("bj-deal", 2);
         Require(scene.BlackjackState.Phase == BlackjackPhase.Betting, "A pinch dealt with the long-press Deal button.");
         Require(scene.ActivateBlackjackButton("bj-deal"), "Deal did not start the round.");
@@ -108,7 +148,7 @@ public sealed partial class MainWindow
         DrawPreview(scene);
         CheckTopControls(scene, resetEnabled: false);
         await Save("dealer-turn");
-        var future = DateTimeOffset.UtcNow.AddSeconds(2);
+        var future = MonotonicClock.UtcNow.AddSeconds(2);
         Require(scene.TickBlackjack(future) && !scene.BlackjackState.DealerHoleCardHidden,
             "The dealer did not reveal its hidden card.");
         Require(scene.TickBlackjack(future.AddSeconds(1)) && scene.BlackjackState.DealerCards.Count == 3,
@@ -134,7 +174,7 @@ public sealed partial class MainWindow
                 "The rendered player turn leaks information about the dealer's hidden card.");
         }
 
-        var fixtureTime = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var fixtureTime = MonotonicClock.UtcNow.AddMinutes(-5);
         var splitGame = Game(8, 6, 8, 10, 3, 2, 5);
         Act(splitGame, "bj-deal", fixtureTime);
         Act(splitGame, "bj-split", fixtureTime.AddSeconds(1));
@@ -198,6 +238,7 @@ public sealed partial class MainWindow
             "The isolated Blackjack check changed the live camera, projector, board or game.");
         return new { passed = true, liveHardwareUnchanged = true, menuAndPinchActions = true,
             heldPinchSuppressed = true, hoverRendered = true, cachedTableUpdated = true,
+            coinGesturesRejected = true, renderedCoinCaptionHold = true, coinPointerSelection = true, exitCaptionHold = true,
             exitCaptionAndTopCounterTargets = true, yourChipsPlaqueHoverAndRestoredBalance = true, noFooterReset = true,
             hiddenCardDoesNotLeak = true, dealerRevealAndSettlement = true,
             splitRendered = true, perspectiveClip = true, zeroCreditsAndLaptopReset = true, directory, images };
@@ -206,7 +247,7 @@ public sealed partial class MainWindow
         {
             await Task.Delay(2); // Every source frame follows the preceding selection/reset barrier.
             var button = scene.CurrentBoardButtons.Single(item => item.Id == id);
-            var now = DateTimeOffset.UtcNow;
+            var now = MonotonicClock.UtcNow;
             scene.SetHandCursors([new(PointAt(button), now.AddSeconds(1), eventId)], now);
         }
 
@@ -243,14 +284,14 @@ public sealed partial class MainWindow
         static BlackjackGame StartedGame(params int[] ranks)
         {
             var game = Game(ranks);
-            Act(game, "bj-deal", DateTimeOffset.UtcNow.AddMinutes(-1));
+            Act(game, "bj-deal", MonotonicClock.UtcNow.AddMinutes(-1));
             return game;
         }
 
         static BlackjackGame CompletedGame(int[] ranks)
         {
             var game = Game(ranks);
-            var start = DateTimeOffset.UtcNow.AddMinutes(-1);
+            var start = MonotonicClock.UtcNow.AddMinutes(-1);
             Act(game, "bj-deal", start);
             Act(game, "bj-stand", start.AddSeconds(1));
             for (int step = 2; game.Snapshot.Phase == BlackjackPhase.DealerTurn && step < 20; step++)
@@ -259,12 +300,13 @@ public sealed partial class MainWindow
             return game;
         }
 
-        static float Align(SceneCompositor fixture, Vector2[] corners)
+        static float Align(SceneCompositor fixture, Vector2[] corners, int cameraSize = 1)
         {
             fixture.SetDisplayAspect(1);
             fixture.SetBoardSetup(true);
             var fraction = fixture.SetDetectedBoardGrid(corners, Homography.FromFourPoints(
-                [new(0, 0), new(1, 0), new(1, 1), new(0, 1)], [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
+                [new(0, 0), new(cameraSize, 0), new(cameraSize, cameraSize), new(0, cameraSize)],
+                [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
             fixture.SetBoardSetup(false);
             return fraction;
         }
@@ -277,7 +319,7 @@ public sealed partial class MainWindow
             var buttons = fixture.CurrentBoardButtons;
             var exit = buttons.Single(button => button.Id == "menu");
             var reset = buttons.Single(button => button.Id == "bj-reset");
-            Require(exit.Label == "Exit" && exit.Bounds == new BoardRect(.06, .055, .18, .09) && exit.Enabled &&
+            Require(exit.Label == "Exit" && exit.Hold == BoardButtonHold.Once && exit.Bounds == new BoardRect(.06, .055, .18, .09) && exit.Enabled &&
                     reset.Label == "Your Chips" && reset.Bounds == new BoardRect(.742, .055, .198, .09) &&
                     reset.Enabled == resetEnabled && buttons.All(button => !button.Label.Contains("Reset chips", StringComparison.OrdinalIgnoreCase)),
                 "The casino retained its old navigation/footer reset or changed the top-counter interaction rules.");

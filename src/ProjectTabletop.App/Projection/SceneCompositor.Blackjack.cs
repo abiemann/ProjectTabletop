@@ -241,7 +241,9 @@ public sealed partial class SceneCompositor
                 _ => ThemeColor(47, 47, 54)
             };
             DrawCasinoChip(ds, new Vector2((float)(rect.X + rect.Width / 2), (float)(rect.Y + rect.Height / 2)),
-                32, chipColor, button.Id[7..], !enabled);
+                44, chipColor, !enabled);
+            var text = CasinoButtonTextSpec(button);
+            DrawHoldButtonCaption(ds, text.Caption, text.Bounds, HoldExposure(ink, lettering), PaintBoardAspect());
             if (selected)
                 ds.FillCircle(new Vector2((float)rect.Right - 11, (float)rect.Y + 12), 3.5f, CasinoGold);
         }
@@ -467,7 +469,7 @@ public sealed partial class SceneCompositor
         DrawCasinoSuit(ds, BlackjackSuit.Diamonds, center, size, color);
 
     private static void DrawCasinoChip(CanvasDrawingSession ds, Vector2 center, float radius,
-        Color body, string value, bool dimmed)
+        Color body, bool dimmed)
     {
         ds.FillCircle(new Vector2(center.X, center.Y + 3), radius, ThemeColor(0, 10, 8, 100));
         if (dimmed) body = ThemeColor((byte)(body.R * .65), (byte)(body.G * .65), (byte)(body.B * .65));
@@ -483,8 +485,6 @@ public sealed partial class SceneCompositor
         ds.DrawCircle(center, radius - .5f, ThemeColor(239, 229, 195, dimmed ? (byte)70 : (byte)180), 1);
         ds.DrawCircle(center, radius - 10, stripe, 1);
         ds.DrawCircle(center, radius - 13, ThemeColor(225, 235, 220, 90), .8f);
-        CasinoText(ds, value, new Rect(center.X - radius + 8, center.Y - 18, radius * 2 - 16, 36),
-            value.Length >= 3 ? 19 : 23, stripe, "Bahnschrift", true);
     }
 
     private static void CasinoText(CanvasDrawingSession ds, string text, Rect rect, float size, Color color,
@@ -510,8 +510,8 @@ public sealed partial class SceneCompositor
         if (button.Id.StartsWith("bj-bet-", StringComparison.Ordinal))
         {
             string value = button.Id[7..];
-            return (value, new Rect(rect.X + rect.Width / 2 - 24,
-                rect.Y + rect.Height / 2 - 18, 48, 36), value.Length >= 3 ? 19 : 23);
+            return (value, new Rect(rect.X + rect.Width / 2 - 28,
+                rect.Y + rect.Height / 2 - 20, 56, 40), 28);
         }
         if (button.Id == "bj-reset")
             return ("YOUR CHIPS", new Rect(rect.X + 10, rect.Y + 10, rect.Width - 20, 23), 15);

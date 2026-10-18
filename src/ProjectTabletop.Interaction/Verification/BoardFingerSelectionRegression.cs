@@ -67,15 +67,15 @@ internal static class BoardFingerSelectionRegression
         Require(At(board, 380, opened)?.ButtonId == button.Id,
             "A small opening motion outside the visual edge lost the bounded target anchor.");
 
-        // Adjacent bet chips: 50 spans .36-.48 and 100 spans .50-.62.
-        board = new BoardSession(new BlackjackGame(initialShoe: Cards(8, 6, 8, 10)));
-        board.ShowBlackjack(Time(0));
-        var bet = Together(Button(board, "bj-bet-50")) with { FingerAim = new(.478, .82) };
-        At(board, 100, bet); At(board, 200, bet);
-        var neighboringBet = Apart(bet) with { FingerAim = new(.505, .82) };
-        Require(At(board, 300, neighboringBet) is null && At(board, 380, neighboringBet) is null &&
-            board.BlackjackState is { Phase: BlackjackPhase.Betting, SelectedBet: 25 },
-            "Opening across a neighboring target selected 50 or transferred its anchor to 100.");
+        // Adjacent Settings tiles remain gesture targets; betting coins now use caption holds.
+        board = Settings();
+        var tile = Together(Button(board, "hand-tracking")) with { FingerAim = new(.479, .33) };
+        At(board, 100, tile); At(board, 200, tile);
+        var neighboringTile = Apart(tile) with { FingerAim = new(.521, .33) };
+        long revision = board.Revision;
+        Require(At(board, 300, neighboringTile) is null && At(board, 380, neighboringTile) is null &&
+            board.Screen == BoardScreen.Settings && board.Revision == revision,
+            "Opening across a neighboring target selected Hand-Tracking or transferred its anchor to Licenses.");
 
         board = Settings(); var hand = Together(Button(board, "licenses"));
         At(board, 100, hand); At(board, 200, hand);
@@ -196,6 +196,15 @@ internal static class BoardFingerSelectionRegression
     {
         var board = new BoardSession(new BlackjackGame(initialShoe: Cards(8, 6, 8, 10, 10, 2, 10, 4)));
         board.ShowBlackjack(Time(0));
+        foreach (string id in new[] { "bj-bet-10", "bj-bet-25", "bj-bet-50", "bj-bet-100", "menu" })
+        {
+            var betting = new BoardSession(); betting.ShowBlackjack(Time(0));
+            long revision = betting.BlackjackState.Revision;
+            Require(Select(betting, Together(Button(betting, id)), 100) is null &&
+                betting.Screen == BoardScreen.Blackjack && betting.BlackjackState.Revision == revision && betting.HoveredButtonIds.Count == 0 &&
+                betting.FingerSelectionFeedback.Count == 0,
+                "The finger gesture selected or highlighted a long-press betting coin or Exit.");
+        }
         // Deal and the round actions are long-press buttons: the finger gesture never selects them.
         Require(Select(board, Together(Button(board, "bj-deal")), 100) is null &&
             board.BlackjackState.Phase == BlackjackPhase.Betting, "The finger gesture dealt with the long-press Deal button.");
@@ -219,17 +228,17 @@ internal static class BoardFingerSelectionRegression
         Require(Hold(5100).SequenceEqual(["bj-hit"]) && board.BlackjackState.Hands[1].Cards.Count == 3,
             "Lifting and holding again did not rearm HIT for the next split hand.");
 
-        // The 10 chip returns after settlement where the disabled Hit was during the dealer turn.
+        // Your Chips stays a gesture target and re-enables after the dealer turn.
         board = new BoardSession(new BlackjackGame(initialShoe: Cards(10, 10, 8, 7)));
-        board.ShowBlackjack(Time(0)); var chip = Together(Button(board, "bj-bet-10"));
+        board.ShowBlackjack(Time(0)); var chip = Together(Button(board, "bj-reset"));
         board.ActivateButton("bj-deal", Time(50)); board.ActivateButton("bj-stand", Time(100));
         At(board, 200, chip); At(board, 300, chip); board.TickBlackjack(Time(750));
         At(board, 800, chip); At(board, 900, chip); board.TickBlackjack(Time(1400));
         Require(board.BlackjackState.Phase == BlackjackPhase.RoundOver, "The dealer fixture did not finish.");
         Require(At(board, 1500, Apart(chip)) is null && At(board, 1580, Apart(chip)) is null &&
-            board.BlackjackState.SelectedBet == 25, "Fingers grouped over disabled dealer controls armed the next wager.");
-        Require(Select(board, chip, 1700)?.ButtonId == "bj-bet-10" && board.BlackjackState.SelectedBet == 10,
-            "A fresh together-to-apart selection could not choose a wager after settlement.");
+            board.BlackjackState.Bankroll == 1025, "Fingers grouped over disabled dealer controls armed a bankroll reset.");
+        Require(Select(board, chip, 1700)?.ButtonId == "bj-reset" && board.BlackjackState.Bankroll == 1000,
+            "A fresh together-to-apart selection could not reset Your Chips after settlement.");
     }
 
     private static BoardSession Settings()

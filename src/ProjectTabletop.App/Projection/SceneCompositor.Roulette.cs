@@ -18,6 +18,7 @@ public sealed partial class SceneCompositor
     private static readonly Color RouletteCream = ThemeColor(255, 241, 213);
     private static readonly Color RoulettePink = ThemeColor(239, 120, 160);
     private static readonly Color RouletteInk = ThemeColor(8, 22, 28);
+    private static float RouletteChipCaptionSize(double radius) => (float)Math.Min(22, radius * .78);
     private CanvasBitmap? _rouletteBackdrop;
 
     private void DrawRouletteBoard(CanvasDrawingSession ds, RouletteSnapshot game,
@@ -62,33 +63,38 @@ public sealed partial class SceneCompositor
     private static void DrawRouletteSummary(CanvasDrawingSession ds, RouletteSnapshot game, double aspect)
     {
         bool spinning = game.Phase == RoulettePhase.Spinning;
-        var panel = new Rect(505, 149, 441, 297);
+        var panel = new Rect(400, 149, 250, 297);
         ds.FillRoundedRectangle(panel, 16, 16, ThemeColor(5, 18, 24, 215));
         ds.DrawRoundedRectangle(panel, 16, 16, ThemeColor(122, 154, 143, 125), .9f);
-        RouletteText(ds, spinning ? "NO MORE BETS" : "PLACE YOUR BETS", new Rect(525, 164, 400, 25),
-            18, spinning ? RoulettePink : RouletteGold, aspect);
-        ds.DrawLine(527, 202, 924, 202, ThemeColor(155, 133, 97, 140), .8f);
-        RouletteText(ds, "CREDITS", new Rect(526, 214, 193, 17), 11, RouletteGold, aspect);
-        RouletteText(ds, "ON THE TABLE", new Rect(732, 214, 190, 17), 11, RouletteGold, aspect);
-        RouletteText(ds, game.Balance.ToString("N0"), new Rect(526, 237, 193, 44), 33, RouletteCream, aspect, "Georgia");
-        RouletteText(ds, game.TotalBet.ToString("N0"), new Rect(732, 237, 190, 44), 33, RouletteCream, aspect, "Georgia");
-        ds.DrawLine(724, 216, 724, 280, ThemeColor(155, 133, 97, 100), .8f);
-        RouletteText(ds, game.Status, new Rect(526, 291, 397, 42), 14, RouletteCream, aspect);
-        RouletteText(ds, "RECENT NUMBERS", new Rect(527, 345, 397, 17), 10, RouletteGold, aspect);
+        RouletteText(ds, spinning ? "NO MORE BETS" : "PLACE YOUR BETS", new Rect(410, 164, 230, 25),
+            16, spinning ? RoulettePink : RouletteGold, aspect, fitWidth: true);
+        ds.DrawLine(417, 202, 633, 202, ThemeColor(155, 133, 97, 140), .8f);
+        RouletteText(ds, "CREDITS", new Rect(410, 211, 230, 17), 11, RouletteGold, aspect);
+        RouletteText(ds, game.Balance.ToString("N0"), new Rect(410, 230, 230, 39), 31, RouletteCream, aspect, "Georgia");
+        RouletteText(ds, "ON THE TABLE", new Rect(410, 278, 230, 17), 11, RouletteGold, aspect);
+        RouletteText(ds, game.TotalBet.ToString("N0"), new Rect(410, 297, 230, 39), 31, RouletteCream, aspect, "Georgia");
+        RouletteText(ds, "RECENT NUMBERS", new Rect(410, 348, 230, 17), 10, RouletteGold, aspect);
         int index = 0;
         foreach (var result in game.History.Take(8))
         {
             int number = result.Number;
-            var box = new Rect(534 + index * 49, 374, 41, 42);
+            var box = new Rect(416 + index % 4 * 55, 375 + index / 4 * 32, 52, 28);
             Color color = number == 0 ? ThemeColor(17, 103, 77) : RouletteGame.IsRed(number)
                 ? ThemeColor(135, 26, 57) : ThemeColor(19, 30, 37);
             ds.FillRoundedRectangle(box, 6, 6, color);
             ds.DrawRoundedRectangle(box, 6, 6, WithAlpha(RouletteGold, index == 0 ? (byte)230 : (byte)80), 1);
-            RouletteText(ds, number.ToString(), box, 18, RouletteCream, aspect);
+            RouletteText(ds, number.ToString(), box, 16, RouletteCream, aspect);
             index++;
         }
-        if (index == 0) RouletteText(ds, "Your evening starts here", new Rect(532, 372, 392, 38), 15,
-            ThemeColor(159, 178, 175), aspect, "Georgia");
+        if (index == 0) RouletteText(ds, "Your evening starts here", new Rect(410, 375, 230, 38), 11,
+            ThemeColor(159, 178, 175), aspect, "Georgia", fitWidth: true);
+
+        var chips = new Rect(680, 149, 290, 297);
+        ds.FillRoundedRectangle(chips, 16, 16, ThemeColor(5, 18, 24, 215));
+        ds.DrawRoundedRectangle(chips, 16, 16, ThemeColor(122, 154, 143, 125), .9f);
+        RouletteText(ds, "CHIP VALUE", new Rect(695, 157, 260, 20), 11, RouletteGold, aspect);
+        ds.FillRoundedRectangle(new Rect(49, 780, 903, 52), 12, 12, ThemeColor(5, 18, 24, 215));
+        RouletteText(ds, game.Status, new Rect(69, 785, 863, 42), 14, RouletteCream, aspect);
     }
 
     private void DrawRouletteControls(CanvasDrawingSession ds, RouletteSnapshot game,
@@ -96,12 +102,16 @@ public sealed partial class SceneCompositor
         IReadOnlyList<BoardFingerSelectionFeedback> feedback, double aspect)
     {
         if (buttons.Count == 0) return;
-        using var fade = CreateBoardControlsFadeLayer(ds);
         foreach (var button in buttons)
         {
+            if (button.IsHold) continue;
             DrawRouletteButton(ds, button, game, hovered.Contains(button.Id), aspect, _holdControlBrightness);
-            if (!button.IsHold) DrawButtonFingerSelectionFeedback(ds, button, feedback, RouletteGold);
+            DrawButtonFingerSelectionFeedback(ds, button, feedback, RouletteGold);
         }
+        using var fade = CreateBoardControlsFadeLayer(ds);
+        foreach (var button in buttons)
+            if (button.IsHold)
+                DrawRouletteButton(ds, button, game, hovered.Contains(button.Id), aspect, _holdControlBrightness);
     }
 
     private static void DrawRouletteButton(CanvasDrawingSession ds, BoardButton button,
@@ -139,7 +149,8 @@ public sealed partial class SceneCompositor
         {
             decimal value = decimal.Parse(button.Id["roulette-chip-".Length..], System.Globalization.CultureInfo.InvariantCulture);
             var center = new Vector2((float)(rect.X + rect.Width / 2), (float)(rect.Y + rect.Height / 2));
-            DrawRouletteChip(ds, center, (float)rect.Height * .46f, value, aspect, selected: game.Chip == value);
+            DrawRouletteChip(ds, center, (float)(RouletteChipRadius(button, aspect) * BoardSurfaceSize),
+                value, aspect, selected: game.Chip == value);
             if (hovered) ds.DrawRoundedRectangle(rect, 8, 8, RouletteCream, 2);
             return;
         }
@@ -163,13 +174,17 @@ public sealed partial class SceneCompositor
         return new(rect.X + 5, rect.Y + 3, rect.Width - 10, rect.Height - 6);
     }
 
-    private HandTrackingBounds RouletteChipSearchRegion(BoardButton button)
+    // Keep the physical chip inside its gesture target on wide and narrow boards.
+    // Drawing, caption bounds and optical coverage all use this same face size.
+    private static double RouletteChipRadius(BoardButton button, double aspect) =>
+        Math.Min(button.Bounds.Height, button.Bounds.Width * aspect) * .46;
+
+    private HandTrackingBounds RouletteChipFaceRegion(BoardButton button)
     {
-        // Keep the comfortable gesture hit target, but judge optical coverage
-        // against the visible chip face rather than its empty horizontal padding.
-        // This square sits inside the circular face and excludes the moving rim.
+        // The caption supplies acquisition evidence; this separate colour
+        // reference stays inside the circular face and excludes its rim.
         var bounds = button.Bounds;
-        double halfHeight = bounds.Height * .46 / Math.Sqrt(2);
+        double halfHeight = RouletteChipRadius(button, PaintBoardAspect()) / Math.Sqrt(2);
         double halfWidth = halfHeight / PaintBoardAspect();
         return new(bounds.X + bounds.Width / 2 - halfWidth,
             bounds.Y + bounds.Height / 2 - halfHeight, halfWidth * 2, halfHeight * 2);
@@ -183,10 +198,10 @@ public sealed partial class SceneCompositor
         if (button.Id.StartsWith("roulette-chip-", StringComparison.Ordinal))
         {
             var bounds = Pixels(button.Bounds, 0);
-            double radius = bounds.Height * .46, aspect = PaintBoardAspect();
+            double aspect = PaintBoardAspect(), radius = RouletteChipRadius(button, aspect) * BoardSurfaceSize;
             rect = new(bounds.X + bounds.Width / 2 - radius / aspect,
                 bounds.Y + bounds.Height / 2 - radius, radius * 2 / aspect, radius * 2);
-            size = 14;
+            size = RouletteChipCaptionSize(radius);
         }
         using var format = RouletteTextFormat(size);
         using var layout = new CanvasTextLayout(device, button.Label.ToUpperInvariant(), format,
@@ -205,7 +220,8 @@ public sealed partial class SceneCompositor
     };
 
     private static void RouletteText(CanvasDrawingSession ds, string text, Rect rect, float size, Color color,
-        double aspect, string family = "Bahnschrift", CanvasHorizontalAlignment alignment = CanvasHorizontalAlignment.Center)
+        double aspect, string family = "Bahnschrift", CanvasHorizontalAlignment alignment = CanvasHorizontalAlignment.Center,
+        bool fitWidth = false)
     {
         float a = (float)Math.Clamp(aspect, .4, 3);
         var previous = ds.Transform;
@@ -213,6 +229,11 @@ public sealed partial class SceneCompositor
         try
         {
             using var format = RouletteTextFormat(size, family, alignment);
+            if (fitWidth)
+            {
+                using var layout = new CanvasTextLayout(ds.Device, text, format, 2000, (float)rect.Height);
+                format.FontSize *= (float)Math.Min(1, Math.Max(1, rect.Width * a - 4) / Math.Max(1, layout.DrawBounds.Width));
+            }
             ds.DrawText(text, new Rect(0, 0, rect.Width * a, rect.Height), color, format);
         }
         finally { ds.Transform = previous; }
@@ -237,7 +258,7 @@ public sealed partial class SceneCompositor
             }
             ds.DrawCircle(center, radius * .67f, ThemeColor(255, 243, 205, 160), .7f);
             if (selected) ds.DrawCircle(center, radius + 4, RouletteGold, 1.8f);
-            using var format = RouletteTextFormat(stack ? 8 : 14);
+            using var format = RouletteTextFormat(stack ? 8 : RouletteChipCaptionSize(radius));
             ds.DrawText(amount.ToString("0"), new Rect(center.X - radius, center.Y - radius, radius * 2, radius * 2),
                 amount < 10 ? RouletteInk : RouletteCream, format);
         }

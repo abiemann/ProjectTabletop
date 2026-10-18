@@ -67,29 +67,37 @@ public sealed partial class MainWindow
         Require(ReferenceEquals(menuSelection, scene.GetLastHandBoardSelection()),
             "Held separation overwrote the menu selection route after navigation.");
 
-        // Same-target rearming, on a gesture chip before the round starts.
-        var chip = AtButton("bj-bet-10");
-        await Arm(chip);
-        await Select(chip, "bj-bet-10", () => scene.BlackjackState.SelectedBet == 10);
-        var chipSelection = scene.GetLastHandBoardSelection();
-        for (int i = 0; i < 4; i++) await Send(Separate(chip));
-        Require(scene.BlackjackState.SelectedBet == 10 && ReferenceEquals(chipSelection, scene.GetLastHandBoardSelection()),
-            "Keeping the index apart repeated the bet selection.");
-        // Rearm at precisely the same point without folding or moving away.
-        await Arm(chip);
-        await Select(chip, "bj-bet-10", () => !ReferenceEquals(chipSelection, scene.GetLastHandBoardSelection()));
-
-        // The ready-state indicator, on the 50 chip.
-        var fifty = AtButton("bj-bet-50");
-        var fiftyBounds = scene.CurrentBoardButtons.Single(button => button.Id == "bj-bet-50").Bounds;
-        await Send(fifty);
+        // Your Chips remains an ordinary gesture control; betting coins now
+        // use caption holds and must never arm from grouped fingers.
+        var chips = AtButton("bj-reset");
+        var chipsBounds = scene.CurrentBoardButtons.Single(button => button.Id == "bj-reset").Bounds;
+        await Send(chips);
         var beforeArm = Draw(casinoImage);
-        await Arm(fifty, casinoImage);
+        await Arm(chips, casinoImage);
         Require(Differences(beforeArm, casinoImage.GetPixelBytes(),
-            PointAt(fiftyBounds.X + fiftyBounds.Width * .4, fiftyBounds.Y + fiftyBounds.Height - .007), 5, false) > 12,
+            PointAt(chipsBounds.X + chipsBounds.Width * .4, chipsBounds.Y + chipsBounds.Height - .007), 5, false) > 12,
             "The ready-state gold indicator did not redraw on the casino table.");
-        await Select(fifty, "bj-bet-50", () => scene.BlackjackState.SelectedBet == 50);
+        var beforeChipsSelection = scene.GetLastHandBoardSelection();
+        await Select(chips, "bj-reset", () => !ReferenceEquals(beforeChipsSelection, scene.GetLastHandBoardSelection()));
+        var chipsSelection = scene.GetLastHandBoardSelection();
+        for (int i = 0; i < 4; i++) await Send(Separate(chips));
+        Require(ReferenceEquals(chipsSelection, scene.GetLastHandBoardSelection()),
+            "Keeping the index apart repeated the Your Chips selection.");
+        // Rearm at precisely the same point without folding or moving away.
+        await Arm(chips);
+        await Select(chips, "bj-reset", () => !ReferenceEquals(chipsSelection, scene.GetLastHandBoardSelection()));
         var dealSelection = scene.GetLastHandBoardSelection();
+        decimal selectedBet = scene.BlackjackState.SelectedBet;
+        foreach (string id in new[] { "bj-bet-10", "bj-bet-25", "bj-bet-50", "bj-bet-100", "menu" })
+        {
+            var coin = AtButton(id);
+            for (int i = 0; i < 3; i++) await Send(coin);
+            for (int i = 0; i < 3; i++) await Send(Separate(coin));
+            Require(scene.CurrentBoardScreen == BoardScreen.Blackjack && scene.CurrentFingerSelectionFeedback.Count == 0 && scene.HoveredBoardButtons.Count == 0 &&
+                    scene.BlackjackState.SelectedBet == selectedBet &&
+                    ReferenceEquals(dealSelection, scene.GetLastHandBoardSelection()),
+                "The finger gesture armed, highlighted or selected the long-press " + id + " control.");
+        }
         // Deal is a one-time long-press: grouped fingers never arm it.
         var deal = AtButton("bj-deal");
         for (int i = 0; i < 3; i++) await Send(deal);
@@ -104,7 +112,7 @@ public sealed partial class MainWindow
         for (int i = 0; i < 4; i++) await Send(Separate(deal));
         Require(scene.BlackjackState.Hands.Count == 1, "Held separation clicked the newly drawn Split control.");
         Require(ReferenceEquals(dealSelection, scene.GetLastHandBoardSelection()),
-            "A held gesture overwrote the successful wager route.");
+            "A held gesture overwrote the successful Your Chips route.");
 
         // Round actions are long-press buttons: grouped fingers never arm or select Hit.
         var hit = AtButton("bj-hit");
@@ -113,7 +121,7 @@ public sealed partial class MainWindow
         Require(scene.CurrentFingerSelectionFeedback.Count == 0 && scene.BlackjackState.Hands.Single().Cards.Count == 2 &&
             ReferenceEquals(dealSelection, scene.GetLastHandBoardSelection()),
             "The finger gesture armed or selected the long-press Hit button.");
-        Require(new[] { menuHand, chip, deal, hit }.All(hand => hand.ExecuteEventId == 0), "Selection generated a pinch event.");
+        Require(new[] { menuHand, chips, deal, hit }.All(hand => hand.ExecuteEventId == 0), "Selection generated a pinch event.");
         var lastHitSelection = scene.GetLastHandBoardSelection();
         scene.ShowPaint();
         scene.SetHandCursors([], MonotonicClock.UtcNow);
@@ -148,7 +156,7 @@ public sealed partial class MainWindow
             groupedHoldNeverExecutes = true, separationSelectsOnce = true, sameTargetRearms = true,
             readyFeedbackRendered = true, noPinchEvents = true, liveHardwareUnchanged = true,
             exactIndexSelectionRouteRetained = true, settingsBackRouteRetainedAcrossNavigation = true,
-            paintDrawerRejectsFingerSelection = true,
+            paintDrawerRejectsFingerSelection = true, bettingCoinsRejectFingerSelection = true, blackjackExitRejectsFingerSelection = true,
             rejectedAndHeldObservationsDoNotOverwriteSelection = true,
             directory, images = new[] { menuPath, casinoPath } };
 

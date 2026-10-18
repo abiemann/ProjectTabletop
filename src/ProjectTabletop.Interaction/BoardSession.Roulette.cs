@@ -41,7 +41,7 @@ public sealed partial class BoardSession
     public static BoardRect RouletteChipBounds(int index)
     {
         if (index < 0 || index >= RouletteGame.ChipOptions.Count) throw new ArgumentOutOfRangeException(nameof(index));
-        return new(.18 + index * .165, .785, .14, .05);
+        return new(.71 + index % 2 * .13, .195 + index / 2 * .13, .11, .095);
     }
 
     private IReadOnlyList<BoardButton> RouletteButtons()

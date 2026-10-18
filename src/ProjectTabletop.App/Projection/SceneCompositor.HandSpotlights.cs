@@ -149,6 +149,7 @@ public sealed partial class SceneCompositor
             _handSpotlights = lights.ToArray();
             if (lights.Count > 0) _spotlightFrameTime = lights.Max(hand => hand.SourceFrameTime);
             if (observations.Length > 0) _spotlightUpdateCount++;
+            CancelHoldsForBoardActivity(frameTime);
         }
     }
 

@@ -59,6 +59,7 @@ public sealed partial class MainWindow
         // chips and the small table chip, with Undo/Clear/Spin enabled.
         Require(scene.ActivateRouletteButton("roulette-number-17"), "Roulette acquisition fixture could not place its stake.");
         VerifyButtons("Roulette");
+        if (selectedBoard == BoardScreen.Roulette) return CompleteVerification();
         scene.ShowPhotoCopy(); VerifyButtons("Photo Copy closed drawer");
         Require(scene.ActivatePhotoCopyButton("photo-drawer-open"), "The Photo Copy acquisition drawer could not open.");
         now += BoardSession.PhotoCopyDrawerOpeningDuration;
@@ -119,53 +120,58 @@ public sealed partial class MainWindow
         VerifyButtons("Blackjack player");
         Require(scene.CurrentBoardButtons.Any(button => button.Id == "bj-hit"),
             "The fixture did not reach a player turn.");
-        scene.SetBackground(null);
-        Require(scene.CurrentBoardScreen == BoardScreen.Media && scene.GetHandAcquisitionContext(now) is null,
-            "A media-only scene with no buttons started acquisition lighting.");
-        if (selectedBoard is null or BoardScreen.HandTracking)
-            Require(PixelMatches(Draw(), CameraPoint(.55, .55), AppPalette.Background.R,
-                AppPalette.Background.G, AppPalette.Background.B),
-                "The gesture tester's neutral lighting changed the ordinary media test grid.");
-        scene.ShowBoardMenu(); Draw(); scene.GetHandAcquisitionContext(now);
-        now += TimeSpan.FromMilliseconds(600);
-        var previous = scene.GetHandAcquisitionContext(now)!;
-        scene.SetBoardSetup(true);
-        Require(scene.GetHandAcquisitionContext(now) is null, "Calibration retained shared button assistance.");
-        scene.SetBoardSetup(false);
-        scene.ClearBoardMediaClip();
-        scene.CompleteHandAcquisition(previous, [], [], now);
-        Require(scene.GetHandAcquisitionContext(now) is null, "An uncalibrated scene retained button assistance.");
-        Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
-                Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
-            "The shared-board verification changed live hardware or navigation.");
-        return new { passed = true, scope = selectedBoard?.ToString() ?? "All", stationaryArrivalWithoutMotionForEveryControl = true, controls = tested,
-            generatedCaptionCorruptionNeedsTwoFreshFrames = true,
-            noEmptyBoardCandidates = true, assistanceCannotSelect = true,
-            sevenPercentCoverageRequiredAcrossBoards = true,
-            buttonRegionsOnlyBeforeQualification = true, nativeFocusedModelSearchBeforeFallbackIllumination = true,
-            noBlindButtonSweepOrWholeBoardMotionFallback = true,
-            resetClearsForegroundQueryHistory = true,
-            boundedPhotoCopyFieldAndUnrestrictedGestureTesterPreserved = true,
-            gestureTesterGridCropsAndNeutralLightingChecked = selectedBoard is null or BoardScreen.HandTracking,
-            rectangularPhotoCopyFieldCoveredWithoutStretching = true,
-            paintCaptionHoldsNeedNoSpotlight = true,
-            renderedLabelMasksContainLightAndDarkInkAcrossBoards = true,
-            gestureSearchUsesCaptionAreaWithSeparatePlateReference = true,
-            ordinaryHoldSearchGeometryPreserved = true,
-            foregroundFixturesCoverActualLabels = true,
-            untouchedLabelRejectsControlEdgeDisturbanceAcrossBoards = true,
-            blackjackExitAndYourChipsIncluded = true, yourChipsAcquiresHeadingInsteadOfBalance = true,
-            mediaAndCalibrationInactive = true,
-            globeClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Globe", StringComparison.Ordinal)) == 5,
-            photoCopyClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Photo Copy", StringComparison.Ordinal)) == 5,
-            paintClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Paint", StringComparison.Ordinal)) == 4,
-            rouletteBetsChipsAndHoldsCovered = selectedBoard is null or BoardScreen.Roulette,
-            menuScrollArrowUsesSharedCaptionEvidence = selectedBoard is null or BoardScreen.Menu,
-            groupedMenuArrivalAndIntactCaptionRecovery = selectedBoard is null or BoardScreen.Menu,
-            intactReflectiveSpinCaptionChecked = selectedBoard is null or BoardScreen.Slots,
-            waterGardenCaptionCorruptionAndIntactReflectanceChecked =
-                tested.Count(label => label.StartsWith("Water Garden/", StringComparison.Ordinal)) == 5,
-            liveHardwareUnchanged = true };
+        return CompleteVerification();
+
+        object CompleteVerification()
+        {
+            scene.SetBackground(null);
+            Require(scene.CurrentBoardScreen == BoardScreen.Media && scene.GetHandAcquisitionContext(now) is null,
+                "A media-only scene with no buttons started acquisition lighting.");
+            if (selectedBoard is null or BoardScreen.HandTracking)
+                Require(PixelMatches(Draw(), CameraPoint(.55, .55), AppPalette.Background.R,
+                    AppPalette.Background.G, AppPalette.Background.B),
+                    "The gesture tester's neutral lighting changed the ordinary media test grid.");
+            scene.ShowBoardMenu(); Draw(); scene.GetHandAcquisitionContext(now);
+            now += TimeSpan.FromMilliseconds(600);
+            var previous = scene.GetHandAcquisitionContext(now)!;
+            scene.SetBoardSetup(true);
+            Require(scene.GetHandAcquisitionContext(now) is null, "Calibration retained shared button assistance.");
+            scene.SetBoardSetup(false);
+            scene.ClearBoardMediaClip();
+            scene.CompleteHandAcquisition(previous, [], [], now);
+            Require(scene.GetHandAcquisitionContext(now) is null, "An uncalibrated scene retained button assistance.");
+            Require(ReferenceEquals(liveOutput, _output) && liveState == (_camera.IsRunning, _output?.AppWindow.IsVisible,
+                    Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.HasBoardMediaClip),
+                "The shared-board verification changed live hardware or navigation.");
+            return new { passed = true, scope = selectedBoard?.ToString() ?? "All", stationaryArrivalWithoutMotionForEveryControl = true, controls = tested,
+                generatedCaptionCorruptionNeedsTwoFreshFrames = true,
+                noEmptyBoardCandidates = true, assistanceCannotSelect = true,
+                sevenPercentCoverageRequiredAcrossBoards = true,
+                buttonRegionsOnlyBeforeQualification = true, nativeFocusedModelSearchBeforeFallbackIllumination = true,
+                noBlindButtonSweepOrWholeBoardMotionFallback = true,
+                resetClearsForegroundQueryHistory = true,
+                boundedPhotoCopyFieldAndUnrestrictedGestureTesterPreserved = true,
+                gestureTesterGridCropsAndNeutralLightingChecked = selectedBoard is null or BoardScreen.HandTracking,
+                rectangularPhotoCopyFieldCoveredWithoutStretching = true,
+                paintCaptionHoldsNeedNoSpotlight = true,
+                renderedLabelMasksContainLightAndDarkInkAcrossBoards = true,
+                gestureSearchUsesCaptionAreaWithSeparatePlateReference = true,
+                ordinaryHoldSearchGeometryPreserved = true,
+                foregroundFixturesCoverActualLabels = true,
+                untouchedLabelRejectsControlEdgeDisturbanceAcrossBoards = true,
+                blackjackExitAndYourChipsIncluded = true, yourChipsAcquiresHeadingInsteadOfBalance = true,
+                mediaAndCalibrationInactive = true,
+                globeClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Globe", StringComparison.Ordinal)) == 5,
+                photoCopyClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Photo Copy", StringComparison.Ordinal)) == 5,
+                paintClosedAndOpenControlsCovered = tested.Count(label => label.StartsWith("Paint", StringComparison.Ordinal)) == 4,
+                rouletteBetsChipsAndHoldsCovered = selectedBoard is null or BoardScreen.Roulette,
+                menuScrollArrowUsesSharedCaptionEvidence = selectedBoard is null or BoardScreen.Menu,
+                groupedMenuArrivalAndIntactCaptionRecovery = selectedBoard is null or BoardScreen.Menu,
+                intactReflectiveSpinCaptionChecked = selectedBoard is null or BoardScreen.Slots,
+                waterGardenCaptionCorruptionAndIntactReflectanceChecked =
+                    tested.Count(label => label.StartsWith("Water Garden/", StringComparison.Ordinal)) == 5,
+                liveHardwareUnchanged = true };
+        }
 
         void VerifyButtons(string label)
         {
@@ -206,9 +212,9 @@ public sealed partial class MainWindow
                 bool vectorGlyph = context.ExpectedScene.BoardVectorGlyphRegions?.Contains(index) == true;
                 bool rouletteChip = screen == BoardScreen.Roulette &&
                     button.Id.StartsWith("roulette-chip-", StringComparison.Ordinal);
-                bool captionSearch = !button.IsHold && !vectorGlyph && !rouletteChip;
+                bool captionSearch = !button.IsHold && !vectorGlyph;
                 if (captionSearch)
-                    Require(control == trigger && reference == plate &&
+                    Require(control == trigger && (rouletteChip || reference == plate) &&
                             reference.Width * reference.Height >= control.Width * control.Height,
                         label + "/" + button.Label +
                         " diluted caption acquisition with plate/artwork area or discarded its full optical reference.");

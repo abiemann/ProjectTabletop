@@ -79,6 +79,9 @@ public sealed partial class SceneCompositor
     private static Vector2 RoulettePolarPoint(double radius, double angle, double height) =>
         ProjectRouletteWheelPoint(Math.Cos(angle) * radius, Math.Sin(angle) * radius, height);
 
+    internal static readonly Vector2 RouletteBoardWheelCenter = new(210, 294);
+    internal const float RouletteBoardWheelWidthFit = .92f;
+
     private CanvasRenderTarget? DrawRouletteMotionLayer(CanvasDevice device, DateTimeOffset now, double aspect)
     {
         if (_boardSession.Screen != BoardScreen.Roulette) return null;
@@ -97,16 +100,16 @@ public sealed partial class SceneCompositor
             using var ds = _rouletteMotionTarget!.CreateDrawingSession();
             ds.Transform = BoardRasterTransform(_rouletteMotionTarget);
             ds.Clear(Colors.Transparent);
-            DrawRouletteWheel(ds, game, now, new(274, 294), aspect);
+            DrawRouletteWheel(ds, game, now, RouletteBoardWheelCenter, aspect, widthFit: RouletteBoardWheelWidthFit);
             _rouletteMotionKey = key;
         }
         return _rouletteMotionTarget;
     }
 
     private void DrawRouletteWheel(CanvasDrawingSession ds, RouletteSnapshot game, DateTimeOffset now,
-        Vector2 center, double aspect, float scale = 1)
+        Vector2 center, double aspect, float scale = 1, float widthFit = 1.22f)
     {
-        float fit = Math.Min(1, (float)aspect * 1.22f) * scale;
+        float fit = Math.Min(1, (float)aspect * widthFit) * scale;
         var original = ds.Transform;
         ds.Transform = Matrix3x2.CreateTranslation(-200, -200) * Matrix3x2.CreateScale(fit / (float)aspect, fit) *
             Matrix3x2.CreateTranslation(center) * original;

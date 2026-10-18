@@ -293,6 +293,7 @@ public sealed partial class SceneCompositor
             _acquisitionLightStarted = now;
             _acquisitionLightCount++;
             _acquisitionReason = "illuminated-search";
+            CancelHoldsForBoardActivity(frameTime);
         }
     }
 
@@ -528,7 +529,7 @@ public sealed partial class SceneCompositor
             // retain their shaped reference inside the circular control.
             var controlReferences = _boardSession.Buttons.Select(button =>
                 _boardSession.Screen == BoardScreen.Roulette && button.Id.StartsWith("roulette-chip-", StringComparison.Ordinal)
-                    ? RouletteChipSearchRegion(button) : BoardButtonPlateRegion(button)).ToArray();
+                    ? RouletteChipFaceRegion(button) : BoardButtonPlateRegion(button)).ToArray();
             // One Back button is not enough to fit the camera's color response
             // when fingers cover most of it. Include fixed, opaque UI nearby as
             // a lighting reference, without allowing it to suggest a search light.

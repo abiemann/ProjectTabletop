@@ -26,7 +26,7 @@ public sealed partial class SceneCompositor
     /// <param name="ButtonIds">Every current button, index-aligned with the scene's control regions.</param>
     public sealed record HoldButtonContext(long Revision, PixelPoint[] SearchPolygon,
         HandAcquisitionSceneImage ExpectedScene, IReadOnlyList<string> ButtonIds, IReadOnlySet<string> EnabledHoldIds,
-        long NavigationRevision)
+        long NavigationRevision, IReadOnlySet<int>? ActivityGuardRegions = null)
     {
         // Golden rule: a long press requires broken lettering. A colour or
         // reflectance change beneath still-readable letters is never a press.
@@ -50,6 +50,13 @@ public sealed partial class SceneCompositor
         // actual held/clear observations intact: a veto is not proof of release.
         public IReadOnlyList<string> BlockedButtons(HandAcquisitionPresenceResult? result)
         {
+            // Roulette's footer lies under the reaching arm. Use the same
+            // camera frame's table-caption evidence before either worker can
+            // finish a footer hold, even if hand recognition has not completed.
+            if (ActivityGuardRegions is not null && result?.TextPatterns?.Any(pattern =>
+                    ActivityGuardRegions.Contains(pattern.ControlRegion) &&
+                    (pattern.CaptionHoldEvidence || pattern.CaptionReflectanceChanged)) == true)
+                return EnabledHoldIds.ToArray();
             if (ExpectedScene.BoardDisturbanceExclusionRegion is null || result is null) return [];
             bool elsewhere = result.OutsideControlDisturbance || result.TextPatterns?.Any(pattern =>
                 pattern.CaptionHoldEvidence && pattern.ControlRegion >= 0 && pattern.ControlRegion < ButtonIds.Count &&
@@ -71,7 +78,14 @@ public sealed partial class SceneCompositor
                 now - frameTime > TimeSpan.FromMilliseconds(350)) return null;
             var key = new HoldSceneKey(_boardSession.Screen, _boardSession.NavigationRevision,
                 string.Join('|', buttons.Select(button => $"{button.Id}:{button.Label}:{button.Enabled}:{button.Bounds}")),
-                PaintBoardAspect(), _boardSession.Screen == BoardScreen.Slots ? _boardSession.SlotsState.BuyCost : 0,
+                PaintBoardAspect(), _boardSession.Screen switch
+                {
+                    BoardScreen.Slots => _boardSession.SlotsState.BuyCost,
+                    // The reach veto also compares table captions, so placed
+                    // wagers must refresh their reference, not only the footer.
+                    BoardScreen.Roulette => _boardSession.RouletteState.Revision,
+                    _ => 0
+                },
                 _holdControlBrightness, _boardCameraMap, _boardSurfaceMap);
             if (_holdSceneKey != key || _holdExpectedScene is null)
             {
@@ -111,7 +125,10 @@ public sealed partial class SceneCompositor
                 .Select(point => new PixelPoint(point.X, point.Y)).ToArray();
             return new(_holdRevision, polygon, _holdExpectedScene, buttons.Select(button => button.Id).ToArray(),
                 buttons.Where(button => button.IsHold && button.Enabled).Select(button => button.Id).ToHashSet(),
-                _boardSession.NavigationRevision);
+                _boardSession.NavigationRevision,
+                _boardSession.Screen == BoardScreen.Roulette
+                    ? buttons.Select((button, index) => (button, index)).Where(item => !item.button.IsHold)
+                        .Select(item => item.index).ToHashSet() : null);
         }
     }
 
@@ -128,6 +145,9 @@ public sealed partial class SceneCompositor
                 frameTime < _holdNavigationStartedAt || HoldControlsSettling(frameTime) ||
                 context is null || !IsCurrentHoldContext(context) ||
                 !AcquisitionBoardReady || HasBoardControlDrawerAnimation()) return [];
+            if (HoldButtonsBlockedByBoardActivity(HoldClock()))
+                blockedIds = _boardSession.Buttons.Where(button => button.IsHold).Select(button => button.Id)
+                    .Concat(blockedIds ?? []).Distinct().ToArray();
             var activated = _boardSession.ObserveHeldButtons(heldIds, frameTime, HoldClock(), clearedIds, blockedIds);
             if (activated.Count > 0)
             {
@@ -240,8 +260,16 @@ public sealed partial class SceneCompositor
         return _boardSession.Buttons.Any(button => button.IsHold && button.Bounds.Contains(board.X, board.Y));
     }
 
+    private static readonly Vector2[] HoldLightCornerDirections = Enumerable.Range(0, 36)
+        .Select(index =>
+        {
+            double angle = (index / 9 - 1 + index % 9 / 8d) * Math.PI / 2;
+            return new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle));
+        }).ToArray();
+
     // Projected light over a hold button would erase its caption from the
-    // camera's view and look like a finger, so lights are clipped around them.
+    // camera's view and look like a finger. Follow its rounded surface, including
+    // the alignment margin, so the protected area has no dark square corners.
     private CanvasGeometry? HoldButtonLightClip(CanvasDrawingSession ds, Rect output)
     {
         if (_boardSurfaceMap is null) return null;
@@ -252,11 +280,21 @@ public sealed partial class SceneCompositor
         {
             const double margin = .006;
             var b = button.Bounds;
-            var corners = new[] { new Point2(b.X - margin, b.Y - margin), new Point2(b.X + b.Width + margin, b.Y - margin),
-                    new Point2(b.X + b.Width + margin, b.Y + b.Height + margin), new Point2(b.X - margin, b.Y + b.Height + margin) }
-                .Select(point => _boardSurfaceMap.Transform(point))
-                .Select(point => new Vector2((float)(output.X + point.X * output.Width), (float)(output.Y + point.Y * output.Height)))
-                .ToArray();
+            double radius = Math.Min(BoardButtonCornerRadius(button) / BoardSurfaceSize,
+                Math.Min(b.Width, b.Height) / 2) + margin;
+            var corners = new Vector2[HoldLightCornerDirections.Length];
+            for (int index = 0; index < corners.Length; index++)
+            {
+                int corner = index / 9;
+                double x = corner < 2 ? b.X + b.Width + margin - radius : b.X - margin + radius;
+                double y = corner is 0 or 3 ? b.Y - margin + radius : b.Y + b.Height + margin - radius;
+                var direction = HoldLightCornerDirections[index];
+                // Map the curved outline point by point: an affine rounded
+                // rectangle would not follow a perspective-calibrated board.
+                var point = _boardSurfaceMap.Transform(new Point2(x + direction.X * radius, y + direction.Y * radius));
+                corners[index] = new((float)(output.X + point.X * output.Width),
+                    (float)(output.Y + point.Y * output.Height));
+            }
             using var hole = CanvasGeometry.CreatePolygon(ds.Device, corners);
             var remaining = area.CombineWith(hole, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
             area.Dispose();
