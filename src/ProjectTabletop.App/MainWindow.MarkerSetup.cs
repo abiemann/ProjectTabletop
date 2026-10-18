@@ -46,7 +46,7 @@ public sealed partial class MainWindow
     {
         if (target == 0)
         {
-            lock (_eyeTipGate) return _wandMarkerProfiles.GetValueOrDefault(camera);
+            lock (_markerTrackingGate) return _wandMarkerProfiles.GetValueOrDefault(camera);
         }
         lock (_footballInputGate) return _footballMarkerProfiles.GetValueOrDefault(camera)?.ForPlayer(target - 1);
     }
@@ -73,7 +73,7 @@ public sealed partial class MainWindow
 
         CancelMarkerSetup(null, continueFirstUse: firstUse);
         // Select the requested board only when necessary. Existing games and the
-        // current wand board are preserved when they are already open. Paint
+        // current marker board are preserved when they are already open. Paint
         // and Water Garden share the same camera-specific double-bar profile.
         var board = target == 0 ? (_scene.CurrentBoardScreen == BoardScreen.Paint ? BoardScreen.Paint : BoardScreen.WaterGarden)
             : BoardScreen.Football;
@@ -83,11 +83,11 @@ public sealed partial class MainWindow
             else ShowFootball();
         }
         CancelFootballLearning();
-        ResetEyeTipTracking("marker-setup");
+        ResetMarkerTracking("marker-setup");
         ResetFootballInput();
         _frozenFrame = null;
         using var latest = AcquireLatestCameraFrame();
-        if (latest?.Frame is not { } frame || !EyeTipFrameFresh(frame, MonotonicClock.UtcNow))
+        if (latest?.Frame is not { } frame || !MarkerFrameFresh(frame, MonotonicClock.UtcNow))
         { SetMarkerSetupMessage("Wait for a fresh camera frame, then try again."); return; }
         lock (_markerSetupGate)
         {
@@ -182,7 +182,7 @@ public sealed partial class MainWindow
             if (_scene.MarkerSetupState?.PresentedAt is not { } presented ||
                 frame.Timestamp < presented + TimeSpan.FromMilliseconds(650))
             { _markerSetupMessage = "Waiting for the projected target to settle."; return true; }
-            if (!EyeTipFrameFresh(frame, MonotonicClock.UtcNow))
+            if (!MarkerFrameFresh(frame, MonotonicClock.UtcNow))
             {
                 session.ResetProgress(); _markerSetupMeasurement = null;
                 _markerSetupMessage = "Waiting for a fresh camera frame."; return true;
@@ -239,7 +239,7 @@ public sealed partial class MainWindow
                             {
                                 board = new(mapped.X, mapped.Y);
                                 // Only actual fresh full-pair measurements seed a bounded search.
-                                if (EyeTipFrameFresh(frame, now))
+                                if (MarkerFrameFresh(frame, now))
                                 { _markerSetupMeasurement = detection.Candidates[0]; _markerSetupMeasurementTime = frame.Timestamp; }
                             }
                             session.ObserveValidation(detection, board, frame.Timestamp, now);
@@ -317,7 +317,7 @@ public sealed partial class MainWindow
         {
             changed = _markerSetupSession is not null && !MarkerSetupContextCurrentLocked();
             if (!changed && _markerSetupSession is { Stage: not SetupStage.Ready } session &&
-                Volatile.Read(ref _latestCameraFrame) is { } latest && !EyeTipFrameFresh(latest, MonotonicClock.UtcNow))
+                Volatile.Read(ref _latestCameraFrame) is { } latest && !MarkerFrameFresh(latest, MonotonicClock.UtcNow))
             {
                 session.ResetProgress(); _markerSetupMeasurement = null;
                 _markerSetupMessage = "Waiting for a fresh camera frame.";
@@ -332,7 +332,7 @@ public sealed partial class MainWindow
             RecheckMarkerSetupButton.IsEnabled = session is null;
             CancelMarkerSetupButton.IsEnabled = session is not null;
             SaveMarkerSetupButton.IsEnabled = session?.Stage == SetupStage.Ready &&
-                Volatile.Read(ref _latestCameraFrame) is { } current && EyeTipFrameFresh(current, MonotonicClock.UtcNow);
+                Volatile.Read(ref _latestCameraFrame) is { } current && MarkerFrameFresh(current, MonotonicClock.UtcNow);
             MarkerSetupProgress.Value = (session?.Progress ?? 0) * 100;
             MarkerSetupStatusText.Text = _markerSetupMessage;
         }
@@ -357,7 +357,7 @@ public sealed partial class MainWindow
         }
         if (active && !_closing)
         {
-            ResetEyeTipTracking("marker-setup-finished");
+            ResetMarkerTracking("marker-setup-finished");
             ResetFootballInput();
         }
     }
@@ -366,60 +366,65 @@ public sealed partial class MainWindow
     {
         int target;
         bool continueFirstUse;
+        string camera;
+        BlackTipProfile profile;
         lock (_markerSetupGate)
         {
-            if (_markerSetupSession is not { Stage: SetupStage.Ready, CandidateProfile: { } profile } ||
-                _markerSetupCamera is not { } camera || !MarkerSetupContextCurrentLocked()) return;
-            if (Volatile.Read(ref _latestCameraFrame) is not { } latest || !EyeTipFrameFresh(latest, MonotonicClock.UtcNow))
+            if (_markerSetupSession is not { Stage: SetupStage.Ready, CandidateProfile: { } verified } ||
+                _markerSetupCamera is not { } setupCamera || !MarkerSetupContextCurrentLocked()) return;
+            if (Volatile.Read(ref _latestCameraFrame) is not { } latest || !MarkerFrameFresh(latest, MonotonicClock.UtcNow))
             { _markerSetupMessage = "Wait for fresh camera video before saving the verified marker."; return; }
             target = _markerSetupTarget;
             continueFirstUse = _markerSetupFirstUseActive;
-            if (target == 0)
-            {
-                BlackTipProfile? old;
-                string? oldMode;
-                lock (_eyeTipGate)
-                {
-                    old = _wandMarkerProfiles.GetValueOrDefault(camera);
-                    oldMode = _wandMarkerModes.GetValueOrDefault(camera);
-                    _wandMarkerProfiles[camera] = profile;
-                    _wandMarkerModes[camera] = "bar";
-                }
-                SaveWandMarkerSettings();
-                if (_wandMarkerSettingsError is { } error)
-                {
-                    lock (_eyeTipGate)
-                    {
-                        if (old is null) _wandMarkerProfiles.Remove(camera); else _wandMarkerProfiles[camera] = old;
-                        if (oldMode is null) _wandMarkerModes.Remove(camera); else _wandMarkerModes[camera] = oldMode;
-                    }
-                    _markerSetupMessage = error + " Your previous marker is unchanged. Try Save again.";
-                    return;
-                }
-            }
-            else
-            {
-                FootballCameraProfiles? old;
-                lock (_footballInputGate)
-                {
-                    old = _footballMarkerProfiles.GetValueOrDefault(camera);
-                    var previous = old ?? new(null, null);
-                    _footballMarkerProfiles[camera] = target == 1 ? previous with { Player1 = profile } : previous with { Player2 = profile };
-                }
-                SaveFootballMarkerSettings();
-                if (_footballMarkerSaveError is { } error)
-                {
-                    lock (_footballInputGate)
-                    { if (old is null) _footballMarkerProfiles.Remove(camera); else _footballMarkerProfiles[camera] = old; }
-                    _markerSetupMessage = error + " Your previous marker is unchanged. Try Save again.";
-                    return;
-                }
-            }
+            camera = setupCamera;
+            profile = verified;
+        }
+        // The camera input worker takes the setup gate for every frame. Write the
+        // settings file outside it; only this UI thread saves or cancels setup.
+        string? error = target == 0 ? SaveVerifiedWandMarker(camera, profile)
+            : SaveVerifiedFootballMarker(target, camera, profile);
+        if (error is not null)
+        {
+            lock (_markerSetupGate) _markerSetupMessage = error + " Your previous marker is unchanged. Try Save again.";
+            return;
         }
         CancelMarkerSetup("Marker saved. Position, movement and lift-off checks passed for this camera.", continueFirstUse);
         if (target == 0) SetStickTrackingEnabled(true);
         else (target == 1 ? FootballPlayer1Input : FootballPlayer2Input).SelectedIndex = 0;
         UpdateMarkerSetupUi();
+    }
+
+    // Each save stages the verified profile in memory, writes the file, and restores
+    // the previous profile when the write fails. Returns the save error, if any.
+    private string? SaveVerifiedWandMarker(string camera, BlackTipProfile profile)
+    {
+        BlackTipProfile? old;
+        lock (_markerTrackingGate)
+        {
+            old = _wandMarkerProfiles.GetValueOrDefault(camera);
+            _wandMarkerProfiles[camera] = profile;
+        }
+        SaveWandMarkerSettings();
+        if (_wandMarkerSettingsError is not { } error) return null;
+        lock (_markerTrackingGate)
+        { if (old is null) _wandMarkerProfiles.Remove(camera); else _wandMarkerProfiles[camera] = old; }
+        return error;
+    }
+
+    private string? SaveVerifiedFootballMarker(int target, string camera, BlackTipProfile profile)
+    {
+        FootballCameraProfiles? old;
+        lock (_footballInputGate)
+        {
+            old = _footballMarkerProfiles.GetValueOrDefault(camera);
+            var previous = old ?? new(null, null);
+            _footballMarkerProfiles[camera] = target == 1 ? previous with { Player1 = profile } : previous with { Player2 = profile };
+        }
+        SaveFootballMarkerSettings();
+        if (_footballMarkerSaveError is not { } error) return null;
+        lock (_footballInputGate)
+        { if (old is null) _footballMarkerProfiles.Remove(camera); else _footballMarkerProfiles[camera] = old; }
+        return error;
     }
 
     private object GetMarkerSetupStatus()

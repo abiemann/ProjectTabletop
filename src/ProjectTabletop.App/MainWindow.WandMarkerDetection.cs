@@ -9,16 +9,16 @@ public sealed partial class MainWindow
     private void PublishWandMarkerDetection(CameraFrame frame, MarkerTipDetectionResult detection,
         BlackTipProfile profile, BlackTipSearchHint? searchHint, double milliseconds, long generation)
     {
-        lock (_eyeTipGate)
+        lock (_markerTrackingGate)
         {
-            if (_closing || generation != _eyeTipGeneration || !_eyeTipEnabled || !_cameraWanted ||
-                _cameraHealthWarning || _camera.ActiveDeviceId != _eyeTipCameraId ||
-                !WandMarkerBoardSelected || _scene.CurrentBoardScreen != _eyeTipSceneBoard ||
-                CurrentWandMarkerInputRevision != _eyeTipSceneRevision) return;
+            if (_closing || generation != _markerTrackingGeneration || !_markerTrackingEnabled || !_cameraWanted ||
+                _cameraHealthWarning || _camera.ActiveDeviceId != _markerTrackingCameraId ||
+                !WandMarkerBoardSelected || _scene.CurrentBoardScreen != _markerTrackingSceneBoard ||
+                CurrentWandMarkerInputRevision != _markerTrackingSceneRevision) return;
             var now = MonotonicClock.UtcNow;
-            if (!EyeTipFrameFresh(frame, now))
+            if (!MarkerFrameFresh(frame, now))
             {
-                _eyeTipReason = "Waiting for a fresh camera frame.";
+                _markerTrackingReason = "Waiting for a fresh camera frame.";
                 PublishStickTipLocked();
                 return;
             }
@@ -31,6 +31,9 @@ public sealed partial class MainWindow
             var decision = _wandMarkerTracker.Update(profile, detection,
                 camera => _scene.TryMapWandMarkerCameraPoint(camera, out var board) ? board : null,
                 frame.Timestamp, now);
+            // Paint strokes and water stirring along the control row are not sweeps.
+            if (MarkerResultForControlSwipes(detection, decision.Action == FootballTipAction.Publish) is { } markerSeen)
+                _scene.CompleteControlSwipeMarkerCheck(frame.Timestamp, markerSeen);
             var observation = _wandMarkerPreview?.Track.Observation;
             var observedAt = _wandMarkerPreview?.ObservedAt ?? default;
             bool confirmed = _wandMarkerPreview?.Track.Confirmed == true;
@@ -47,12 +50,11 @@ public sealed partial class MainWindow
                 confirmed = false;
             }
             // Hold preserves the measurement's original time, never the newer
-            // empty frame. Wand input expires after 250 ms without a measurement.
+            // empty frame. Marker input expires after 250 ms without a measurement.
             SetWandMarkerPreviewLocked(new(frame, detection,
                 new(observation, confirmed, decision.Source), observedAt, milliseconds) { SearchHint = searchHint });
-            SetEyeTipPreviewLocked(null);
-            _eyeTipReason = decision.Reason;
-            PublishStickTipLocked();
+            _markerTrackingReason = decision.Reason;
+            PublishStickTipLocked(frame.Timestamp);
         }
     }
 }

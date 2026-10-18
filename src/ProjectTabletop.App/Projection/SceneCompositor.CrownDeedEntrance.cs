@@ -4,6 +4,11 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
+    // Scheduling/status readers need only the selected board. Publish that
+    // scalar independently of the render lock; input contexts and application
+    // of results still validate the complete session under _gate.
+    private int _publishedBoardScreen = (int)BoardScreen.Menu;
+
     internal const double CrownDeedEntranceLeadInMilliseconds = 320;
     internal const double CrownDeedEntranceTileStaggerMilliseconds = 75;
     internal const double CrownDeedEntranceTileFallMilliseconds = 420;
@@ -41,6 +46,7 @@ public sealed partial class SceneCompositor
 
     private void OnBoardOpened(BoardScreen screen)
     {
+        Volatile.Write(ref _publishedBoardScreen, (int)screen);
         // Context capture can run after the camera frame arrived. A new visit
         // must never treat pre-navigation pixels as its own caption evidence.
         _holdNavigationStartedAt = HoldClock();

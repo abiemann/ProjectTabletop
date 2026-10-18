@@ -47,7 +47,7 @@ internal sealed class WaterFountainFluid
     private readonly Vector3[] _positions = new Vector3[MaximumParticles];
     private readonly Vector3[] _velocities = new Vector3[MaximumParticles];
     private readonly Vector3[] _velocityChanges = new Vector3[MaximumParticles];
-    private readonly float[] _density = new float[MaximumParticles];
+    private readonly float[] _pressure = new float[MaximumParticles];
     private readonly float[] _age = new float[MaximumParticles];
     private readonly int[] _next = new int[MaximumParticles];
     private readonly int[] _cellX = new int[MaximumParticles];
@@ -250,7 +250,10 @@ internal sealed class WaterFountainFluid
         {
             float density = DensityWeight;
             ForNeighborDensity(i, ref density);
-            _density[i] = density;
+            // Every neighbor uses this same pressure for the current step.
+            // Cache it once without changing the force accumulation order.
+            float denominator = Math.Max(.35f, density);
+            _pressure[i] = Math.Max(0, density - 1) / (denominator * denominator);
             _maximumDensity = Math.Max(_maximumDensity, density);
         }
         for (int i = 0; i < _count; i++) ApplyNeighborForces(i, dt);
@@ -352,8 +355,7 @@ internal sealed class WaterFountainFluid
     private void ApplyNeighborForces(int i, float dt)
     {
         Vector3 position = _positions[i];
-        float densityI = Math.Max(.35f, _density[i]);
-        float pressureI = Math.Max(0, _density[i] - 1) / (densityI * densityI);
+        float pressureI = _pressure[i];
         for (int z = Math.Max(0, _cellZ[i] - 1); z <= Math.Min(_hashZ - 1, _cellZ[i] + 1); z++)
         for (int y = Math.Max(0, _cellY[i] - 1); y <= Math.Min(_hashY - 1, _cellY[i] + 1); y++)
         for (int x = Math.Max(0, _cellX[i] - 1); x <= Math.Min(_hashX - 1, _cellX[i] + 1); x++)
@@ -364,8 +366,7 @@ internal sealed class WaterFountainFluid
             float distance2 = delta.LengthSquared();
             if (distance2 >= KernelRadiusSquared || distance2 < 1e-12f) continue;
             float distance = MathF.Sqrt(distance2), q = 1 - distance2 / KernelRadiusSquared;
-            float densityJ = Math.Max(.35f, _density[j]);
-            float pressureJ = Math.Max(0, _density[j] - 1) / (densityJ * densityJ);
+            float pressureJ = _pressure[j];
             // Symmetric pressure exchanges momentum between the two parcels. A short
             // repulsive core protects sparse streams where density alone undercounts.
             float pressure = .065f * (pressureI + pressureJ) *
@@ -419,7 +420,7 @@ internal sealed class WaterFountainFluid
         _positions[index] = _positions[last];
         _velocities[index] = _velocities[last];
         _velocityChanges[index] = _velocityChanges[last];
-        _density[index] = _density[last];
+        _pressure[index] = _pressure[last];
         _age[index] = _age[last];
     }
 

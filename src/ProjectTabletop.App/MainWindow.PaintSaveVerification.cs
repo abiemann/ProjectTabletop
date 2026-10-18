@@ -171,6 +171,22 @@ public sealed partial class MainWindow
         Require(Directory.GetFiles(directory, "*.png").Length == 3 && Directory.GetFiles(directory, "*.tmp").Length == 0,
             "A failed or replayed Paint save published another PNG or left a temporary file.");
 
+        // Direct activation (local control) completes the same export with a dated file.
+        OpenDrawer();
+        now += TimeSpan.FromMilliseconds(100);
+        Require(scene.ActivatePaintButton("paint-save", out var directRequest) && directRequest is not null,
+            "Direct Paint SAVE activation was not accepted.");
+        Require(scene.TryTakePaintSaveRequest(directRequest!.Value, out var directImage),
+            "Direct Paint SAVE activation left no exportable request.");
+        string? direct = await SavePaintMemoryImageAsync(scene, directImage, directory);
+        Require(direct is not null && System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(direct),
+                @"^paint-\d{8}-\d{6}-\d{7}Z-[0-9a-f]{32}\.png$"),
+            "Direct Paint SAVE did not write a dated PNG: " + direct);
+        await AssertPng(direct!, directImage);
+        Require(PaintSaveDirectory == Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Pictures", "Paint"),
+            "Paint exports did not target the user profile's local Pictures folder: " + PaintSaveDirectory);
+
         var pendingBeforeExit = await HoldSave();
         scene.ShowBoardMenu();
         Require(!scene.TryTakePaintSaveRequest(pendingBeforeExit, out _) && !scene.CanSavePaint,
@@ -220,7 +236,8 @@ public sealed partial class MainWindow
             resetAndNavigationInvalidateSnapshots = true,
             imageSavedFeedbackThreeSeconds = true, liveHardwareUnchanged = true, noPicturesWrites = true,
             introductoryPaintSaveableInMemory = true, reentryReplacesPreviousPaintingWithIntroduction = true,
-            directory, images = new[] { first, second, third } };
+            directActivationSavesDatedPng = true, paintSaveDirectory = PaintSaveDirectory,
+            directory, images = new[] { first, second, third, direct } };
 
         void Draw()
         {
@@ -239,7 +256,7 @@ public sealed partial class MainWindow
         void OpenDrawer()
         {
             if (scene.PaintDrawerOpen) return;
-            Require(scene.ActivatePaintButton("paint-drawer-open"), "The Paint Save fixture drawer could not open.");
+            Require(scene.ActivatePaintButton("paint-drawer-open", out _), "The Paint Save fixture drawer could not open.");
             now += BoardSession.PaintDrawerOpeningDuration;
             scene.TickPaint(now);
         }

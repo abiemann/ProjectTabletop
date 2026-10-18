@@ -15,7 +15,7 @@ internal static class WaterGardenView
     public const float SinTilt = .70710678f;
     public const float CosTilt = .70710678f;
     // Enlarge width and front-to-back span by 5%, retaining the far waterline
-    // below the sand title. The shared camera keeps wand input registered to
+    // below the sand title. The shared camera keeps marker input registered to
     // the enlarged surface; stationary controls remain in their own layer.
     public const float Distance = 3.3f;
     public const float Zoom = .8505f;

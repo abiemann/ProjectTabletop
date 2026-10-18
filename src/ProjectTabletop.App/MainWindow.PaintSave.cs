@@ -6,7 +6,7 @@ public sealed partial class MainWindow
 {
     private Task? _paintSaveTask;
     private string? _lastSavedPaintPath;
-    private static string PaintSaveDirectory => Path.Combine(PhotoCopyImageStore.DefaultDirectory, "Paint");
+    private static string PaintSaveDirectory => BoardImageDirectories.Paint;
 
     // Called immediately after this frame's board selection. Rendering freezes
     // its artwork synchronously; PNG encoding and publication run asynchronously.
@@ -23,6 +23,16 @@ public sealed partial class MainWindow
             AppLog.Write("Paint artwork snapshot", error);
             if (!_closing) UpdateBoardAppStatus();
         }
+    }
+
+    // Direct activation (local control) shares the long-press export: an accepted
+    // SAVE freezes the painting now and writes a dated PNG to the Paint folder.
+    private bool ActivatePaintButton(string id)
+    {
+        bool accepted = _scene.ActivatePaintButton(id, out var saveRequestTime);
+        if (saveRequestTime is { } requestTime) QueuePaintSave(requestTime);
+        UpdateBoardAppStatus();
+        return accepted;
     }
 
     private async Task SaveStoredPaintAsync(SceneCompositor.PaintMemoryImage image, Task? previous)

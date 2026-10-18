@@ -25,6 +25,10 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Compile Include="..\..\src\ProjectTabletop.App\ExclusiveProcessLease.cs" Link="App\ExclusiveProcessLease.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\BoardImageDirectories.cs" Link="App\BoardImageDirectories.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Projection\WaterGarden\WaterFountainFluid.cs" Link="App\WaterFountainFluid.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Projection\WaterGarden\WaterFountainLayout.cs" Link="App\WaterFountainLayout.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Projection\WaterGarden\WaterGardenView.cs" Link="App\WaterGardenView.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\MarkerSetupFirstUse.cs" Link="App\MarkerSetupFirstUse.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Camera\CameraAccessBlockedException.cs" Link="App\CameraAccessBlockedException.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Camera\CameraFrame.cs" Link="App\CameraFrame.cs" />
@@ -36,7 +40,8 @@
     <Compile Include="..\..\src\ProjectTabletop.App\HandTrackingVideoRecorder.cs" Link="App\HandTrackingVideoRecorder.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\HandTrackingVideoRecorderVerification.cs" Link="App\HandTrackingVideoRecorderVerification.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Settings\FootballMarkerSettingsStore.cs" Link="App\FootballMarkerSettingsStore.cs" />
-    <Compile Include="..\..\src\ProjectTabletop.App\Settings\WandMarkerProfileSelection.cs" Link="App\WandMarkerProfileSelection.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Settings\DoubleBarProfileSelection.cs" Link="App\DoubleBarProfileSelection.cs" />
+    <Compile Include="..\..\src\ProjectTabletop.App\Settings\DoubleBarMarkerSettings.cs" Link="App\DoubleBarMarkerSettings.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Settings\CameraFrameRateSettingsStore.cs" Link="App\CameraFrameRateSettingsStore.cs" />
   </ItemGroup>
 </Project>

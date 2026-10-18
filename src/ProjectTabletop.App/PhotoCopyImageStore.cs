@@ -7,16 +7,7 @@ namespace ProjectTabletop.App;
 /// <summary>Exports the original object pixels as a straight-alpha PNG, without a rendering transform.</summary>
 internal static class PhotoCopyImageStore
 {
-    public static string DefaultDirectory
-    {
-        get
-        {
-            string pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-            if (string.IsNullOrWhiteSpace(pictures))
-                throw new DirectoryNotFoundException("Windows did not provide a Pictures folder.");
-            return Path.Combine(pictures, "Project Tabletop");
-        }
-    }
+    public static string DefaultDirectory => BoardImageDirectories.PhotoCopy;
 
     /// <summary>
     /// Returns the full final filename only after writing and publishing the complete PNG.

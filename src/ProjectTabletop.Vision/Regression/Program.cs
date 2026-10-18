@@ -1,35 +1,6 @@
 using OpenCvSharp;
 using ProjectTabletop.Vision;
 
-if (args.Length > 0 && args[0] == "--eye-tip-projected-frame")
-{
-    EyeTipProjectedFrameReplay.Run(args[1..]);
-    return;
-}
-
-if (args is ["--eye-tip"])
-{
-    EyeTipRegression.Run();
-    return;
-}
-
-if (args is ["--eye-tip-frame", var eyeTipFramePath])
-{
-    using Mat source = Cv2.ImRead(eyeTipFramePath, ImreadModes.Color);
-    if (source.Empty()) throw new ArgumentException("Could not read the eye-tip camera frame.");
-    using Mat bgra = new();
-    Cv2.CvtColor(source, bgra, ColorConversionCodes.BGR2BGRA);
-    byte[] pixels = BoardDetectionRegression.BytesOf(bgra);
-    var timer = System.Diagnostics.Stopwatch.StartNew();
-    var result = EyeTipDetector.Detect(bgra.Width, bgra.Height, (int)bgra.Step(), pixels);
-    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
-    {
-        width = bgra.Width, height = bgra.Height, elapsedMs = timer.Elapsed.TotalMilliseconds,
-        result.Reason, result.Candidates
-    }));
-    return;
-}
-
 if (args is ["--hand-caption-resolution"])
 {
     HandAcquisitionCaptionResolutionRegression.Run();
@@ -244,7 +215,6 @@ HandSpotlightRegression.Run();
 HandSpotlightSmoothingRegression.Run();
 PhotoCopyRegression.Run();
 PatternRailRegression.Run();
-EyeTipRegression.Run();
 PhotoObjectRegression.Run();
 PhotoObjectTargetRegression.Run();
 if (args.Length == 1)

@@ -5,39 +5,22 @@ namespace ProjectTabletop.Vision;
 
 /// <summary>An immutable copy of the rendered board. CameraToBoard maps raw camera pixels to UV.
 /// This reference is separate from the stationary caption images used for button presses.</summary>
-public sealed record EyeTipProjectionFrame(int Width, int Height, byte[] Bgra,
+public sealed record MarkerProjectionFrame(int Width, int Height, byte[] Bgra,
     IReadOnlyList<double> CameraToBoard, DateTimeOffset RenderedAt);
 
-/// <summary>Optional learned scale, clicked/associated location, and current projected scene.
-/// A supplied projection history limits candidates to that board and rejects its printed marks;
-/// it never supplies positive evidence of a physical eye. Null preserves stand-alone detection.
-/// FrameTime is required with a projection history and must use the clock of RenderedAt.</summary>
-public sealed record EyeTipDetectionOptions(double? ExpectedRadiusPixels = null,
-    PixelPoint? PreferredCenter = null, IReadOnlyList<EyeTipProjectionFrame>? ProjectionFrames = null,
-    DateTimeOffset FrameTime = default)
-{
-    internal void Validate()
-    {
-        if (ExpectedRadiusPixels is { } radius && (!double.IsFinite(radius) || radius is < 1 or > 1024))
-            throw new ArgumentException("Invalid expected eye radius.");
-        if (PreferredCenter is { } center && (!double.IsFinite(center.X) || !double.IsFinite(center.Y) ||
-            center.X < 0 || center.Y < 0)) throw new ArgumentException("Invalid preferred eye center.");
-    }
-}
-
-/// <summary>Vetoes eye-shaped details already present in the app's own projected artwork.
+/// <summary>Vetoes marker-shaped details already present in the app's own projected artwork.
 /// Local normalized correlation tolerates exposure, tint, optical blur and small registration
 /// errors. It neither learns a still physical marker as background nor extrapolates a missing one.</summary>
-internal sealed class EyeTipProjectionMatcher
+internal sealed class MarkerProjectionMatcher
 {
     private const int Grid = 11, Search = 8, Margin = Search + 2;
     private const double MatchCorrelation = .75;
-    private static readonly ConditionalWeakTable<EyeTipProjectionFrame, Reference> References = new();
+    private static readonly ConditionalWeakTable<MarkerProjectionFrame, Reference> References = new();
     private static readonly (int X, int Y)[] Offsets = MakeOffsets();
     private readonly Reference[] _frames;
     public bool Ready => _frames.Length > 0;
 
-    public EyeTipProjectionMatcher(IReadOnlyList<EyeTipProjectionFrame> frames, DateTimeOffset frameTime)
+    public MarkerProjectionMatcher(IReadOnlyList<MarkerProjectionFrame> frames, DateTimeOffset frameTime)
     {
         // RenderedAt comes from the caller's clock (the app's MonotonicClock).
         // A wall-clock default could disagree with it and reject every frame.
@@ -54,14 +37,6 @@ internal sealed class EyeTipProjectionMatcher
 
     /// <summary>Whether any current reference places this raw camera point on the board.</summary>
     public bool ContainsBoardPoint(PixelPoint center) => _frames.Any(frame => frame.InBoard(center.X, center.Y));
-
-    public bool IsPhysicalCandidate(EyeTipObservation eye, byte[] gray, int width, int height,
-        double scaleX, double scaleY) => IsPhysicalCandidate(eye.Center, eye.RadiusPixels,
-            gray, width, height, scaleX, scaleY);
-
-    public bool IsPhysicalCandidate(PixelPoint center, double radiusPixels, byte[] gray, int width, int height,
-        double scaleX, double scaleY) => IsPhysicalCandidate(center, radiusPixels, gray, width, height,
-            scaleX, scaleY, null);
 
     /// <param name="originX">The raw camera X of gray pixel (0, 0) when gray is a crop.</param>
     public bool IsPhysicalBlackBarCandidate(MarkerTipObservation strip, byte[] gray, int width, int height,
@@ -107,8 +82,7 @@ internal sealed class EyeTipProjectionMatcher
             Span<double> camera = stackalloc double[Grid * Grid];
             double sum = 0, sumSquares = 0;
             // A neighbouring physical strip must not hide that this strip was projected.
-            // Compare its narrow oriented band and immediate flanks independently, leaving
-            // the existing circular eye comparison unchanged.
+            // Compare its narrow oriented band and immediate flanks independently.
             double barX = 0, barY = 0, axisX = 0, axisY = 0, halfLength = 0, halfWidth = 0;
             if (bar is not null)
             {
@@ -151,7 +125,7 @@ internal sealed class EyeTipProjectionMatcher
             if (energy < count * 16) return false;
             for (int i = 0; i < count; i++) camera[i] -= mean;
 
-            // The unblurred and two compact Gaussian kernels cover a small camera pupil without
+            // The unblurred and two compact Gaussian kernels cover a small camera marker without
             // requiring whole-frame resampling. Most background candidates exit at the first fit.
             foreach (var offset in Offsets)
             {
@@ -186,7 +160,6 @@ internal sealed class EyeTipProjectionMatcher
                     if (bEnergy < count * 16) continue;
                     // A faint turf stripe can correlate with actual black ink after arbitrary
                     // normalization. It cannot explain more than four times its contrast.
-                    // Apply this bound only to bars; eye comparisons stay unchanged.
                     if (cross / Math.Sqrt(energy * bEnergy) >= MatchCorrelation &&
                         (bar is null || energy <= bEnergy * 16)) return true;
                 }
@@ -196,7 +169,7 @@ internal sealed class EyeTipProjectionMatcher
         finally { ArrayPool<double>.Shared.Return(scratch); }
     }
 
-    private static bool Valid(EyeTipProjectionFrame? frame) => frame is { Width: > 1 and <= 4096,
+    private static bool Valid(MarkerProjectionFrame? frame) => frame is { Width: > 1 and <= 4096,
         Height: > 1 and <= 4096, Bgra: not null, CameraToBoard.Count: 9 } &&
         frame.Bgra.LongLength == frame.Width * (long)frame.Height * 4 &&
         frame.CameraToBoard.All(double.IsFinite);
@@ -206,7 +179,7 @@ internal sealed class EyeTipProjectionMatcher
         private readonly int _width, _height;
         private readonly byte[] _gray;
         private readonly double[] _map;
-        public Reference(EyeTipProjectionFrame frame)
+        public Reference(MarkerProjectionFrame frame)
         {
             _width = frame.Width; _height = frame.Height; _map = frame.CameraToBoard.ToArray();
             _gray = new byte[_width * _height];
@@ -222,7 +195,7 @@ internal sealed class EyeTipProjectionMatcher
         public double Sample(double x, double y)
         {
             var (u, v) = Map(x, y);
-            return EyeTipProjectionMatcher.Sample(_gray, _width, _height, u * _width, v * _height);
+            return MarkerProjectionMatcher.Sample(_gray, _width, _height, u * _width, v * _height);
         }
         private (double U, double V) Map(double x, double y)
         {

@@ -5,7 +5,7 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     private readonly DisplaySoundPlayer _waterGardenSound = new("Water Garden fountain", .27);
-    private readonly DisplaySoundPlayer _waterGardenSwishSound = new("Water Garden wand", .25);
+    private readonly DisplaySoundPlayer _waterGardenSwishSound = new("Water Garden marker", .25);
     private static readonly DisplaySoundClip[] WaterGardenFountainSound =
         [new("fountain-loop", Path.Combine(AppContext.BaseDirectory, "Assets", "WaterGarden", "Audio", "fountain-loop.wav"))];
     private static readonly DisplaySoundClip[] WaterGardenSwishSound =

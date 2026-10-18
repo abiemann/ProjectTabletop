@@ -41,7 +41,6 @@ public sealed partial class HandAcquisitionPresenceTracker
             if (excluded) continue;
             _outsideControlMask[index] = true;
             _outsideControlAreas[index] = BoardSampleArea(scene, point);
-            if (_templateSampleMask is not null) _templateSampleMask[index] = true;
             if (_edgeColors[index] is not null) continue;
             // Use exactly the caption pass's local colour/edge tolerance. The
             // extra samples never enter its candidate, reference or text masks.
@@ -67,6 +66,18 @@ public sealed partial class HandAcquisitionPresenceTracker
                     if (Math.Abs(alternatives[colorIndex + channel] - _expected![index * 3 + channel]) > 32)
                     { flat = false; break; }
             _outsideControlFitMask[index] = flat;
+        }
+    }
+
+    // The caption pass samples only its controls and reference plates. Read the
+    // remaining board cells into the same frame sample when the veto is needed.
+    private void SampleOutsideControl(int stride, byte[] bgra, double[] current, HandAcquisitionHint? illuminatedHint)
+    {
+        for (int index = 0; index < _outsideControlMask!.Length; index++)
+        {
+            if (!_outsideControlMask[index] || SamplesCell(index, illuminatedHint)) continue;
+            SampledCellCount++;
+            SampleCell(index, stride, bgra, current);
         }
     }
 

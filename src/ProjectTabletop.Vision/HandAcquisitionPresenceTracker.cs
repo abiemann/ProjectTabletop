@@ -58,7 +58,8 @@ public sealed record HandAcquisitionTextPatternResult(int ControlRegion, bool La
 /// <param name="ForegroundFraction">Foreground occupancy among eligible candidate samples.
 /// When separate reference regions are supplied, their fit quality is checked independently.</param>
 /// <param name="OutsideControlDisturbance">A compact obstruction outside the opted-in control plate.
-/// Independent of caption corruption and hand acquisition; false for uncertain broad changes.</param>
+/// Independent of hand acquisition; false for uncertain broad changes. Measured only on frames
+/// where at least one caption is not cleanly readable, and otherwise false.</param>
 /// <param name="OutsideControlForegroundFraction">Residual area divided by eligible opaque board
 /// area outside the control plate, before compact-component qualification.</param>
 public sealed record HandAcquisitionPresenceResult(IReadOnlyList<HandAcquisitionHint> Hints,
@@ -246,8 +247,16 @@ public sealed partial class HandAcquisitionPresenceTracker
         }
         bool modelReliable = fit is not null && fit.MedianError <= 18 && referenceFraction < .40;
         if (!modelReliable) Array.Clear(foreground);
-        var outsideControl = MeasureOutsideControlDisturbance(reference, current,
-            modelReliable ? fit : null, colorOffsets, threshold, activeLight ? illuminatedHint : null);
+        // The whole-board veto matters only while a caption is not cleanly readable:
+        // an intact arrow can neither start nor extend its hold. Read and fit the
+        // rest of the board only then, never on every frame of an idle menu.
+        var outsideControl = (Disturbed: false, Fraction: 0d);
+        if (_outsideControlMask is not null && textObservations.Any(observation => !observation.Clean))
+        {
+            SampleOutsideControl(stride, bgra, current, activeLight ? illuminatedHint : null);
+            outsideControl = MeasureOutsideControlDisturbance(reference, current,
+                modelReliable ? fit : null, colorOffsets, threshold, activeLight ? illuminatedHint : null);
+        }
         var captionReflectance = MeasureCaptionReflectance(reference, current, foreground, fit, colorOffsets);
         var reflectedControls = ValidateCaptionReflectance(reference, current, captionReflectance,
             textObservations, fitAllowed);
@@ -566,25 +575,33 @@ public sealed partial class HandAcquisitionPresenceTracker
         SampledCellCount = 0;
         for (int index = 0; index < _mask.Length; index++)
         {
-            if (!_mask[index]) continue;
-            PixelPoint point = _locations[index];
-            // Generated controls are the points of interest. Independent static
-            // reference patches compensate camera exposure; they cannot acquire
-            // a hand. Only an active light's white core needs additional pixels.
-            if (_templateSampleMask is not null && !_templateSampleMask[index] &&
-                (illuminatedHint is null || Distance(point, illuminatedHint.IlluminationCenter) >= illuminatedHint.IlluminationRadiusPixels * .64))
-                continue;
+            if (!_mask[index] || !SamplesCell(index, illuminatedHint)) continue;
             SampledCellCount++;
-            for (int dy = -1; dy <= 1; dy += 2)
-            for (int dx = -1; dx <= 1; dx += 2)
-            {
-                int x = Math.Clamp((int)(point.X + dx * _scale * .25), 0, _width - 1);
-                int y = Math.Clamp((int)(point.Y + dy * _scale * .25), 0, _height - 1);
-                int offset = y * stride + x * 4;
-                for (int channel = 0; channel < 3; channel++) result[index * 3 + channel] += bgra[offset + channel] * .25;
-            }
+            SampleCell(index, stride, bgra, result);
         }
         return result;
+    }
+
+    // Generated controls are the points of interest. Independent static
+    // reference patches compensate camera exposure; they cannot acquire
+    // a hand. Only an active light's white core needs additional pixels.
+    private bool SamplesCell(int index, HandAcquisitionHint? illuminatedHint) =>
+        _templateSampleMask is null || _templateSampleMask[index] || illuminatedHint is not null &&
+            Distance(_locations[index], illuminatedHint.IlluminationCenter) < illuminatedHint.IlluminationRadiusPixels * .64;
+
+    private void SampleCell(int index, int stride, byte[] bgra, double[] result)
+    {
+        PixelPoint point = _locations[index];
+        double blue = 0, green = 0, red = 0;
+        for (int dy = -1; dy <= 1; dy += 2)
+        for (int dx = -1; dx <= 1; dx += 2)
+        {
+            int x = Math.Clamp((int)(point.X + dx * _scale * .25), 0, _width - 1);
+            int y = Math.Clamp((int)(point.Y + dy * _scale * .25), 0, _height - 1);
+            int offset = y * stride + x * 4;
+            blue += bgra[offset]; green += bgra[offset + 1]; red += bgra[offset + 2];
+        }
+        result[index * 3] = blue * .25; result[index * 3 + 1] = green * .25; result[index * 3 + 2] = red * .25;
     }
 
     private void ConfigureTemplate(HandAcquisitionSceneImage? scene)

@@ -162,7 +162,7 @@ public class MarkerSetupGeneralizationTests
         [new(width * .2, height * .2), new(width * .8, height * .2),
             new(width * .8, height * .8), new(width * .2, height * .8)];
 
-    private static EyeTipProjectionFrame Reference(int width, int height, byte[] pixels, DateTimeOffset time) =>
+    private static MarkerProjectionFrame Reference(int width, int height, byte[] pixels, DateTimeOffset time) =>
         new(width, height, pixels, [1.0 / width, 0, 0, 0, 1.0 / height, 0, 0, 0, 1], time);
 
     private static byte[] Frame(int width, int height, byte value)

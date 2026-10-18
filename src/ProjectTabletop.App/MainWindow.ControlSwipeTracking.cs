@@ -24,10 +24,11 @@ public sealed partial class MainWindow
         int MotionCount, long? TrackingId, double? U, double? V, bool Traversing,
         BoardControlSwipe? Gesture, bool Applied, string? Error,
         BoardSwipeSample? SecondDisturbance = null, BoardSwipeSample? ThirdDisturbance = null,
-        BoardSwipeSample? FourthDisturbance = null);
+        BoardSwipeSample? FourthDisturbance = null, object? MarkerWait = null);
     private ControlSwipeDetectionDiagnostics? ControlSwipeDiagnostics
     {
-        get { lock (_controlSwipeGate) return _lastControlSwipeDetection; }
+        get { lock (_controlSwipeGate) return _lastControlSwipeDetection is { } result
+            ? result with { MarkerWait = _scene.GetControlSwipeMarkerWaitDiagnostics() } : null; }
     }
 
     private void QueueControlSwipeDetection(CameraFrame frame, long tick)
@@ -77,10 +78,12 @@ public sealed partial class MainWindow
                 }
                 var command = _controlSwipePath.Update(_controlSwipeSamples, frame.Timestamp, now);
                 bool traversing = _controlSwipePath.HasTraversalInProgress;
+                // Never take marker locks while holding the swipe publication lock.
+                bool markerCheckRequired = command == BoardControlSwipe.Toggle && ControlSwipeNeedsMarkerCheck();
                 lock (_controlSwipeGate)
                 {
                     if (generation != _controlSwipeGeneration || !ControlSwipeDetectionAvailable()) return;
-                    bool applied = _scene.CompleteControlSwipe(context, command, traversing, frame.Timestamp);
+                    bool applied = _scene.CompleteControlSwipe(context, command, traversing, frame.Timestamp, markerCheckRequired);
                     _lastControlSwipeDetection = new(frame.Timestamp, context.Revision, observations.Count,
                         observations.Count > 0 ? observations[0].TrackingId : null,
                         observations.Count > 0 ? observations[0].U : null,
@@ -106,6 +109,40 @@ public sealed partial class MainWindow
         });
     }
 
+    // Null means no valid check occurred; it must never be mistaken for clear.
+    private static bool? MarkerResultForControlSwipes(MarkerTipDetectionResult detection, bool published) =>
+        published || detection.Candidates.Count > 0 || detection.AmbiguousMarkerCenters.Count > 0 ? true :
+        detection.Reason == "waiting-for-projected-bat-reference" ? null : false;
+
+    private static bool? CombineControlSwipeMarkerResults(bool? previous, bool? next) =>
+        previous == true || next == true ? true : previous == false && next == false ? false : null;
+
+    // Worker occupancy is deliberately excluded: dropping a frame is not evidence
+    // that it was clear. Only a completed detector result can release a waiting swipe.
+    private bool ControlSwipeNeedsMarkerCheck()
+    {
+        var board = _scene.CurrentBoardScreen;
+        if (board is BoardScreen.WaterGarden or BoardScreen.Paint)
+        {
+            lock (_markerTrackingGate) return _markerTrackingEnabled && !_wandMarkerLearning &&
+                LearnedWandMarkerProfileLocked() is not null;
+        }
+        if (board == BoardScreen.Football)
+        {
+            lock (_footballInputGate)
+            {
+                if (!_scene.FootballInputActive || _footballLearningPlayer >= 0 ||
+                    _camera.ActiveDeviceId is not { } cameraId ||
+                    !_footballMarkerProfiles.TryGetValue(cameraId, out var profiles)) return false;
+                for (int player = 0; player < 2; player++)
+                    if (FootballHumanPlayer(player) && !_footballFingerInputs[player] && profiles.ForPlayer(player) is not null)
+                        return true;
+                return false;
+            }
+        }
+        return false;
+    }
+
     private bool ControlSwipeDetectionAvailable() => !_closing && _cameraWanted && _camera.IsRunning &&
         !_cameraManualRestartRequired && _cameraOperation.CurrentCount != 0 &&
         _camera.ActiveDeviceId == _cameraWantedDeviceId && !Volatile.Read(ref _cameraHealthWarning) &&
@@ -118,6 +155,7 @@ public sealed partial class MainWindow
             _controlSwipeGeneration++;
             _controlSwipeInputNotBefore = MonotonicClock.UtcNow;
             _lastControlSwipeDetection = null;
+            _scene.ResetControlSwipeMarkerChecks();
         }
         _controlSwipeWorker.ResetCadence();
     }

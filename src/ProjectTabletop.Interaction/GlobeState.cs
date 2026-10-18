@@ -10,7 +10,7 @@ public sealed record GlobeSnapshot(double TargetZoom, double Zoom, double Rotati
 /// </summary>
 public sealed class GlobeState
 {
-    public const double DefaultZoom = 1.5;
+    public const double DefaultZoom = .6;
     public const double MinimumZoom = .6;
     public const double MaximumZoom = 3;
     public const double ZoomStep = 1.25;

@@ -79,7 +79,7 @@ public sealed partial class MainWindow
             VerifyButtons(title);
             if (id == "paint")
             {
-                Require(scene.ActivatePaintButton("paint-drawer-open"), "The Paint drawer fixture could not open.");
+                Require(scene.ActivatePaintButton("paint-drawer-open", out _), "The Paint drawer fixture could not open.");
                 now += BoardSession.PaintDrawerOpeningDuration;
                 scene.TickPaint(now);
                 Require(scene.PaintDrawerOpen && scene.CurrentBoardButtons.All(button => button.IsHold) &&

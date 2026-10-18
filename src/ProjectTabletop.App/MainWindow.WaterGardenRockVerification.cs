@@ -51,7 +51,7 @@ public sealed partial class MainWindow
         Require(blocked.GetDiagnostics().DisturbanceCount == 1 &&
                 MaximumHeight(besideRock, size, size, 0, .48f, .3f, .7f) > .001 &&
                 MaximumHeight(besideRock, size, size, .515f, 1, 0, 1) == 0,
-            "A wide wand impulse tunneled through a thin obstacle.");
+            "A wide marker impulse tunneled through a thin obstacle.");
         CheckField(blocked, slab, "near-edge impulse");
         var beforeSolidImpulse = blocked.GetDiagnostics().DisturbanceCount;
         blocked.AddDisturbance(new(.5f, .5f), .046f, .012f);
@@ -199,10 +199,10 @@ public sealed partial class MainWindow
                 strokes.Clear();
                 Require(Touch(new(.54f, .5f)) && pulses.Count == 1 && strokes.Count == 0 &&
                         Vector2.Distance(pulses.Peek().Position, new(.54f, .5f)) < .001,
-                    "A wand jump across a rock interpolated ripples or a wake through the obstruction.");
+                    "A marker jump across a rock interpolated ripples or a wake through the obstruction.");
                 pulses.Clear();
                 Require(!Touch(new(.5f, .5f)) && pulses.Count == 0,
-                    "The production wand input accepted a submerged rock cell.");
+                    "The production marker input accepted a submerged rock cell.");
                 Field(scene, "_waterObstacles").SetValue(scene, rocks);
 
                 bool Touch(Vector2 surface)

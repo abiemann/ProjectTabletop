@@ -162,7 +162,7 @@ public sealed partial class SceneCompositor
         _projectorPixelWidth = _projectorPixelHeight = 0;
         _boardApplicationTarget?.Dispose();
         _boardApplicationTarget = null;
-        DisposeEyeProjectionReference();
+        DisposeMarkerProjectionReference();
         _renderedBoardState = null;
         _blackjackFlightTarget?.Dispose();
         _blackjackFlightTarget = null;

@@ -110,6 +110,33 @@ public sealed partial class MainWindow
         Require(!session.FootballControlsVisible && scene.GetControlSwipeContext(now) is null,
             "Football's automatically hidden gameplay controls enabled swipes.");
 
+        // A detected double-bar marker paints or stirs. The same crossing that
+        // toggles controls by hand must not toggle them when the marker appears
+        // mid-sweep, nor after it briefly drops out of detection.
+        scene.ShowFootball();
+        var markerBand = Context();
+        var markerPath = new BoardControlSwipeTracker();
+        double[] markerStroke = [.88, .66, .45, .12];
+        bool markerSwipe = false, markerToggled = false;
+        for (int index = 0; index < markerStroke.Length; index++)
+        {
+            now += TimeSpan.FromMilliseconds(110);
+            // The marker detector first reports it on the second frame, then misses it.
+            if (index == 1) scene.NoteMarkerOnBoard(now);
+            var command = markerPath.Update([new(index, markerStroke[index], (markerBand.Top + markerBand.Bottom) / 2)], now, now);
+            markerSwipe |= command == BoardControlSwipe.Toggle;
+            markerToggled |= scene.CompleteControlSwipe(markerBand, command, markerPath.HasTraversalInProgress, now);
+            Require(index == 0 || scene.GetControlSwipeContext(now) is null,
+                "A marker on the board left the control-band context engaged.");
+        }
+        Require(markerSwipe, "The marker fixture did not form a complete control-row sweep.");
+        Require(!markerToggled && session.ButtonsVisible, "A marker stroke along the control row toggled the controls.");
+        now += SceneCompositor.ControlSwipeMarkerQuietPeriod;
+        Cross(rightToLeft: true);
+        Cross(rightToLeft: false);
+
+        VerifyMarkerCompletionOrdering();
+
         scene.ShowWaterGarden();
         Draw();
         Require(scene.GetControlSwipeContext(now) is null, "Water Garden intro trained a motion baseline.");
@@ -201,6 +228,7 @@ public sealed partial class MainWindow
         }
         Require(session.WaterGardenDuckAddRevision > ducksBefore,
             "A fully shown button did not rearm after fresh clear lettering.");
+
         scene.ShowBlackjack();
         var blackjackContext = Context();
         Require(blackjackContext.Top == .75 && blackjackContext.Bottom == .90,
@@ -212,9 +240,116 @@ public sealed partial class MainWindow
             hiddenBandRetained = true, excludedMenuAndStryker = true,
             excludedFootballPlay = true, cameraNavigationCalibrationAndVisibilityBarriers = true,
             coordinateSwipeSuppressesHolds = true, restoredCaptionRequiresClear = true,
+            markerStrokesIgnored = true, markerQuietMilliseconds = SceneCompositor.ControlSwipeMarkerQuietPeriod.TotalMilliseconds,
+            markerLateCompletionCancels = true, markerClearReleasesImmediately = true,
+            bothFootballPlayersCheckedBeforeClear = true,
+            markerPendingResetNavigationAndExpiry = true, nonMarkerBoardsDoNotWait = true,
+            markerWait = scene.GetControlSwipeMarkerWaitDiagnostics(),
             introAndDrawerAnimationExcluded = true, simultaneousFadeMilliseconds = BoardSession.ControlFadeDuration.TotalMilliseconds,
             fadeBoards = new[] { "WaterGarden", "Blackjack" }, fadingControlsExcludedFromInput = true,
             worldPixelsUnaffected = true, liveHardwareUntouched = true };
+
+        void VerifyMarkerCompletionOrdering()
+        {
+            var clearPlayer = new MarkerTipDetectionResult([], "not-found");
+            var markerPlayer = new MarkerTipDetectionResult([], "ambiguous")
+                { AmbiguousMarkerCenters = [new(20, 20)] };
+            var waitingPlayer = new MarkerTipDetectionResult([], "waiting-for-projected-bat-reference");
+            bool? clear = MarkerResultForControlSwipes(clearPlayer, false);
+            bool? marker = MarkerResultForControlSwipes(markerPlayer, false);
+            bool? waiting = MarkerResultForControlSwipes(waitingPlayer, false);
+            Require(clear == false && marker == true && waiting is null &&
+                    CombineControlSwipeMarkerResults(clear, marker) == true &&
+                    CombineControlSwipeMarkerResults(marker, clear) == true &&
+                    CombineControlSwipeMarkerResults(clear, waiting) is null &&
+                    CombineControlSwipeMarkerResults(waiting, clear) is null,
+                "Football did not aggregate both players before declaring a checked frame clear.");
+            var context = Prepare();
+            var tracker = new BoardControlSwipeTracker();
+            DateTimeOffset firstFrame = default, lastFrame = default;
+            bool commandProduced = false;
+            for (int sample = 0; sample < markerStroke.Length; sample++)
+            {
+                now += TimeSpan.FromMilliseconds(sample == 0 ? 1 : 50);
+                if (sample == 0) firstFrame = now;
+                lastFrame = now;
+                var command = tracker.Update([new(sample, markerStroke[sample], .91)], now, now);
+                commandProduced |= command == BoardControlSwipe.Toggle;
+                Require(!scene.CompleteControlSwipe(context, command, tracker.HasTraversalInProgress, now,
+                        markerCheckRequired: true) && session.ButtonsVisible,
+                    "The swipe worker outran an unfinished marker check and toggled controls.");
+            }
+            Require(commandProduced, "The reverse-completion fixture did not produce a swipe.");
+            now += TimeSpan.FromMilliseconds(50);
+            Require(!scene.CompleteControlSwipeMarkerCheck(firstFrame, markerSeen: true) && session.ButtonsVisible,
+                "A marker measured during the swipe did not cancel its waiting command.");
+            Require(!scene.CompleteControlSwipeMarkerCheck(lastFrame, markerSeen: false) && session.ButtonsVisible,
+                "A later clear frame resurrected a marker-cancelled command.");
+
+            // Deliberately no detector callback while a worker is busy or its
+            // frame was dropped. An older clear result also cannot release it.
+            context = Prepare();
+            now += TimeSpan.FromMilliseconds(1);
+            var waitingFrame = now;
+            Require(!scene.CompleteControlSwipe(context, BoardControlSwipe.Toggle, false, waitingFrame, true),
+                "An unchecked marker-board swipe did not wait.");
+            now += TimeSpan.FromMilliseconds(17);
+            Require(!scene.CompleteControlSwipeMarkerCheck(waitingFrame.AddTicks(-1), false) && session.ButtonsVisible,
+                "A clear result from before the swipe released it prematurely.");
+            now += TimeSpan.FromMilliseconds(1);
+            Require(scene.CompleteControlSwipeMarkerCheck(waitingFrame, false) && !session.ButtonsVisible &&
+                    session.ControlVisibilityAnimating(now),
+                "A clear same-frame result did not start the fade immediately when it finished.");
+            Require(!scene.CompleteControlSwipeMarkerCheck(waitingFrame, false),
+                "A repeated clear completion toggled a pending swipe twice.");
+            var wait = System.Text.Json.JsonSerializer.SerializeToElement(scene.GetControlSwipeMarkerWaitDiagnostics());
+            Require(wait.GetProperty("lastWaitMilliseconds").GetDouble() == 18,
+                "Marker wait includes an added timer instead of only the 18 ms detector lag.");
+
+            context = Prepare();
+            now += TimeSpan.FromMilliseconds(1);
+            Require(!scene.CompleteControlSwipeMarkerCheck(now, false) &&
+                    scene.CompleteControlSwipe(context, BoardControlSwipe.Toggle, false, now, true),
+                "A marker detector already caught up with the swipe introduced a wait.");
+
+            foreach (string invalidation in new[] { "reset", "navigation", "expiry" })
+            {
+                context = Prepare();
+                now += TimeSpan.FromMilliseconds(1);
+                Require(!scene.CompleteControlSwipe(context, BoardControlSwipe.Toggle, false, now, true),
+                    "The invalidation fixture did not queue its single waiting command.");
+                if (invalidation == "reset") scene.ResetControlSwipeMarkerChecks();
+                else if (invalidation == "navigation") scene.ShowSettings();
+                now += TimeSpan.FromMilliseconds(invalidation == "expiry" ? 251 : 1);
+                Require(!scene.CompleteControlSwipeMarkerCheck(now, false) && session.ButtonsVisible,
+                    "A " + invalidation + " allowed a delayed marker check to toggle controls.");
+                if (invalidation == "expiry")
+                {
+                    now += TimeSpan.FromMilliseconds(1);
+                    Require(!scene.CompleteControlSwipe(context, BoardControlSwipe.Toggle, false, now, true) &&
+                            scene.CompleteControlSwipeMarkerCheck(now, false) && !session.ButtonsVisible,
+                        "An expired pending command occupied the slot and blocked a fresh later swipe.");
+                }
+            }
+
+            // Carry a recent marker into another board: neither its quiet window
+            // nor marker-detector completion may delay non-marker controls.
+            scene.NoteMarkerOnBoard(now);
+            scene.ShowSettings();
+            context = Context();
+            now += TimeSpan.FromMilliseconds(1);
+            Require(scene.CompleteControlSwipe(context, BoardControlSwipe.Toggle, false, now),
+                "A non-marker board waited for a marker result or inherited its quiet period.");
+
+            SceneCompositor.ControlSwipeContext Prepare()
+            {
+                now += TimeSpan.FromSeconds(2);
+                scene.ShowFootball();
+                scene.ClearHandTips();
+                scene.ResetControlSwipeMarkerChecks();
+                return Context();
+            }
+        }
 
         SceneCompositor.ControlSwipeContext Cross(bool rightToLeft)
         {

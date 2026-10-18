@@ -157,8 +157,22 @@ public sealed partial class MainWindow
                 $"Motion after a marker {interruption} replayed the old stroke.");
         }
 
+        // A detector's "no marker" result keeps its own camera time and is
+        // published after detection latency. Camera frames newer than that absence
+        // still start the next stroke immediately; none of its ink is lost.
         revision = Reset();
-        Require(scene.ActivatePaintButton("paint-drawer-open"), "The marker control-exclusion fixture could not open Paint's drawer.");
+        Feed(new(.30, .45));
+        now += TimeSpan.FromMilliseconds(20);
+        var absentFrame = now;
+        now += TimeSpan.FromMilliseconds(35);
+        scene.SetPaintMarkerTip(null, .025, absentFrame, revision);
+        for (int frame = 1; frame <= 3; frame++)
+            scene.SetPaintMarkerTip(Camera(new(.40 + frame * .04, .45)), .025, absentFrame.AddMilliseconds(frame * 20), revision);
+        Require(Pending().Length > 0 && Pending().All(drop => drop.Center.X >= .44 - .001 && drop.Center.X < .48),
+            "Marker frames newer than a published absence were rejected, losing the start of the stroke.");
+
+        revision = Reset();
+        Require(scene.ActivatePaintButton("paint-drawer-open", out _), "The marker control-exclusion fixture could not open Paint's drawer.");
         now += BoardSession.PaintDrawerOpeningDuration;
         scene.TickPaint(now);
         foreach (var button in scene.CurrentBoardButtons)

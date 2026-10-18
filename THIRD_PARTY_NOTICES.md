@@ -29,6 +29,10 @@ and [cloud JPEG](https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57747/
 NASA imagery is used under its [media usage guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/).
 NASA does not endorse this application.
 
+The separate Milky Way backdrop is original generated illustrative artwork, not
+NASA imagery or a scientifically mapped sky. Its generation prompt and source
+details are in `GlobeRendering/Assets/SKY.md` in the app package.
+
 ## Fluid Paint by David Li
 
 Source: [dli/paint](https://github.com/dli/paint), commit
@@ -149,11 +153,11 @@ loop and plays it at 27% volume. Restoration details, source and output
 checksums, and the CC0 license text are bundled in `Assets/WaterGarden/Audio`
 and available through **Settings → Licenses**.
 
-The wand interaction loop also uses **Trickling Water 3 by Yoyodaman234**, under
+The marker interaction loop also uses **Trickling Water 3 by Yoyodaman234**, under
 **CC0 1.0 Universal**. ProjectTabletop selects a separate quiet excerpt from its
 verified prepared fountain recording, filters low rumble and high frequencies,
 crossfades the repeat boundary, smooths its edges and adjusts the level into an
-8-second mono loop. It plays at 25% volume while the wand interacts with the water.
+8-second mono loop. It plays at 25% volume while the double-bar marker interacts with the water.
 See the [Water Garden audio credits](https://github.com/abiemann/ProjectTabletop/blob/main/src/ProjectTabletop.App/Assets/WaterGarden/Audio/AUDIO.md)
 for both loops, preparation details, checksums and the bundled CC0 license.
 

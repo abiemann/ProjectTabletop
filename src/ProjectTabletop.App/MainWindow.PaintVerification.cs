@@ -168,7 +168,7 @@ public sealed partial class MainWindow
                 ChangedPixels(blank, Draw(scene), canvas) == 0,
             "A real hand input illuminated Paint or drew its fingertip marker over the painting.");
         scene.ClearHandTips();
-        Require(scene.ActivatePaintButton("paint-drawer-open"),
+        Require(scene.ActivatePaintButton("paint-drawer-open", out _),
             "The Paint fixture drawer did not reopen after clearing its hand-input state.");
         now += BoardSession.PaintDrawerOpeningDuration;
         scene.TickPaint(now);
@@ -704,7 +704,7 @@ public sealed partial class MainWindow
             safetyInset = result.SetDetectedBoardGrid(corners, Homography.FromFourPoints(camera, unit));
             result.SetBoardSetup(false);
             result.ShowPaint();
-            Require(result.ActivatePaintButton("paint-drawer-open"), "The Paint fixture drawer could not open.");
+            Require(result.ActivatePaintButton("paint-drawer-open", out _), "The Paint fixture drawer could not open.");
             now += BoardSession.PaintDrawerOpeningDuration;
             result.TickPaint(now);
             if (!keepIntroduction)

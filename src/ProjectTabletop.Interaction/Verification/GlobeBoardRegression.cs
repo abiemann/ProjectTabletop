@@ -37,14 +37,14 @@ internal static class GlobeBoardRegression
         IReadOnlyList<string> Hold(string[] ids, int time) => board.ObserveHeldButtons(ids, Time(time), Time(time + 40));
         for (int time = 4000; time < 5000; time += 100)
             Require(Hold(zoomIn, time).Count == 0, "A hold activated before a full second of caption evidence.");
-        Require(Hold(zoomIn, 5000).SequenceEqual(zoomIn) && Near(board.GetGlobeSnapshot(Time(5100)).TargetZoom, 1.875),
+        Require(Hold(zoomIn, 5000).SequenceEqual(zoomIn) && Near(board.GetGlobeSnapshot(Time(5100)).TargetZoom, GlobeState.DefaultZoom * 1.25),
             "One second of held evidence did not zoom exactly once.");
         Require(Hold(zoomIn, 5000).Count == 0 && Hold(zoomIn, 4900).Count == 0,
             "A repeated or delayed frame advanced the hold.");
         for (int time = 5100; time < 6000; time += 100)
             Require(time is > 5300 and < 5500 || Hold(zoomIn, time).Count == 0,
                 "A continued hold repeated before another second; a 200 ms evidence gap released it.");
-        Require(Hold(zoomIn, 6000).SequenceEqual(zoomIn) && Near(board.GetGlobeSnapshot(Time(6400)).TargetZoom, 1.5 * 1.25 * 1.25),
+        Require(Hold(zoomIn, 6000).SequenceEqual(zoomIn) && Near(board.GetGlobeSnapshot(Time(6400)).TargetZoom, GlobeState.DefaultZoom * 1.25 * 1.25),
             "A continued hold did not repeat after each further second.");
         Require(Hold([], 6400).Count == 0, "An uncovered frame activated a hold.");
         for (int time = 6500; time < 7500; time += 100)
@@ -111,7 +111,7 @@ internal static class GlobeBoardRegression
         for (int time = 2200; time < 3100; time += 100)
             Require(Hold(time).Count == 0, "A strict zoom repeated before its next second.");
         Require(Hold(3100).SequenceEqual(["globe-zoom-in"]) &&
-            Near(board.GetGlobeSnapshot(Time(3100)).TargetZoom, 1.5 * 1.25 * 1.25),
+            Near(board.GetGlobeSnapshot(Time(3100)).TargetZoom, GlobeState.DefaultZoom * 1.25 * 1.25),
             "Resetting an unrelated caption interrupted a strict repeat or consumed its readiness.");
 
         board.ResetHoldCaptionEvidence();
@@ -130,7 +130,7 @@ internal static class GlobeBoardRegression
         for (int time = 6200; time < 7200; time += 100)
             Require(Hold(time).Count == 0, "A reset Globe caption reused previous hold progress.");
         Require(Hold(7200).SequenceEqual(["globe-zoom-in"]) &&
-            Near(board.GetGlobeSnapshot(Time(7200)).TargetZoom, 1.5 * Math.Pow(1.25, 3)),
+            Near(board.GetGlobeSnapshot(Time(7200)).TargetZoom, GlobeState.DefaultZoom * Math.Pow(1.25, 3)),
             "A fresh clear reference followed by a full strict hold failed to zoom.");
     }
 
@@ -163,7 +163,7 @@ internal static class GlobeBoardRegression
         IReadOnlyList<string> Hold(string[] ids, int time) => board.ObserveHeldButtons(ids, Time(time), Time(time));
         for (int time = 1000; time <= 3000; time += 100)
             Require(Hold(["globe-zoom-in", "globe-exit"], time).Count == 0 && board.Screen == BoardScreen.Globe &&
-                Near(board.GetGlobeSnapshot(Time(time)).TargetZoom, 1.5),
+                Near(board.GetGlobeSnapshot(Time(time)).TargetZoom, GlobeState.DefaultZoom),
                 "Two covered long-press captions activated a button.");
         for (int time = 3100; time < 4100; time += 100)
             Require(Hold(["globe-zoom-in"], time).Count == 0, "An ambiguous hold shortened the next long press.");
@@ -213,10 +213,10 @@ internal static class GlobeBoardRegression
         GlobeSnapshot start = board.GetGlobeSnapshot(Time(100));
         GlobeSnapshot middle = board.GetGlobeSnapshot(Time(1600));
         GlobeSnapshot finished = board.GetGlobeSnapshot(Time(3100));
-        Require(start is { IntroProgress: 0, ElapsedSeconds: 0, TargetZoom: 1.5 } && Near(start.Zoom, .06),
+        Require(start is { IntroProgress: 0, ElapsedSeconds: 0, TargetZoom: GlobeState.DefaultZoom } && Near(start.Zoom, .04 * GlobeState.DefaultZoom),
             "Earth did not start far away at its default zoom.");
         Require(Near(middle.IntroProgress, .5) && middle.Zoom > start.Zoom && middle.Zoom < finished.Zoom &&
-            Near(finished.IntroProgress, 1) && Near(finished.Zoom, 1.5), "The three-second approach did not fill the default view.");
+            Near(finished.IntroProgress, 1) && Near(finished.Zoom, GlobeState.DefaultZoom), "The three-second approach did not fill the default view.");
         Require(Near(finished.RotationDegrees, 3) && Near(board.GetGlobeSnapshot(Time(60100)).RotationDegrees, 60),
             "Earth did not spin slowly at one degree per second.");
         Require(board.GetGlobeSnapshot(Time(1600)) == middle && board.Revision == revision &&
@@ -225,7 +225,7 @@ internal static class GlobeBoardRegression
             board.GetGlobeSnapshot(Time(99)) is { IntroProgress: 0, ElapsedSeconds: 0 },
             "Long-running spin wrapping or a pre-launch clock produced invalid globe geometry.");
         board.ShowMenu(Time(361000)); board.ShowGlobe(Time(362000));
-        Require(board.GetGlobeSnapshot(Time(362000)) is { TargetZoom: 1.5, IntroProgress: 0, RotationDegrees: 0 } &&
+        Require(board.GetGlobeSnapshot(Time(362000)) is { TargetZoom: GlobeState.DefaultZoom, IntroProgress: 0, RotationDegrees: 0 } &&
             !board.GlobeDrawerOpen && board.GlobeDrawerOpenedAt is null,
             "Returning to Globe did not restart the approach, orientation and closed drawer.");
 
@@ -267,11 +267,11 @@ internal static class GlobeBoardRegression
         GlobeSnapshot middle = board.GetGlobeSnapshot(Time(1500));
         GlobeSnapshot arrived = board.GetGlobeSnapshot(Time(3000));
         long revision = globe.Revision;
-        Require(Near(first.RotationDegrees, 55.29723737777772) && Near(first.Zoom, .06) &&
+        Require(Near(first.RotationDegrees, 55.29723737777772) && Near(first.Zoom, .04 * GlobeState.DefaultZoom) &&
             Near(middle.RotationDegrees, 56.79723737777772) && Near(middle.IntroProgress, .5) &&
             middle.Zoom > first.Zoom && middle.Zoom < arrived.Zoom &&
             Near(arrived.RotationDegrees, 58.29723737777772) && Near(arrived.ViewLatitudeDegrees, 34.05222222222222) &&
-            Near(arrived.Zoom, 1.5) && Near(arrived.TargetZoom, 1.5) && Near(arrived.IntroProgress, 1),
+            Near(arrived.Zoom, GlobeState.DefaultZoom) && Near(arrived.TargetZoom, GlobeState.DefaultZoom) && Near(arrived.IntroProgress, 1),
             "The fixed three-second approach did not reach the user's captured Globe view.");
         Require(Near(board.GetGlobeSnapshot(Time(4000)).RotationDegrees, 59.29723737777772) &&
             Near(board.GetGlobeSnapshot(Time(363000)).RotationDegrees, arrived.RotationDegrees) &&
@@ -332,8 +332,9 @@ internal static class GlobeBoardRegression
             board.Buttons.Where(button => button.Id != "globe-drawer-close").All(button => !button.Enabled) &&
             !board.ActivateButton("globe-exit", Time(4150)) && !board.ActivateButton("globe-zoom-in", Time(4299)),
             "Drawer sampling changed state or a moving control became executable.");
+        // The opening view is the minimum zoom, so only Zoom - stays unavailable.
         Require(!board.TickGlobe(Time(4299)) && board.TickGlobe(Time(4300)) && !board.TickGlobe(Time(4301)) &&
-            board.Buttons.All(button => button.Enabled) && Near(board.GetGlobeDrawerProgress(Time(4100)), 1) && opened == 1,
+            board.Buttons.All(button => button.Enabled != (button.Id == "globe-zoom-out")) && Near(board.GetGlobeDrawerProgress(Time(4100)), 1) && opened == 1,
             "Settled drawer controls did not enable once, or the drawer restarted the Earth.");
 
         GlobeSnapshot before = board.GetGlobeSnapshot(Time(4400));
@@ -341,11 +342,11 @@ internal static class GlobeBoardRegression
         GlobeSnapshot instant = board.GetGlobeSnapshot(Time(4400));
         GlobeSnapshot halfway = board.GetGlobeSnapshot(Time(4575));
         GlobeSnapshot final = board.GetGlobeSnapshot(Time(4750));
-        Require(Near(instant.Zoom, before.Zoom) && Near(instant.TargetZoom, 1.875) && halfway.Zoom > instant.Zoom &&
-            halfway.Zoom < final.Zoom && Near(final.Zoom, 1.875), "Zooming jumped immediately or failed to settle smoothly.");
+        Require(Near(instant.Zoom, before.Zoom) && Near(instant.TargetZoom, GlobeState.DefaultZoom * 1.25) && halfway.Zoom > instant.Zoom &&
+            halfway.Zoom < final.Zoom && Near(final.Zoom, GlobeState.DefaultZoom * 1.25), "Zooming jumped immediately or failed to settle smoothly.");
         Require(board.ActivateButton("globe-zoom-in", Time(4750)) && board.ActivateButton("globe-zoom-in", Time(4750)),
             "Consecutive zoom selections were lost.");
-        Require(Near(board.GetGlobeSnapshot(Time(5100)).TargetZoom, 1.5 * Math.Pow(1.25, 3)),
+        Require(Near(board.GetGlobeSnapshot(Time(5100)).TargetZoom, GlobeState.DefaultZoom * Math.Pow(1.25, 3)),
             "Quick selections failed to accumulate zoom targets.");
         for (int time = 5500; time < 15000; time += 400) board.ActivateButton("globe-zoom-in", Time(time));
         Require(Near(board.GetGlobeSnapshot(Time(15000)).Zoom, GlobeState.MaximumZoom) &&
@@ -364,8 +365,8 @@ internal static class GlobeBoardRegression
             board.Buttons.Single().Id == "globe-drawer-open" && opened == 1,
             "Closing the drawer did not hide its controls or reopened the board.");
         board.ShowGlobe(Time(41000));
-        Require(board.GetGlobeSnapshot(Time(44000)) is { TargetZoom: 1.5 } &&
-            Near(board.GetGlobeSnapshot(Time(44000)).Zoom, 1.5) && !board.GlobeDrawerOpen,
+        Require(board.GetGlobeSnapshot(Time(44000)) is { TargetZoom: GlobeState.DefaultZoom } &&
+            Near(board.GetGlobeSnapshot(Time(44000)).Zoom, GlobeState.DefaultZoom) && !board.GlobeDrawerOpen,
             "Restarting Globe retained the previous zoom or drawer.");
         Require(board.ActivateButton("globe-drawer-open", Time(45000)) &&
             board.ActivateButton("globe-drawer-close", Time(45100)) && !board.TickGlobe(Time(45400)) &&
@@ -398,7 +399,7 @@ internal static class GlobeBoardRegression
             eventId++;
         }
         Require(board.Screen == BoardScreen.Globe && board.GlobeDrawerOpen &&
-            Near(board.GetGlobeSnapshot(Time(800)).TargetZoom, 1.5), "A pinch changed the Globe.");
+            Near(board.GetGlobeSnapshot(Time(800)).TargetZoom, GlobeState.DefaultZoom), "A pinch changed the Globe.");
         // Exit acts after one second of caption evidence, once.
         for (int time = 1000; time < 2000; time += 100)
             Require(board.ObserveHeldButtons(["globe-exit"], Time(time), Time(time)).Count == 0 &&
@@ -438,7 +439,7 @@ internal static class GlobeBoardRegression
             start += 1500;
         }
         Require(board.Screen == BoardScreen.Globe && board.GlobeDrawerOpen &&
-            Near(board.GetGlobeSnapshot(Time(start)).TargetZoom, 1.5), "A finger gesture changed the Globe.");
+            Near(board.GetGlobeSnapshot(Time(start)).TargetZoom, GlobeState.DefaultZoom), "A finger gesture changed the Globe.");
     }
 
     private static BoardHandSample Together(BoardButton button) => new(double.NaN, double.NaN,

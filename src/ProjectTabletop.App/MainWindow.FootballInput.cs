@@ -125,6 +125,7 @@ public sealed partial class MainWindow
         {
             _footballSceneInputRevision = _scene.FootballInputRevision;
             _footballInputGeneration++;
+            _scene.ResetControlSwipeMarkerChecks();
             _footballInputNotBefore = MonotonicClock.UtcNow;
             _footballProfileReloadPending = true;
             _footballLastDetection = null;
@@ -180,8 +181,8 @@ public sealed partial class MainWindow
         ResetFootballInput();
         _footballInputWasActive = _scene.FootballInputActive;
         // Cancel another learning gesture without replacing its saved profile.
-        ResetEyeTipTracking("football-marker-learning");
-        UpdateEyeTipStatus();
+        ResetMarkerTracking("football-marker-learning");
+        UpdateMarkerStatus();
         _frozenFrame = null;
         lock (_footballInputGate)
         {
@@ -195,7 +196,7 @@ public sealed partial class MainWindow
     }
 
     // Starting another marker's learning replaces a pending football click, just
-    // as football learning cancels eye and wand learning.
+    // as football learning cancels double-bar marker learning.
     private void CancelFootballLearning()
     {
         lock (_footballInputGate)
@@ -239,7 +240,7 @@ public sealed partial class MainWindow
         using var frameLease = AcquireLatestCameraFrame();
         var frame = frameLease?.Frame;
         if (_closing || frame is null || !_cameraWanted || !_camera.IsRunning || _cameraHealthWarning ||
-            _camera.ActiveDeviceId != _selectedCameraId || !EyeTipFrameFresh(frame, MonotonicClock.UtcNow))
+            _camera.ActiveDeviceId != _selectedCameraId || !MarkerFrameFresh(frame, MonotonicClock.UtcNow))
             throw new InvalidOperationException("Start the selected webcam and wait for a fresh frame.");
         if (!double.IsFinite(x) || !double.IsFinite(y) || x < 0 || y < 0 || x >= frame.Width || y >= frame.Height)
             throw new ArgumentException("Provide x and y inside the raw camera frame.");
@@ -266,7 +267,7 @@ public sealed partial class MainWindow
             long generation;
             lock (_footballInputGate) generation = _footballInputGeneration;
             if (cameraId is null || cameraId != _selectedCameraId || !_cameraWanted || !_camera.IsRunning ||
-                _cameraHealthWarning || !EyeTipFrameFresh(frame, MonotonicClock.UtcNow))
+                _cameraHealthWarning || !MarkerFrameFresh(frame, MonotonicClock.UtcNow))
                 throw new InvalidOperationException("Wait for fresh webcam video, then click the tip again.");
             var learned = await Task.Run(() =>
             {
@@ -281,7 +282,7 @@ public sealed partial class MainWindow
             {
                 if (_closing || generation != _footballInputGeneration || _footballLearningPlayer != player ||
                     _camera.ActiveDeviceId != cameraId || cameraId != _selectedCameraId ||
-                    !EyeTipFrameFresh(frame, MonotonicClock.UtcNow))
+                    !MarkerFrameFresh(frame, MonotonicClock.UtcNow))
                     throw new InvalidOperationException("The camera changed or the frame expired. Click the tip again.");
                 var chosen = NearestStickTipCandidate(learned.Detection.Candidates, point.X, point.Y,
                     item => item.Center, item => item.RadiusPixels);
@@ -345,7 +346,7 @@ public sealed partial class MainWindow
             if (_closing || _footballInputWorker.IsBusy || _footballLearningPlayer >= 0 ||
                 !_scene.FootballInputActive || !_cameraWanted || !_camera.IsRunning ||
                 _cameraHealthWarning || IsBoardScanMeasuring || frame.Timestamp < _footballInputNotBefore ||
-                !EyeTipFrameFresh(frame, MonotonicClock.UtcNow)) return;
+                !MarkerFrameFresh(frame, MonotonicClock.UtcNow)) return;
             string? cameraId = _camera.ActiveDeviceId;
             if (cameraId is null || cameraId != _selectedCameraId ||
                 !_footballMarkerProfiles.TryGetValue(cameraId, out var profiles)) return;
@@ -399,7 +400,8 @@ public sealed partial class MainWindow
                         var now = MonotonicClock.UtcNow;
                         double processingMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                         var decisionSources = new string[selected.Length];
-                        bool fresh = EyeTipFrameFresh(frame, now);
+                        bool fresh = MarkerFrameFresh(frame, now);
+                        bool? markerSeen = false;
                         for (int index = 0; index < selected.Length; index++)
                         {
                             int player = selected[index];
@@ -416,6 +418,8 @@ public sealed partial class MainWindow
                                 detections[index], camera => _scene.TryMapFootballMarkerCameraPoint(camera, out var field) ? field : null,
                                 frame.Timestamp, now);
                             decisionSources[index] = decision.Source;
+                            markerSeen = CombineControlSwipeMarkerResults(markerSeen,
+                                MarkerResultForControlSwipes(detections[index], decision.Action == FootballTipAction.Publish));
                             switch (decision.Action)
                             {
                                 case FootballTipAction.Publish:
@@ -447,6 +451,10 @@ public sealed partial class MainWindow
                                     break;
                             }
                         }
+                        // Only the combined result can declare the pitch clear;
+                        // player 1 finishing clear must not outrun player 2's marker.
+                        if (fresh && markerSeen is { } completedMarkerResult)
+                            _scene.CompleteControlSwipeMarkerCheck(frame.Timestamp, completedMarkerResult);
                         _footballLastDetection = new(frame.Timestamp, processingMilliseconds,
                             (now - frame.Timestamp).TotalMilliseconds, detections.Select(item => item.Reason).ToArray(),
                             detections.Select(item => item.Candidates.Count).ToArray(), selected.Select(player => player + 1).ToArray(),
@@ -486,7 +494,7 @@ public sealed partial class MainWindow
             }
             bool fresh = !_closing && _cameraWanted && _camera.IsRunning && !_cameraHealthWarning &&
                 !IsBoardScanMeasuring && frame.Timestamp >= _footballInputNotBefore &&
-                EyeTipFrameFresh(frame, MonotonicClock.UtcNow);
+                MarkerFrameFresh(frame, MonotonicClock.UtcNow);
             var candidates = new List<(PixelPoint Camera, PixelPoint Field)>[] { [], [] };
             if (fresh)
                 foreach (var hand in hands)
@@ -566,7 +574,7 @@ public sealed partial class MainWindow
                     input = _footballFingerInputs[player] ? "finger" : "black-bar",
                     learned = profiles?.ForPlayer(player) is not null,
                     profile = profiles?.ForPlayer(player),
-                    visible = _footballCameraTips[player] is not null && now - _footballTipTimes[player] <= EyeTipLifetime,
+                    visible = _footballCameraTips[player] is not null && now - _footballTipTimes[player] <= MarkerObservationLifetime,
                     trackingSource = _footballTrackingSources[player],
                     cameraPoint = _footballCameraTips[player], bar = _footballCameraBars[player], frameTime = _footballTipTimes[player],
                     reason = _footballInputReasons[player]
@@ -585,7 +593,7 @@ public sealed partial class MainWindow
             var now = MonotonicClock.UtcNow;
             for (int player = 0; player < 2; player++)
             {
-                if (_footballCameraTips[player] is not { } point || now - _footballTipTimes[player] > EyeTipLifetime) continue;
+                if (_footballCameraTips[player] is not { } point || now - _footballTipTimes[player] > MarkerObservationLifetime) continue;
                 var center = new Vector2((float)(rect.X + point.X / frame.Width * rect.Width),
                     (float)(rect.Y + point.Y / frame.Height * rect.Height));
                 var color = player == 0 ? Colors.Orange : Colors.DeepSkyBlue;

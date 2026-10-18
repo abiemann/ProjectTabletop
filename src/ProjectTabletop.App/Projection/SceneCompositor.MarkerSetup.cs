@@ -128,7 +128,7 @@ public sealed partial class SceneCompositor
         _markerSetupVisualRevision++;
         _renderedBoardState = null;
         _waterRenderedFrame = null;
-        ClearEyeProjectionHistory();
+        ClearMarkerProjectionHistory();
         ClearAcquisitionLight();
         ClearHandSpotlights();
         _handTips = [];

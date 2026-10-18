@@ -12,8 +12,11 @@ public sealed partial class SceneCompositor
         lock (_gate) return _boardSession.TickPaint(now);
     }
 
-    public bool ActivatePaintButton(string id)
+    /// <summary>Activates a Paint control directly. An accepted SAVE returns the request
+    /// time the caller must pass to <see cref="TryTakePaintSaveRequest"/> to export it.</summary>
+    public bool ActivatePaintButton(string id, out DateTimeOffset? saveRequestTime)
     {
+        saveRequestTime = null;
         lock (_gate)
         {
             if (_boardSession.Screen != BoardScreen.Paint || IsBoardRevealActive || _markerSetup is not null) return false;
@@ -24,7 +27,11 @@ public sealed partial class SceneCompositor
             {
                 SyncPaintSession();
                 NotePaintUserActivity();
-                if (id == "paint-save") QueuePaintSaveRequest(now);
+                if (id == "paint-save")
+                {
+                    QueuePaintSaveRequest(now);
+                    saveRequestTime = _paintSaveRequest?.FrameTime;
+                }
             }
             return changed;
         }

@@ -100,7 +100,7 @@ public sealed partial class MainWindow
     private void SuspendBoardScanForCameraOutage()
     {
         ClearHandTracking();
-        ResetEyeTipTracking("waiting-for-fresh-camera-frame");
+        ResetMarkerTracking("waiting-for-fresh-camera-frame");
         var hadMediaClip = _scene.HasBoardMediaClip;
         _scene.ClearBoardMediaClip();
         if (hadMediaClip && !Volatile.Read(ref _boardSetupActive))
@@ -208,7 +208,7 @@ public sealed partial class MainWindow
         _selectedCameraId = selected.Device.Id;
         LoadSelectedCameraFrameRate();
         ClearHandTracking();
-        ResetEyeTipTracking("camera-changed", selected.Device.Id);
+        ResetMarkerTracking("camera-changed", selected.Device.Id);
         _scene.ClearBoardMediaClip();
         if (_cameraWantedDeviceId is not null && _cameraWantedDeviceId != selected.Device.Id)
         {
@@ -261,7 +261,7 @@ public sealed partial class MainWindow
             if (_camera.IsRunning && _camera.ActiveDeviceId == choice.Device.Id &&
                 _camera.RequestedFramesPerSecond == requestedRate) return true;
             ClearHandTracking();
-            ResetEyeTipTracking("camera-restarted", choice.Device.Id);
+            ResetMarkerTracking("camera-restarted", choice.Device.Id);
             _scene.ClearBoardMediaClip();
             ResetCameraHealth(preserveBoardScanSuspension:
                 _boardScanSuspendedForCameraOutage && Volatile.Read(ref _boardSetupActive));
@@ -318,7 +318,7 @@ public sealed partial class MainWindow
     {
         _cameraWanted = false;
         ClearHandTracking();
-        ResetEyeTipTracking("camera-stopped");
+        ResetMarkerTracking("camera-stopped");
         _cameraWantedDeviceId = null;
         Interlocked.Increment(ref _cameraOperationVersion);
         await _cameraOperation.WaitAsync();
@@ -344,7 +344,7 @@ public sealed partial class MainWindow
         if (_camera.IsRunning) return;
         var version = Interlocked.Read(ref _cameraOperationVersion);
         ClearHandTracking();
-        ResetEyeTipTracking("camera-stopped");
+        ResetMarkerTracking("camera-stopped");
         _scene.ClearBoardMediaClip();
         ClearLatestCameraFrame();
         DispatcherQueue.TryEnqueue(() =>
@@ -408,7 +408,7 @@ public sealed partial class MainWindow
             QueueStrykersRunDetection(frame);
             return;
         }
-        QueueEyeTipDetection(frame);
+        QueueMarkerDetection(frame);
         QueueFootballDetection(frame);
         QueueHandTrackingVideoFrame(frame);
 
@@ -563,9 +563,9 @@ public sealed partial class MainWindow
     private void CameraCanvas_PointerPressed(object sender,
         Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
-        // Learning must inspect the pupil the user actually saw, even when a
+        // Learning must inspect the marker the user actually saw, even when a
         // newer camera frame arrived after the last preview draw.
-        using var frameLease = IsLearningEyeTip || IsLearningFootballTip
+        using var frameLease = IsLearningDoubleBarMarker || IsLearningFootballTip
             ? _bitmapFrame?.TryRetain() : _frozenFrame?.Retain() ?? AcquireLatestCameraFrame();
         var frame = frameLease?.Frame;
         if (frame is null) return;
@@ -576,7 +576,7 @@ public sealed partial class MainWindow
         var cameraPoint = new PixelPoint((point.X - rect.X) / rect.Width * frame.Width,
                                          (point.Y - rect.Y) / rect.Height * frame.Height);
 
-        if (TryLearnFootballTipFromPreview(frame, cameraPoint) || TryLearnEyeTipFromPreview(frame, cameraPoint))
+        if (TryLearnFootballTipFromPreview(frame, cameraPoint) || TryLearnWandMarkerFromPreview(frame, cameraPoint))
         {
             e.Handled = true;
             return;
@@ -653,7 +653,7 @@ public sealed partial class MainWindow
         {
             DrawBoardPreview(ds, frame, rect);
             DrawHandPreview(ds, frame, rect);
-            DrawEyeTipPreview(ds, frame, rect);
+            DrawMarkerPreview(ds, frame, rect);
             DrawFootballInputPreview(ds, frame, rect);
             if (!Volatile.Read(ref _boardSetupActive)) foreach (var detection in Volatile.Read(ref _latestDetections))
             {

@@ -29,7 +29,7 @@ without further processing or attenuation of the WAV.
 
 The clip is bundled for offline playback and begins only after a completed
 garden frame contains emitted fountain water. Loading artwork or elapsed wall
-time alone cannot start it. Moving the wand and reusing a cached preview do not
+time alone cannot start it. Moving the marker and reusing a cached preview do not
 restart it. Reset silences the clip until new fountain water is rendered.
 Leaving or hiding the board, calibration, disabling display audio, losing the
 output or closing the app stops playback. An absent display endpoint never
@@ -61,7 +61,7 @@ The script checks format, clipping, continuity and the checksum, then copies the
 WAV unchanged and saves measurements in the ignored artifacts directory.
 It performs no downloads. The prepared WAV, credits and license are shipped.
 
-## Wand interaction sound
+## Marker interaction sound
 
 `wand-swish-loop.wav` replaces the bathtub swish with a softer trickling texture
 from the same verified pure-water recording used for the fountain:
@@ -74,7 +74,7 @@ SHA-256 above, and selects 12.50–20.75 seconds. It applies a 300 Hz high-pass
 and 5,000 Hz low-pass, folds the final 250 ms into the beginning with an
 equal-power overlap, and smooths the two file edges over 2 ms. The resulting
 8-second mono loop is normalized to -32 dBFS RMS, 4 dB quieter than the previous
-wand asset. There is no compression, limiting, pitch change, time stretching,
+marker-contact asset. There is no compression, limiting, pitch change, time stretching,
 synthetic layer or additional runtime audio processing.
 
 - PCM WAV, 48,000 Hz, mono, signed 16-bit, 8.000 seconds; 768,044 bytes.
@@ -87,10 +87,10 @@ synthetic layer or additional runtime audio processing.
 
 These are signal checks; the replacement has not been auditioned through the
 projector. The source is the previously approved pure-water recording, with a
-separate excerpt and level for wand contact.
+separate excerpt and level for marker contact.
 
 A separate shared `DisplaySoundPlayer` repeats this loop at 25% volume while
-accepted wand contact remains on the water's upper surface, including stationary
+accepted marker contact remains on the water's upper surface, including stationary
 contact. Repeated observations do not restart playback. Contact loss or expiry,
 reset, navigation, calibration and lost output stop it. It shares the fountain's
 display-speaker routing and mute setting without interrupting the fountain.

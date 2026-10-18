@@ -16,7 +16,7 @@ public sealed record MarkerTipDetectionResult(IReadOnlyList<MarkerTipObservation
 }
 
 public sealed record MarkerTipDetectionOptions(PixelPoint? PreferredCenter = null,
-    IReadOnlyList<EyeTipProjectionFrame>? ProjectionFrames = null, DateTimeOffset FrameTime = default);
+    IReadOnlyList<MarkerProjectionFrame>? ProjectionFrames = null, DateTimeOffset FrameTime = default);
 
 public static class MarkerTipGeometry
 {

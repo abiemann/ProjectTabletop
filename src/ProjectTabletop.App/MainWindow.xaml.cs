@@ -88,7 +88,7 @@ public sealed partial class MainWindow : Window
         _initialized = true;
         ApplyProjectionPreviewState();
         StartHandTrackingStatus();
-        InitializeEyeTipTracking();
+        InitializeMarkerTracking();
         InitializeFootballInput();
         InitializeMarkerSetup();
         RefreshDisplays();
@@ -268,7 +268,7 @@ public sealed partial class MainWindow : Window
         _statusTimer.Stop();
         await _cameraInputWorker.StopAsync();
         await _markerSetupWorker.WorkerTask;
-        await DisposeEyeTipTrackingAsync();
+        await DisposeMarkerTrackingAsync();
         await DisposeFootballInputAsync();
         await DisposeStrykersRunInputAsync();
         await DisposeHandTrackingAsync();

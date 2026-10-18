@@ -6,22 +6,74 @@ namespace ProjectTabletop.App.Projection.GlobeRendering;
 // Evaluate a sphere at the destination's native pixels. Equirectangular NASA
 // imagery is sampled directly: there is no low-resolution globe render target
 // and no planar stretching of the surface photograph.
-[D2DInputCount(2)]
+[D2DInputCount(3)]
 [D2DInputComplex(0)]
 [D2DInputComplex(1)]
+[D2DInputComplex(2)]
 [D2DInputDescription(0, D2D1Filter.MinMagMipLinear)]
 [D2DInputDescription(1, D2D1Filter.MinMagMipLinear)]
+[D2DInputDescription(2, D2D1Filter.MinMagMipLinear)]
 [D2DRequiresScenePosition]
 [D2DShaderProfile(D2D1ShaderProfile.PixelShader50)]
 [D2DGeneratedPixelShaderDescriptor]
 internal readonly partial struct EarthSurfaceShader(
-    Float2 daySize, Float2 cloudSize, Float2 center, Float2 radii,
-    float rotationRadians, float edgeWidth, float viewLatitudeRadians) : ID2D1PixelShader
+    Float2 daySize, Float2 cloudSize, Float2 starFieldSize, Float2 center, Float2 radii,
+    float rotationRadians, float edgeWidth, float viewLatitudeRadians,
+    Float2 shootingStarHead, Float2 shootingStarDirection, Float2 shootingStarScale,
+    float shootingStarTailLength, float shootingStarOpacity) : ID2D1PixelShader
 {
     public Float4 Execute()
     {
         Float2 p = D2D.GetScenePosition().XY;
-        Float3 background = Space(p);
+        Float3 background = D2D.SampleInputAtPosition(2,
+            Hlsl.Clamp(p / 1000 * starFieldSize, new Float2(.5f, .5f), starFieldSize - .5f)).XYZ;
+        // Full-bright sky frames the dimmer centre. Preserve the lower swipe
+        // strip and restore the top eighth, with a soft upper transition.
+        if (p.Y > 125 && p.Y < 750)
+        {
+            float blend = 1 - Hlsl.SmoothStep(125, 250, p.Y)
+                + Hlsl.SmoothStep(500, 750, p.Y);
+            background *= .5f + .5f * blend;
+
+            // Sub-8-bit, screen-stationary dither softens transition banding.
+            // It vanishes at each transition's ends and leaves both bright
+            // margins untouched.
+            Float2 pixel = Hlsl.Floor(p / 1000 * starFieldSize);
+            float noise = Hlsl.Frac(52.9829189f * Hlsl.Frac(
+                Hlsl.Dot(pixel, new Float2(.06711056f, .00583715f)))) - .5f;
+            background = Hlsl.Saturate(background
+                + noise * (.75f / 255) * (4 * blend * (1 - blend)));
+        }
+        if (shootingStarOpacity > 0 && p.Y < 720)
+        {
+            // Physical short-edge coordinates keep the head round and the
+            // tapered trail equally slim on landscape and portrait boards.
+            Float2 offset = (p / 1000 - shootingStarHead) * shootingStarScale;
+            float behind = -Hlsl.Dot(offset, shootingStarDirection);
+            float across = Hlsl.Abs(offset.X * shootingStarDirection.Y
+                - offset.Y * shootingStarDirection.X);
+            Float3 meteor = new Float3(0, 0, 0);
+            if (behind >= 0 && behind < shootingStarTailLength)
+            {
+                float along = behind / shootingStarTailLength;
+                float taper = 1 - along;
+                float width = .00022f + .00065f * taper;
+                float core = 1 - Hlsl.SmoothStep(width * .35f, width, across);
+                float halo = 1 - Hlsl.SmoothStep(width, .0014f + .0018f * taper, across);
+                Float3 trailColor = Hlsl.Lerp(new Float3(1, .79f, .43f),
+                    new Float3(.3f, .64f, 1), Hlsl.SmoothStep(.08f, .85f, along));
+                meteor = (trailColor * core + new Float3(.22f, .48f, 1) * halo * .18f)
+                    * taper * taper;
+            }
+            float headDistance = Hlsl.Length(offset);
+            float head = 1 - Hlsl.SmoothStep(.0003f, .001f, headDistance);
+            float glow = 1 - Hlsl.SmoothStep(.0006f, .0045f, headDistance);
+            meteor += new Float3(1, .95f, .81f) * head * 1.2f
+                + new Float3(.65f, .78f, 1) * glow * glow * .22f;
+            // The sphere's existing coverage hides the meteor behind Earth;
+            // no animated texture touches the bottom control/swipe strip.
+            background += meteor * shootingStarOpacity;
+        }
         Float2 disk = (p - center) / radii;
         float distance = Hlsl.Length(disk);
 
@@ -91,24 +143,4 @@ internal readonly partial struct EarthSurfaceShader(
         return new Float4(Hlsl.Lerp(background + atmosphere, Hlsl.Saturate(display), coverage), 1);
     }
 
-    private Float3 Space(Float2 p)
-    {
-        // Static sky: no animated grain, moving stars, or changing illumination
-        // underneath the opaque controls monitored by the camera.
-        Float2 physical = (p - center) * new Float2(radii.Y / Hlsl.Max(radii.X, 0.01f), 1);
-        float blueGlow = Hlsl.Exp(-Hlsl.Dot((physical - new Float2(-310, -120)) / 550,
-            (physical - new Float2(-310, -120)) / 550));
-        Float3 color = new Float3(0.004f, 0.009f, 0.018f)
-            + new Float3(0.009f, 0.018f, 0.029f) * blueGlow;
-        Float2 cell = Hlsl.Floor(physical / 43);
-        float hash = Hlsl.Frac(Hlsl.Sin(Hlsl.Dot(cell, new Float2(127.1f, 311.7f))) * 43758.5453f);
-        float hash2 = Hlsl.Frac(Hlsl.Sin(Hlsl.Dot(cell, new Float2(269.5f, 183.3f))) * 43758.5453f);
-        Float2 within = Hlsl.Frac(physical / 43) * 43;
-        Float2 star = new Float2(5 + hash * 33, 5 + hash2 * 33);
-        float brightness = 0.09f + hash2 * hash2 * 0.55f;
-        float radius = 0.28f + hash * 0.65f;
-        float point = Hlsl.Saturate(1 - Hlsl.Length(within - star) / radius);
-        color += new Float3(0.72f, 0.84f, 1) * point * brightness;
-        return color;
-    }
 }

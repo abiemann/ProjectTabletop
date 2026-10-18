@@ -49,9 +49,9 @@ public sealed partial class MainWindow
         long ripples = scene.GetWaterGardenDiagnostics().InputCount;
         for (int frame = 0; frame < 20; frame++) Contact();
         Require(published == started && scene.GetWaterGardenDiagnostics().InputCount == ripples,
-            "A resting wand restarted audio or pumped extra ripples.");
+            "A resting marker restarted audio or pumped extra ripples.");
         Require(!scene.WaterGardenAudioActive,
-            "Wand contact started fountain audio before newly emitted water was rendered.");
+            "Marker contact started fountain audio before newly emitted water was rendered.");
         var lastContact = now;
         scene.SetWaterStickTip(null, now.AddMilliseconds(-1));
         Require(scene.WaterGardenSwishAudioActive, "An out-of-order missing frame canceled current contact.");
@@ -64,7 +64,7 @@ public sealed partial class MainWindow
         int beforeExpiry = changes.Count;
         var expiredFrame = now;
         now += TimeSpan.FromMilliseconds(251);
-        Require(!scene.WaterGardenSwishAudioActive, "A delayed callback could start expired wand audio.");
+        Require(!scene.WaterGardenSwishAudioActive, "A delayed callback could start expired marker audio.");
         scene.TickWaterGarden(now);
         Require(changes.Count == beforeExpiry + 1 && !changes[^1], "Expiry did not publish a swish stop.");
         Require(!scene.SetWaterStickTip(CameraPoint(.5, .5), expiredFrame) && !scene.WaterGardenSwishAudioActive,
@@ -144,7 +144,7 @@ public sealed partial class MainWindow
         {
             now += TimeSpan.FromMilliseconds(20);
             Require(scene.SetWaterStickTip(CameraPoint(.5, .5), now) && scene.WaterGardenSwishAudioActive,
-                "A fresh wand over open water did not request swish playback.");
+                "A fresh marker over open water did not request swish playback.");
         }
         void Stopped(string cause) => Require(!scene.WaterGardenSwishAudioActive && changes.Count > 0 && !changes[^1],
             cause + " left the swish request active or omitted its stop event.");

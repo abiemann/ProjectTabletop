@@ -27,7 +27,7 @@ public sealed partial class MainWindow
     private async Task<object?> HandleControlOnUiAsync(string method, JsonElement parameters)
     {
         if (_closing) throw new InvalidOperationException("The app is closing.");
-        if (_scene.MarkerSetupActive && method is "learn_stick_tip" or "learn_wand_marker" or "learn_football_bar")
+        if (_scene.MarkerSetupActive && method is "learn_double_bar_marker" or "learn_football_bar")
             throw new InvalidOperationException("Finish or cancel guided marker setup before using direct marker learning.");
         switch (method)
         {
@@ -369,14 +369,9 @@ public sealed partial class MainWindow
                     throw new ArgumentException("Provide enabled as a JSON boolean.");
                 SetStickTrackingEnabled(stickEnabled.GetBoolean());
                 return GetStickTipStatus();
-            case "learn_stick_tip":
-                if (!parameters.TryGetProperty("x", out var stickX) || stickX.ValueKind != JsonValueKind.Number || !stickX.TryGetDouble(out double eyeX) ||
-                    !parameters.TryGetProperty("y", out var stickY) || stickY.ValueKind != JsonValueKind.Number || !stickY.TryGetDouble(out double eyeY))
-                    throw new ArgumentException("Provide numeric x and y in raw camera pixels.");
-                return await LearnEyeTipAsync(eyeX, eyeY);
-            case "learn_wand_marker":
-                if (!parameters.TryGetProperty("x", out var wandX) || wandX.ValueKind != JsonValueKind.Number || !wandX.TryGetDouble(out double markerX) ||
-                    !parameters.TryGetProperty("y", out var wandY) || wandY.ValueKind != JsonValueKind.Number || !wandY.TryGetDouble(out double markerY))
+            case "learn_double_bar_marker":
+                if (!parameters.TryGetProperty("x", out var barX) || barX.ValueKind != JsonValueKind.Number || !barX.TryGetDouble(out double markerX) ||
+                    !parameters.TryGetProperty("y", out var barY) || barY.ValueKind != JsonValueKind.Number || !barY.TryGetDouble(out double markerY))
                     throw new ArgumentException("Provide numeric x and y in raw camera pixels.");
                 return await LearnWandMarkerAsync(markerX, markerY);
             case "capture_stick_tip":
@@ -464,6 +459,11 @@ public sealed partial class MainWindow
                 bool footballAccepted = _scene.ActivateFootballButton(footballAction.GetString()!);
                 UpdateBoardAppStatus();
                 return new { accepted = footballAccepted, state = FootballControlState() };
+            case "paint_action":
+                if (!parameters.TryGetProperty("id", out var paintAction) || paintAction.ValueKind != JsonValueKind.String)
+                    throw new ArgumentException("Provide a Paint button id.");
+                return new { accepted = ActivatePaintButton(paintAction.GetString()!), paintDrawerOpen = _scene.PaintDrawerOpen,
+                    paintSaveStatus = _scene.GetPaintSaveStatus(MonotonicClock.UtcNow), paintSaveDirectory = PaintSaveDirectory };
             case "water_garden_action":
                 if (!parameters.TryGetProperty("id", out var waterAction) || waterAction.ValueKind != JsonValueKind.String)
                     throw new ArgumentException("Provide a Water Garden button id.");

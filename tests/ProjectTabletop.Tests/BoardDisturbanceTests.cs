@@ -217,6 +217,160 @@ public sealed class BoardDisturbanceTests(ITestOutputHelper output)
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SparseBrightDetailLossSupportsBothSwipeDirections(bool reverse)
+    {
+        var tracker = new BoardDisturbanceTracker();
+        var gestures = new BoardControlSwipeTracker();
+        byte[] clear = Stars();
+        DateTimeOffset time = Warm(tracker, clear);
+        var samples = new List<BoardSwipeSample>(4);
+        var commands = new List<BoardControlSwipe>();
+        int observedFrames = 0;
+        for (int i = 0; i < 32; i++)
+        {
+            double center = reverse ? .11 + i * .025 : .89 - i * .025;
+            byte[] frame = (byte[])clear.Clone();
+            Paint(frame, (int)(center * Width) - 23, 23, 46, 55, 6, 6, 6);
+            IReadOnlyList<BoardMotionObservation> found = Update(tracker, frame, ref time);
+            samples.Clear();
+            foreach (var detail in found)
+            {
+                Assert.Equal(0, detail.TrackingId);
+                Assert.InRange(detail.U, center - .065, center + .065);
+                samples.Add(new(detail.TrackingId, detail.U, .82 + .18 * detail.V));
+            }
+            if (found.Count > 0) observedFrames++;
+            if (gestures.Update(samples, time, time) is { } command) commands.Add(command);
+        }
+        Assert.True(observedFrames >= 20);
+        Assert.Equal(new[] { BoardControlSwipe.Toggle }, commands);
+        // A bright detail reappearing after the hand leaves is not a new arrival.
+        Assert.Empty(Update(tracker, clear, ref time));
+    }
+
+    [Fact]
+    public void SparseDetailRejectsNewBrightObjectsRipplesAndScatteredStarFlicker()
+    {
+        var tracker = new BoardDisturbanceTracker();
+        byte[] clear = Stars();
+        DateTimeOffset time = Warm(tracker, clear);
+        for (int i = 0; i < 150; i++)
+        {
+            byte[] frame = (byte[])clear.Clone();
+            for (int y = 0; y < Height; y++)
+            for (int x = 0; x < Width; x++)
+            {
+                int c = y * Stride + x * 4;
+                int noise = (x * 13 + y * 11 + i * 7) % 7 - 3;
+                double radius = Math.Sqrt(Math.Pow(x - Width * .5, 2) + Math.Pow((y - Height * .5) * 2, 2));
+                bool ripple = Math.Abs(radius - (30 + i % 100)) < 1.5;
+                for (int channel = 0; channel < 3; channel++)
+                    frame[c + channel] = (byte)Math.Clamp(frame[c + channel] + noise +
+                        (i % 30 < 15 ? 5 : -3) + (ripple ? 65 : 0), 0, 255);
+            }
+            Paint(frame, 20 + i % 250, 70, 12, 8, 225, 180, 55);
+            Assert.Empty(Update(tracker, frame, ref time));
+        }
+        // Black surroundings make a global change in star brightness invisible
+        // to median exposure compensation. All qualified losses still count
+        // toward the spatial extent, including features beyond candidate slots.
+        time = Warm(tracker, clear, time);
+        for (int i = 0; i < 30; i++)
+        {
+            byte[] frame = (byte[])clear.Clone();
+            for (int c = 0; c < frame.Length; c += 4)
+                if (clear[c] > 60)
+                    for (int channel = 0; channel < 3; channel++) frame[c + channel] = (byte)(i % 2 == 0 ? 12 : 170);
+            Assert.Empty(Update(tracker, frame, ref time));
+        }
+    }
+
+    [Fact]
+    public void AStationaryDetailMayBeObservedButCannotSupplyASwipe()
+    {
+        var tracker = new BoardDisturbanceTracker();
+        var gestures = new BoardControlSwipeTracker();
+        byte[] clear = Stars();
+        DateTimeOffset time = Warm(tracker, clear);
+        var samples = new List<BoardSwipeSample>(4);
+        int observedFrames = 0;
+        for (int i = 0; i < 120; i++)
+        {
+            byte[] frame = (byte[])clear.Clone();
+            if (i % 6 < 3) Paint(frame, Width / 2 - 8, 23, 16, 55, 6, 6, 6);
+            samples.Clear();
+            foreach (var detail in Update(tracker, frame, ref time))
+                samples.Add(new(detail.TrackingId, detail.U, .82 + .18 * detail.V));
+            if (samples.Count > 0) observedFrames++;
+            Assert.Null(gestures.Update(samples, time, time));
+        }
+        Assert.True(observedFrames > 0);
+    }
+
+    [Fact]
+    public void MovingOneBrightFeatureCannotBorrowItsVacatedPositionForASwipe()
+    {
+        var tracker = new BoardDisturbanceTracker();
+        var gestures = new BoardControlSwipeTracker();
+        byte[] dark = new byte[Stride * Height];
+        Paint(dark, 0, 0, Width, Height, 8, 8, 8);
+        byte[] clear = (byte[])dark.Clone();
+        Paint(clear, 46, 40, 8, 12, 170, 170, 170);
+        DateTimeOffset time = Warm(tracker, clear);
+        var samples = new List<BoardSwipeSample>(4);
+        for (int i = 0; i < 120; i++)
+        {
+            byte[] frame = (byte[])dark.Clone();
+            Paint(frame, 54 + i * 2, 40, 8, 12, 170, 170, 170);
+            samples.Clear();
+            foreach (var detail in Update(tracker, frame, ref time))
+            {
+                // Losing the original stationary feature may be observed, but
+                // a new bright point cannot move that observation across the band.
+                Assert.InRange(detail.U, .115, .15);
+                samples.Add(new(detail.TrackingId, detail.U, .82 + .18 * detail.V));
+            }
+            Assert.Null(gestures.Update(samples, time, time));
+        }
+    }
+
+    [Fact]
+    public void SmallDarkObjectsNeedExistingBrightDetail()
+    {
+        var tracker = new BoardDisturbanceTracker();
+        byte[] clear = new byte[Stride * Height];
+        Paint(clear, 0, 0, Width, Height, 26, 26, 26);
+        DateTimeOffset time = Warm(tracker, clear);
+        for (int i = 0; i < 45; i++) Update(tracker, clear, ref time);
+        for (int i = 0; i < 120; i++)
+        {
+            byte[] frame = (byte[])clear.Clone();
+            Paint(frame, 20 + i * 2, 40, 12, 8, 0, 0, 0);
+            Assert.Empty(Update(tracker, frame, ref time));
+        }
+    }
+
+    [Fact]
+    public void SparseDetailSamplingReusesMemory()
+    {
+        var tracker = new BoardDisturbanceTracker();
+        byte[] clear = Stars(), covered = (byte[])clear.Clone();
+        Paint(covered, Width / 2 - 8, 23, 16, 55, 6, 6, 6);
+        DateTimeOffset time = Warm(tracker, clear);
+        for (int i = 0; i < 20; i++) Update(tracker, i % 2 == 0 ? clear : covered, ref time);
+        long allocated = GC.GetAllocatedBytesForCurrentThread();
+        long started = Stopwatch.GetTimestamp();
+        const int iterations = 300;
+        for (int i = 0; i < iterations; i++) Update(tracker, i % 2 == 0 ? clear : covered, ref time);
+        double milliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        long bytes = GC.GetAllocatedBytesForCurrentThread() - allocated;
+        output.WriteLine($"Sparse details: {milliseconds / iterations:F3} ms/frame, {bytes} managed bytes over {iterations} updates.");
+        Assert.Equal(0, bytes);
+    }
+
     [Fact]
     public void SceneRedrawAndFreshnessBarriersCannotCarryAnIdentityAcrossScenes()
     {
@@ -385,6 +539,15 @@ public sealed class BoardDisturbanceTests(ITestOutputHelper output)
             frame[offset + 2] = (byte)(95 + exposure + texture);
             frame[offset + 3] = 255;
         }
+        return frame;
+    }
+
+    private static byte[] Stars()
+    {
+        var frame = new byte[Stride * Height];
+        Paint(frame, 0, 0, Width, Height, 8, 8, 8);
+        for (int i = 1; i <= 9; i++)
+            Paint(frame, (int)(Width * i / 10d) - 4, 37 + i % 3 * 3, 8, 12, 170, 170, 170);
         return frame;
     }
 

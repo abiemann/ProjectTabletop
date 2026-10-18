@@ -38,15 +38,15 @@ public sealed partial class MainWindow
             throw new InvalidOperationException("A completed hand result did not release its worker.");
         _handWorker.ResetCadence();
 
-        for (int frame = 0; frame < 100; frame++) QueueEyeTipStatusRefresh();
-        if (!_eyeTipUiRefresh.IsPending)
-            throw new InvalidOperationException("Stick status refreshes were not coalesced into one pending update.");
+        for (int frame = 0; frame < 100; frame++) QueueMarkerStatusRefresh();
+        if (!_markerTrackingUiRefresh.IsPending)
+            throw new InvalidOperationException("Marker status refreshes were not coalesced into one pending update.");
         var drained = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!DispatcherQueue.TryEnqueue(() => drained.TrySetResult(true)))
             throw new InvalidOperationException("The UI queue could not complete the scheduling check.");
         await drained.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        if (_eyeTipUiRefresh.IsPending)
-            throw new InvalidOperationException("A completed stick status update did not release its pending slot.");
+        if (_markerTrackingUiRefresh.IsPending)
+            throw new InvalidOperationException("A completed marker status update did not release its pending slot.");
 
         // The stick callback also requests a preview. Let that work finish before
         // independently checking a burst and the final request in a throttle window.

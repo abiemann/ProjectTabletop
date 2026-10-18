@@ -979,7 +979,7 @@ public sealed partial class SceneCompositor : IDisposable
             DisposeFootballResources();
             DisposeStrykersRunResources();
             DisposeWaterGardenArtwork();
-            DisposeEyeProjectionReference();
+            DisposeMarkerProjectionReference();
         }
     }
 }

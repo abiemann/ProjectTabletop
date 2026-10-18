@@ -16,7 +16,7 @@ public sealed partial class SceneCompositor
 
     internal sealed record GlobeRenderDiagnostics(bool Ready, int SurfaceWidth, int SurfaceHeight,
         int CloudWidth, int CloudHeight, double CenterU, double CenterV, double RadiusU, double RadiusV,
-        string? Error);
+        string? Error, int StarFieldWidth, int StarFieldHeight, int StarFieldRenderCount);
 
     internal GlobeRenderDiagnostics GetGlobeRenderDiagnostics(double boardAspect, GlobeSnapshot state)
     {
@@ -27,7 +27,9 @@ public sealed partial class SceneCompositor
             return new(_globeRenderer?.IsReady == true, _globeRenderer?.SurfaceWidth ?? 0,
                 _globeRenderer?.SurfaceHeight ?? 0, _globeRenderer?.CloudWidth ?? 0, _globeRenderer?.CloudHeight ?? 0,
                 .5, .5, boardAspect >= 1 ? radius / boardAspect : radius,
-                boardAspect >= 1 ? radius : radius * boardAspect, _globeRenderer?.Error);
+                boardAspect >= 1 ? radius : radius * boardAspect, _globeRenderer?.Error,
+                _globeRenderer?.StarFieldWidth ?? 0, _globeRenderer?.StarFieldHeight ?? 0,
+                _globeRenderer?.StarFieldRenderCount ?? 0);
         }
     }
 
@@ -58,7 +60,8 @@ public sealed partial class SceneCompositor
         bool drawerOpen = false, float drawerProgress = 1)
     {
         var renderer = GetGlobeRenderer(ds.Device);
-        if (!renderer.Draw(ds, (float)state.Zoom, (float)state.RotationDegrees, boardAspect, (float)state.ViewLatitudeDegrees))
+        if (!renderer.Draw(ds, (float)state.Zoom, (float)state.RotationDegrees, boardAspect,
+            (float)state.ViewLatitudeDegrees, state.ElapsedSeconds))
         {
             ds.Clear(ThemeColor(2, 5, 11));
             GlobeText(ds, renderer.Error is null ? "Loading Earth imagery…" : "Earth imagery could not load",

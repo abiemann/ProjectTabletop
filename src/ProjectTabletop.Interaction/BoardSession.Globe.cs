@@ -6,7 +6,7 @@ public sealed partial class BoardSession
     private readonly GlobeState _globe;
     // The handle and its three actions share one bottom row, left of the
     // bottom-right credit. The wide, tall handle keeps opposite glass margins
-    // for the camera's colour fit and clears Earth's settled 1.5× limb on
+    // for the camera's colour fit and clears Earth's limb at 1.5× zoom on
     // rectangular boards; a square board's limb reaches its upper-right corner.
     // Fingers on this edge row leave the wrist outside the camera view, so hand
     // tracking kept dropping mid-gesture. Every control here is a hold button:

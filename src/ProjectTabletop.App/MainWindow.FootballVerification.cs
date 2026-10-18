@@ -103,7 +103,7 @@ public sealed partial class MainWindow
         await Save(target, "football-playing");
         // The tip detectors' projected-scene reference matches the camera's own view of
         // the board (1000 synthetic camera pixels less the safety inset), not the projector raster.
-        var projectedReference = scene.GetEyeTipProjectionFrames();
+        var projectedReference = scene.GetMarkerProjectionFrames();
         double cameraSpan = 1000 * (1 - inset);
         Check(projectedReference.Count == 1 && Math.Abs(projectedReference[0].Width - cameraSpan) <= 2 &&
             Math.Abs(projectedReference[0].Height - cameraSpan) <= 2,

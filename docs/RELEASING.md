@@ -24,7 +24,9 @@ The workflow publishes with the built-in `GITHUB_TOKEN`, whose write permission 
 
 ## Reproduce the package locally
 
-Use Windows 11 x64, Visual Studio 2026 with WinUI and C++ tools, SDK 10.0.26100, .NET SDK 10.0.401, PowerShell 7, and Inno Setup 6.3 or newer. Close existing app instances before installation smoke tests. Use fresh staging, output and test directories.
+Use Windows 11 x64, Visual Studio 2026 with WinUI and C++ tools, SDK 10.0.26100, .NET SDK 10.0.402, PowerShell 7, and Inno Setup 6.3 or newer. Close existing app instances before installation smoke tests. Use fresh staging, output and test directories.
+
+Use stable release SDK versions only. Keep "allowPrerelease" false in global.json; do not adopt beta, preview or release-candidate SDKs.
 
 ```powershell
 dotnet restore ProjectTabletop.sln -p:Platform=x64 --locked-mode

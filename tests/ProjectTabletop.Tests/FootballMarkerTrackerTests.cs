@@ -630,7 +630,7 @@ public sealed class FootballMarkerTrackerTests
     private static MarkerTipDetectionResult Detect(byte[] pixels, BlackTipProfile profile, BlackTipSearchHint hint, byte[]? projected = null)
     {
         var time = Epoch.AddMilliseconds(33);
-        IReadOnlyList<EyeTipProjectionFrame>? frames = projected is null ? null :
+        IReadOnlyList<MarkerProjectionFrame>? frames = projected is null ? null :
             [new(400, 300, projected, [1.0 / 400, 0, 0, 0, 1.0 / 300, 0, 0, 0, 1], time)];
         return BlackTipDetector.DetectEach(400, 300, 1600, pixels, [profile], new(ProjectionFrames: frames, FrameTime: time), [hint])[0];
     }

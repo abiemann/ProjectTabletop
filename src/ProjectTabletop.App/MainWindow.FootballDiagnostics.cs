@@ -7,7 +7,7 @@ namespace ProjectTabletop.App;
 public sealed partial class MainWindow
 {
     private sealed record FootballDiagnosticObservation(CameraFrame Frame,
-        IReadOnlyList<EyeTipProjectionFrame>? References, int[] Players, BlackTipProfile[] Profiles,
+        IReadOnlyList<MarkerProjectionFrame>? References, int[] Players, BlackTipProfile[] Profiles,
         BlackTipSearchHint?[] Hints, IReadOnlyList<MarkerTipDetectionResult> Results,
         string[] Decisions, double?[] InputAgeMilliseconds, PixelPoint[]? SearchArea)
     {
@@ -37,7 +37,7 @@ public sealed partial class MainWindow
         }
     }
 
-    private void RecordFootballDetection(CameraFrame frame, IReadOnlyList<EyeTipProjectionFrame>? references,
+    private void RecordFootballDetection(CameraFrame frame, IReadOnlyList<MarkerProjectionFrame>? references,
         int[] players, BlackTipProfile[] profiles, BlackTipSearchHint?[] hints,
         IReadOnlyList<MarkerTipDetectionResult> results, string[] decisions, double?[] inputAgeMilliseconds,
         PixelPoint[]? searchArea)

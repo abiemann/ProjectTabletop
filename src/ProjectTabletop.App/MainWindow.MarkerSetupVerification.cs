@@ -90,7 +90,7 @@ public sealed partial class MainWindow
                 "Move to the centre and hold still. 1 / 5", .65, area);
             Require(validationRevision != revision && scene.MarkerSetupState is { PresentedAt: null },
                 "The real-scene transition reused neutral-field presentation timing.");
-            Require(scene.GetEyeTipProjectionFrames().Count == 0,
+            Require(scene.GetMarkerProjectionFrames().Count == 0,
                 "A stale neutral reference survived before validation was rendered.");
             Draw(projectorFrame: true);
             AssertInputsBlocked();
@@ -308,7 +308,7 @@ public sealed partial class MainWindow
 
         void AssertReferenceMatchesSource()
         {
-            var frames = scene.GetEyeTipProjectionFrames();
+            var frames = scene.GetMarkerProjectionFrames();
             Require(frames.Count == 1, "A presentation transition retained references from its previous stage.");
             var frame = frames[0];
             var source = Source();

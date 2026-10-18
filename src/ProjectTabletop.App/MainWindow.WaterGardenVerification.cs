@@ -38,7 +38,7 @@ public sealed partial class MainWindow
             Require(navigation.TickWaterGarden(now) &&
                     navigation.ActivateWaterGardenButton("water-garden-reset") &&
                     opened.SequenceEqual(new[] { BoardScreen.WaterGarden }),
-                "RESET replayed the board-entry notification that enables remembered stick tracking.");
+                "RESET replayed the board-entry notification that enables remembered marker tracking.");
             navigation.ShowBoardMenu();
             navigation.ShowWaterGarden();
             Require(opened.SequenceEqual(new[] { BoardScreen.WaterGarden, BoardScreen.Menu, BoardScreen.WaterGarden }),
@@ -191,11 +191,11 @@ public sealed partial class MainWindow
         Require(scene.TickWaterGarden(now) && scene.CurrentBoardButtons.All(button => button.Enabled),
             "The water drawer did not settle into four usable hold controls.");
         Draw(scene, target);
-        var projectedEyeFrames = scene.GetEyeTipProjectionFrames();
-        Require(projectedEyeFrames.Count == 1 && projectedEyeFrames[0].Width <= 2048 &&
-                projectedEyeFrames[0].Height <= 2048 && projectedEyeFrames[0].CameraToBoard.Count == 9 &&
-                ReferenceEquals(projectedEyeFrames[0], scene.GetEyeTipProjectionFrames()[0]),
-            "Eye tracking did not retain a bounded, calibrated projection reference between camera samples.");
+        var projectedMarkerFrames = scene.GetMarkerProjectionFrames();
+        Require(projectedMarkerFrames.Count == 1 && projectedMarkerFrames[0].Width <= 2048 &&
+                projectedMarkerFrames[0].Height <= 2048 && projectedMarkerFrames[0].CameraToBoard.Count == 9 &&
+                ReferenceEquals(projectedMarkerFrames[0], scene.GetMarkerProjectionFrames()[0]),
+            "Marker tracking did not retain a bounded, calibrated projection reference between camera samples.");
         var water = Simulation(scene);
         water.SetAmbientEnabledForVerification(false);
         water.SetFountainEnabledForVerification(false);
@@ -366,7 +366,7 @@ public sealed partial class MainWindow
         Require(beforeStickHoldContext is not null, "The settled water controls had no hold reference.");
         now += TimeSpan.FromSeconds(1.0 / 60);
         Require(scene.SetWaterStickTip(CameraPoint(.5, .5, inset), now),
-            "The calibrated eye-tip fixture was not accepted.");
+            "The calibrated marker fixture was not accepted.");
         Require(scene.CurrentBoardButtons[0].Enabled && scene.CurrentBoardButtons.Skip(1).All(button => !button.Enabled) &&
                 scene.GetHoldButtonContext(now) is { EnabledHoldIds.Count: 1 } &&
                 !scene.ActivateWaterGardenButton("water-garden-reset") &&
@@ -374,12 +374,12 @@ public sealed partial class MainWindow
                 !scene.ActivateWaterGardenButton("water-garden-duck-add") &&
                 scene.ObserveHoldButtons(beforeStickHoldContext, ["water-garden-reset"], now, []).Count == 0 &&
                 scene.WaterGardenDrawerOpen,
-            "A detected water stick failed to disarm pond actions or disabled independent drawer navigation.");
+            "A detected marker over the water failed to disarm pond actions or disabled independent drawer navigation.");
         Draw(scene, target);
         var injected = Statistics(water);
         Require(IsFinite(injected) && injected.MinimumHeight < -.007 &&
                 injected.MaximumHeight > .0001 && injected.TotalEnergy > 0,
-            $"A confirmed eye tip did not make the deeper local water disturbance: {injected}.");
+            $"A confirmed marker did not make the deeper local water disturbance: {injected}.");
         var firstPixels = Pixels(target);
         Require(ChangedPixels(blank, firstPixels, new(.35, .35, .30, .30)) > 20,
             "The GPU disturbance did not change the visible water.");
@@ -400,7 +400,7 @@ public sealed partial class MainWindow
                 scene.GetHoldButtonContext(now) is { } afterStickHoldContext &&
                 afterStickHoldContext.Revision != beforeStickHoldContext!.Revision &&
                 scene.ObserveHoldButtons(beforeStickHoldContext, ["water-garden-reset"], now, []).Count == 0,
-            "Stick loss failed to re-enable controls or accepted a caption result from before the interlock.");
+            "Marker loss failed to re-enable controls or accepted a caption result from before the interlock.");
 
         var propagationProbe = WaterGardenView.ScreenToSurface(new(.5f, .5f)) + new Vector2(.065f, 0);
         double propagatedHeight = 0;
@@ -482,7 +482,7 @@ public sealed partial class MainWindow
         Require(IsFinite(reset) && reset.TotalEnergy == 0 && reset.MaximumHeight == 0 &&
                 DuckStatesWithinTolerance(initialDucks, DuckStates(water)) &&
                 scene.GetWaterGardenDiagnostics() is { TipVisible: false, InputCount: 0, PendingDisturbances: 0 },
-            "RESET left a wave, moving duck, queued disturbance or active eye tip.");
+            "RESET left a wave, moving duck, queued disturbance or active marker.");
         Require(!scene.SetWaterStickTip(CameraPoint(.5, .5, inset), now),
             "A frame captured at the reset watermark replayed an old disturbance.");
         await Save(target, "water-square-reset");
@@ -526,7 +526,7 @@ public sealed partial class MainWindow
             var waveOnlyDuck = DuckStates(duckWater)[0];
             duckWater.Reset();
             Require(DuckStatesWithinTolerance(start, DuckStates(duckWater)),
-                "Preparing the moving-stick comparison failed to reset duck positions.");
+                "Preparing the moving-marker comparison failed to reset duck positions.");
             duckWater.AddDisturbance(stickTip, .034f, .004f);
             // The matching ripple-only run above is the acquisition control;
             // the moving stroke below must add a separate directed shove.
@@ -539,7 +539,7 @@ public sealed partial class MainWindow
             double outwardStrokeTravel = movedByStick.SurfaceX - subject.SurfaceX;
             Require(DuckIsFiniteAndInside(movedByStick) && additionalStrokeTravel > .004 &&
                     outwardStrokeTravel > .004,
-                $"A confirmed moving stick failed to push the nearby duck beyond the matching " +
+                $"A confirmed moving marker failed to push the nearby duck beyond the matching " +
                 $"acquisition ripple: additional travel={additionalStrokeTravel:G6}, " +
                 $"outward travel={outwardStrokeTravel:G6}.");
             for (int frame = 0; frame < 120; frame++) duckWater.Advance(1.0 / 30);
@@ -566,14 +566,14 @@ public sealed partial class MainWindow
             var fastStrokeDucks = DuckStates(duckWater);
             double fastStrokeTravel = fastStrokeDucks[0].SurfaceX - subject.SurfaceX;
             Require(fastStrokeDucks.All(DuckIsFiniteAndInside),
-                "A fast multi-segment stick stroke drove a duck outside the basin.");
+                "A fast multi-segment marker stroke drove a duck outside the basin.");
             duckWater.Reset();
             duckWater.AddStickStroke(fastStroke[^2], fastStroke[^1], .7f);
             for (int frame = 0; frame < 60; frame++) duckWater.Advance(1.0 / 30);
             var lastSegmentOnlyDuck = DuckStates(duckWater)[0];
             double intermediateSegmentTravel = fastStrokeDucks[0].SurfaceX - lastSegmentOnlyDuck.SurfaceX;
             Require(fastStrokeTravel > .004 && intermediateSegmentTravel > .004,
-                $"A duck beside an intermediate stick segment did not receive its push: " +
+                $"A duck beside an intermediate marker segment did not receive its push: " +
                 $"fast stroke={fastStrokeTravel:G6}, beyond-last-segment control " +
                 $"difference={intermediateSegmentTravel:G6}.");
             duckWater.Reset();
@@ -650,7 +650,7 @@ public sealed partial class MainWindow
                     Math.Abs(direct.VelocityY) < .003 &&
                     contactWater.GetDiagnostics().SimulationSteps == 0 &&
                     Statistics(contactWater) == beforeField,
-                $"The {label} swept stick failed to push a duck before the next water step: " +
+                $"The {label} swept marker failed to push a duck before the next water step: " +
                 $"velocity=({direct.VelocityX:G6},{direct.VelocityY:G6}), " +
                 $"expected={expectedVelocity:G6}.");
             contactWater.AddStickStroke(left, right, .5f);
@@ -667,7 +667,7 @@ public sealed partial class MainWindow
             var glancing = DuckStates(contactWater)[0];
             Require(glancing.VelocityX > .02f * scale && glancing.VelocityY > .02f * scale &&
                     Math.Abs(glancing.SurfaceY - subject.SurfaceY) < 1e-7,
-                $"The {label} glancing stick contact did not deflect the duck laterally: " +
+                $"The {label} glancing marker contact did not deflect the duck laterally: " +
                 $"velocity=({glancing.VelocityX:G6},{glancing.VelocityY:G6}).");
 
             contactWater.Reset();
@@ -677,7 +677,7 @@ public sealed partial class MainWindow
                 left - new Vector2(0, missOffset),
                 right - new Vector2(0, missOffset), .5f);
             Require(beforeMiss.SequenceEqual(DuckStates(contactWater)),
-                $"A {label} stick path outside the hull and tip radii applied a contact impulse.");
+                $"A {label} marker path outside the hull and tip radii applied a contact impulse.");
 
             contactWater.Reset();
             var beforeRejected = DuckStates(contactWater);
@@ -686,19 +686,19 @@ public sealed partial class MainWindow
                 new(subject.SurfaceX, subject.SurfaceY - .10f),
                 new(subject.SurfaceX, subject.SurfaceY + .10f), 1);
             Require(beforeRejected.SequenceEqual(DuckStates(contactWater)),
-                $"A stationary or implausibly long {label} stick observation pushed a duck.");
+                $"A stationary or implausibly long {label} marker observation pushed a duck.");
 
             contactWater.Reset();
             Require(contactWater.AddDuck(), $"The {label} airborne exclusion fixture could not add a duck.");
             var airborneBefore = DuckStates(contactWater)[10];
             Require(airborneBefore.DropHeight > airborneBefore.Scale * 1.5f,
-                $"The {label} added duck did not begin above the stick contact plane.");
+                $"The {label} added duck did not begin above the marker contact plane.");
             var drop = WaterGardenView.ScreenToSurface(new(.5f, .5f));
             contactWater.AddStickStroke(
                 new(drop.X - halfSpan, drop.Y), new(drop.X + halfSpan, drop.Y), .5f);
             var airborneAfter = DuckStates(contactWater)[10];
             Require(airborneAfter == airborneBefore,
-                $"The {label} stick pushed a duck still falling above the water.");
+                $"The {label} marker pushed a duck still falling above the water.");
 
             if (label == "square")
             {
@@ -978,12 +978,12 @@ public sealed partial class MainWindow
         }
 
         now += TimeSpan.FromMilliseconds(20);
-        Require(scene.SetWaterStickTip(CameraPoint(.25, .40, inset), now), "Fresh eye-tip reacquisition failed.");
+        Require(scene.SetWaterStickTip(CameraPoint(.25, .40, inset), now), "Fresh marker reacquisition failed.");
         Require(scene.GetWaterGardenDiagnostics().PendingDisturbances == 1, "Acquisition must start with one local disturbance.");
         now += TimeSpan.FromMilliseconds(20);
         Require(scene.SetWaterStickTip(CameraPoint(.30, .40, inset), now) &&
                 scene.GetWaterGardenDiagnostics().PendingDisturbances > 2,
-            "Continuous stick movement did not interpolate the short ripple trail.");
+            "Continuous marker movement did not interpolate the short ripple trail.");
         Draw(scene, target);
         long beforeLoss = scene.GetWaterGardenDiagnostics().InputCount;
         scene.SetWaterStickTip(null, now);
@@ -1001,7 +1001,7 @@ public sealed partial class MainWindow
         now += TimeSpan.FromMilliseconds(300);
         Require(scene.GetHoldButtonContext(now) is not null &&
                 scene.CurrentBoardButtons.All(button => button.Enabled),
-            "Expired stick detection left controls disarmed until another render or camera result.");
+            "Expired marker detection left controls disarmed until another render or camera result.");
         Require(!scene.SetWaterStickTip(CameraPoint(.4, .4, inset), oldFrame) &&
                 scene.GetWaterGardenDiagnostics() is { TipVisible: false, PendingDisturbances: 0 },
             "A stale tip survived the 250 millisecond freshness limit.");
@@ -1012,7 +1012,7 @@ public sealed partial class MainWindow
         Require(!scene.SetWaterStickTip(CameraPoint(.75, .90, inset), now) &&
                 scene.CurrentBoardScreen == BoardScreen.WaterGarden &&
                 scene.GetWaterGardenDiagnostics().PendingDisturbances == 0,
-            "The eye-tip input entered the stationary control row.");
+            "The marker input entered the stationary control row.");
         now += TimeSpan.FromMilliseconds(20);
         Require(!scene.SetWaterStickTip(CameraPoint(.04, .22, inset), now) &&
                 scene.GetWaterGardenDiagnostics() is { TipVisible: false, PendingDisturbances: 0 },
@@ -1026,11 +1026,11 @@ public sealed partial class MainWindow
         var frontWaterSide = WaterGardenView.Project(new(0, .5f, -WaterGardenView.WaterDepth * .5f), 1);
         Require(!scene.SetWaterStickTip(CameraPoint(frontWaterSide.X, frontWaterSide.Y, inset), now) &&
                 scene.GetWaterGardenDiagnostics() is { TipVisible: false, PendingDisturbances: 0 },
-            "A stick on the vertical water cutaway was treated as touching its upper surface.");
+            "A marker on the vertical water cutaway was treated as touching its upper surface.");
 
         scene.SetBoardFacingDegrees(90);
-        Require(scene.GetEyeTipProjectionFrames().Count == 0,
-            "Changing board orientation retained an eye reference with the previous camera mapping.");
+        Require(scene.GetMarkerProjectionFrames().Count == 0,
+            "Changing board orientation retained a marker reference with the previous camera mapping.");
         Require(scene.GetWaterGardenDiagnostics() is { TipVisible: false, InputCount: 0 },
             "Changing board orientation retained the old camera association.");
         now += TimeSpan.FromMilliseconds(20);
@@ -1169,15 +1169,15 @@ public sealed partial class MainWindow
                 Require(current is not null && current.Revision == oldContext.Revision &&
                         ReferenceEquals(current.ExpectedScene, oldContext.ExpectedScene) &&
                         captions.ObserveHoldButtons(current, ["water-drawer-open"], now, []).Count == 0,
-                    "Wand contact replaced the closed arrow's unchanged optical reference or interrupted its hold.");
+                    "Marker contact replaced the closed arrow's unchanged optical reference or interrupted its hold.");
             }
             Require(captions.CurrentHoldProgress.Single().Progress > .3,
-                "Wand transitions discarded the navigation arrow's partial caption hold.");
+                "Marker transitions discarded the navigation arrow's partial caption hold.");
             now += TimeSpan.FromMilliseconds(20);
             captions.SetWaterStickTip(null, now);
             captions.ObserveHoldButtons(oldContext, [], now, ["water-drawer-open"]);
             Require(captions.CurrentHoldProgress.Count == 0 && !captions.WaterGardenDrawerOpen,
-                "Intact arrow lettering did not cancel navigation progress after wand use.");
+                "Intact arrow lettering did not cancel navigation progress after marker use.");
             var beforeNavigation = now;
             now += TimeSpan.FromMilliseconds(10);
             captions.ShowBoardMenu();
@@ -1257,7 +1257,7 @@ public sealed partial class MainWindow
             sameClockFountainStable = true,
             perspectiveRoundTrips, perspectiveTouches, outsideWaterRejectedAndNearEdgeAccepted = true,
             markerMappingChecks, wholeBoardMarkerMappingAndInvalidation = true,
-            boundedEyeProjectionReference = true,
+            boundedMarkerProjectionReference = true,
             sameClockDrawStable = true, stationaryCaptionPixelsStable = true, freshCalibratedStickMapping = true,
             rawPreviewSameClockStable = true, uncalibratedPreviewControls = true,
             projectorFrameReusedByPreviews = true, stoppedProjectorPreviewFallback = true,

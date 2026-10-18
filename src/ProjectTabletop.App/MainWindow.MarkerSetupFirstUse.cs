@@ -29,13 +29,9 @@ public sealed partial class MainWindow
 
     private MarkerSetupFirstUseContext FirstUseMarkerContext(string camera, bool ready)
     {
-        bool waterTrained, wandBarTrained;
-        lock (_eyeTipGate)
-        {
-            waterTrained = WandMarkerProfileSelection.HasUsableProfile(_wandMarkerModes.GetValueOrDefault(camera),
-                _wandMarkerProfiles.GetValueOrDefault(camera), _eyeTipProfiles.ContainsKey(camera));
-            wandBarTrained = WandMarkerProfileSelection.PaintBarProfile(_wandMarkerProfiles.GetValueOrDefault(camera)) is not null;
-        }
+        bool doubleBarTrained;
+        lock (_markerTrackingGate)
+            doubleBarTrained = DoubleBarProfileSelection.Usable(_wandMarkerProfiles.GetValueOrDefault(camera)) is not null;
         bool player1UsesMarker, player2UsesMarker, player1Trained, player2Trained;
         lock (_footballInputGate)
         {
@@ -45,22 +41,22 @@ public sealed partial class MainWindow
             player1Trained = profiles?.Player1 is { IsValid: true };
             player2Trained = profiles?.Player2 is { IsValid: true };
         }
-        return new(_scene.CurrentBoardScreen, ready, _markerSetupSession is not null, waterTrained,
+        return new(_scene.CurrentBoardScreen, ready, _markerSetupSession is not null, doubleBarTrained,
             player1UsesMarker, player1Trained, _scene.FootballState.Mode == FootballMode.TwoHumans,
-            player2UsesMarker, player2Trained, wandBarTrained);
+            player2UsesMarker, player2Trained);
     }
 
     private void TryBeginFirstUseMarkerSetup()
     {
         if (_closing || _markerSetupSession is not null ||
             _scene.CurrentBoardScreen is not (BoardScreen.WaterGarden or BoardScreen.Paint or BoardScreen.Football) ||
-            IsLearningEyeTip || IsLearningFootballTip ||
+            IsLearningDoubleBarMarker || IsLearningFootballTip ||
             !_cameraWanted || !_camera.IsRunning || _cameraHealthWarning || _cameraManualRestartRequired ||
             _cameraOperation.CurrentCount == 0 || _camera.ActiveDeviceId is not { } camera ||
             camera != _selectedCameraId || camera != _cameraWantedDeviceId ||
             IsBoardScanMeasuring || _output?.AppWindow.IsVisible != true || !_scene.MarkerSetupReady) return;
         using var lease = AcquireLatestCameraFrame();
-        bool fresh = lease?.Frame is { } frame && EyeTipFrameFresh(frame, MonotonicClock.UtcNow);
+        bool fresh = lease?.Frame is { } frame && MarkerFrameFresh(frame, MonotonicClock.UtcNow);
         int? target = _markerSetupFirstUse.NextTarget(FirstUseMarkerContext(camera, fresh));
         if (target is null) return;
         MarkerSetupTargetCombo.SelectedIndex = target.Value;

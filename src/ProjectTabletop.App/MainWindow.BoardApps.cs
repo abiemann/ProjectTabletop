@@ -57,14 +57,14 @@ public sealed partial class MainWindow
             (blackjack || crownDeed || globe || slots || roulette || water || football || strykersRun);
         BoardGamePreviewTitle.Text = strykersRun ? "STRYKER'S RUN  ·  slide along the dots  ·  automatic fire" :
             football ? "FOOTBALL  ·  black cardboard bars or index fingers  ·  first to five" :
-            water ? "WATER GARDEN  ·  stick tip makes ripples  ·  click controls" :
+            water ? "WATER GARDEN  ·  double-bar marker makes ripples  ·  click controls" :
             roulette ? "VICE ROYALE  ·  ROULETTE  ·  click to place chips" :
             slots ? "DRAGON SLOTS  ·  click a button to play  ·  virtual credits" :
             globe ? "GLOBE  ·  zoom Earth in and out" : crownDeed ? "CROWN & DEED  ·  click the table to play" :
             "BLACKJACK  ·  click the table to play  ·  virtual chips";
         BlackjackPreviewPanel.Visibility = boardGame ? Visibility.Visible : Visibility.Collapsed;
-        // Water keeps the camera beside its interactive preview so Learn eye tip
-        // remains usable and the user can see whether the sticker is acquired.
+        // Water keeps the camera beside its interactive preview so the user can see
+        // whether the double-bar marker is acquired.
         Microsoft.UI.Xaml.Controls.Grid.SetRow(BlackjackPreviewPanel, water || football || strykersRun ? 1 : 0);
         Microsoft.UI.Xaml.Controls.Grid.SetRowSpan(BlackjackPreviewPanel, water || football || strykersRun ? 1 : 2);
         CameraPreviewPanel.Visibility = water || football || strykersRun || !boardGame ? Visibility.Visible : Visibility.Collapsed;
@@ -78,7 +78,7 @@ public sealed partial class MainWindow
              roulette ? _scene.RouletteState.Status :
              crownDeed ? _scene.CrownDeedState.Status :
              globe ? "Earth spins slowly. Open the ^ drawer for Zoom + and Zoom -; its Exit returns to the menu." :
-             water ? "Move the calibrated stick tip across the water. Open the bottom-left arrow for Exit, Reset, and Duck+; you can also click those controls here." :
+             water ? "Move the learned double-bar marker across the water. Open the bottom-left arrow for Exit, Reset, and Duck+; you can also click those controls here." :
              football ? "Choose Football input for each player. Play the computer or switch to two players. First to five wins; tracking loss pauses the match." :
              strykersRun ? _scene.StrykersRunState.Banner :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :

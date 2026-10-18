@@ -33,8 +33,8 @@ public sealed partial class MainWindow
         Require(!scene.PaintDrawerOpen && scene.CurrentBoardButtons.Single() is
                 { Id: "paint-drawer-open", Label: "^", Enabled: true, Hold: BoardButtonHold.Once } handle &&
                 handle.Bounds == new BoardRect(.01, .87, .18, .12) &&
-                !scene.ActivatePaintButton("menu") && !scene.ActivatePaintButton("paint-reset") &&
-                !scene.ActivatePaintButton("paint-save"),
+                !scene.ActivatePaintButton("menu", out _) && !scene.ActivatePaintButton("paint-reset", out _) &&
+                !scene.ActivatePaintButton("paint-save", out _),
             "Paint must initially expose only its bottom-left long-press arrow.");
         await Capture("closed-arrow");
 
@@ -42,7 +42,7 @@ public sealed partial class MainWindow
         await holds.CheckReleaseCancelsAsync("paint-drawer-open");
         await holds.HoldAsync("paint-drawer-open");
         Require(scene.PaintDrawerOpen && scene.CurrentBoardButtons.Where(button => button.Id != "paint-drawer-close")
-                .All(button => !button.Enabled) && !scene.ActivatePaintButton("menu") &&
+                .All(button => !button.Enabled) && !scene.ActivatePaintButton("menu", out _) &&
                 scene.GetHoldButtonContext(now) is null && scene.GetControlSwipeContext(now) is null,
             "Paint accepted an action or camera caption while its drawer was opening.");
         await Task.Delay((int)BoardSession.PaintDrawerOpeningDuration.TotalMilliseconds + 50);
@@ -132,7 +132,7 @@ public sealed partial class MainWindow
         CheckSwipeRoundTrip(rightToLeft: false);
         await Capture("swipe-restored");
         frozenPaintTime = null;
-        Require(scene.ActivatePaintButton("paint-drawer-close") && !scene.PaintDrawerOpen &&
+        Require(scene.ActivatePaintButton("paint-drawer-close", out _) && !scene.PaintDrawerOpen &&
                 scene.CurrentBoardButtons.Single().Id == "paint-drawer-open" &&
                 scene.GetPaintDiagnostics().DropCount == drops && scene.GetPaintDiagnostics().SessionRevision == painting,
             "Closing Paint's drawer discarded its painting or left the actions exposed.");
@@ -264,8 +264,8 @@ public sealed partial class MainWindow
         {
             var context = Swipe(rightToLeft);
             Require(!session.ButtonsVisible && scene.PaintDrawerOpen && scene.CurrentBoardButtons.Count == 0 &&
-                    !scene.ActivatePaintButton("menu") && !scene.ActivatePaintButton("paint-reset") &&
-                    !scene.ActivatePaintButton("paint-save") &&
+                    !scene.ActivatePaintButton("menu", out _) && !scene.ActivatePaintButton("paint-reset", out _) &&
+                    !scene.ActivatePaintButton("paint-save", out _) &&
                     scene.GetHoldButtonContext(now) is null,
                 "The bottom swipe left hidden Paint actions active or closed the drawer.");
             now += BoardSession.ControlFadeDuration / 2;

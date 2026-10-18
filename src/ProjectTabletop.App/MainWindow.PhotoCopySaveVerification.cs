@@ -11,6 +11,11 @@ public sealed partial class MainWindow
     // user's capture, Pictures folder, camera and projected board are untouched.
     private async Task<object> VerifyPhotoCopySaveAsync()
     {
+        Require(PhotoCopyImageStore.DefaultDirectory == Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Pictures", "Photo Copy"),
+            "Photo Copy exports did not target their own folder directly under local Pictures.");
+        Require(PhotoCopyImageStore.DefaultDirectory != PaintSaveDirectory,
+            "Photo Copy and Paint exports share a folder.");
         var liveOutput = _output;
         var liveState = (_camera.IsRunning, _output?.AppWindow.IsVisible,
             Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen,
@@ -80,6 +85,7 @@ public sealed partial class MainWindow
         return new { passed = true, exactNativePixels = true, straightAlphaPreserved = true,
             transparentBorderAndHole = true, paddedRows = true, uniqueFiles = true,
             cancellationAndFailuresCannotReportSuccess = true, liveHardwareUnchanged = true,
+            photoCopySaveDirectory = PhotoCopyImageStore.DefaultDirectory,
             directory, images = new[] { first, second, paddedPath } };
 
         static byte[] Fixture(int imageWidth, int imageHeight)

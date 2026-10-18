@@ -35,6 +35,12 @@ public sealed partial class SceneCompositor
     {
         get
         {
+            // Every other board has a fixed policy. Its scheduling check must
+            // not wait behind an unrelated frame's simulation or GPU work.
+            // Stryker's controls change during play, so retain the full locked
+            // policy and recheck the board after acquiring that lock.
+            var screen = CurrentBoardScreen;
+            if (screen != BoardScreen.StrykersRun) return screen != BoardScreen.Paint;
             lock (_gate) return _boardSession.Screen != BoardScreen.Paint &&
                 (_boardSession.Screen != BoardScreen.StrykersRun ||
                     _boardSession.StrykersRunControlsVisible && !_boardSession.StrykersRunControlsAnimating &&

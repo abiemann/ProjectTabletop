@@ -23,7 +23,7 @@ public sealed record BlackTipProfile(int Version, double Value, double Saturatio
 /// chosen front across frames. Map all four points through calibration before deriving a pose.</summary>
 public sealed record BlackBarGeometry(PixelPoint End1, PixelPoint End2, PixelPoint Side1, PixelPoint Side2);
 
-public sealed record BlackTipLearningOptions(IReadOnlyList<EyeTipProjectionFrame>? ProjectionFrames = null,
+public sealed record BlackTipLearningOptions(IReadOnlyList<MarkerProjectionFrame>? ProjectionFrames = null,
     DateTimeOffset FrameTime = default);
 
 /// <summary>A recent measured full marker and a bounded prediction used only to locate an
@@ -90,10 +90,10 @@ public static partial class BlackTipDetector
             AspectRatio = selected.Aspect
         };
         if (!result.IsValid) throw new InvalidOperationException("The crossbar is outside the supported size or shape. Make its width about 2–16 times its thickness.");
-        EyeTipProjectionMatcher? projection = null;
+        MarkerProjectionMatcher? projection = null;
         if (options?.ProjectionFrames is { } frames)
         {
-            projection = new EyeTipProjectionMatcher(frames, options.FrameTime);
+            projection = new MarkerProjectionMatcher(frames, options.FrameTime);
             if (!projection.Ready)
                 throw new InvalidOperationException("Wait for a current projected-board reference, then click the physical crossbar again.");
             if (!projection.ContainsBoardPoint(selected.Observation.Center))
@@ -179,7 +179,7 @@ public static partial class BlackTipDetector
         if (options?.PreferredCenter is { } preferred && (!double.IsFinite(preferred.X) ||
             !double.IsFinite(preferred.Y) || preferred.X < 0 || preferred.Y < 0))
             throw new ArgumentException("Invalid preferred black-crossbar center.", nameof(options));
-        EyeTipProjectionMatcher? projection = options?.ProjectionFrames is null ? null :
+        MarkerProjectionMatcher? projection = options?.ProjectionFrames is null ? null :
             new(options.ProjectionFrames, options.FrameTime);
         if (projection is { Ready: false })
             return profiles.Select(_ => new MarkerTipDetectionResult([], "waiting-for-projected-bat-reference")).ToArray();
@@ -209,12 +209,12 @@ public static partial class BlackTipDetector
         return right - left < 16 || bottom - top < 16 ? null : new(left, top, right - left, bottom - top);
     }
 
-    private static bool Physical(EyeTipProjectionMatcher projection, MarkerTipObservation strip, BlackImage image) =>
+    private static bool Physical(MarkerProjectionMatcher projection, MarkerTipObservation strip, BlackImage image) =>
         projection.IsPhysicalBlackBarCandidate(strip, image.Gray, image.Width, image.Height,
             image.ScaleX, image.ScaleY, image.OriginX, image.OriginY);
 
     private static MarkerTipDetectionResult Detect(BlackImage image, BlackTipProfile profile, double framePixels,
-        PixelPoint? preferred, EyeTipProjectionMatcher? projection, BlackTipSearchHint? hint, DateTimeOffset frameTime,
+        PixelPoint? preferred, MarkerProjectionMatcher? projection, BlackTipSearchHint? hint, DateTimeOffset frameTime,
         Dictionary<MarkerTipObservation, bool> vetoes)
     {
         double expectedArea = profile.NormalizedArea * framePixels;
@@ -415,7 +415,7 @@ public static partial class BlackTipDetector
     }
 
     private static MarkerTipObservation[] ExtractStrips(BlackImage image, BlackTipProfile profile, double expectedArea,
-        PixelPoint? preferred, EyeTipProjectionMatcher? projection, Dictionary<MarkerTipObservation, bool> vetoes,
+        PixelPoint? preferred, MarkerProjectionMatcher? projection, Dictionary<MarkerTipObservation, bool> vetoes,
         double valueAllowance = 0, Rect? region = null, bool useLuminance = false)
     {
         using Mat mask = image.Mask(profile, valueAllowance, region, useLuminance);

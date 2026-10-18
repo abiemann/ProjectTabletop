@@ -67,7 +67,7 @@ public sealed partial class MainWindow
                 var raw = new PixelPoint(1000 * (inset / 2 + u * (1 - inset)),
                     1000 * (inset / 2 + v * (1 - inset)));
                 if (!scene.SetWaterStickTip(raw, now))
-                    throw new InvalidOperationException($"The motion capture rejected fresh mapped eye sample at frame {frame}.");
+                    throw new InvalidOperationException($"The motion capture rejected fresh mapped marker sample at frame {frame}.");
                 acceptedSamples++;
                 samples.Add(new { frame, seconds = frame / (double)fps, boardU = u, boardV = v,
                     surfaceU = surface.X, surfaceV = surface.Y,
@@ -99,7 +99,7 @@ public sealed partial class MainWindow
                 Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen,
                 _scene.HasBoardMediaClip, _scene.GetBoardFacingDegrees());
         if (!hardwareUnchanged || acceptedSamples != 30 || scene.CurrentBoardScreen != BoardScreen.WaterGarden)
-            throw new InvalidOperationException("Motion capture changed live hardware state or failed to capture all 30 eye-tip observations.");
+            throw new InvalidOperationException("Motion capture changed live hardware state or failed to capture all 30 marker observations.");
         var result = new
         {
             passed = true, directory, metadataPath, framePattern = "frame-%04d.png", firstFrame = 0,

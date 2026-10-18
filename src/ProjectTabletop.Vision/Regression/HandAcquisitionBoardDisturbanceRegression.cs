@@ -25,28 +25,32 @@ internal static class HandAcquisitionBoardDisturbanceRegression
         var scene = ordinaryScene with { BoardDisturbanceExclusionRegion = new(.725, .835, .21, .135) };
         var polygon = Read<PixelPoint[]>(root, "SearchPolygon");
         var epoch = new DateTimeOffset(2026, 10, 16, 20, 0, 0, TimeSpan.Zero);
+        var arrow = new HandTrackingBounds(.76, .86, .14, .07);
         byte[] empty = Pixels("camera");
+        // The veto is measured only while a caption is broken, so false-veto
+        // checks cover the camera variations while the arrow itself is held.
+        byte[] held = Obstruct(arrow);
         foreach (var (name, gain, offsets) in new[] { ("clear", 1.0, new[] { 0, 0, 0 }),
             ("dimmer", .72, new[] { 8, 8, 8 }), ("brighter", 1.12, new[] { 12, 12, 12 }),
             ("white balance", .76, new[] { 24, 9, 38 }) })
         {
             var tracker = new HandAcquisitionPresenceTracker();
-            Quiet(Feed(tracker, empty, 0), "Clear generated menu");
-            Quiet(Feed(tracker, Transform(gain, offsets), 100), name);
+            Quiet(Feed(tracker, held, 0), "Held arrow on the generated menu");
+            Quiet(Feed(tracker, Transform(held, gain, offsets), 100), name + " with the arrow held");
         }
-        byte[] noise = (byte[])empty.Clone();
+        byte[] noise = (byte[])held.Clone();
         var random = new Random(412);
         for (int pixel = 0; pixel < noise.Length; pixel += 4)
             for (int channel = 0; channel < 3; channel++)
                 noise[pixel + channel] = (byte)Math.Clamp(noise[pixel + channel] + random.Next(-5, 6), 0, 255);
-        Quiet(Feed(new(), noise, 0), "Camera noise");
+        Quiet(Feed(new(), noise, 0), "Camera noise with the arrow held");
         using (var source = new Mat(height, width, MatType.CV_8UC4))
         using (var blurred = new Mat())
         {
-            Marshal.Copy(empty, 0, source.Data, empty.Length);
+            Marshal.Copy(held, 0, source.Data, held.Length);
             Cv2.GaussianBlur(source, blurred, new Size(5, 5), 1.2);
-            byte[] pixels = new byte[empty.Length]; Marshal.Copy(blurred.Data, pixels, 0, pixels.Length);
-            Quiet(Feed(new(), pixels, 0), "Small optical blur");
+            byte[] pixels = new byte[held.Length]; Marshal.Copy(blurred.Data, pixels, 0, pixels.Length);
+            Quiet(Feed(new(), pixels, 0), "Small optical blur with the arrow held");
         }
 
         foreach (var (name, bounds) in new[] {
@@ -58,7 +62,8 @@ internal static class HandAcquisitionBoardDisturbanceRegression
         {
             var tracker = new HandAcquisitionPresenceTracker();
             if (warm) Quiet(Feed(tracker, empty, 0), "Initial clear menu");
-            byte[] obstruction = Obstruct(bounds);
+            // The veto protects a hold, so it is measured while the arrow is covered.
+            byte[] obstruction = Obstruct(bounds, arrow);
             foreach (int time in new[] { 100, 200, 1200, 2400 })
             {
                 var result = Feed(tracker, obstruction, time);
@@ -70,42 +75,56 @@ internal static class HandAcquisitionBoardDisturbanceRegression
             }
             Require(!Feed(tracker, obstruction, 2400).OutsideControlDisturbance,
                 "Repeated camera frames emitted another board obstruction observation.");
-            Quiet(Feed(tracker, empty, 2500), "Removed obstruction");
+            Quiet(Feed(tracker, held, 2500), "Removed obstruction while the arrow remains held");
         }
-        byte[] arrowOnly = Obstruct(new(.76, .86, .14, .07));
+        byte[] arrowOnly = held;
         Quiet(Feed(new(), arrowOnly, 0), "Excluded arrow alone");
-        byte[] speck = Obstruct(new(.49, .29, .006, .006));
-        Quiet(Feed(new(), speck, 0), "Tiny residual speck");
-        byte[] broad = Obstruct(new(.01, .01, .97, .80));
-        Quiet(Feed(new(), broad, 0), "Broad uncertain camera appearance");
+        // An intact arrow cannot start or extend a hold. With every caption readable,
+        // activity elsewhere is not measured, and the rest of the board is not read.
+        var idleGap = new HandAcquisitionPresenceTracker();
+        Quiet(Feed(idleGap, Obstruct(new HandTrackingBounds(.485, .26, .03, .50)), 0),
+            "Unmeasured gap obstruction beside intact captions");
+        byte[] speck = Obstruct(new HandTrackingBounds(.49, .29, .006, .006), arrow);
+        Quiet(Feed(new(), speck, 0), "Tiny residual speck with the arrow held");
+        byte[] broad = Obstruct(new HandTrackingBounds(.01, .01, .97, .80), arrow);
+        Quiet(Feed(new(), broad, 0), "Broad uncertain camera appearance with the arrow held");
 
         var ordinary = new HandAcquisitionPresenceTracker();
         var watched = new HandAcquisitionPresenceTracker();
         var without = ordinary.Update(width, height, width * 4, empty, polygon, ordinaryScene, epoch, epoch);
         var with = Feed(watched, empty, 0);
         Require(!without.OutsideControlDisturbance && without.OutsideControlForegroundFraction == 0 &&
-            watched.SampledCellCount > ordinary.SampledCellCount,
-            "Whole-board sampling was not restricted to explicitly opted-in scenes.");
-        Require(JsonSerializer.Serialize(without.TextPatterns) == JsonSerializer.Serialize(with.TextPatterns) &&
-            without.Hints.SequenceEqual(with.Hints) && without.ForegroundFraction == with.ForegroundFraction,
-            "The separate board veto changed caption or hand acquisition evidence.");
+            watched.SampledCellCount == ordinary.SampledCellCount && idleGap.SampledCellCount == ordinary.SampledCellCount,
+            "An idle opted-in menu read the whole board.");
+        RequireSameEvidence(without, with);
+        var heldTime = epoch.AddMilliseconds(100);
+        var heldWithout = ordinary.Update(width, height, width * 4, arrowOnly, polygon, ordinaryScene, heldTime, heldTime);
+        var heldWith = Feed(watched, arrowOnly, 100);
+        Require(watched.SampledCellCount > ordinary.SampledCellCount,
+            "Whole-board sampling was not restricted to explicitly opted-in scenes with a covered caption.");
+        RequireSameEvidence(heldWithout, heldWith);
         Console.WriteLine("Whole-board arrow veto passed: generated clear/blur/noisy/exposure/white-balance menu, " +
-            "cold and stationary gap/artwork/caption obstruction, excluded arrow, tiny/broad uncertainty, release and opt-in sampling.");
+            "cold and stationary gap/artwork/caption obstruction while the arrow is held, excluded arrow, tiny/broad " +
+            "uncertainty, release, idle-menu skip and opt-in sampling.");
 
         HandAcquisitionPresenceResult Feed(HandAcquisitionPresenceTracker tracker, byte[] pixels, int milliseconds)
         {
             var time = epoch.AddMilliseconds(milliseconds);
             return tracker.Update(width, height, width * 4, pixels, polygon, scene, time, time);
         }
-        byte[] Transform(double gain, int[] offsets)
+        static void RequireSameEvidence(HandAcquisitionPresenceResult without, HandAcquisitionPresenceResult with) =>
+            Require(JsonSerializer.Serialize(without.TextPatterns) == JsonSerializer.Serialize(with.TextPatterns) &&
+                without.Hints.SequenceEqual(with.Hints) && without.ForegroundFraction == with.ForegroundFraction,
+                "The separate board veto changed caption or hand acquisition evidence.");
+        static byte[] Transform(byte[] source, double gain, int[] offsets)
         {
-            byte[] pixels = (byte[])empty.Clone();
+            byte[] pixels = (byte[])source.Clone();
             for (int pixel = 0; pixel < pixels.Length; pixel += 4)
                 for (int channel = 0; channel < 3; channel++)
-                    pixels[pixel + channel] = (byte)Math.Clamp(empty[pixel + channel] * gain + offsets[channel], 0, 255);
+                    pixels[pixel + channel] = (byte)Math.Clamp(source[pixel + channel] * gain + offsets[channel], 0, 255);
             return pixels;
         }
-        byte[] Obstruct(HandTrackingBounds bounds)
+        byte[] Obstruct(params HandTrackingBounds[] regions)
         {
             byte[] pixels = (byte[])empty.Clone();
             var m = scene.CameraToBoard;
@@ -113,7 +132,8 @@ internal static class HandAcquisitionBoardDisturbanceRegression
             for (int x = 0; x < width; x++)
             {
                 double u = m[0] * x + m[2], v = m[4] * y + m[5];
-                if (u < bounds.X || u > bounds.X + bounds.Width || v < bounds.Y || v > bounds.Y + bounds.Height) continue;
+                if (!regions.Any(bounds => u >= bounds.X && u <= bounds.X + bounds.Width &&
+                    v >= bounds.Y && v <= bounds.Y + bounds.Height)) continue;
                 int index = (y * width + x) * 4;
                 pixels[index] = 75; pixels[index + 1] = 95; pixels[index + 2] = 185;
             }
@@ -144,13 +164,15 @@ internal static class HandAcquisitionBoardDisturbanceRegression
         int stride = root.GetProperty("Stride").GetInt32();
         var polygon = JsonSerializer.Deserialize<PixelPoint[]>(root.GetProperty("SearchPolygon").GetRawText())!;
         var epoch = new DateTimeOffset(2026, 10, 17, 3, 19, 23, TimeSpan.Zero);
-        var empty = Pixels("camera");
-        Quiet(Feed(new(), empty, 0), "Recorded clear second menu page");
-        var adjacent = Pixels("camera-adjacent");
-        Quiet(Feed(new(), adjacent, 0), "Adjacent clear second-page camera frame");
+        // The veto is measured only while a caption is broken. Every recorded
+        // frame below therefore keeps the arrow covered, as during a real hold.
+        var empty = Cover(Pixels("camera"));
+        Quiet(Feed(new(), empty, 0), "Recorded second menu page with the arrow held");
+        var adjacent = Cover(Pixels("camera-adjacent"));
+        Quiet(Feed(new(), adjacent, 0), "Adjacent second-page camera frame with the arrow held");
         var steady = new HandAcquisitionPresenceTracker();
-        Quiet(Feed(steady, empty, 0), "Initial clear second-page frame");
-        Quiet(Feed(steady, adjacent, 100), "Clear second-page camera variation");
+        Quiet(Feed(steady, empty, 0), "Initial held-arrow second-page frame");
+        Quiet(Feed(steady, adjacent, 100), "Held-arrow second-page camera variation");
         foreach (var (name, bounds, color) in new[] {
             ("artwork hand", new HandTrackingBounds(.78, .27, .10, .12), new byte[] {75,95,185}),
             ("lit artwork hand", new HandTrackingBounds(.78, .27, .10, .12), new byte[] {220,225,230}),
@@ -158,23 +180,33 @@ internal static class HandAcquisitionBoardDisturbanceRegression
         foreach (bool warm in new[] { false, true })
         {
             var tracker = new HandAcquisitionPresenceTracker();
-            if (warm) Quiet(Feed(tracker, empty, 0), "Warm recorded clear second page");
-            byte[] obstruction = (byte[])empty.Clone();
-            var m = scene.CameraToBoard;
-            for (int y = 0; y < height; y++)
-            for (int x = 0; x < width; x++)
-            {
-                double d = m[6]*x+m[7]*y+m[8], u = (m[0]*x+m[1]*y+m[2])/d, v = (m[3]*x+m[4]*y+m[5])/d;
-                if (u < bounds.X || u > bounds.X+bounds.Width || v < bounds.Y || v > bounds.Y+bounds.Height) continue;
-                int index = y*stride+x*4;
-                for (int channel=0;channel<3;channel++) obstruction[index+channel]=color[channel];
-            }
+            if (warm) Quiet(Feed(tracker, empty, 0), "Warm recorded second page with the arrow held");
+            byte[] obstruction = Cover(empty, bounds, color);
             foreach (int time in new[] { 100, 1400 })
             {
                 var result = Feed(tracker, obstruction, time);
                 Require(result.OutsideControlDisturbance, $"Recorded {name}, warm={warm}, {time}ms was fitted away: {result.OutsideControlForegroundFraction}");
             }
             Quiet(Feed(tracker, empty, 1500), "Recorded removed " + name);
+        }
+        byte[] Cover(byte[] source, HandTrackingBounds? region = null, byte[]? color = null)
+        {
+            byte[] pixels = (byte[])source.Clone();
+            var m = scene.CameraToBoard;
+            for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                double d = m[6]*x+m[7]*y+m[8], u = (m[0]*x+m[1]*y+m[2])/d, v = (m[3]*x+m[4]*y+m[5])/d;
+                int index = y*stride+x*4;
+                if (u >= .76 && u <= .90 && v >= .86 && v <= .93)
+                {
+                    pixels[index] = 75; pixels[index+1] = 95; pixels[index+2] = 185;
+                }
+                else if (region is { } bounds && color is not null && u >= bounds.X && u <= bounds.X+bounds.Width &&
+                    v >= bounds.Y && v <= bounds.Y+bounds.Height)
+                    for (int channel=0;channel<3;channel++) pixels[index+channel]=color[channel];
+            }
+            return pixels;
         }
         HandAcquisitionPresenceResult Feed(HandAcquisitionPresenceTracker tracker, byte[] pixels, int milliseconds)
         {

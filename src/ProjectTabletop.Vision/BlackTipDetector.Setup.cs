@@ -22,7 +22,7 @@ public static partial class BlackTipDetector
         using var polygonInput = InputArray.Create(polygon);
         var seed = new BlackTipProfile(1, .18, 0, .0001, 3);
         using var image = new BlackImage(width, height, stride, bgra, SearchBounds(rawTarget, [seed], width, height));
-        EyeTipProjectionMatcher? projection = options?.ProjectionFrames is null ? null :
+        MarkerProjectionMatcher? projection = options?.ProjectionFrames is null ? null :
             new(options.ProjectionFrames, options.FrameTime);
         if (projection is { Ready: false }) return new(null, null, "waiting-for-projected-reference");
         using Mat mask = image.Mask(seed);

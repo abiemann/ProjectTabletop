@@ -428,7 +428,7 @@ public sealed partial class SceneCompositor
         }
         if (!_boardSession.SetWaterGardenStickPresent(present, _waterClock())) return;
         // Only the action row changes appearance. Keep the navigation arrow's
-        // verified optics and hold while a wand enters/leaves the water. An
+        // verified optics and hold while a marker enters/leaves the water. An
         // open row still rejects in-flight results from its previous enabled
         // state; GetHoldButtonContext selectively resets the changed actions.
         if (_boardSession.WaterGardenDrawerOpen) _holdRevision++;

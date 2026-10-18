@@ -9,7 +9,7 @@ public sealed partial class SceneCompositor
     private PixelPoint[]? _paintMarkerCameraPolygon;
     private Homography? _paintMarkerPolygonCameraMap, _paintMarkerPolygonSurfaceMap;
 
-    // Both wand boards use the same camera-plane detector and saved marker.
+    // Both marker boards use the same camera-plane detector and saved marker.
     // Keep the polygon immutable while registration is unchanged.
     public IReadOnlyList<PixelPoint>? GetWandMarkerCameraPolygon()
     {

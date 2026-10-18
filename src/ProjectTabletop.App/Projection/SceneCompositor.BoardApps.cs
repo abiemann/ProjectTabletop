@@ -66,7 +66,7 @@ public sealed partial class SceneCompositor
 
     public BoardScreen CurrentBoardScreen
     {
-        get { lock (_gate) return _boardSession.Screen; }
+        get => Monitor.IsEntered(_gate) ? _boardSession.Screen : (BoardScreen)Volatile.Read(ref _publishedBoardScreen);
     }
 
     public string CurrentBoardTitle

@@ -10,15 +10,15 @@ public sealed partial class SceneCompositor
 {
     // Pooled capture target. A capture takes ownership while it reads pixels
     // outside _gate, so this is null until that capture returns it.
-    private CanvasRenderTarget? _eyeProjectionTarget;
-    private readonly Queue<EyeTipProjectionFrame> _eyeProjectionFrames = new();
-    private Homography? _eyeProjectionCameraMap, _eyeProjectionSurfaceMap;
-    private long _eyeProjectionNavigation = -1, _eyeProjectionHistory;
-    private DateTimeOffset _eyeProjectionCapturedAt;
+    private CanvasRenderTarget? _markerProjectionTarget;
+    private readonly Queue<MarkerProjectionFrame> _markerProjectionFrames = new();
+    private Homography? _markerProjectionCameraMap, _markerProjectionSurfaceMap;
+    private long _markerProjectionNavigation = -1, _markerProjectionHistory;
+    private DateTimeOffset _markerProjectionCapturedAt;
 
     // Separate from stationary caption references: this image explains our own
-    // projected artwork to the eye detector, and can never qualify a held button.
-    internal IReadOnlyList<EyeTipProjectionFrame> GetEyeTipProjectionFrames()
+    // projected artwork to the marker detector, and can never qualify a held button.
+    internal IReadOnlyList<MarkerProjectionFrame> GetMarkerProjectionFrames()
     {
         CanvasRenderTarget capture;
         CanvasRenderTarget source;
@@ -35,37 +35,37 @@ public sealed partial class SceneCompositor
                 _renderedBoardState is not { } rendered || rendered.Screen != _boardSession.Screen ||
                 _boardSession.Screen == BoardScreen.Media)
             {
-                ClearEyeProjectionHistory();
+                ClearMarkerProjectionHistory();
                 return [];
             }
-            if (!ReferenceEquals(_eyeProjectionCameraMap, _boardCameraMap) ||
-                !ReferenceEquals(_eyeProjectionSurfaceMap, _boardSurfaceMap) ||
-                _eyeProjectionNavigation != _boardSession.NavigationRevision)
+            if (!ReferenceEquals(_markerProjectionCameraMap, _boardCameraMap) ||
+                !ReferenceEquals(_markerProjectionSurfaceMap, _boardSurfaceMap) ||
+                _markerProjectionNavigation != _boardSession.NavigationRevision)
             {
-                ClearEyeProjectionHistory();
-                _eyeProjectionCameraMap = _boardCameraMap;
-                _eyeProjectionSurfaceMap = _boardSurfaceMap;
-                _eyeProjectionNavigation = _boardSession.NavigationRevision;
+                ClearMarkerProjectionHistory();
+                _markerProjectionCameraMap = _boardCameraMap;
+                _markerProjectionSurfaceMap = _boardSurfaceMap;
+                _markerProjectionNavigation = _boardSession.NavigationRevision;
             }
             now = MonotonicClock.UtcNow;
-            if (now - _eyeProjectionCapturedAt < TimeSpan.FromMilliseconds(150))
-                return _eyeProjectionFrames.ToArray();
+            if (now - _markerProjectionCapturedAt < TimeSpan.FromMilliseconds(150))
+                return _markerProjectionFrames.ToArray();
             source = _boardApplicationTarget;
             cameraMap = _boardCameraMap;
             surfaceMap = _boardSurfaceMap;
             screen = _boardSession.Screen;
             navigation = _boardSession.NavigationRevision;
             var size = source.SizeInPixels;
-            (width, height) = EyeProjectionSize(cameraMap, surfaceMap, (int)size.Width, (int)size.Height);
-            if (_eyeProjectionTarget is { } pooled && pooled.Device == source.Device &&
+            (width, height) = MarkerProjectionSize(cameraMap, surfaceMap, (int)size.Width, (int)size.Height);
+            if (_markerProjectionTarget is { } pooled && pooled.Device == source.Device &&
                 pooled.SizeInPixels.Width == width && pooled.SizeInPixels.Height == height)
                 capture = pooled;
             else
             {
-                _eyeProjectionTarget?.Dispose();
+                _markerProjectionTarget?.Dispose();
                 capture = new(source.Device, width, height, 96);
             }
-            _eyeProjectionTarget = null;
+            _markerProjectionTarget = null;
             try
             {
                 using (var drawing = capture.CreateDrawingSession())
@@ -86,8 +86,8 @@ public sealed partial class SceneCompositor
             for (int column = 0; column < 3; column++)
             for (int middle = 0; middle < 3; middle++)
                 mapping[row * 3 + column] += surface[row * 3 + middle] * camera[middle * 3 + column];
-            _eyeProjectionCapturedAt = now;
-            history = _eyeProjectionHistory;
+            _markerProjectionCapturedAt = now;
+            history = _markerProjectionHistory;
         }
 
         // The readback waits for the GPU. Keep the render loop's lock free
@@ -96,12 +96,12 @@ public sealed partial class SceneCompositor
         try { pixels = capture.GetPixelBytes(); }
         catch
         {
-            lock (_gate) ReturnEyeProjectionTarget(capture);
+            lock (_gate) ReturnMarkerProjectionTarget(capture);
             throw;
         }
         lock (_gate)
         {
-            ReturnEyeProjectionTarget(capture);
+            ReturnMarkerProjectionTarget(capture);
             // A reset, new registration or navigation during the readback
             // makes this snapshot describe a board that is no longer shown.
             // Another reference request is not guaranteed during that change,
@@ -111,15 +111,15 @@ public sealed partial class SceneCompositor
                 !ReferenceEquals(source, _boardApplicationTarget) || navigation != _boardSession.NavigationRevision ||
                 screen != _boardSession.Screen || _renderedBoardState is not { } current || current.Screen != screen)
             {
-                if (history == _eyeProjectionHistory) ClearEyeProjectionHistory();
+                if (history == _markerProjectionHistory) ClearMarkerProjectionHistory();
                 return [];
             }
-            if (history != _eyeProjectionHistory) return [];
-            if (_eyeProjectionFrames.Any(frame => frame.Width != width || frame.Height != height))
-                _eyeProjectionFrames.Clear();
-            _eyeProjectionFrames.Enqueue(new(width, height, pixels, mapping, now));
-            while (_eyeProjectionFrames.Count > 3) _eyeProjectionFrames.Dequeue();
-            return _eyeProjectionFrames.ToArray();
+            if (history != _markerProjectionHistory) return [];
+            if (_markerProjectionFrames.Any(frame => frame.Width != width || frame.Height != height))
+                _markerProjectionFrames.Clear();
+            _markerProjectionFrames.Enqueue(new(width, height, pixels, mapping, now));
+            while (_markerProjectionFrames.Count > 3) _markerProjectionFrames.Dequeue();
+            return _markerProjectionFrames.ToArray();
         }
     }
 
@@ -127,7 +127,7 @@ public sealed partial class SceneCompositor
     // sample per camera pixel. Match that resolution along each board axis: extra
     // pixels were skipped by the comparison, yet each capture paid for reading
     // them back from the GPU and converting them on the detection thread.
-    private static (int Width, int Height) EyeProjectionSize(Homography cameraMap, Homography surfaceMap,
+    private static (int Width, int Height) MarkerProjectionSize(Homography cameraMap, Homography surfaceMap,
         int sourceWidth, int sourceHeight)
     {
         try
@@ -149,25 +149,25 @@ public sealed partial class SceneCompositor
             Math.Max(1, Math.Min(Math.Min(2048, sourceLength), (int)Math.Ceiling(length)));
     }
 
-    private void ReturnEyeProjectionTarget(CanvasRenderTarget capture)
+    private void ReturnMarkerProjectionTarget(CanvasRenderTarget capture)
     {
-        if (_disposed || _eyeProjectionTarget is not null) capture.Dispose();
-        else _eyeProjectionTarget = capture;
+        if (_disposed || _markerProjectionTarget is not null) capture.Dispose();
+        else _markerProjectionTarget = capture;
     }
 
-    private void ClearEyeProjectionHistory()
+    private void ClearMarkerProjectionHistory()
     {
-        _eyeProjectionFrames.Clear();
-        _eyeProjectionCapturedAt = default;
-        _eyeProjectionCameraMap = _eyeProjectionSurfaceMap = null;
-        _eyeProjectionNavigation = -1;
-        _eyeProjectionHistory++;
+        _markerProjectionFrames.Clear();
+        _markerProjectionCapturedAt = default;
+        _markerProjectionCameraMap = _markerProjectionSurfaceMap = null;
+        _markerProjectionNavigation = -1;
+        _markerProjectionHistory++;
     }
 
-    private void DisposeEyeProjectionReference()
+    private void DisposeMarkerProjectionReference()
     {
-        ClearEyeProjectionHistory();
-        _eyeProjectionTarget?.Dispose();
-        _eyeProjectionTarget = null;
+        ClearMarkerProjectionHistory();
+        _markerProjectionTarget?.Dispose();
+        _markerProjectionTarget = null;
     }
 }

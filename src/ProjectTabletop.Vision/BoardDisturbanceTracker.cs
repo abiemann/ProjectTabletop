@@ -101,8 +101,9 @@ public sealed class BoardDisturbanceTracker
             Initialize(frameTime);
             return _observations;
         }
-        FindComponents();
+        BoardMotionObservation? sparseDetail = FindComponents((redShift + greenShift + blueShift) / 3f);
         MatchComponents(frameTime);
+        if (_observations.Count == 0 && sparseDetail is { } detail) _observations.Add(detail);
         float backgroundRate = (float)(1 - Math.Exp(-elapsed / (warming ? .12 : 2.5)));
         float stationaryRate = (float)(1 - Math.Exp(-elapsed / .10));
         float noiseRate = (float)(1 - Math.Exp(-elapsed / .7));
@@ -225,9 +226,11 @@ public sealed class BoardDisturbanceTracker
         return 0;
     }
 
-    private void FindComponents()
+    private BoardMotionObservation? FindComponents(float luminanceShift)
     {
         _candidateCount = 0;
+        int detailCells = 0, detailLeft = Columns, detailRight = 0, detailTop = Rows, detailBottom = 0;
+        long detailX = 0, detailY = 0;
         Array.Clear(_connected);
         Array.Clear(_componentProtection);
         // Remove isolated sampling noise without dilating separate ripples into a hand-sized blob.
@@ -267,7 +270,22 @@ public sealed class BoardDisturbanceTracker
             int width = right - left + 1, height = bottom - top + 1;
             if (count < _validCells * .018 || count > _validCells * .30 ||
                 width < Columns * .035 || width > Columns * .34 || height < Rows * .12 ||
-                count < width * height * .42) continue;
+                count < width * height * .42)
+            {
+                // On a dark surface an occluding hand may only damage a few stars
+                // or letters. Use losses of those existing details, not arbitrary
+                // small moving objects. The gesture stage supplies the successive
+                // positions and direction; this does not need a hand-sized blob.
+                if (count >= 8 && width >= 2 && height >= 2 && width <= Columns * .34 &&
+                    count <= _validCells * .018 &&
+                    IsLostBrightDetail(count, left, right, top, bottom, luminanceShift))
+                {
+                    detailCells += count; detailX += sumX; detailY += sumY;
+                    detailLeft = Math.Min(detailLeft, left); detailRight = Math.Max(detailRight, right);
+                    detailTop = Math.Min(detailTop, top); detailBottom = Math.Max(detailBottom, bottom);
+                }
+                continue;
+            }
             for (int i = 0; i < count; i++)
             {
                 _protected[_queue[i]] = 1;
@@ -289,6 +307,41 @@ public sealed class BoardDisturbanceTracker
             }
             _candidates[insert] = candidate;
         }
+        // Scattered flicker or a scene-wide exposure change is not one local
+        // disturbance. Keep the normal filled-component path unchanged.
+        return _candidateCount == 0 && detailCells >= 8 && detailRight - detailLeft + 1 <= Columns * .34 &&
+            detailBottom - detailTop + 1 <= Rows * .85
+            ? new BoardMotionObservation(0, (detailX / (double)detailCells + .5) / Columns,
+                (detailY / (double)detailCells + .5) / Rows) : null;
+    }
+
+    private bool IsLostBrightDetail(int count, int left, int right, int top, int bottom, float luminanceShift)
+    {
+        // A narrow ring measures the original local surface without reading or
+        // copying the camera again. Bright canvases retain their original gate.
+        float surround = 0;
+        int surroundingCells = 0;
+        for (int y = Math.Max(0, top - 2); y <= Math.Min(Rows - 1, bottom + 2); y++)
+        for (int x = Math.Max(0, left - 2); x <= Math.Min(Columns - 1, right + 2); x++)
+        {
+            if (x >= left && x <= right && y >= top && y <= bottom) continue;
+            int index = y * Columns + x;
+            if (_offsets[index] < 0) continue;
+            int c = index * 3;
+            surround += (_background[c] + _background[c + 1] + _background[c + 2]) / 3 + luminanceShift;
+            surroundingCells++;
+        }
+        if (surroundingCells == 0 || (surround /= surroundingCells) > 48) return false;
+        int lost = 0;
+        for (int i = 0; i < count; i++)
+        {
+            int index = _queue[i], c = index * 3;
+            float background = (_background[c] + _background[c + 1] + _background[c + 2]) / 3 + luminanceShift;
+            float sample = (_samples[c] + _samples[c + 1] + _samples[c + 2]) / 3f;
+            float threshold = Math.Max(Math.Clamp(background * .60f, 14, 40), _noise[index] * 5 + 14);
+            if (_noise[index] <= 8 && background - surround >= 18 && background - sample > threshold) lost++;
+        }
+        return lost >= 6 && lost >= count * .60;
     }
 
     private void MatchComponents(DateTimeOffset frameTime)
