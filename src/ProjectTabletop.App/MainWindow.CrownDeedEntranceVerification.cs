@@ -169,7 +169,7 @@ public sealed partial class MainWindow
         now = started.AddMilliseconds(duration - 1);
         Draw(scene);
         Require(scene.CrownDeedEntranceActive && !scene.ActivateCrownDeedButton("mp-start-game") &&
-                !scene.ActivateCrownDeedButton("mp-exit"), "The final moving contact frame accepted input early.");
+                !scene.ActivateCrownDeedButton("mp-exit-game"), "The final moving contact frame accepted input early.");
         now = started.AddMilliseconds(duration);
         Draw(scene);
         Require(!scene.CrownDeedEntranceActive && ReferenceEquals(state, scene.CrownDeedState),
@@ -261,7 +261,7 @@ public sealed partial class MainWindow
         }
         void CheckSuppression(SceneCompositor fixture)
         {
-            Require(!fixture.ActivateCrownDeedButton("mp-start-game") && !fixture.ActivateCrownDeedButton("mp-exit") &&
+            Require(!fixture.ActivateCrownDeedButton("mp-start-game") && !fixture.ActivateCrownDeedButton("mp-exit-game") &&
                     !fixture.TickCrownDeed(now), "The entrance allowed gameplay, navigation input or AI progress.");
             var context = fixture.GetHandAcquisitionContext(now);
             Require(context is { ObserveMotion: false, IlluminatedHint: null, ExpectedScene: null },
@@ -395,7 +395,7 @@ public sealed partial class MainWindow
             using var input = await FixtureAsync();
             var inputStarted = now;
             await Task.Delay(5);
-            var button = input.CurrentBoardButtons.Single(item => item.Id == "mp-start-game");
+            var button = input.CurrentBoardButtons.Single(item => item.Id == "mp-exit-game");
             var map = Field<Homography>(input, "_boardSurfaceMap");
             var camera = Field<Homography>(input, "_boardCameraMap");
             var point = camera.InverseTransform(map.Transform(new(button.Bounds.X + button.Bounds.Width / 2,
@@ -436,9 +436,9 @@ public sealed partial class MainWindow
             now += TimeSpan.FromMilliseconds(110); session.Update([grouped], now, now);
             now += TimeSpan.FromMilliseconds(20); session.Update([separated], now, now);
             now += TimeSpan.FromMilliseconds(90);
-            Require(session.Update([separated], now, now) is { ButtonId: "mp-start-game", Gesture: BoardSelectionGesture.IndexSeparation } &&
-                    input.CrownDeedState.Phase == CrownDeedPhase.Setup,
-                "The landing barrier permanently blocked a fresh grouped-to-separated selection.");
+            Require(session.Update([separated], now, now) is { ButtonId: "mp-exit-game", Gesture: BoardSelectionGesture.IndexSeparation } &&
+                    input.CurrentBoardScreen == BoardScreen.Menu,
+                "The landing barrier permanently blocked a fresh grouped-to-separated Exit Game selection.");
         }
         async Task Capture(string name)
         {

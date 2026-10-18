@@ -21,28 +21,22 @@ internal static class CrownDeedDrawerRegression
         var game = new CrownDeedGame(seed: 87, initialRolls: [new(1, 2)]);
         var board = new BoardSession(crownDeed: game);
         int rolls = 0; board.CrownDeedRollOccurred += _ => rolls++;
-        board.ShowCrownDeed(Next());
-        var landing = board.CrownDeedState;
+        board.ShowCrownDeed(Next()); Act(board, "mp-start-game");
+        var setup = board.CrownDeedState;
         for (int index = 0; index < 4; index++)
         {
             Require(!board.CrownDeedDrawerOpen && Button(board, "mp-exit").Label == "^",
                 "The closed drawer did not show its upward caret.");
             Act(board, "mp-exit");
             CheckOpen(board, active: false);
-            Require(ReferenceEquals(landing, board.CrownDeedState) && !board.CrownDeedSaveRequested &&
-                    !board.ActivateButton("mp-start-game", Next()) && !board.TickCrownDeed(Next(1100)),
-                "Opening an inactive drawer changed rules state or allowed its underlying Start control.");
+            Require(ReferenceEquals(setup, board.CrownDeedState) && !board.CrownDeedSaveRequested &&
+                    !board.ActivateButton("mp-start", Next()) && !board.ActivateButton("mp-ai-plus", Next()) &&
+                    !board.TickCrownDeed(Next(1100)),
+                "Opening the setup drawer changed configuration or allowed its underlying player/Start controls.");
             Act(board, "mp-exit-cancel");
-            Require(!board.CrownDeedDrawerOpen && ReferenceEquals(landing, board.CrownDeedState),
-                "Closing the landing drawer changed its game snapshot.");
+            Require(!board.CrownDeedDrawerOpen && ReferenceEquals(setup, board.CrownDeedState),
+                "Closing the setup drawer changed its game snapshot.");
         }
-        Act(board, "mp-start-game");
-        var setup = board.CrownDeedState;
-        Act(board, "mp-exit"); CheckOpen(board, active: false);
-        Require(ReferenceEquals(setup, board.CrownDeedState) && !board.ActivateButton("mp-ai-plus", Next()),
-            "The setup drawer changed player configuration or exposed the controls underneath it.");
-        Act(board, "mp-exit-cancel");
-        Require(ReferenceEquals(setup, board.CrownDeedState), "Closing the setup drawer mutated player configuration.");
         Act(board, "mp-ai-minus"); Act(board, "mp-human-plus"); Act(board, "mp-start"); Act(board, "mp-roll");
         var control = new BoardSession(crownDeed: new CrownDeedGame(seed: 87, initialRolls: [new(1, 2)]));
         control.ShowCrownDeed(Next());
@@ -176,7 +170,7 @@ internal static class CrownDeedDrawerRegression
 
     private static void OpeningReadinessAndRestoredDrawer()
     {
-        var idle = new BoardSession(); idle.ShowCrownDeed(Next());
+        var idle = new BoardSession(); idle.ShowCrownDeed(Next()); Act(idle, "mp-start-game");
         var opened = Next();
         Require(idle.ActivateButton("mp-exit", opened) && idle.CrownDeedDrawerOpenedAt == opened &&
                 BoardSession.CrownDeedDrawerOpeningDuration == TimeSpan.FromMilliseconds(300) &&
@@ -209,7 +203,7 @@ internal static class CrownDeedDrawerRegression
                 active.CrownDeedState.Phase == previous.Phase && active.CrownDeedState.Players.SequenceEqual(previous.Players),
             "Returning abandoned the active confirmation, replayed its entrance or lost the interrupted turn.");
 
-        var immediateClose = new BoardSession(); immediateClose.ShowCrownDeed(Next());
+        var immediateClose = new BoardSession(); immediateClose.ShowCrownDeed(Next()); Act(immediateClose, "mp-start-game");
         opened = Next(); Require(immediateClose.ActivateButton("mp-exit", opened) &&
                 immediateClose.ActivateButton("mp-exit-cancel", opened.AddMilliseconds(1)) &&
                 !immediateClose.CrownDeedDrawerOpen && immediateClose.CrownDeedDrawerOpenedAt is null,
@@ -217,7 +211,7 @@ internal static class CrownDeedDrawerRegression
     }
     private static void Act(BoardSession board, string id)
     {
-        if (id is "mp-save-exit" or "mp-exit-game") Next(350);
+        if (board.CrownDeedDrawerOpen && id is "mp-save-exit" or "mp-exit-game") Next(350);
         Require(board.ActivateButton(id, Next()), $"Drawer fixture rejected {id} during {board.CrownDeedState.Phase}.");
     }
     private static BoardButton Button(BoardSession board, string id) => board.Buttons.Single(button => button.Id == id);

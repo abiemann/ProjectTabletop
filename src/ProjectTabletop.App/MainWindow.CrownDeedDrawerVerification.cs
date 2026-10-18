@@ -34,15 +34,25 @@ public sealed partial class MainWindow
         Require(scene.GetCrownDeedEntranceFrame(now) is { Active: true, ElapsedMilliseconds: 0 },
             "The drawer fixture did not start its entrance after artwork loading.");
         now += TimeSpan.FromMilliseconds(4975); scene.TickCrownDeed(now);
-        await Capture("landing-closed");
-        Require(!scene.CrownDeedDrawerOpen && Button("mp-exit").Label == "^", "The landing drawer lacks its closed upward caret.");
+        await Capture("landing-direct-exit");
+        CheckLanding();
         CheckAcquisition();
-        var landing = scene.CrownDeedState;
+        Act("mp-exit-game");
+        Require(scene.CurrentBoardScreen == BoardScreen.Menu && !scene.CrownDeedDrawerOpen &&
+                !scene.TryGetCrownDeedSaveRequest(out _, out _),
+            "The landing Exit Game did not return directly to the menu without saving.");
+        scene.ShowCrownDeed();
+        now += TimeSpan.FromMilliseconds(4975); scene.TickCrownDeed(now);
+        Act("mp-start-game");
+        await Capture("setup-closed");
+        Require(!scene.CrownDeedDrawerOpen && Button("mp-exit").Label == "^", "The setup drawer lacks its closed upward caret.");
+        CheckAcquisition();
+        var setup = scene.CrownDeedState;
         Act("mp-exit"); var openedAt = now;
         await Capture("drawer-start");
         CheckDrawerProgress(0);
-        Require(ReferenceEquals(landing, scene.CrownDeedState) && !Button("mp-exit-game").Enabled,
-            "Opening the landing drawer mutated rules state or enabled its moving action.");
+        Require(ReferenceEquals(setup, scene.CrownDeedState) && !Button("mp-exit-game").Enabled,
+            "Opening the setup drawer mutated rules state or enabled its moving action.");
         now = openedAt.AddMilliseconds(150); await Capture("drawer-halfway"); CheckDrawerProgress(.5);
         Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null, ExpectedScene: null } &&
                 !scene.ActivateCrownDeedButton("mp-exit-game"),
@@ -50,12 +60,12 @@ public sealed partial class MainWindow
         now = openedAt.AddMilliseconds(299);
         Require(!scene.ActivateCrownDeedButton("mp-exit-game"), "Exit Game enabled before the 300 ms slide finished.");
         now = openedAt.AddMilliseconds(300); scene.TickCrownDeed(now);
-        await Capture("landing-drawer-open"); CheckDrawerProgress(1); CheckOpen(active: false);
+        await Capture("setup-drawer-open"); CheckDrawerProgress(1); CheckOpen(active: false);
         CheckAcquisition();
         Act("mp-exit-cancel");
-        Require(!scene.CrownDeedDrawerOpen && ReferenceEquals(landing, scene.CrownDeedState),
+        Require(!scene.CrownDeedDrawerOpen && ReferenceEquals(setup, scene.CrownDeedState),
             "The downward caret failed to close the inactive drawer without changing the game.");
-        Act("mp-start-game"); Act("mp-ai-minus"); Act("mp-human-plus"); Act("mp-start");
+        Act("mp-ai-minus"); Act("mp-human-plus"); Act("mp-start");
         var preserved = scene.CrownDeedState;
         string preservedSave = scene.ExportCrownDeedSave();
         await Capture("active-game-closed");
@@ -83,6 +93,8 @@ public sealed partial class MainWindow
             "A successful retry did not navigate after persistence completed.");
         scene.ShowCrownDeed();
         now += TimeSpan.FromMilliseconds(4975); scene.TickCrownDeed(now);
+        await Capture("landing-direct-exit-with-resume");
+        CheckLanding();
         Act("mp-resume");
         Require(!scene.CrownDeedDrawerOpen && scene.ExportCrownDeedSave() == preservedSave,
             "Resume lost the saved turn or replayed the old drawer.");
@@ -91,6 +103,7 @@ public sealed partial class MainWindow
                 Volatile.Read(ref _boardSetupActive), _scene.CurrentBoardScreen, _scene.CrownDeedState.Revision),
             "The isolated drawer check changed the user's hardware or live game.");
         return new { passed = true, nativeWidth = width, nativeHeight = height, durationMilliseconds = 300,
+            smallerDirectLandingExit = true, savedResumeFitsBelowExit = true,
             slideReferenceSuppression = true, modalTargets = true, bothConditionalActionsAndCaretsAcquired = true,
             vectorChevronTemplates = true, intactChevronRejectsLargePillObstruction = true,
             twoFreshFramesAndSevenPercent = true, busySaveAndFailureRecovery = true, successfulRetryAndResume = true,
@@ -102,6 +115,21 @@ public sealed partial class MainWindow
             Require(scene.ActivateCrownDeedButton(id), $"Drawer fixture rejected {id} during {scene.CrownDeedState.Phase}.");
         }
         BoardButton Button(string id) => scene.CurrentBoardButtons.Single(button => button.Id == id);
+        void CheckLanding()
+        {
+            var start = Button("mp-start-game");
+            var exit = Button("mp-exit-game");
+            Require(scene.CrownDeedState.Phase == CrownDeedPhase.Landing && !scene.CrownDeedDrawerOpen &&
+                    scene.CurrentBoardButtons.All(button => button.Id != "mp-exit") &&
+                    exit is { Enabled: true, Label: "Exit Game" } &&
+                    exit.Bounds.Width < start.Bounds.Width && exit.Bounds.Height < start.Bounds.Height &&
+                    exit.Bounds.Y > start.Bounds.Y + start.Bounds.Height &&
+                    Math.Abs(exit.Bounds.X + exit.Bounds.Width / 2 - start.Bounds.X - start.Bounds.Width / 2) < 1e-8,
+                "The landing Exit Game is not a smaller centered button below Start Game.");
+            if (scene.CrownDeedState.CanResume)
+                Require(Button("mp-resume").Bounds.Y > exit.Bounds.Y + exit.Bounds.Height,
+                    "The saved-game Resume button overlaps the direct landing Exit Game.");
+        }
         void CheckOpen(bool active) => Require(scene.CrownDeedDrawerOpen &&
             scene.CurrentBoardButtons.Count == 2 && Button("mp-exit-cancel").Label == "v" &&
             Button(active ? "mp-save-exit" : "mp-exit-game").Label == (active ? "Save and Exit" : "Exit Game") &&

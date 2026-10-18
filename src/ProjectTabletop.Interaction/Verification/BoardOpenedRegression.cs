@@ -72,12 +72,11 @@ internal static class BoardOpenedRegression
                     navigation.Gesture == (fingers ? BoardSelectionGesture.IndexSeparation : BoardSelectionGesture.Pinch) &&
                     opened.SequenceEqual([BoardScreen.CrownDeed]),
                 "An accepted menu gesture omitted or duplicated its CrownDeed launch notification.");
-            Require(board.ActivateButton("mp-exit", Time(600)) && opened.Count == 1,
-                "Opening the inactive drawer was treated as a new board.");
-            board.TickCrownDeed(Time(900));
-            Require(board.ActivateButton("mp-exit-game", Time(910)) &&
+            Require(!board.ActivateButton("mp-exit", Time(600)) && opened.Count == 1,
+                "The removed landing drawer still accepted its old action or raised a board launch.");
+            Require(board.ActivateButton("mp-exit-game", Time(610)) &&
                     opened.SequenceEqual([BoardScreen.CrownDeed, BoardScreen.Menu]),
-                "Exit Game did not notify the actual navigation to Menu once.");
+                "Direct Exit Game did not notify the actual navigation to Menu once.");
         }
     }
 

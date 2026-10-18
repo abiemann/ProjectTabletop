@@ -40,7 +40,7 @@ internal static class BoardInteractionRegression
                 navigation.ButtonId == button.Id && session.Screen == button.Destination, "Menu pinch opened the wrong application.");
             Require(session.Title == button.Label, "The application title is incorrect.");
             Require(session.Buttons.Count >= 1 && (session.Buttons[0].Destination == BoardScreen.Menu ||
-                button.Destination == BoardScreen.CrownDeed && session.Buttons[0].Id == "mp-exit" ||
+                button.Destination == BoardScreen.CrownDeed && session.Buttons.Any(item => item.Id == "mp-exit-game") ||
                 button.Destination == BoardScreen.Football && session.Buttons[0].Id == "football-exit" ||
                 button.Destination == BoardScreen.Globe && session.Buttons[0].Id == "globe-drawer-open" ||
                 button.Destination == BoardScreen.PhotoCopy && session.Buttons[0].Id == "photo-drawer-open" ||
@@ -48,12 +48,9 @@ internal static class BoardInteractionRegression
                 "An application lacks a back-to-menu target.");
             if (button.Destination == BoardScreen.CrownDeed)
             {
-                Require(Update(session, time + 20, Over(session.Buttons[0], ++eventId, time + 20)) is
-                    { Current: BoardScreen.CrownDeed, ButtonId: "mp-exit" } && session.CrownDeedDrawerOpen,
-                    "The CrownDeed caret did not open its drawer.");
                 var exit = session.Buttons.Single(item => item.Id == "mp-exit-game");
-                Require(Update(session, time + 321, Over(exit, ++eventId, time + 321))?.Current == BoardScreen.Menu,
-                    "The drawer's Exit Game target did not return to the launcher.");
+                Require(Update(session, time + 20, Over(exit, ++eventId, time + 20))?.Current == BoardScreen.Menu,
+                    "The opening table's Exit Game target did not return directly to the launcher.");
             }
             else if (button.Destination == BoardScreen.Globe)
             {

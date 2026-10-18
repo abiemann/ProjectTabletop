@@ -29,7 +29,13 @@ internal static class CrownDeedBoardRegression
             Require(board.Screen == BoardScreen.CrownDeed && board.Title == "Crown & Deed" &&
                 board.CrownDeedState.Phase == CrownDeedPhase.Landing,
                 "The replacement menu entry did not open the CrownDeed landing board.");
-            Require(board.Buttons.Any(button => button.Label == "Start Game"), "The landing board lacks Start Game.");
+            var startGame = Button(board, "mp-start-game");
+            var exitGame = Button(board, "mp-exit-game");
+            Require(startGame.Label == "Start Game" && exitGame is { Label: "Exit Game", Enabled: true } &&
+                exitGame.Bounds.Y > startGame.Bounds.Y + startGame.Bounds.Height &&
+                exitGame.Bounds.Width < startGame.Bounds.Width && exitGame.Bounds.Height < startGame.Bounds.Height &&
+                board.Buttons.All(button => button.Id != "mp-exit") && !board.CrownDeedDrawerOpen,
+                "The landing board lacks a smaller direct Exit Game below Start Game or still hides Exit in a drawer.");
             Targets(board);
             Separate(board, "mp-start-game");
             Require(board.CrownDeedState.Phase == CrownDeedPhase.Setup, "The grouped-to-separated finger gesture did not open setup.");
@@ -169,6 +175,12 @@ internal static class CrownDeedBoardRegression
         loaded.ShowCrownDeed(Next());
         Require(loaded.CrownDeedState.Phase == CrownDeedPhase.Landing && loaded.CrownDeedState.CanResume,
             "Loading a disk save started gameplay before the user selected Resume.");
+        Targets(loaded);
+        Pinch(loaded, "mp-exit-game");
+        Require(loaded.Screen == BoardScreen.Menu && !loaded.CrownDeedSaveRequested,
+            "Leaving the landing table with a saved game requested another save or failed to exit directly.");
+        loaded.ShowCrownDeed(Next());
+        Require(loaded.CrownDeedState.CanResume, "Direct landing exit discarded the staged saved game.");
         Pinch(loaded, "mp-resume");
         Require(loaded.CrownDeedState.Phase == preserved.Phase && loaded.CrownDeedState.Players.SequenceEqual(preserved.Players),
             "A fresh board did not resume the persisted game.");
@@ -176,13 +188,10 @@ internal static class CrownDeedBoardRegression
         Require(loaded.Screen == BoardScreen.CrownDeed && loaded.CrownDeedSaveRequested &&
             loaded.CompleteCrownDeedSave(loaded.CrownDeedSaveRequestId, success: true, Next()) && loaded.Screen == BoardScreen.Menu,
             "The resumed game's Save and Exit route did not retain the game until its save completed.");
-        var landing = new BoardSession(); landing.ShowCrownDeed(Next()); Pinch(landing, "mp-exit");
-        Require(landing.Screen == BoardScreen.CrownDeed && landing.CrownDeedDrawerOpen &&
-            Button(landing, "mp-exit-game").Label == "Exit Game" && !landing.CrownDeedSaveRequested,
-            "The unstarted board did not open an Exit Game drawer without a save request.");
+        var landing = new BoardSession(); landing.ShowCrownDeed(Next());
         Pinch(landing, "mp-exit-game");
-        Require(landing.Screen == BoardScreen.Menu && !landing.CrownDeedDrawerOpen,
-            "Exit Game from an unstarted board failed to close the drawer and return to the launcher.");
+        Require(landing.Screen == BoardScreen.Menu && !landing.CrownDeedDrawerOpen && !landing.CrownDeedSaveRequested,
+            "Direct Exit Game from the unstarted table failed to return to the launcher without saving.");
     }
 
     private static void CheckAiTurnInputBarrier()
@@ -248,14 +257,14 @@ internal static class CrownDeedBoardRegression
     }
     private static void Pinch(BoardSession board, string id)
     {
-        if (id is "mp-save-exit" or "mp-exit-game") Next(350);
+        if (board.CrownDeedDrawerOpen && id is "mp-save-exit" or "mp-exit-game") Next(350);
         var time = Next(); var button = Button(board, id);
         Require(board.Update([Sample(button, ++_eventId, time)], time, time)?.ButtonId == id,
             $"Shared pinch rejected {id} during {board.CrownDeedState.Phase}.");
     }
     private static void Separate(BoardSession board, string id)
     {
-        if (id is "mp-save-exit" or "mp-exit-game") Next(350);
+        if (board.CrownDeedDrawerOpen && id is "mp-save-exit" or "mp-exit-game") Next(350);
         var aim = Aim(Button(board, id));
         var hand = new BoardHandSample(double.NaN, double.NaN, DateTimeOffset.MinValue, 0)
             { TrackingId = 902, FourFingersExtended = true, FingerAim = aim, FingersTogether = true };

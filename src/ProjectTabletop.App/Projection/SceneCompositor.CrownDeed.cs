@@ -359,7 +359,7 @@ public sealed partial class SceneCompositor
             CrownDeedText(ds, "WELCOME TO OVAL BOULEVARD", new Rect(236, 354, 528, 21), 14, CrownDeedGold);
             CrownDeedText(ds, "CROWN & DEED", new Rect(212, 382, 576, 68), 53, CrownDeedIvory, "Georgia", true);
             DrawCrownDeedRule(ds, 458, 135);
-            CrownDeedText(ds, "Build your fortune. Shape the city.", new Rect(250, 679, 500, 31), 19, CrownDeedIvory);
+            CrownDeedText(ds, "Build your fortune. Shape the city.", new Rect(250, game.CanResume ? 735 : 679, 500, 31), 19, CrownDeedIvory);
             return;
         }
         CrownDeedText(ds, "CROWN & DEED", new Rect(280, 232, 440, 42),
@@ -532,7 +532,8 @@ public sealed partial class SceneCompositor
         var b = button.Bounds;
         var rect = new Rect(b.X * BoardSurfaceSize, b.Y * BoardSurfaceSize, b.Width * BoardSurfaceSize, b.Height * BoardSurfaceSize);
         bool caret = IsCrownDeedDrawerHandle(button);
-        bool primary = button.Id is "mp-roll" or "mp-start-game" or "mp-start" or "mp-buy" or "mp-end-turn" or "mp-save-exit" or "mp-exit-game" or "mp-new-game";
+        bool copper = button.Id == "mp-exit-game" && _boardSession.CrownDeedState.Phase == CrownDeedPhase.Landing;
+        bool primary = !copper && button.Id is "mp-roll" or "mp-start-game" or "mp-start" or "mp-buy" or "mp-end-turn" or "mp-save-exit" or "mp-exit-game" or "mp-new-game";
         bool danger = button.Id is "mp-bankrupt" or "mp-exit-without-saving";
         bool enabled = button.Enabled;
         hovered &= enabled;
@@ -544,11 +545,17 @@ public sealed partial class SceneCompositor
             top = ThemeColor(241, 234, 211);
             bottom = ThemeColor(211, 205, 183);
         }
+        else if (copper && enabled)
+        {
+            top = ThemeColor(173, 112, 72);
+            bottom = ThemeColor(125, 72, 45);
+        }
         ds.FillRoundedRectangle(new Rect(rect.X, rect.Y + 4, rect.Width, rect.Height), radius, radius, ThemeColor(0, 12, 5, 140));
         using var surface = new CanvasLinearGradientBrush(ds.Device, top, bottom)
         { StartPoint = new((float)rect.X, (float)rect.Y), EndPoint = new((float)rect.X, (float)rect.Bottom) };
         ds.FillRoundedRectangle(rect, radius, radius, surface);
-        ds.DrawRoundedRectangle(rect, radius, radius, hovered ? CrownDeedIvory : enabled ? CrownDeedGold : ThemeColor(100, 117, 88), hovered ? 2.6f : 1.2f);
+        Color rim = copper ? ThemeColor(202, 150, 103) : CrownDeedGold;
+        ds.DrawRoundedRectangle(rect, radius, radius, hovered ? CrownDeedIvory : enabled ? rim : ThemeColor(100, 117, 88), hovered ? 2.6f : 1.2f);
         ds.DrawLine((float)rect.X + radius, (float)rect.Y + 2, (float)rect.Right - radius, (float)rect.Y + 2, ThemeColor(255, 245, 207, enabled ? (byte)90 : (byte)20), .7f);
         if (hovered)
             ds.DrawRoundedRectangle(new Rect(rect.X - 3, rect.Y - 3, rect.Width + 6, rect.Height + 6), radius + 3, radius + 3, ThemeColor(226, 198, 133, 50), 3);

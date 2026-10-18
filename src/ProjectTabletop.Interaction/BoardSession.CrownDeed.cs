@@ -99,7 +99,8 @@ public sealed partial class BoardSession
     {
         if (now < _crownDeedPresentationObservedAt) return false;
         if (_crownDeedPresentationUntil is not null && !IsCrownDeedNavigation(button.Id)) return false;
-        if (button.Id is "mp-save-exit" or "mp-exit-game" && !_crownDeedDrawerOpeningReady) return false;
+        bool landingExit = button.Id == "mp-exit-game" && CrownDeedState.Phase == CrownDeedPhase.Landing;
+        if (button.Id is "mp-save-exit" or "mp-exit-game" && !landingExit && !_crownDeedDrawerOpeningReady) return false;
         if (button.Id == "mp-exit" && !CrownDeedState.IsActiveGame)
         {
             _crownDeedInactiveDrawerOpen = true;
@@ -116,7 +117,7 @@ public sealed partial class BoardSession
             return true;
         }
         bool immediateExit = button.Id == "mp-exit-game" && !CrownDeedState.IsActiveGame;
-        if (button.Id == "mp-exit-game" && (!CrownDeedDrawerOpen || !immediateExit)) return false;
+        if (button.Id == "mp-exit-game" && (!immediateExit || (!landingExit && !CrownDeedDrawerOpen))) return false;
         long previousRoll = _lastRelayedCrownDeedRollSequence;
         long previousDevelopment = _lastRelayedCrownDeedDevelopmentSequence;
         if (!_crownDeed.HandleAction(immediateExit ? "mp-exit" : button.Id, now)) return false;
@@ -213,13 +214,14 @@ public sealed partial class BoardSession
                 BoardScreen.CrownDeed, enabled && _crownDeedDrawerOpeningReady));
             return result.AsReadOnly();
         }
-        Add("mp-exit", "^", game.Phase == CrownDeedPhase.Landing
-            ? new(.456, .752, .088, .06) : new(.456, .160, .088, .06));
+        if (game.Phase != CrownDeedPhase.Landing) Add("mp-exit", "^", new(.456, .160, .088, .06));
         switch (game.Phase)
         {
             case CrownDeedPhase.Landing:
                 Add("mp-start-game", "Start Game", new(.335, .475, .33, .078));
-                if (game.CanResume) Add("mp-resume", "Resume saved game", new(.335, .573, .33, .064));
+                result.Add(new("mp-exit-game", "Exit Game", new(.38, .573, .24, .054),
+                    BoardScreen.CrownDeed, game.AvailableActions.Contains("mp-exit")));
+                if (game.CanResume) Add("mp-resume", "Resume saved game", new(.335, .647, .33, .064));
                 break;
             case CrownDeedPhase.Setup:
                 Add("mp-human-minus", "-", new(.36, .391, .07, .056));
