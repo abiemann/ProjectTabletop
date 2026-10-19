@@ -1,4 +1,4 @@
-# Install Project Tabletop 1.3
+# Install Project Tabletop 1.3.1
 
 ## Requirements
 
@@ -11,8 +11,8 @@ The setup includes .NET, the Windows App SDK, the native Visual C++ runtime, art
 ## Install and start
 
 1. Open the repository's [latest release](https://github.com/abiemann/ProjectTabletop/releases/latest).
-2. Download `ProjectTabletop-1.3.0-win-x64-setup.exe`. The automatically generated **Source code** archives are for developers, not the Windows setup.
-3. Optionally compare `Get-FileHash .\ProjectTabletop-1.3.0-win-x64-setup.exe -Algorithm SHA256` with `SHA256SUMS.txt` from the same release.
+2. Download `ProjectTabletop-1.3.1-win-x64-setup.exe`. The automatically generated **Source code** archives are for developers, not the Windows setup.
+3. Optionally compare `Get-FileHash .\ProjectTabletop-1.3.1-win-x64-setup.exe -Algorithm SHA256` with `SHA256SUMS.txt` from the same release.
 4. Run setup. It installs for your Windows account under `%LOCALAPPDATA%\Programs\ProjectTabletop` and adds **Project Tabletop** to Start. An optional desktop shortcut is available.
 5. Launch **Project Tabletop**. The setup is unsigned; Windows may show an unknown-publisher or reputation warning. The checksums identify the release files but are not a signing certificate.
 
@@ -22,20 +22,20 @@ Under **Camera Input**, **Frame rate** offers **30, 60 and 100 fps**, with a sep
 
 During board setup, **Estimated camera latency** appears on the laptop, using the alignment dots and subtracting **Projector latency (ms)**. Enter your projector's latency there; the default is 17 ms. This estimates camera exposure, buffering and delivery together. It is not shown on the projected board.
 
-Blackjack, Crown & Deed, Globe, Water Garden and other available laptop previews can be explored without opening projector output. Read the [README](https://github.com/abiemann/ProjectTabletop/blob/v1.3.0/README.md) for each board's controls and capture behavior. Turn **PROJECTION PREVIEW** off on the laptop to reduce duplicate rendering while keeping projector output and tracking active.
+Blackjack, Crown & Deed, Globe, Water Garden and other available laptop previews can be explored without opening projector output. Read the [README](https://github.com/abiemann/ProjectTabletop/blob/v1.3.1/README.md) for each board's controls and capture behavior. Turn **PROJECTION PREVIEW** off on the laptop to reduce duplicate rendering while keeping projector output and tracking active.
 
-**Automatic camera picture profiles** starts enabled. It saves compatible camera brightness/contrast values as Default and uses a lower-contrast Dark scene profile for Globe, restoring Default for other boards and calibration. It does not change shutter, ISO, white balance or frame rate. Unsupported controls are left alone. After making manual camera adjustments, use **Use current settings as Default**; see [automatic profiles](https://github.com/abiemann/ProjectTabletop/blob/v1.3.0/README.md#automatic-camera-picture-profiles).
+**Automatic camera picture profiles** starts enabled. It saves compatible camera brightness/contrast values as Default and uses a lower-contrast Dark scene profile for Globe, restoring Default for other boards and calibration. It does not change shutter, ISO, white balance or frame rate. Unsupported controls are left alone. After making manual camera adjustments, use **Use current settings as Default**; see [automatic profiles](https://github.com/abiemann/ProjectTabletop/blob/v1.3.1/README.md#automatic-camera-picture-profiles).
 
 ## Guided marker setup
 
 Water Garden, Paint and Football share guided double-bar training in **SETUP → BOARD CONTROL → Marker setup**. Use two equal parallel black rectangles with aligned ends and a clear gap on a light backing, facing the webcam close to the board. Choose the Water Garden / Paint marker or a Football player, place one complete marker in the neutral target, follow five targets over the actual board, slide between the two movement rings and back, lift it away, then choose **SAVE MARKER**. Movement must remain tracked across the route in both directions; failed checks show retry guidance before saving becomes available. **Cancel** preserves the old profile; **Recheck saved marker** tests existing geometry.
 
-Profiles are separate for each camera and controller; Paint reuses Water Garden's profile. On first use without a saved marker, these boards open the trainer after camera and calibration are ready. Football skips finger-input players and trains the second marker only for two-human play. Cancelling dismisses setup for the current visit; saving stops subsequent automatic prompts. Water Garden's navigation arrow remains usable while its marker is present; pond actions stay protected. See [marker setup](https://github.com/abiemann/ProjectTabletop/blob/v1.3.0/README.md#marker-setup) for dimensions, lighting guidance and validation limits. The expanded Football trainer passed a self-guided physical-tabletop check; Water Garden's added movement step still needs its own physical acceptance.
+Profiles are separate for each camera and controller; Paint reuses Water Garden's profile. On first use without a saved marker, these boards open the trainer after camera and calibration are ready. Football skips finger-input players and trains the second marker only for two-human play. Cancelling dismisses setup for the current visit; saving stops subsequent automatic prompts. Water Garden's navigation arrow remains usable while its marker is present; pond actions stay protected. See [marker setup](https://github.com/abiemann/ProjectTabletop/blob/v1.3.1/README.md#marker-setup) for dimensions, lighting guidance and validation limits. The expanded Football trainer passed a self-guided physical-tabletop check; Water Garden's added movement step still needs its own physical acceptance.
 
 ## Football quick start
 
 1. Complete board setup, then open **Football** from the first menu page or the laptop. In **Football game**, choose **One player against AI** or **Two human players**.
-2. Choose **Double-bar marker** for each human player and complete the projected trainer, saving player 1's marker and player 2's in two-human mode. The crowd stays silent during training and starts after the last required marker is saved. Alternatively, choose **Index fingertip** and point with a palm-down hand. See [Football](https://github.com/abiemann/ProjectTabletop/blob/v1.3.0/README.md#football) for controller settings and marker details.
+2. Choose **Double-bar marker** for each human player and complete the projected trainer, saving player 1's marker and player 2's in two-human mode. The crowd stays silent during training and starts after the last required marker is saved. Alternatively, choose **Index fingertip** and point with a palm-down hand. See [Football](https://github.com/abiemann/ProjectTabletop/blob/v1.3.1/README.md#football) for controller settings and marker details.
 3. Keep player 1's marker or finger in the left half and player 2's in the right. The cars follow in the preview, but play begins only after **PLAY**. Cover its lettering for one second, then uncover it; laptop clicks also work. Fresh player input starts the countdown. First to five goals wins.
 4. Controls hide during play. To reach **RESET** or **EXIT**, remove a human player's marker or hand until the match pauses and the controls return. **RESET** starts a fresh match at 0–0; returning the marker without resetting resumes the existing match. After a win, **PLAY** returns once the confetti settles and the buttons finish sliding into place.
 5. For whistles, separate goal cheers, chants and continuous stadium ambience, open projector output and turn on **Enable Audio on Display Device** under **Projection Output**. This uses the selected display's matching Windows audio output; the sounds are included for offline play.

@@ -1,10 +1,12 @@
 # ProjectTabletop
 
-## Version 1.3 release scope
+## Version 1.3.1 release scope
 
 Version 1.3 includes Stryker's Run, the guided double-bar trainer, marker-only Paint with RESET/SAVE, Football multiball, Water Garden rendering/audio improvements and the NASA Globe. Globe now has ZOOM/PITCH rails, a toggled CLOUDS/NO CLOUDS/NIGHT model row and SAVE to local `Pictures\Globe`. Reaching across MODEL or SAVE to disturbed model choices cancels those lower holds; both model selections and the absence of accidental saves passed the latest physical check. Paint and Photo Copy also save to their own local Pictures folders.
 
-The current source passed all 668 offline tests with no skips. The final Globe change passed 80 focused checks and seven rendered-control checks before live acceptance. The release pipeline performs its own build and installed-app smoke checks before publication; those results must be checked separately. See [1.3 release notes](docs/releases/1.3.0.md), [installation](docs/INSTALL.md), and the [README](README.md) for the current behavior and remaining physical-validation limits.
+Version 1.3.1 adds corrections for Globe caption-hold recovery, Football markers on dim turf and goal markings, false search spotlights from disabled controls during Roulette animation, Blackjack EXIT when reaching over its wagers, and Photo Copy's white-light edge fringe being mistaken for object movement. The temporary Blackjack guaranteed-win recording code has been removed.
+
+The release source passed all 688 offline tests with no skips. Photo Copy also passed eight focused offline groups, its full object regression console suite, four native application checks, and Debug/Release builds without warnings or errors. Recorded replay retained all 31 illuminated-card frames and rejected all 22 removed-card frames. The user confirmed steady lighting and release after removing the card in the corrected live build. Football's updated live tracking was reported approximately 99% reliable, and Blackjack EXIT returned to the menu without changing the wager. The release pipeline performs its own full regression run and installed-app smoke checks before publication; those results must be checked separately. See [1.3.1 release notes](docs/releases/1.3.1.md), [1.3.0 release notes](docs/releases/1.3.0.md), [installation](docs/INSTALL.md), and the [README](README.md) for current behavior and remaining physical-validation limits.
 
 ## Development record before 1.3
 

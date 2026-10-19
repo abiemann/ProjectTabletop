@@ -42,6 +42,7 @@ internal static class PhotoObjectTargetRegression
         PhotoSingleComponentBoxRegression.Run();
         PhotoAcquisitionNoiseRegression.Run();
         PhotoConnectedPaleSurfaceRegression.Run();
+        PhotoObjectIlluminatedFringeRegression.Run();
         PhotoObjectPerforatedShapeRegression.Run();
         Console.WriteLine("Photo object target regression: grey dark/light/color acquisition, holes and immutable mask, " +
             "current illuminated pixels, timed capture after shutter departure, stationary/moved/removed/occluded checks, ambiguous/edge/invalid rejection, " +

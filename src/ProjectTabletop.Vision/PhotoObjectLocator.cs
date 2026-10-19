@@ -213,15 +213,17 @@ public static partial class PhotoObjectLocator
             return PhotoObjectTargetState.Occluded;
         }
 
-        using Mat outside = new(), innerMargin = new(), eroded = new();
+        using Mat outside = new(), innerMargin = new(), edgeFringe = new(), eroded = new();
         using Mat outerKernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(41, 41));
         using Mat marginKernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(17, 17));
+        using Mat fringeKernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(5, 5));
         using Mat erodeKernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(11, 11));
         Cv2.Dilate(mask, outside, outerKernel);
         Cv2.Dilate(mask, innerMargin, marginKernel);
+        Cv2.Dilate(mask, edgeFringe, fringeKernel);
         Cv2.Erode(evidence, eroded, erodeKernel);
         byte[] outer = Bytes(outside, 1), margin = Bytes(innerMargin, 1), inside = Bytes(eroded, 1),
-            evidencePixels = Bytes(evidence, 1);
+            fringe = Bytes(edgeFringe, 1), evidencePixels = Bytes(evidence, 1);
         var samples = new List<BackgroundSample>();
         int x0 = Math.Max(Capture.Left, target.Left - 23), x1 = Math.Min(Capture.Right, target.Left + target.Width + 23);
         int y0 = Math.Max(Capture.Top, target.Top - 23), y1 = Math.Min(Capture.Bottom, target.Top + target.Height + 23);
@@ -251,7 +253,10 @@ public static partial class PhotoObjectLocator
                     body++; if (foreground) bodySeen++;
                     if (inside[index] == 0) { edge++; if (foreground) edgeSeen++; }
                 }
-                else if (margin[index] != 0)
+                // White illumination can strengthen a camera/shadow fringe just
+                // outside the acquired edge. Ignore only that two-pixel band
+                // for spill; the original body, edge and capture alpha stay fixed.
+                else if (margin[index] != 0 && fringe[index] == 0)
                 {
                     spill++; if (foreground) spillSeen++;
                 }

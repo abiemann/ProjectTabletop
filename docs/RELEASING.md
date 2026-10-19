@@ -17,7 +17,7 @@ Passing runs upload the setup, `SHA256SUMS.txt` and a payload manifest as an Act
 1. Update `Directory.Build.props` with the intended three-part version. Update README, installation instructions, `NEW_PROJECT.md`, affected design/task documentation, and `docs/releases/<version>.md` against the final implementation. Separate verified results from remaining physical acceptance.
 2. If dependencies change, regenerate and review the solution's lock files with `dotnet restore ProjectTabletop.sln -p:Platform=x64 --use-lock-file --force-evaluate`. Review new package/native license terms and any additions to `packaging/licenses`.
 3. Validate and commit all source and documentation before building release artifacts or creating a tag. Push the commit to `main` and wait for Windows CI to pass, including the installer smoke test.
-4. Tag that exact source commit, for example `git tag -a v1.3.0 -m "Project Tabletop 1.3.0"`, then `git push origin v1.3.0`.
+4. Tag that exact source commit, for example `git tag -a v1.3.1 -m "Project Tabletop 1.3.1"`, then `git push origin v1.3.1`.
 5. Wait for the tag workflow and inspect the resulting release assets. Download the setup from GitHub and check its SHA-256 against the attached checksum file. For a private repository, only authorized accounts can access the release.
 
 The workflow publishes with the built-in `GITHUB_TOKEN`, whose write permission is limited to the release job. Pull-request code has read-only repository permission. It does not change repository visibility. No signing identity is configured; installers are unsigned until a separate certificate/signing service is deliberately added.
@@ -32,9 +32,9 @@ Use stable release SDK versions only. Keep "allowPrerelease" false in global.jso
 dotnet restore ProjectTabletop.sln -p:Platform=x64 --locked-mode
 dotnet build ProjectTabletop.sln -c Release -p:Platform=x64 --no-restore
 dotnet test tests/ProjectTabletop.Tests/ProjectTabletop.Tests.csproj -c Release --no-build --no-restore
-./scripts/Publish-Windows.ps1 -StagingDirectory artifacts/staging -Version 1.3.0
-./scripts/Build-Installer.ps1 -StagingDirectory artifacts/staging -Version 1.3.0 -OutputDirectory artifacts/release
-./scripts/Test-InstalledApp.ps1 -SetupPath artifacts/release/ProjectTabletop-1.3.0-win-x64-setup.exe -Version 1.3.0 -WorkDirectory artifacts/install-smoke
+./scripts/Publish-Windows.ps1 -StagingDirectory artifacts/staging -Version 1.3.1
+./scripts/Build-Installer.ps1 -StagingDirectory artifacts/staging -Version 1.3.1 -OutputDirectory artifacts/release
+./scripts/Test-InstalledApp.ps1 -SetupPath artifacts/release/ProjectTabletop-1.3.1-win-x64-setup.exe -Version 1.3.1 -WorkDirectory artifacts/install-smoke
 ```
 
 The installer smoke test creates and removes the per-user installation registration and shortcuts. Prefer a disposable Windows test machine rather than a PC with an existing installed copy.
