@@ -246,8 +246,21 @@ public static partial class BlackTipDetector
                 // mask leaves an anchor. Try one stricter core over the same value
                 // image; never replace an existing physical strip or ambiguous pair.
                 if (strips.Length == 0 && cores.Length == 0)
+                {
                     cores = ExtractStrips(image, profile, expectedArea, preferred, projection, vetoes,
                         image.DeepCoreAllowance(profile));
+                    // A profile learned under bright projection can leave even the
+                    // half-value mask connected to dim turf. Two bounded lower cores
+                    // separate the physical ink without widening size, spacing,
+                    // gap contrast or artwork checks. Keep every earlier valid
+                    // strip, including ambiguous markers, ahead of this fallback.
+                    if (cores.Length == 0)
+                        cores = ExtractStrips(image, profile, expectedArea, preferred, projection, vetoes,
+                            image.DeepCoreAllowance(profile, retainedValue: .30));
+                    if (cores.Length == 0)
+                        cores = ExtractStrips(image, profile, expectedArea, preferred, projection, vetoes,
+                            image.DeepCoreAllowance(profile, retainedValue: .20));
+                }
                 coreAnchors = cores;
                 var corePairs = FindPairs(cores, profile.SpacingRatio);
                 corePairs.RemoveAll(pair => !image.HasSeparatingGap(cores[pair.First], cores[pair.Second], profile) ||
@@ -726,7 +739,8 @@ public static partial class BlackTipDetector
 
         public double DarkCoreAllowance(BlackTipProfile profile) => -Math.Min(.10, MaximumValue(profile, 0) * .28);
 
-        public double DeepCoreAllowance(BlackTipProfile profile) => -MaximumValue(profile, 0) * .50;
+        public double DeepCoreAllowance(BlackTipProfile profile, double retainedValue = .50) =>
+            -MaximumValue(profile, 0) * (1 - retainedValue);
 
         public bool HasSeparatingGap(MarkerTipObservation first, MarkerTipObservation second, BlackTipProfile profile)
         {

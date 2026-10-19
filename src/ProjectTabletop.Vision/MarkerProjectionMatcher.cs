@@ -79,11 +79,16 @@ internal sealed class MarkerProjectionMatcher
             }
 
             Span<int> locations = stackalloc int[Grid * Grid];
+            Span<byte> stripSamples = stackalloc byte[Grid * Grid];
             Span<double> camera = stackalloc double[Grid * Grid];
+            Span<double> cameraStripSums = stackalloc double[4];
+            Span<int> cameraStripCounts = stackalloc int[4];
+            cameraStripSums.Clear();
+            cameraStripCounts.Clear();
             double sum = 0, sumSquares = 0;
             // A neighbouring physical strip must not hide that this strip was projected.
             // Compare its narrow oriented band and immediate flanks independently.
-            double barX = 0, barY = 0, axisX = 0, axisY = 0, halfLength = 0, halfWidth = 0;
+            double barX = 0, barY = 0, axisX = 0, axisY = 0, halfLength = 0, halfWidth = 0, inkHalfWidth = 0;
             if (bar is not null)
             {
                 barX = ((bar.End1.X + bar.End2.X) * .5 - originX) / scaleX;
@@ -98,29 +103,50 @@ internal sealed class MarkerProjectionMatcher
                 // Otherwise a wide strip can contribute only uniform ink samples and an
                 // exact projected copy incorrectly survives the zero-contrast comparison.
                 double flank = Math.Max(3, radius * 2.0 / (Grid - 1));
-                halfWidth = Math.Abs((bar.Side2.X - bar.Side1.X) / scaleX * -axisY +
-                    (bar.Side2.Y - bar.Side1.Y) / scaleY * axisX) * .5 + flank;
+                inkHalfWidth = Math.Abs((bar.Side2.X - bar.Side1.X) / scaleX * -axisY +
+                    (bar.Side2.Y - bar.Side1.Y) / scaleY * axisX) * .5;
+                halfWidth = inkHalfWidth + flank;
             }
+            // A thin bar's grid samples can fall inside a neighbouring strip
+            // instead of its immediate flank. Retain the existing artwork
+            // comparison when this grid cannot resolve the three bands.
+            bool resolveStripProfile = inkHalfWidth >= radius * 2.0 / (Grid - 1);
             int count = 0, eligible = 0;
             for (int gy = 0; gy < Grid; gy++)
             for (int gx = 0; gx < Grid; gx++)
             {
                 int x = (int)Math.Round(gx * radius * 2.0 / (Grid - 1));
                 int y = (int)Math.Round(gy * radius * 2.0 / (Grid - 1));
+                byte stripSample = 0;
                 if (bar is not null)
                 {
                     double dx = cx - radius + x - barX, dy = cy - radius + y - barY;
-                    if (Math.Abs(dx * axisX + dy * axisY) > halfLength ||
-                        Math.Abs(dx * -axisY + dy * axisX) > halfWidth) continue;
+                    double along = dx * axisX + dy * axisY, across = dx * -axisY + dy * axisX;
+                    if (Math.Abs(along) > halfLength || Math.Abs(across) > halfWidth) continue;
+                    if (Math.Abs(along) <= Math.Min(halfLength - 3, radius) * .8)
+                        stripSample = Math.Abs(across) <= inkHalfWidth * .55 ? (byte)1 :
+                            across < -inkHalfWidth - .5 ? (byte)2 :
+                            across > inkHalfWidth + .5 ? (byte)3 : (byte)0;
                 }
                 eligible++;
                 double value = Sample(gray, width, height, cx - radius + x, cy - radius + y);
                 if (value < 0) continue;
                 locations[count] = (y + Margin) * size + x + Margin;
+                stripSamples[count] = stripSample;
                 camera[count++] = value;
+                cameraStripSums[stripSample] += value;
+                cameraStripCounts[stripSample]++;
                 sum += value; sumSquares += value * value;
             }
             if (count < 12 || count < eligible * .80) return false;
+            // Do not relax the artwork veto for a one-sided turf edge. The
+            // camera must independently show physical dark ink between two
+            // brighter flanks before missing projected ink distinguishes it.
+            // Use the detector's existing 13-level local-contrast floor on
+            // each flank, instead of accepting only its surrounding average.
+            resolveStripProfile &= cameraStripCounts[1] >= 3 && cameraStripCounts[2] >= 3 && cameraStripCounts[3] >= 3 &&
+                cameraStripSums[2] / cameraStripCounts[2] - cameraStripSums[1] / cameraStripCounts[1] >= 13 &&
+                cameraStripSums[3] / cameraStripCounts[3] - cameraStripSums[1] / cameraStripCounts[1] >= 13;
             double mean = sum / count, energy = sumSquares - sum * mean;
             if (energy < count * 16) return false;
             for (int i = 0; i < count; i++) camera[i] -= mean;
@@ -161,12 +187,54 @@ internal sealed class MarkerProjectionMatcher
                     // A faint turf stripe can correlate with actual black ink after arbitrary
                     // normalization. It cannot explain more than four times its contrast.
                     if (cross / Math.Sqrt(energy * bEnergy) >= MatchCorrelation &&
-                        (bar is null || energy <= bEnergy * 16)) return true;
+                        (bar is null || energy <= bEnergy * 16 &&
+                            (!resolveStripProfile ||
+                                HasProjectedDarkCore(expected, size, locations[..count], stripSamples[..count],
+                                    offset.Y * size + offset.X, blur)))) return true;
                 }
             }
             return false;
         }
         finally { ArrayPool<double>.Shared.Return(scratch); }
+    }
+
+    private static bool HasProjectedDarkCore(ReadOnlySpan<double> expected, int size,
+        ReadOnlySpan<int> locations, ReadOnlySpan<byte> samples, int offset, int blur)
+    {
+        // A bright goal line beside physical black ink can dominate correlation
+        // without depicting a black strip. The same registered reference must
+        // contain a darker core between BOTH immediate flanks. Keep the narrow
+        // per-strip support so a physical neighbour cannot hide projected ink.
+        Span<double> sum = stackalloc double[4];
+        Span<int> count = stackalloc int[4];
+        sum.Clear();
+        count.Clear();
+        for (int sample = 0; sample < samples.Length; sample++)
+        {
+            int group = samples[sample];
+            if (group == 0) continue;
+            int index = locations[sample] + offset;
+            double value = expected[index];
+            if (blur != 0)
+            {
+                double cardinal = expected[index - 1] + expected[index + 1] +
+                    expected[index - size] + expected[index + size];
+                double diagonal = expected[index - size - 1] + expected[index - size + 1] +
+                    expected[index + size - 1] + expected[index + size + 1];
+                value = blur == 1 ? value * .64 + cardinal * .08 + diagonal * .01 :
+                    value * .25 + cardinal * .125 + diagonal * .0625;
+            }
+            sum[group] += value;
+            count[group]++;
+        }
+        // A very small or wide strip may not resolve all three bands on this
+        // grid. Preserve its existing correlation policy instead of weakening
+        // the artwork veto based on absent evidence.
+        if (count[1] < 3 || count[2] < 3 || count[3] < 3) return true;
+        double core = sum[1] / count[1];
+        // Four levels match the projected patch's existing contrast floor
+        // (energy >= count * 16), while allowing its own exposure response.
+        return sum[2] / count[2] - core >= 4 && sum[3] / count[3] - core >= 4;
     }
 
     private static bool Valid(MarkerProjectionFrame? frame) => frame is { Width: > 1 and <= 4096,

@@ -19,5 +19,7 @@
     <Content Include="Fixtures/water-caption-hold.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Fixtures/drawer-ink.json;Fixtures/drawer-spread.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Fixtures/native-drawer-raster.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Fixtures/football-dark-turf-moving-reference.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Fixtures/football-dark-turf-held-full-reference.json;Fixtures/football-dark-turf-clear-full-reference.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -32,6 +32,7 @@ internal sealed class HandAcquisitionTextPatterns
         public double TentativeScaleX { get; set; } = 1;
         public double TentativeScaleY { get; set; } = 1;
         public int ObservationCount { get; set; }
+        public int NominalScaleRetryAfter { get; set; }
         public double[]? PreviousHighPass { get; set; }
         public double ExposureGain { get; set; } = 1;
         public double ExposureBackground { get; set; }
@@ -254,6 +255,37 @@ internal sealed class HandAcquisitionTextPatterns
                 for (int dy = Math.Max(-8, originalDy - 2); dy <= Math.Min(8, originalDy + 2); dy++)
                 for (int dx = Math.Max(-8, originalDx - 2); dx <= Math.Min(8, originalDx + 2); dx++)
                     Evaluate(variant, dx, dy, 1 + xScale * .04, 1 + yScale * .05);
+            }
+            // A short-lived compressed projection can verify a bounded affine
+            // fit. Once the glyph returns to its normal proportions that old
+            // scale may still score above .82, yet invent local stroke breaks.
+            // Try only the original generated proportions in the existing
+            // neighbourhood, and only accept a substantially stronger match.
+            // All ink/sector checks below still apply before registration can
+            // change. Throttle failed retries while a real finger stays put.
+            if (template.RegisteredVariant is not null &&
+                (template.RegisteredScaleX != 1 || template.RegisteredScaleY != 1) && best is >= .80 and < .90 &&
+                (appearanceChanged || template.NominalScaleRetryAfter-- <= 0))
+            {
+                template.NominalScaleRetryAfter = 8;
+                var affineRegistration = (best, bestMeanExpected, bestMeanCurrent, bestGain, bestStd,
+                    bestVariant, bestDx, bestDy, bestScaleX, bestScaleY, bestExpected,
+                    bestExposureGain, bestExposureBackground);
+                int first = Math.Max(0, template.RegisteredVariant.Value - 1);
+                int last = Math.Min(Blurs.Length - 1, template.RegisteredVariant.Value + 1);
+                for (int variant = first; variant <= last; variant++)
+                for (int dy = Math.Max(-8, template.RegisteredDy - 2); dy <= Math.Min(8, template.RegisteredDy + 2); dy++)
+                for (int dx = Math.Max(-8, template.RegisteredDx - 2); dx <= Math.Min(8, template.RegisteredDx + 2); dx++)
+                    Evaluate(variant, dx, dy, 1, 1);
+                if (template.ExposureHighPass is { } nominalExposure)
+                    for (int dy = Math.Max(-8, template.RegisteredDy - 2); dy <= Math.Min(8, template.RegisteredDy + 2); dy++)
+                    for (int dx = Math.Max(-8, template.RegisteredDx - 2); dx <= Math.Min(8, template.RegisteredDx + 2); dx++)
+                        Evaluate(template.ExposureVariant, dx, dy, 1, 1,
+                            nominalExposure, template.ExposureGain, template.ExposureBackground);
+                if (best < .90 || best < affineRegistration.best + .04)
+                    (best, bestMeanExpected, bestMeanCurrent, bestGain, bestStd,
+                        bestVariant, bestDx, bestDy, bestScaleX, bestScaleY, bestExpected,
+                        bestExposureGain, bestExposureBackground) = affineRegistration;
             }
             void Evaluate(int variant, int dx, int dy, double scaleX, double scaleY,
                 double[]? exposed = null, double exposureGain = 1, double exposureBackground = 0)
