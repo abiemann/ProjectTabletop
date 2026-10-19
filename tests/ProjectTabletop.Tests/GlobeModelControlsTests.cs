@@ -11,14 +11,13 @@ public class GlobeModelControlsTests
     public void ModelChoicesReplaceZoomButtonsAndKeepNavigationAvailable()
     {
         var board = ReadyBoard();
-        Assert.Equal(["globe-drawer-close", "globe-exit", "globe-model"], board.Buttons.Select(button => button.Id));
+        Assert.Equal(["globe-drawer-close", "globe-exit", "globe-model", "globe-save"], board.Buttons.Select(button => button.Id));
         Assert.False(board.ActivateButton("globe-zoom-in", At(3400)));
         Assert.False(board.ActivateButton("globe-model-night", At(3400)));
         Assert.True(board.ActivateButton("globe-model", At(3500)));
         Assert.True(board.GlobeModelExpanded);
         var model = Assert.Single(board.Buttons, button => button.Id == "globe-model");
-        Assert.False(model.Enabled);
-        Assert.False(board.ActivateButton("globe-model", At(3600)));
+        Assert.True(model.Enabled);
         Assert.True(Assert.Single(board.Buttons, button => button.Id == "globe-exit").Enabled);
         Assert.True(Assert.Single(board.Buttons, button => button.Id == "globe-drawer-close").Enabled);
         var choices = board.Buttons.Where(button => button.Id.StartsWith("globe-model-")).ToArray();
@@ -36,6 +35,76 @@ public class GlobeModelControlsTests
         Assert.True(choices[2].Bounds.X > choices[1].Bounds.X + choices[1].Bounds.Width);
         Assert.True(board.ActivateButton("globe-exit", At(3700)));
         Assert.Equal(BoardScreen.Menu, board.Screen);
+    }
+
+    [Fact]
+    public void ModelCanCloseAndReopenWithoutChangingEarthOrRails()
+    {
+        var board = ReadyBoard();
+        Assert.True(board.ActivateButton("globe-model", At(3500)));
+        Assert.True(board.ActivateButton("globe-model-night", At(3600)));
+        Assert.True(board.SetGlobeZoomPosition(.7, At(3700)));
+        Assert.True(board.SetGlobePitchPosition(.2, At(3700)));
+        var selected = board.GetGlobeSnapshot(At(4000));
+        Assert.True(board.ActivateButton("globe-model", At(4100)));
+        Assert.False(board.GlobeModelExpanded);
+        Assert.DoesNotContain(board.Buttons, button => button.Id.StartsWith("globe-model-"));
+        Assert.True(board.GlobePitchAvailable(At(4100)));
+        Assert.True(board.ActivateButton("globe-model", At(4200)));
+        Assert.True(board.GlobeModelExpanded);
+        var restored = board.GetGlobeSnapshot(At(4200));
+        Assert.Equal(selected.Model, restored.Model);
+        Assert.Equal(selected.Zoom, restored.Zoom);
+        Assert.Equal(selected.ViewLatitudeDegrees, restored.ViewLatitudeDegrees);
+    }
+
+    [Theory]
+    [InlineData("globe-model-clouds", GlobeModel.Clouds)]
+    [InlineData("globe-model-no-clouds", GlobeModel.NoClouds)]
+    [InlineData("globe-model-night", GlobeModel.Night)]
+    public void ReachingAcrossModelAndSaveStillAllowsTheOptionHold(string choice, GlobeModel selected)
+    {
+        var board = ReadyBoard();
+        Assert.True(board.ActivateButton("globe-model", At(3500)));
+        string[] both = ["globe-model", "globe-save", choice];
+        string[] blocked = ["globe-model", "globe-save"];
+        board.ObserveHeldButtons([], At(3600), At(3600), both);
+        for (int ms = 3700; ms < 4700; ms += 100)
+            Assert.Empty(board.ObserveHeldButtons(both, At(ms), At(ms), [], blocked));
+        Assert.Equal([choice], board.ObserveHeldButtons(both, At(4700), At(4700), [], blocked));
+        Assert.True(board.GlobeModelExpanded);
+        Assert.Equal(selected, board.GetGlobeSnapshot(At(4700)).Model);
+        for (int ms = 4800; ms <= 6100; ms += 100)
+            Assert.Empty(board.ObserveHeldButtons(blocked, At(ms), At(ms), []));
+        Assert.True(board.GlobeModelExpanded);
+    }
+
+    [Fact]
+    public void OptionVetoCancelsModelUntilFreshClearThenFullHold()
+    {
+        var board = ReadyBoard();
+        Assert.True(board.ActivateButton("globe-model", At(3500)));
+        const string model = "globe-model";
+        board.ObserveHeldButtons([], At(3600), At(3600), [model]);
+        for (int ms = 3700; ms <= 4600; ms += 100)
+            Assert.Empty(board.ObserveHeldButtons([model], At(ms), At(ms), []));
+        Assert.Single(board.HoldProgress(At(4600)));
+        // A veto at the exact completion frame wins over both held and clear evidence.
+        Assert.Empty(board.ObserveHeldButtons([model], At(4700), At(4700), [model], [model]));
+        Assert.Empty(board.HoldProgress(At(4700)));
+        for (int ms = 4800; ms <= 6000; ms += 100)
+            Assert.Empty(board.ObserveHeldButtons([model], At(ms), At(ms), []));
+        Assert.True(board.GlobeModelExpanded);
+        board.ObserveHeldButtons([], At(6100), At(6100), [model]);
+        for (int ms = 6200; ms < 7200; ms += 100)
+            Assert.Empty(board.ObserveHeldButtons([model], At(ms), At(ms), []));
+        // An old veto cannot cancel a fresh press.
+        Assert.Empty(board.ObserveHeldButtons([], At(7000), At(7100), [], [model]));
+        Assert.Equal([model], board.ObserveHeldButtons([model], At(7200), At(7200), []));
+        Assert.False(board.GlobeModelExpanded);
+        for (int ms = 7300; ms <= 8600; ms += 100)
+            Assert.Empty(board.ObserveHeldButtons([model], At(ms), At(ms), []));
+        Assert.False(board.GlobeModelExpanded);
     }
 
     [Fact]

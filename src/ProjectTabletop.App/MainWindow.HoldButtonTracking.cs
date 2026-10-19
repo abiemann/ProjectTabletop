@@ -37,7 +37,7 @@ public sealed partial class MainWindow
                 var context = _scene.GetHoldButtonContext(frame.Timestamp);
                 if (context is null) return;
                 var query = FindHeldButtons(frame, context, handGeneration);
-                bool savePaint;
+                bool savePaint, saveGlobe;
                 lock (_captionGate)
                 {
                     if (generation != _captionGeneration || !HoldDetectionAvailable() ||
@@ -47,22 +47,25 @@ public sealed partial class MainWindow
                     _captionCheckError = null;
                     // Scene methods validate freshness again after acquiring
                     // their render lock. Never extend the 350 ms safety limit.
-                    savePaint = PublishHoldButtonEvidence(frame, context, query).Contains("paint-save");
+                    var activated = PublishHoldButtonEvidence(frame, context, query);
+                    savePaint = activated.Contains("paint-save");
+                    saveGlobe = activated.Contains("globe-save");
                 }
-                if (savePaint)
+                if (savePaint || saveGlobe)
                     work.TryPost(_dispatchInputResult, () =>
                     {
                         lock (_captionGate)
                         {
                             var age = MonotonicClock.UtcNow - frame.Timestamp;
                             if (generation != _captionGeneration || !HoldDetectionAvailable() ||
-                                _scene.CurrentBoardScreen != BoardScreen.Paint ||
+                                _scene.CurrentBoardScreen != board ||
                                 age < TimeSpan.Zero || age > HandMarkerLifetime) return;
                         }
                         // Freeze and save on the UI thread, without holding a
                         // caption lock across application status/hand queries.
                         // The scene checks this exact source frame and visit.
-                        QueuePaintSave(frame.Timestamp);
+                        if (savePaint) QueuePaintSave(frame.Timestamp);
+                        if (saveGlobe) QueueGlobeSave();
                     });
             }
             catch (Exception error)

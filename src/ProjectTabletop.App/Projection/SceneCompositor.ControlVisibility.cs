@@ -14,6 +14,7 @@ public sealed partial class SceneCompositor
             if (_markerSetup is not null) return [];
             var now = _blackjackClock();
             _boardSession.TickControlVisibility(now);
+            SyncGlobeSaveState();
             return _boardSession.GetVisibleButtons(now);
         }
     }

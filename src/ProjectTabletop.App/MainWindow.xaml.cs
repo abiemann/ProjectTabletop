@@ -234,6 +234,7 @@ public sealed partial class MainWindow : Window
         UpdateBoardSetupStatus();
         _scene.TickCrownDeed(ProjectTabletop.Interaction.MonotonicClock.UtcNow);
         QueueCrownDeedSave();
+        QueueGlobeSave();
         UpdateBoardAppStatus();
         UpdateBoardSizeEstimate();
         RenderStatusText.Text = $"Draw callbacks: {outputFps:F1}/s output ({outputSlowDelta} slow), " +
@@ -277,6 +278,7 @@ public sealed partial class MainWindow : Window
         await DisposeStrykersRunInputAsync();
         await DisposeHandTrackingAsync();
         if (_crownDeedSaveTask is not null) await _crownDeedSaveTask;
+        if (_globeSaveTask is not null) await _globeSaveTask;
         if (_controlHost is not null) await _controlHost.DisposeAsync();
         _output?.Close();
         _camera.FrameReceived -= Camera_FrameReceived;

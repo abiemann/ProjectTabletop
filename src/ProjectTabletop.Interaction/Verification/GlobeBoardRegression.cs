@@ -35,7 +35,7 @@ internal static class GlobeBoardRegression
         for (int time = 4000; time < 5000; time += 100)
             Require(Hold(model, time).Count == 0, "MODEL activated before a full second of caption evidence.");
         Require(Hold(model, 5000).SequenceEqual(model) && board.GlobeModelExpanded &&
-            !Button(board, "globe-model").Enabled, "A full hold did not expand and disable MODEL.");
+            Button(board, "globe-model").Enabled, "A full hold did not expand MODEL while keeping it available to close.");
         Require(Hold(model, 5000).Count == 0 && Hold(model, 4900).Count == 0,
             "A repeated or delayed frame advanced the hold.");
         for (int time = 5100; time < 7000; time += 100)
@@ -283,12 +283,12 @@ internal static class GlobeBoardRegression
             "A hidden Globe control remained executable.");
         Require(board.ActivateButton("globe-drawer-open", Time(4000)) && board.GlobeDrawerOpen &&
             board.GlobeDrawerOpenedAt == Time(4000), "The drawer handle did not open a timed drawer.");
-        string[] ids = ["globe-drawer-close", "globe-exit", "globe-model"];
-        string[] labels = ["v", "Exit", "MODEL"];
+        string[] ids = ["globe-drawer-close", "globe-exit", "globe-model", "globe-save"];
+        string[] labels = ["v", "Exit", "MODEL", "SAVE"];
         Require(board.Buttons.Select(button => button.Id).SequenceEqual(ids) &&
             board.Buttons.Select(button => button.Label).SequenceEqual(labels), "The open drawer contains incorrect controls.");
         BoardRect[] bounds = [new(.01, .87, .18, .12), new(.20, .87, .155, .12),
-            new(.365, .87, .155, .12)];
+            new(.365, .87, .155, .12), new(.53, .87, .155, .12)];
         Require(board.Buttons.Select(button => button.Bounds).SequenceEqual(bounds) &&
             Button(board, "globe-drawer-close").Bounds == new BoardRect(.01, .87, .18, .12),
             "Drawer controls did not form one bottom row beside the fixed handle.");

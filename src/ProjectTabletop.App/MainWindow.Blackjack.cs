@@ -62,6 +62,7 @@ public sealed partial class MainWindow
             crownDeed ? _scene.ActivateCrownDeedAt(u, v) : _scene.ActivateBlackjackAt(u, v))
         {
             if (crownDeed) QueueCrownDeedSave();
+            if (globe) QueueGlobeSave();
             UpdateBoardAppStatus();
             e.Handled = true;
         }

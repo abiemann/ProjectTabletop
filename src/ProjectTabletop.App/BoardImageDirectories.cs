@@ -5,6 +5,7 @@ namespace ProjectTabletop.App;
 internal static class BoardImageDirectories
 {
     public static string Paint => ForBoard("Paint");
+    public static string Globe => ForBoard("Globe");
     public static string PhotoCopy => ForBoard("Photo Copy");
 
     private static string ForBoard(string boardName)

@@ -110,10 +110,11 @@ public sealed partial class BoardSession
                 clearedIds?.Contains(id) == true && frameTime > hold.LastSeen ||
                 strictCaptions && !_clearHoldCaptions.ContainsKey(id))
                 _holds.Remove(id);
-        // Safety: evidence over more than one button is ambiguous. Nothing acts,
-        // and a long press needs a full second as the only covered caption.
+        // Evidence over multiple unblocked buttons is ambiguous. A vetoed
+        // parent still occupies its spent physical place, but must not prevent
+        // the reached child caption from completing its own full hold.
         var currentIds = Buttons.Select(button => button.Id).ToHashSet();
-        if (heldIds.Distinct().Count(currentIds.Contains) > 1)
+        if (heldIds.Distinct().Count(id => currentIds.Contains(id) && blockedIds?.Contains(id) != true) > 1)
         {
             _holds.Clear();
             return [];

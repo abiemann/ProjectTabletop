@@ -50,6 +50,13 @@ public sealed partial class SceneCompositor
         // actual held/clear observations intact: a veto is not proof of release.
         public IReadOnlyList<string> BlockedButtons(HandAcquisitionPresenceResult? result)
         {
+            // Reaching over MODEL/SAVE to the choices cancels the lower holds on
+            // the very first broken-caption frame. Readable letters changing
+            // brightness alone cannot veto it, just as they cannot press it.
+            if (EnabledHoldIds.Contains("globe-model") && result?.TextPatterns?.Any(pattern =>
+                    pattern.CaptionHoldEvidence && pattern.ControlRegion >= 0 && pattern.ControlRegion < ButtonIds.Count &&
+                    ButtonIds[pattern.ControlRegion] is "globe-model-clouds" or "globe-model-no-clouds" or "globe-model-night") == true)
+                return EnabledHoldIds.Contains("globe-save") ? ["globe-model", "globe-save"] : ["globe-model"];
             // Roulette's footer lies under the reaching arm. Use the same
             // camera frame's table-caption evidence before either worker can
             // finish a footer hold, even if hand recognition has not completed.
@@ -72,6 +79,7 @@ public sealed partial class SceneCompositor
             RefreshWaterStickPresence();
             var now = HoldClock();
             _boardSession.TickControlVisibility(_blackjackClock());
+            SyncGlobeSaveState();
             var buttons = _boardSession.Buttons;
             if (!AcquisitionBoardReady || HoldControlsSettling(frameTime) || !buttons.Any(button => button.IsHold && button.Enabled) ||
                 HasBoardControlDrawerAnimation() || frameTime < _holdNavigationStartedAt || frameTime > now ||
@@ -148,6 +156,7 @@ public sealed partial class SceneCompositor
             if (HoldButtonsBlockedByBoardActivity(HoldClock()))
                 blockedIds = _boardSession.Buttons.Where(button => button.IsHold).Select(button => button.Id)
                     .Concat(blockedIds ?? []).Distinct().ToArray();
+            SyncGlobeSaveState();
             var activated = _boardSession.ObserveHeldButtons(heldIds, frameTime, HoldClock(), clearedIds, blockedIds);
             if (activated.Count > 0)
             {
@@ -158,6 +167,7 @@ public sealed partial class SceneCompositor
                     if (activated.Contains("paint-save")) QueuePaintSaveRequest(frameTime);
                 }
                 QueuePhotoCopyHoldAction(activated, frameTime);
+                if (activated.Contains("globe-save")) QueueGlobeSaveRequest();
                 foreach (var id in activated) RetryGlobeModelAfterAction(id);
                 SyncPhotoCopySession();
             }

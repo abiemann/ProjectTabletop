@@ -10,7 +10,8 @@ public sealed partial class BoardSession
     private static readonly IReadOnlyList<BoardButton> GlobeDrawerButtons = Array.AsReadOnly(new[]
     {
         new BoardButton("globe-exit", "Exit", new(.20, .87, .155, .12), BoardScreen.Menu, Hold: BoardButtonHold.Once),
-        new BoardButton("globe-model", "MODEL", new(.365, .87, .155, .12), BoardScreen.Globe, Hold: BoardButtonHold.Once)
+        new BoardButton("globe-model", "MODEL", new(.365, .87, .155, .12), BoardScreen.Globe, Hold: BoardButtonHold.Once),
+        new BoardButton("globe-save", "SAVE", new(.53, .87, .155, .12), BoardScreen.Globe, Hold: BoardButtonHold.Once)
     });
     private static readonly IReadOnlyList<BoardButton> GlobeModelButtons = Array.AsReadOnly(new[]
     {
@@ -20,6 +21,8 @@ public sealed partial class BoardSession
     });
     public bool GlobeDrawerOpen => Screen == BoardScreen.Globe && _globeDrawer.Open;
     public bool GlobeModelExpanded => Screen == BoardScreen.Globe && _globeModelExpanded;
+    public bool GlobeSaveEnabled { get; set; } = true;
+    public GlobeModel SelectedGlobeModel => _globe.Model;
     public DateTimeOffset? GlobeDrawerOpenedAt => GlobeDrawerOpen ? _globeDrawer.OpenedAt : null;
     public double GlobeHomeRotationDegrees => _globe.HomeRotationDegrees;
     public double GlobeHomeLatitudeDegrees => _globe.HomeLatitudeDegrees;
@@ -74,7 +77,7 @@ public sealed partial class BoardSession
         };
         buttons.AddRange(GlobeDrawerButtons.Select(button => button with
         {
-            Enabled = _globeDrawer.OpeningReady && (button.Id == "globe-exit" || !_globeModelExpanded)
+            Enabled = _globeDrawer.OpeningReady && (button.Id != "globe-save" || GlobeSaveEnabled)
         }));
         if (_globeModelExpanded)
             buttons.AddRange(GlobeModelButtons.Select(button => button with { Enabled = _globeDrawer.OpeningReady }));
@@ -96,10 +99,14 @@ public sealed partial class BoardSession
         }
         if (button.Id == "globe-model")
         {
-            if (_globeModelExpanded) return false;
-            _globeModelExpanded = true;
+            _globeModelExpanded = !_globeModelExpanded;
             // New captions require a clear observation after they appear.
             BottomDrawerInputBarrier(_globeDrawer, now);
+            return true;
+        }
+        if (button.Id == "globe-save")
+        {
+            BottomDrawerGestureBarrier(now);
             return true;
         }
         GlobeModel? model = button.Id switch

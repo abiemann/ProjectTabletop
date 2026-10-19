@@ -68,7 +68,6 @@ public sealed partial class MainWindow
     // is tracked and must not restart when a hold activation changes the board.
     private readonly HandAcquisitionPresenceTracker _holdPresence = new();
     private readonly object _holdDetectionGate = new();
-    private long _holdContextRevision = -1;
     private long _holdGeneration = -1;
 
     private sealed record HoldButtonQuery(IReadOnlyList<string> Held, IReadOnlyList<string> Cleared,
@@ -83,8 +82,10 @@ public sealed partial class MainWindow
         // A board transition can briefly overlap them; never race that history.
         lock (_holdDetectionGate)
         {
-            if (context.Revision != _holdContextRevision || generation != _holdGeneration) _holdPresence.Reset();
-            _holdContextRevision = context.Revision;
+            // A gesture changes input eligibility, not the projected letters.
+            // Retain verified optics across those barriers; Update separately
+            // rebuilds them when the actual scene or camera geometry changes.
+            if (generation != _holdGeneration) _holdPresence.Reset();
             _holdGeneration = generation;
             var presence = _holdPresence.Update(frame.Width, frame.Height, frame.Stride, frame.Bgra,
                 context.SearchPolygon, context.ExpectedScene, frame.Timestamp, MonotonicClock.UtcNow);

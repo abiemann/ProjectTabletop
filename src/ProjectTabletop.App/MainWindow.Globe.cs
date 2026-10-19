@@ -23,7 +23,7 @@ public sealed partial class MainWindow
         _scene.ShowGlobe();
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
-        SetStatus("Globe ready. Open the drawer for EXIT and MODEL. The left dotted bar controls ZOOM; " +
+        SetStatus("Globe ready. Open the drawer for EXIT, MODEL and SAVE. The left dotted bar controls ZOOM; " +
             "the right controls PITCH. MODEL offers CLOUDS, NO CLOUDS and NIGHT. Laptop clicks also work.");
     }
 

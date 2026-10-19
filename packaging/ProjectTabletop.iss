@@ -53,5 +53,5 @@ Name: "{autodesktop}\Project Tabletop"; Filename: "{app}\ProjectTabletop.App.exe
 Filename: "{app}\ProjectTabletop.App.exe"; Description: "Launch Project Tabletop"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 
 ; Uninstall removes the installed payload and shortcuts only. Application state
-; in %LOCALAPPDATA%\ProjectTabletop and photographs in Pictures\Project Tabletop
+; in %LOCALAPPDATA%\ProjectTabletop and images in board-specific Pictures folders
 ; are deliberately outside {app}; no UninstallDelete entry targets user data.

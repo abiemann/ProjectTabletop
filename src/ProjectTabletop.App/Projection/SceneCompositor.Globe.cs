@@ -77,6 +77,9 @@ public sealed partial class SceneCompositor
         DrawGlobeControls(ds, buttons, hovered, selectionFeedback, drawerOpen, drawerProgress, boardAspect,
             _holdControlBrightness, state.ViewLatitudeDegrees);
 
+        if (GetGlobeSaveStatus(_globeClock()) is { } saveStatus)
+            GlobeText(ds, saveStatus, new Rect(200, 680, 600, 38), 22, AppPalette.Text);
+
         const string credit = "NASA EARTH & STAR MAP";
         var zoomLabel = state.TargetZoom.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "×";
         var zoomCaption = zoomLabel + "  ·  SLOW EASTWARD ROTATION";

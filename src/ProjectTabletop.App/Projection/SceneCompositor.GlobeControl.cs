@@ -88,9 +88,11 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             if (_boardSession.Screen != BoardScreen.Globe || IsBoardRevealActive) return false;
+            SyncGlobeSaveState();
             bool changed = _boardSession.ActivateButton(id, _globeClock());
             if (changed)
             {
+                if (id == "globe-save") QueueGlobeSaveRequest();
                 RetryGlobeModelAfterAction(id);
                 SyncPhotoCopySession();
             }

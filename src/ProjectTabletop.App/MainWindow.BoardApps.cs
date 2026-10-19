@@ -78,7 +78,8 @@ public sealed partial class MainWindow
              slots ? _scene.SlotsState.Status :
              roulette ? _scene.RouletteState.Status :
              crownDeed ? _scene.CrownDeedState.Status :
-             globe ? "Earth spins slowly. Open the ^ drawer for Zoom + and Zoom -; its Exit returns to the menu." :
+             globe ? (_scene.GetGlobeSaveStatus(MonotonicClock.UtcNow) ??
+                "Open the arrow for EXIT, MODEL and SAVE. The side bars control zoom and pitch; SAVE keeps only Earth and stars in Pictures/Globe.") :
              water ? "Move the learned double-bar marker across the water. Open the bottom-left arrow for Exit, Reset, and Duck+; you can also click those controls here." :
              football ? "Choose Football input for each player. Play the computer or switch to two players. First to five wins; tracking loss pauses the match." :
              strykersRun ? _scene.StrykersRunState.Banner :

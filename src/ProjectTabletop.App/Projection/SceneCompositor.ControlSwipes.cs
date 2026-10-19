@@ -113,10 +113,24 @@ public sealed partial class SceneCompositor
             if (traversalInProgress && _boardSession.Screen == BoardScreen.Paint) NotePaintUserActivity();
             if (traversalInProgress && !wasTraversing)
             {
-                // Crossing a caption must not complete a hold. A stationary
-                // hand left behind must uncover the caption before rearming.
-                _boardSession.ResetHoldCaptionEvidence();
+                // Only captions in the swipe band need to uncover again. A
+                // reach across the footer must not disarm choices above it.
+                // Use the same lettering bounds as the hold detector.
+                var crossed = _boardSession.Buttons.Where(button => button.IsHold && InSwipeBand(button))
+                    .Select(button => button.Id).ToArray();
+                _boardSession.ResetHoldCaptionEvidence(crossed, frameTime);
                 _holdRevision++;
+
+                bool InSwipeBand(BoardButton button)
+                {
+                    double center = button.Bounds.Y + button.Bounds.Height / 2;
+                    if (_acquisitionReferenceTarget is { } reference)
+                    {
+                        var caption = BoardButtonTextRegion(reference.Device, button);
+                        center = caption.Y + caption.Height / 2;
+                    }
+                    return center >= context.Top && center <= context.Bottom;
+                }
             }
             if (swipe != BoardControlSwipe.Toggle || now < _controlSwipeRearmAt) return false;
             if (markerCheckRequired && !ControlSwipeMarkerCheckReached(frameTime))

@@ -118,7 +118,7 @@ static async Task RunMcpAsync()
             new McpServerToolCreateOptions
             {
                 Name = "globe_action",
-                Description = "Open Globe controls with globe-drawer-open, close with globe-drawer-close, or activate visible globe-zoom-in, globe-zoom-out or globe-exit controls."
+                Description = "Open Globe controls with globe-drawer-open, close with globe-drawer-close, toggle choices with globe-model, or select globe-model-clouds, globe-model-no-clouds or globe-model-night. globe-save exports Earth and stars to Pictures\\Globe; globe-exit returns to the menu. Zoom and pitch use the side rails."
             });
     static McpServerTool SlotsActionTool() =>
         McpServerTool.Create((Func<string, Task<string>>)SlotsActionAsync,

@@ -507,9 +507,11 @@ public sealed partial class MainWindow
                 if (!parameters.TryGetProperty("id", out var globeAction) || globeAction.ValueKind != JsonValueKind.String)
                     throw new ArgumentException("Provide a Globe button id.");
                 bool globeAccepted = _scene.ActivateGlobeButton(globeAction.GetString()!);
+                QueueGlobeSave();
                 UpdateBoardAppStatus();
                 return new { accepted = globeAccepted, globe = _scene.GlobeState,
-                    drawer = _scene.GetGlobeDrawerDiagnostics(MonotonicClock.UtcNow) };
+                    drawer = _scene.GetGlobeDrawerDiagnostics(MonotonicClock.UtcNow),
+                    saveStatus = _scene.GetGlobeSaveStatus(MonotonicClock.UtcNow), savedPath = _lastSavedGlobePath };
             case "capture_globe_preview":
                 return new { path = await SaveGlobePreviewAsync() };
             case "show_slots":

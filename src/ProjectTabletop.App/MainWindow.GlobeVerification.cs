@@ -197,12 +197,12 @@ public sealed partial class MainWindow
         {
             bool expanded = scene.CurrentBoardButtons.Any(button => button.Id == "globe-model-clouds");
             string[] ids = expanded
-                ? ["globe-drawer-close", "globe-exit", "globe-model", "globe-model-clouds", "globe-model-no-clouds", "globe-model-night"]
-                : ["globe-drawer-close", "globe-exit", "globe-model"];
-            string[] captions = expanded ? ["V", "EXIT", "MODEL", "CLOUDS", "NO CLOUDS", "NIGHT"] : ["V", "EXIT", "MODEL"];
+                ? ["globe-drawer-close", "globe-exit", "globe-model", "globe-save", "globe-model-clouds", "globe-model-no-clouds", "globe-model-night"]
+                : ["globe-drawer-close", "globe-exit", "globe-model", "globe-save"];
+            string[] captions = expanded ? ["V", "EXIT", "MODEL", "SAVE", "CLOUDS", "NO CLOUDS", "NIGHT"] : ["V", "EXIT", "MODEL", "SAVE"];
             Require(scene.GlobeDrawerOpen && scene.CurrentBoardButtons.Select(button => button.Id).SequenceEqual(ids) &&
                     scene.CurrentBoardButtons.Select(button => button.Label.ToUpperInvariant()).SequenceEqual(captions) &&
-                    scene.CurrentBoardButtons.All(button => button.Enabled || button.Id == "globe-model" && expanded) &&
+                    scene.CurrentBoardButtons.All(button => button.Enabled) &&
                     scene.CurrentBoardButtons.Single(button => button.Id == "globe-drawer-close").Bounds == new BoardRect(.01, .87, .18, .12) &&
                     scene.CurrentBoardButtons.Single(button => button.Id == "globe-exit").Bounds == new BoardRect(.20, .87, .155, .12) &&
                     scene.CurrentBoardButtons.Single(button => button.Id == "globe-model").Bounds == new BoardRect(.365, .87, .155, .12),
@@ -442,7 +442,7 @@ public sealed partial class MainWindow
                 {
                     Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && scene.GlobeState.Revision == revision,
                         "Qualified obstruction lit or immediately activated the hold " + button.Label + " button.");
-                    if (button.Id == "globe-exit") CheckExitHoldEvidence(button, occupied);
+                    if (button.Id is "globe-exit" or "globe-save") CheckExitHoldEvidence(button, occupied);
                     else CheckLongPress(button, occupied);
                     // Drawer/model expansion changed controls; let acquisition settle again.
                     Draw(); scene.GetHandAcquisitionContext(now);

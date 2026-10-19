@@ -1,9 +1,11 @@
 #if DEBUG
 using System.Numerics;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Text;
 using Microsoft.UI;
+using ProjectTabletop.App.Camera;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.App.Projection.GlobeRendering;
 using ProjectTabletop.Calibration;
@@ -65,6 +67,7 @@ public sealed partial class MainWindow
                     Math.Abs(button.Bounds.Y - .735) < .000001),
             "Expanded MODEL choices do not use the requested uppercase hold-button row.");
         CheckCaptionFit();
+        CheckInputRevisionPreservesCaptionOptics();
         byte[]? clouds = null, noClouds = null;
         foreach (var choice in new[] { (Id: choiceIds[0], Model: GlobeModel.Clouds, Textures: 2, Loads: 2),
             (Id: choiceIds[1], Model: GlobeModel.NoClouds, Textures: 1, Loads: 3),
@@ -94,9 +97,16 @@ public sealed partial class MainWindow
         }
 
         // Returning to a used choice reloads it instead of retaining every model.
+        CheckPartialSwipeCaptionScopes();
         int repeatedLoads = renderer.ModelTextureLoadCount;
         await renderer.EnsureReadyAsync(GlobeModel.Night);
         Check(renderer.ModelTextureLoadCount == repeatedLoads, "Selecting the resident model repeated disk/GPU loading.");
+        await SelectByCaption("globe-model", GlobeModel.Night);
+        Check(!session.GlobeModelExpanded && scene.CurrentBoardButtons.All(button => !choiceIds.Contains(button.Id)),
+            "A second MODEL hold did not close the choices.");
+        await SelectByCaption("globe-model", GlobeModel.Night);
+        Check(session.GlobeModelExpanded && renderer.ModelTextureLoadCount == repeatedLoads,
+            "Reopening MODEL lost the selected view or loaded textures again.");
         now += TimeSpan.FromMilliseconds(100);
         Check(scene.ActivateGlobeButton("globe-drawer-close") && session.GlobeModelExpanded &&
                 scene.GlobeState.Model == GlobeModel.Night && scene.CurrentBoardButtons.Count == 1,
@@ -149,6 +159,7 @@ public sealed partial class MainWindow
         return new { passed = true, directory, images, assertions, modelChecks,
             realCaptionHolds = true, singleResidentModel = true, lazyModelTextures = true,
             unchangedSharedSky = true, latestRequestWins = true, disposeDuringLoading = true,
+            partialSwipePreservesUpperCaptions = true, inputRevisionPreservesCaptionOptics = true,
             drawerAndSwipeRestoreChoices = true, newVisitRestoresClouds = true, liveHardwareUnchanged = true };
 
         byte[] Draw()
@@ -168,31 +179,124 @@ public sealed partial class MainWindow
             }
             return target.GetPixelBytes();
         }
+        void CheckInputRevisionPreservesCaptionOptics()
+        {
+            byte[] clear = Draw();
+            var context = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No optical reset fixture context.");
+            // Exercise the production caption entry point without constructing
+            // a window or borrowing the live camera's optical history.
+            var owner = (MainWindow)RuntimeHelpers.GetUninitializedObject(typeof(MainWindow));
+            GC.SuppressFinalize(owner);
+            var tracker = new HandAcquisitionPresenceTracker();
+            Set("_holdPresence", tracker);
+            Set("_holdDetectionGate", new object());
+            Set("_handGate", new object());
+            Set("_closing", true);
+            var opticsField = typeof(HandAcquisitionPresenceTracker).GetField("_textPatterns", flags)!;
+            var first = Observe(context, 0);
+            object? optics = opticsField.GetValue(tracker);
+            Check(optics is not null && first.Cleared.Contains("globe-model-night"),
+                "The optical fixture did not first verify uncovered NIGHT lettering.");
+            var inputOnly = context with { Revision = context.Revision + 1 };
+            Check(Observe(inputOnly, 0).Cleared.Contains("globe-model-night") &&
+                ReferenceEquals(optics, opticsField.GetValue(tracker)),
+                "An input-only revision discarded the verified caption optics.");
+            Observe(inputOnly, 1);
+            object? afterGeneration = opticsField.GetValue(tracker);
+            Check(afterGeneration is not null && !ReferenceEquals(optics, afterGeneration),
+                "A camera generation change retained old optical calibration.");
+            Observe(inputOnly with { ExpectedScene = context.ExpectedScene with { } }, 1);
+            Check(!ReferenceEquals(afterGeneration, opticsField.GetValue(tracker)),
+                "Changed rendered lettering retained the previous optical template.");
+
+            HoldButtonQuery Observe(SceneCompositor.HoldButtonContext captured, long generation) =>
+                owner.FindHeldButtons(new CameraFrame(width, height, width * 4, clear, MonotonicClock.UtcNow), captured, generation);
+            void Set(string name, object value) => typeof(MainWindow).GetField(name, flags)!.SetValue(owner, value);
+        }
+        void CheckPartialSwipeCaptionScopes()
+        {
+            now += TimeSpan.FromMilliseconds(500);
+            Draw();
+            var context = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No partial-swipe hold context.");
+            scene.ObserveHoldButtons(context, [], now, context.EnabledHoldIds);
+            for (int frame = 0; frame < 4; frame++)
+            {
+                now += TimeSpan.FromMilliseconds(100);
+                Check(scene.ObserveHoldButtons(context, ["globe-model"], now, []).Count == 0,
+                    "MODEL acted before the partial-swipe fixture.");
+            }
+            Check(scene.CurrentHoldProgress.Any(item => item.ButtonId == "globe-model"),
+                "The footer did not have partial hold progress before the swipe.");
+            scene.GetControlSwipeContext(now);
+            now += TimeSpan.FromMilliseconds(100);
+            var band = scene.GetControlSwipeContext(now) ?? throw new InvalidOperationException("No partial-swipe band.");
+            var nightInk = context.ExpectedScene.BoardTriggerRegions![context.ButtonIds.ToList().IndexOf("globe-model-night")];
+            var modelInk = context.ExpectedScene.BoardTriggerRegions![context.ButtonIds.ToList().IndexOf("globe-model")];
+            Check(nightInk.Y + nightInk.Height / 2 < band.Top && modelInk.Y + modelInk.Height / 2 >= band.Top,
+                "The native caption centers do not separate the model row from the footer swipe band.");
+            Check(!scene.CompleteControlSwipe(band, null, traversalInProgress: true, now) &&
+                scene.CurrentHoldProgress.All(item => item.ButtonId != "globe-model"),
+                "A partial footer sweep did not cancel its MODEL hold.");
+            now += TimeSpan.FromMilliseconds(100);
+            Check(!scene.CompleteControlSwipe(band, null, traversalInProgress: false, now),
+                "A partial sweep toggled the controls.");
+            context = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No post-swipe caption context.");
+            for (int frame = 0; frame < 12; frame++)
+            {
+                now += TimeSpan.FromMilliseconds(100);
+                Check(scene.ObserveHoldButtons(context, ["globe-model"], now, []).Count == 0 && session.GlobeModelExpanded,
+                    "The footer MODEL rearmed after a sweep without fresh uncovered lettering.");
+            }
+            int activations = 0;
+            for (int frame = 0; frame < 12; frame++)
+            {
+                now += TimeSpan.FromMilliseconds(100);
+                activations += scene.ObserveHoldButtons(context, ["globe-model-night"], now, [],
+                    ["globe-model", "globe-save"]).Count(id => id == "globe-model-night");
+            }
+            Check(activations == 1 && session.GlobeModelExpanded && scene.GlobeState.Model == GlobeModel.Night,
+                "A partial footer sweep erased the upper NIGHT caption's previously verified clear readiness.");
+        }
         async Task<int> SelectByCaption(string id, GlobeModel expectedModel)
         {
             now += TimeSpan.FromMilliseconds(500);
             byte[] clear = Draw();
             var context = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No model hold context.");
             int index = context.ButtonIds.ToList().IndexOf(id);
-            var ink = context.ExpectedScene.BoardTriggerRegions![index];
             var surface = (Homography)typeof(SceneCompositor).GetField("_boardSurfaceMap", flags)!.GetValue(scene)!;
-            var first = surface.Transform(new(ink.X - .004, ink.Y - .004));
-            var last = surface.Transform(new(ink.X + ink.Width + .004, ink.Y + ink.Height + .004));
             byte[] covered = (byte[])clear.Clone();
-            for (int y = Math.Max(0, (int)(first.Y * height)); y <= Math.Min(height - 1, last.Y * height); y++)
-            for (int x = Math.Max(0, (int)(first.X * width)); x <= Math.Min(width - 1, last.X * width); x++)
+            foreach (string coveredId in choiceIds.Contains(id) ? new[] { id, "globe-model", "globe-save" } : new[] { id })
             {
-                int offset = (y * width + x) * 4;
-                covered[offset] = 95; covered[offset + 1] = 135; covered[offset + 2] = 185;
+                var ink = context.ExpectedScene.BoardTriggerRegions![context.ButtonIds.ToList().IndexOf(coveredId)];
+                var first = surface.Transform(new(ink.X - .004, ink.Y - .004));
+                var last = surface.Transform(new(ink.X + ink.Width + .004, ink.Y + ink.Height + .004));
+                for (int y = Math.Max(0, (int)(first.Y * height)); y <= Math.Min(height - 1, last.Y * height); y++)
+                for (int x = Math.Max(0, (int)(first.X * width)); x <= Math.Min(width - 1, last.X * width); x++)
+                {
+                    int offset = (y * width + x) * 4;
+                    covered[offset] = 95; covered[offset + 1] = 135; covered[offset + 2] = 185;
+                }
             }
             var tracker = new HandAcquisitionPresenceTracker();
             int acts = 0;
-            Feed(clear);
+            for (int frame = 0; frame < 5; frame++) Feed(clear);
+            if (choiceIds.Contains(id))
+            {
+                for (int frame = 0; frame < 10; frame++)
+                {
+                    now += TimeSpan.FromMilliseconds(100);
+                    Check(scene.ObserveHoldButtons(context, ["globe-model"], now, []).Count == 0,
+                        "MODEL completed before the option veto fixture began.");
+                }
+                Check(scene.CurrentHoldProgress.Any(progress => progress.ButtonId == "globe-model" && progress.Progress >= .89),
+                    "The option veto fixture failed to start a nearly complete MODEL hold.");
+            }
             for (int frame = 0; frame < 15; frame++) acts += Feed(covered).Count(action => action == id);
             Check(acts == 1 && scene.GlobeState.Model == expectedModel && scene.ActiveHandSpotlightCount == 0,
                 id + " did not act exactly once from actual covered lettering without a spotlight.");
             await scene.EnsureGlobeResourcesAsync(target.Device);
             clear = Draw();
+            context = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No refreshed model hold context.");
             for (int frame = 0; frame < 5; frame++)
                 Check(Feed(clear).Count == 0, "Lifting from a model caption activated another control.");
             return acts;
@@ -202,7 +306,22 @@ public sealed partial class MainWindow
                 now += TimeSpan.FromMilliseconds(100);
                 var result = tracker.Update(width, height, width * 4, pixels, context.SearchPolygon,
                     context.ExpectedScene, now, now);
-                return scene.ObserveHoldButtons(context, context.HeldButtons(result), now, context.ClearedButtons(result));
+                var blocked = context.BlockedButtons(result);
+                if (choiceIds.Contains(id) && result.TextPatterns?.Any(pattern =>
+                        pattern.ControlRegion == index && pattern.CaptionHoldEvidence && pattern.ConfirmationFrames == 1) == true)
+                {
+                    Check(blocked.SequenceEqual(["globe-model", "globe-save"]), "The first damaged option frame failed to veto MODEL and SAVE.");
+                    Check(context.HeldButtons(result).Contains("globe-model") && context.HeldButtons(result).Contains("globe-save"),
+                        "The reach fixture did not cover MODEL, SAVE and the option together.");
+                    var intact = result with { TextPatterns = result.TextPatterns!.Select(pattern => pattern with
+                        { ShapeCorrupted = false, LabelIntact = true, CaptionReflectanceChanged = true }).ToArray() };
+                    Check(context.BlockedButtons(intact).Count == 0, "Readable option lettering changing brightness vetoed MODEL.");
+                }
+                var actions = scene.ObserveHoldButtons(context, context.HeldButtons(result), now, context.ClearedButtons(result), blocked);
+                if (blocked.Contains("globe-model"))
+                    Check(session.GlobeModelExpanded && !scene.CurrentHoldProgress.Any(progress => progress.ButtonId == "globe-model"),
+                        "Disturbing a model choice closed the menu or kept partial MODEL progress.");
+                return actions;
             }
         }
         void CheckCaptionFit()
