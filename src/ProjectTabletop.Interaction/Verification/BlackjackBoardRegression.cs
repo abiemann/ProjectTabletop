@@ -128,6 +128,7 @@ internal static class BlackjackBoardRegression
         CheckBetHolds();
         CheckHitEvents();
         CheckSimultaneousCaptions();
+        HoldReachRegression.Run();
         BlackjackDealRegression.Run();
         Console.WriteLine("Blackjack board verification passed: launch, shared targets, held/disabled pinch consumption, " +
             "game/navigation revisions, split, menu continuity, phase-gated Your Chips plaque and reset input barriers; " +
@@ -205,11 +206,10 @@ internal static class BlackjackBoardRegression
         }
     }
 
-    // Safety: any second covered caption, even an ordinary button's, stops a long press.
+    // Same-row captions remain ambiguous; reaching to a separate row is checked below.
     private static void CheckSimultaneousCaptions()
     {
-        foreach (var (held, other) in new[] { ("bj-bet-50", "bj-bet-100"), ("bj-bet-50", "menu"),
-            ("bj-bet-50", "bj-reset"), ("bj-hit", "menu") })
+        foreach (var (held, other) in new[] { ("bj-bet-50", "bj-bet-100"), ("bj-hit", "bj-stand") })
         {
             var board = new BoardSession(new BlackjackGame(initialShoe: Cards(2, 6, 2, 10, 2, 3)));
             board.ShowBlackjack(Time(0));

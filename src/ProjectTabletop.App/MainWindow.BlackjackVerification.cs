@@ -106,6 +106,7 @@ public sealed partial class MainWindow
             Require(coinScene.CurrentBoardScreen == BoardScreen.Menu && captionHold.SuccessfulHolds == 3,
                 "A rendered EXIT caption hold did not return to the main menu.");
         }
+        await VerifyBlackjackReachAsync();
         await Pinch("bj-deal", 2);
         Require(scene.BlackjackState.Phase == BlackjackPhase.Betting, "A pinch dealt with the long-press Deal button.");
         Require(scene.ActivateBlackjackButton("bj-deal"), "Deal did not start the round.");
@@ -239,6 +240,7 @@ public sealed partial class MainWindow
         return new { passed = true, liveHardwareUnchanged = true, menuAndPinchActions = true,
             heldPinchSuppressed = true, hoverRendered = true, cachedTableUpdated = true,
             coinGesturesRejected = true, renderedCoinCaptionHold = true, coinPointerSelection = true, exitCaptionHold = true,
+            renderedReachingArmExit = true,
             exitCaptionAndTopCounterTargets = true, yourChipsPlaqueHoverAndRestoredBalance = true, noFooterReset = true,
             hiddenCardDoesNotLeak = true, dealerRevealAndSettlement = true,
             splitRendered = true, perspectiveClip = true, zeroCreditsAndLaptopReset = true, directory, images };

@@ -14,8 +14,9 @@ public sealed partial class BoardSession
     private readonly Dictionary<string, DateTimeOffset> _clearHoldCaptions = [];
     private readonly Dictionary<string, DateTimeOffset> _holdCaptionInputNotBefore = [];
     private DateTimeOffset _holdCaptionObservedAt = DateTimeOffset.MinValue;
-    // Single-action holds stay spent at their place, even when the action puts
-    // another button there (Globe's ^ becomes v; Blackjack's Deal becomes Double
+    // Single-action holds and captions under a reaching arm stay spent at their
+    // place, even when an action puts another button there (Globe's ^ becomes v;
+    // Blackjack's Deal becomes Double
     // and Split), until the fingers lift. A spent place blocks every hold
     // button that overlaps it.
     private readonly Dictionary<BoardRect, SpentHold> _spentHolds = [];
@@ -36,8 +37,9 @@ public sealed partial class BoardSession
     /// Records one fresh camera frame of hold evidence: the enabled hold buttons whose
     /// caption is covered. A button activates after a second of continuous evidence; a
     /// repeating one again after each further second, a single-action one only after the
-    /// camera has seen its place uncovered for <see cref="HoldEvidenceGap"/>. Any frame
-    /// covering more than one button's caption activates nothing and restarts every hold.
+    /// camera has seen its place uncovered for <see cref="HoldEvidenceGap"/>. Multiple
+    /// covered captions remain ambiguous unless one is clearly in a separate upper row;
+    /// that reached caption may act while the lower arm-covered controls await release.
     /// An explicitly clear caption cancels partial progress immediately; an unknown or
     /// missing observation retains the bounded evidence-gap tolerance.
     /// When <paramref name="clearedIds"/> is nonnull, a new hold additionally requires a
@@ -110,19 +112,46 @@ public sealed partial class BoardSession
                 clearedIds?.Contains(id) == true && frameTime > hold.LastSeen ||
                 strictCaptions && !_clearHoldCaptions.ContainsKey(id))
                 _holds.Remove(id);
-        // Evidence over multiple unblocked buttons is ambiguous. A vetoed
-        // parent still occupies its spent physical place, but must not prevent
-        // the reached child caption from completing its own full hold.
-        var currentIds = Buttons.Select(button => button.Id).ToHashSet();
-        if (heldIds.Distinct().Count(id => currentIds.Contains(id) && blockedIds?.Contains(id) != true) > 1)
+        // A hand reaching toward a separate upper row can cover lower captions
+        // with its arm. Require whole-button separation plus a visible gap,
+        // rather than treating small vertical offsets within a row as priority.
+        // Include blocked/disabled captions here: vetoing the reached target
+        // must never redirect the press to the forearm below it.
+        var currentHeld = Buttons.Where(button => heldIds.Contains(button.Id)).ToArray();
+        if (currentHeld.Length > 1)
+        {
+            var upper = currentHeld.MinBy(button => button.Bounds.Y)!;
+            bool separateUpper = currentHeld.All(button => button.Id == upper.Id || ClearlyAbove(upper, button));
+            var lower = currentHeld.Where(button => separateUpper ? button.Id != upper.Id :
+                    currentHeld.Any(other => blockedIds?.Contains(other.Id) == true && ClearlyAbove(other, button)))
+                .ToArray();
+            if (lower.Length > 0)
+            {
+                ResetHoldCaptionEvidence(lower.Select(button => button.Id).ToArray(), frameTime);
+                foreach (var button in lower)
+                {
+                    holdButtons.Remove(button.Id);
+                    // Preserve raw held places above so an already spent lower
+                    // control stays inhibited. Legacy callers also need an
+                    // observed lift before a reached-over place can act again.
+                    if (button.IsHold && !_spentHolds.ContainsKey(button.Bounds))
+                        _spentHolds.Add(button.Bounds, new SpentHold());
+                }
+                currentHeld = currentHeld.Except(lower).ToArray();
+            }
+        }
+        // Same-row or uncertain geometry remains ambiguous. A vetoed lower
+        // parent still cannot prevent its reached child from completing a hold.
+        if (currentHeld.Count(button => blockedIds?.Contains(button.Id) != true) > 1)
         {
             _holds.Clear();
             return [];
         }
         var activated = new List<string>();
-        foreach (string id in heldIds.Distinct())
+        foreach (var observed in currentHeld)
         {
-            if (!holdButtons.TryGetValue(id, out var button) ||
+            string id = observed.Id;
+            if (blockedIds?.Contains(id) == true || !holdButtons.TryGetValue(id, out var button) ||
                 _spentHolds.Keys.Any(place => Overlaps(place, button.Bounds))) continue;
             if (!_holds.TryGetValue(id, out var hold))
             {
@@ -160,6 +189,9 @@ public sealed partial class BoardSession
     private static bool Overlaps(BoardRect first, BoardRect second) =>
         first.X < second.X + second.Width && second.X < first.X + first.Width &&
         first.Y < second.Y + second.Height && second.Y < first.Y + first.Height;
+
+    private static bool ClearlyAbove(BoardButton upper, BoardButton lower) =>
+        upper.Bounds.Y + upper.Bounds.Height + Math.Min(upper.Bounds.Height, lower.Bounds.Height) / 4 <= lower.Bounds.Y;
 
     /// <summary>
     /// Invalidates partial holds and their clear-caption readiness when rendered
