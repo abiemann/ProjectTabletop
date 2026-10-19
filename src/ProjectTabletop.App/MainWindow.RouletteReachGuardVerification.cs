@@ -181,6 +181,62 @@ public sealed partial class MainWindow
                 "The refreshed table reference did not preserve an otherwise valid footer hold.");
         }
 
+        using (var fixture = new RouletteNativeFixture(1000, 1000, new RouletteGame(77)))
+        {
+            await Prepare(fixture);
+            var scene = fixture.Scene;
+            var betting = scene.GetHandAcquisitionContext(fixture.Now)!;
+            var enabled = Hint(fixture, "roulette-even", fixture.Now);
+            // Disabled artwork above an eligible caption must not outrank it.
+            var selectedChip = Hint(fixture, RouletteGame.ChipAction(scene.RouletteState.Chip), fixture.Now);
+            scene.CompleteHandAcquisition(betting, [selectedChip, enabled], [], fixture.Now);
+            var lit = scene.GetHandAcquisitionContext(fixture.Now)!;
+            Check(lit.IlluminatedHint?.Center == enabled.Center,
+                "A disabled chip stole acquisition from an enabled betting caption.");
+            fixture.Now += TimeSpan.FromMilliseconds(100);
+            scene.CompleteHandAcquisition(lit, [selectedChip with { ObservedAt = fixture.Now },
+                enabled with { ObservedAt = fixture.Now }], [], fixture.Now, illuminatedPresence: true);
+            Check(scene.GetHandAcquisitionContext(fixture.Now)?.IlluminatedHint?.Center == enabled.Center,
+                "A disabled chip retargeted an existing search light.");
+
+            Check(scene.ActivateRouletteButton("roulette-spin"), "Could not start the disabled-caption spin check.");
+            fixture.Draw();
+            scene.GetHandAcquisitionContext(fixture.Now);
+            fixture.Now += TimeSpan.FromMilliseconds(600);
+            byte[] spinningPixels = fixture.Draw();
+            var spinning = scene.GetHandAcquisitionContext(fixture.Now)!;
+            var buttons = scene.CurrentBoardButtons;
+            Check(spinning.ObserveMotion && spinning.IlluminatedHint is null &&
+                    spinning.ExpectedScene?.BoardTriggerRegions?.Count == buttons.Count &&
+                    spinning.StationarySearchCenters?.Length == buttons.Count &&
+                    spinning.DisabledControls?.Count == buttons.Count(button => !button.IsHold),
+                "Spinning lost its stationary caption references or failed to exclude disabled search targets.");
+            // Recorded hands-off failures were EVEN and 1ST 12. Exercise every
+            // disabled betting target, including the chip captions, at the
+            // compositor publication and pre-inference boundaries.
+            foreach (var button in buttons.Where(button => !button.IsHold))
+            {
+                Check(!button.Enabled, "A betting target remained active during the spin.");
+                var disabled = Hint(fixture, button.Id, fixture.Now);
+                scene.CompleteHandAcquisition(spinning, [disabled], [], fixture.Now);
+                Check(scene.GetHandAcquisitionContext(fixture.Now)?.IlluminatedHint is null,
+                    "A disabled caption started a search light while the wheel spun: " + button.Id + ".");
+                var query = CreateHandAcquisitionQuery(new Camera.CameraFrame(fixture.Width, fixture.Height,
+                    fixture.Width * 4, spinningPixels, fixture.Now), spinning with
+                    { ObserveMotion = false, IlluminatedHint = disabled, ExpectedScene = null },
+                    new HandAcquisitionPresenceTracker(), fixture.Now);
+                Check(query.Hints.Count == 0 && query.SearchRegions.Count == 0,
+                    "A disabled caption reached the hand inference worker: " + button.Id + ".");
+            }
+            var hold = scene.GetHoldButtonContext(fixture.Now)!;
+            Check(hold.EnabledHoldIds.SetEquals(["roulette-exit"]) &&
+                    buttons.Single(button => button.Id == "roulette-exit") is { Enabled: true, IsHold: true },
+                "Suppressing disabled acquisition also disabled EXIT during the spin.");
+            fixture.Hold("roulette-exit");
+            Check(scene.CurrentBoardScreen == BoardScreen.Menu && scene.RouletteState.Phase == RoulettePhase.Spinning,
+                "A direct EXIT caption hold failed during the wheel animation or changed the committed spin.");
+        }
+
         foreach (var position in new[] { (U: .40, V: .93, Name: "footer"),
             (U: 1.2, V: .60, Name: "off-board") })
         {
@@ -203,6 +259,8 @@ public sealed partial class MainWindow
         return new { passed = true, checks, captionWorkerFirstVeto = true, searchLightCancelsImmediately = true,
             trackedHandCancelsImmediately = true, retainedHandDropoutProtected = true,
             selectedHandRemainsBlockedWithoutLight = true, chipSelectionRemainsAvailable = true,
+            disabledCaptionsCannotAcquireOrRetarget = true, disabledCaptionsExcludedBeforeInference = true,
+            spinningExitHoldPreserved = true,
             wagerArtworkReferenceRefreshed = true,
             delayedCaptionsRejected = true, staleAndFutureHandsIgnored = true,
             directFooterPressPreserved = true, offBoardHandIgnored = true,

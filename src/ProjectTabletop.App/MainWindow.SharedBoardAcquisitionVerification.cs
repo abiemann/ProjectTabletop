@@ -148,6 +148,7 @@ public sealed partial class MainWindow
                 noEmptyBoardCandidates = true, assistanceCannotSelect = true,
                 sevenPercentCoverageRequiredAcrossBoards = true,
                 buttonRegionsOnlyBeforeQualification = true, nativeFocusedModelSearchBeforeFallbackIllumination = true,
+                disabledCaptionsRetainEvidenceWithoutAcquisition = true,
                 noBlindButtonSweepOrWholeBoardMotionFallback = true,
                 resetClearsForegroundQueryHistory = true,
                 boundedPhotoCopyFieldAndUnrestrictedGestureTesterPreserved = true,
@@ -195,6 +196,8 @@ public sealed partial class MainWindow
                 label + " omitted its generated control-label trigger masks.");
             Require(context.ExpectedScene.BoardControlReferenceRegions?.Count == scene.CurrentBoardButtons.Count,
                 label + " omitted its separate optical control references.");
+            Require(context.DisabledControls?.Count == scene.CurrentBoardButtons.Count(button => !button.Enabled && !button.IsHold),
+                label + " omitted disabled gesture controls from its acquisition exclusions.");
             long gameRevision = scene.BlackjackState.Revision;
             long rouletteRevision = scene.RouletteState.Revision;
             var ids = scene.CurrentBoardButtons.Select(button => button.Id).ToArray();
@@ -406,11 +409,12 @@ public sealed partial class MainWindow
                     Math.Abs(hint.Center.Y - center.Y) < 65 && hint.ControlCoverage is double coverage &&
                     double.IsFinite(coverage) && coverage >= .07);
                 Require(pendingQuery.LightingHints.Any(hint => hint.Center == measured.Center),
-                    label + "/" + button.Label + " did not pass measured control evidence to illumination.");
-                if (button.IsHold)
-                    // Long-press buttons act on caption evidence alone: no hand search, spotlight or fingertips.
+                    label + "/" + button.Label + " lost measured control evidence before shared caption policy.");
+                if (button.IsHold || !button.Enabled)
+                    // Retain disabled-caption evidence for reach protection,
+                    // without requesting a hand search. Holds also stay unlit.
                     Require(pendingQuery.SearchRegions.SequenceEqual(emptyQuery.SearchRegions) && pendingQuery.Hints.Count == 0,
-                        label + "/" + button.Label + " started a hand-model search for a long-press button.");
+                        label + "/" + button.Label + " started a hand-model search for a disabled or long-press button.");
                 else Require(pendingQuery.SearchRegions.Count is > 0 and <= 2 &&
                         pendingQuery.SearchRegions.Contains(AcquisitionSearchBounds(measured, size, size)) &&
                         pendingQuery.SearchRegions.All(crop => crop.Width == crop.Height && crop.X >= 0 && crop.Y >= 0 &&
@@ -500,13 +504,14 @@ public sealed partial class MainWindow
                 }
                 scene.CompleteHandAcquisition(context, presence.Hints, [], now);
                 var lit = scene.GetHandAcquisitionContext(now)!;
-                if (button.IsHold)
+                if (button.IsHold || !button.Enabled)
                 {
-                    // Hold buttons act on caption evidence alone; a light would erase it.
+                    // Disabled controls cannot acquire; hold buttons act on
+                    // caption evidence alone, which a light would erase.
                     Require(lit.IlluminatedHint is null && CountWhite(Draw(), center) <= CountWhite(empty, center) + 50,
-                        label + "/" + button.Label + " lit a hold-to-repeat button.");
+                        label + "/" + button.Label + " lit a disabled or long-press button.");
                     // A disabled long-press (Bet - at the minimum bet) cannot start a hold or show a rim.
-                    if (button.Enabled) CheckHeldThroughRim(button, empty, occupied);
+                    if (button.IsHold && button.Enabled) CheckHeldThroughRim(button, empty, occupied);
                 }
                 else
                 {

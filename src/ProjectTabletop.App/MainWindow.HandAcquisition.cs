@@ -121,8 +121,11 @@ public sealed partial class MainWindow
                 context.IlluminatedHint, context.IlluminationStartedAt) : null;
         IReadOnlyList<HandAcquisitionHint> hints = context.IlluminatedHint is { } illuminated ? [illuminated] :
             presence?.Hints ?? [];
-        // Fingers on a long-press button feed its hold timer only, never a hand search.
-        hints = hints.Where(hint => context.HoldControls?.Any(outline => InsideQuad(hint.Center, outline)) != true)
+        // Disabled captions still protect controls beneath a reaching arm, but
+        // cannot request inference or a search light. Hold captions only feed
+        // their independent timer. Keep both in the unchanged optical reference.
+        hints = hints.Where(hint => context.HoldControls?.Any(outline => InsideQuad(hint.Center, outline)) != true &&
+                context.DisabledControls?.Any(outline => InsideQuad(hint.Center, outline)) != true)
             .Select(hint => hint.ConstrainToFrame(frame.Width, frame.Height)).ToArray();
         var regions = new List<HandTrackingBounds>(2);
         // Qualified presence already requires two fresh observations and at

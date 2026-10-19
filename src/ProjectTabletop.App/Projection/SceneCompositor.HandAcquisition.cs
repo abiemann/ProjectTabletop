@@ -59,7 +59,8 @@ public sealed partial class SceneCompositor
         HandAcquisitionSceneImage? ExpectedScene = null, DateTimeOffset IlluminationStartedAt = default,
         PixelPoint[]? StationarySearchCenters = null, bool RestrictAcquisitionToSearchRegions = true,
         bool AllowsSearchIllumination = true, PixelPoint[]? ContinuousSearchPolygon = null,
-        IReadOnlyList<HandDetection>? LostHands = null, IReadOnlyList<PixelPoint[]>? HoldControls = null);
+        IReadOnlyList<HandDetection>? LostHands = null, IReadOnlyList<PixelPoint[]>? HoldControls = null,
+        IReadOnlyList<PixelPoint[]>? DisabledControls = null);
 
     private AcquisitionSceneState CurrentAcquisitionState() => new(_boardSession.Revision,
         _boardSession.Screen == BoardScreen.Blackjack ? _boardSession.BlackjackState.Revision :
@@ -152,7 +153,8 @@ public sealed partial class SceneCompositor
                     RestrictAcquisitionToSearchRegions: _boardSession.Screen != BoardScreen.HandTracking,
                     AllowsSearchIllumination: true,
                     ContinuousSearchPolygon: capturePolygon, LostHands: LostLitHands(),
-                    HoldControls: HoldControlOutlines());
+                    HoldControls: HoldControlOutlines(),
+                    DisabledControls: ControlOutlines(_boardSession.Buttons.Where(button => !button.Enabled && !button.IsHold)));
             }
             if (animating || AcquisitionMustYieldToHandOrExecute(now))
             {
@@ -262,7 +264,7 @@ public sealed partial class SceneCompositor
             if (!double.IsFinite(hint.RadiusPixels) || hint.RadiusPixels <= 0) return;
             var anchor = _boardCameraMap!.Transform(new(hint.Center.X, hint.Center.Y));
             var board = _boardSurfaceMap!.InverseTransform(anchor);
-            if (!_boardSession.Buttons.Any(button => !button.IsHold && button.Bounds.Contains(board.X, board.Y))) return;
+            if (!_boardSession.Buttons.Any(button => button.Enabled && !button.IsHold && button.Bounds.Contains(board.X, board.Y))) return;
             if (hint.ValidatedCandidateBounds is null && ExpectedReachingHand(hint, board) is { } expected) hint = expected;
             var nativeCenter = hint.IlluminationCenter;
             double nativeRadius = hint.IlluminationRadiusPixels;
@@ -327,7 +329,7 @@ public sealed partial class SceneCompositor
             for (int index = 0; index < _boardSession.Buttons.Count; index++)
             {
                 var button = _boardSession.Buttons[index];
-                if (button.IsHold || !button.Bounds.Contains(board.X, board.Y)) continue;
+                if (!button.Enabled || button.IsHold || !button.Bounds.Contains(board.X, board.Y)) continue;
                 var caption = _acquisitionExpectedScene?.BoardTriggerRegions?[index];
                 return caption is { } bounds ? bounds.Y + bounds.Height / 2 : button.Bounds.Y + button.Bounds.Height / 2;
             }
@@ -358,7 +360,9 @@ public sealed partial class SceneCompositor
 
     // Long-press buttons act on covered-caption evidence alone. Fingers on them
     // must not start a hand-model search, so no spotlight or fingertip marks.
-    private PixelPoint[][] HoldControlOutlines() => _boardSession.Buttons.Where(button => button.IsHold)
+    private PixelPoint[][] HoldControlOutlines() => ControlOutlines(_boardSession.Buttons.Where(button => button.IsHold));
+
+    private PixelPoint[][] ControlOutlines(IEnumerable<BoardButton> buttons) => buttons
         .Select(button => new[]
             {
                 new Point2(button.Bounds.X, button.Bounds.Y), new Point2(button.Bounds.X + button.Bounds.Width, button.Bounds.Y),

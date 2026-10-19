@@ -240,7 +240,8 @@ public sealed partial class MainWindow
         now += TimeSpan.FromMilliseconds(600);
         Draw();
         ready = scene.GetHandAcquisitionContext(now)!;
-        // Player-turn actions and EXIT stay unlit; the ordinary counter keeps gesture assistance.
+        // Player-turn actions and EXIT stay unlit. The chips counter is also
+        // disabled until the round ends, so it must not request assistance.
         scene.CompleteHandAcquisition(ready, [hint with { Center = BoardPoint(.55, .83), ObservedAt = now }], [], now);
         Require(scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && !IsWhite(Draw(), center),
             "A long-press player action was lit.");
@@ -248,10 +249,12 @@ public sealed partial class MainWindow
         var counterHint = hint with { SearchBounds = new(counterCenter.X - 140, Math.Max(0, counterCenter.Y - 140), 280, 280),
             Center = counterCenter, ObservedAt = now };
         scene.CompleteHandAcquisition(ready, [counterHint], [], now);
-        Require(IsWhite(Draw(), counterCenter), "The ordinary Your Chips counter did not allow assistance.");
+        Require(scene.CurrentBoardButtons.Single(button => button.Id == "bj-reset").Enabled == false &&
+                scene.GetHandAcquisitionContext(now)?.IlluminatedHint is null && !IsWhite(Draw(), counterCenter),
+            "The disabled Your Chips counter requested assistance during an active round.");
         Require(scene.ActivateBlackjackButton("bj-hit"), "The fixture could not HIT.");
         Require(!IsWhite(Draw(), counterCenter) && scene.GetHandAcquisitionContext(now) is { ObserveMotion: false },
-            "A card flight kept the obsolete light or enabled motion scanning.");
+            "A card flight lit the disabled counter or enabled motion scanning.");
         now += TimeSpan.FromMilliseconds(800);
         Draw(); // Observe the completed HIT before requesting its new control template.
         scene.GetHandAcquisitionContext(now);
@@ -271,6 +274,11 @@ public sealed partial class MainWindow
         now += TimeSpan.FromMilliseconds(600);
         Draw();
         ready = scene.GetHandAcquisitionContext(now)!;
+        Require(scene.CurrentBoardButtons.Single(button => button.Id == "bj-reset").Enabled,
+            "The chips counter did not re-enable after the dealer settled.");
+        scene.CompleteHandAcquisition(ready, [counterHint with { ObservedAt = now }], [], now);
+        Require(IsWhite(Draw(), counterCenter),
+            "The re-enabled Your Chips counter did not regain acquisition assistance.");
         scene.ShowBoardMenu();
         scene.CompleteHandAcquisition(ready, [hint with { ObservedAt = now }], [], now);
         Require(scene.GetHandAcquisitionContext(now) is { ObserveMotion: false, IlluminatedHint: null },
