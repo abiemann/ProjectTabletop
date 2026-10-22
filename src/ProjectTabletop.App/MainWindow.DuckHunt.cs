@@ -114,8 +114,8 @@ public sealed partial class MainWindow
         ResetDuckHuntInput();
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
-        SetStatus("Duck Hunt: move the red dot and make a sharp click to compare its positions. " +
-            "The duck stays in place. Clicks without a visible dot are ignored. Open the arrow for EXIT and MIC.");
+        SetStatus("Duck Hunt: aim the red dot and click. Each hit turns the walking duck around; ten hits win. " +
+            "If the duck walks off the board, the duck wins. Open the arrow for EXIT and MIC.");
     }
 
     private void BoardOpenedForDuckHunt(BoardScreen screen)
@@ -258,11 +258,14 @@ public sealed partial class MainWindow
                 double elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                 if (!Current()) { Report("Input changed", frame.Timestamp, dot, elapsed); return; }
                 if (!Fresh()) { Report("Click frame expired", frame.Timestamp, dot, elapsed); return; }
+                var before = _scene.DuckHuntState;
                 bool accepted = _scene.SubmitDuckHuntSnapshot(dot.Detected
                         ? new BoardAim(dot.BoardX!.Value, dot.BoardY!.Value) : null,
                     frame.Timestamp, at, confirmedAt, context.Epoch);
-                Report(accepted ? _scene.DuckHuntMeasurement.HasCompletedPair ? "Measurement captured" :
-                    "New dot captured; no recent pre-click dot" : dot.Detected ? "Snapshot rejected by current board" :
+                var after = _scene.DuckHuntState;
+                Report(accepted ? after.Hits > before.Hits ? "Duck hit" : after.Shots > before.Shots ? "Shot missed" :
+                    after.Phase == DuckHuntPhase.Turning ? "Shot during turn" : after.RoundFinished ? "Round finished" :
+                    "Shot not applied" : dot.Detected ? "Snapshot rejected by current board" :
                     dot.Ambiguous ? "Ambiguous red dots" : "No red dot",
                     frame.Timestamp, dot, elapsed);
             }
@@ -297,6 +300,7 @@ public sealed partial class MainWindow
         return new
         {
             game = _scene.DuckHuntState,
+            feathers = _scene.DuckHuntFeatherStatus,
             measurement = _scene.DuckHuntMeasurement,
             ready,
             microphoneMenuOpen = _scene.DuckHuntMicrophoneMenuOpen,

@@ -182,7 +182,7 @@ public sealed partial class SceneCompositor
         var football = _boardSession.Screen == BoardScreen.Football;
         var strykersRun = _boardSession.Screen == BoardScreen.StrykersRun;
         var duckHunt = _boardSession.Screen == BoardScreen.DuckHunt;
-        if (duckHunt) _boardSession.TickDuckHunt(blackjackNow);
+        if (duckHunt) UpdateDuckHuntRound(blackjackNow);
         var waterNow = _waterClock();
         if (water) _boardSession.TickWaterGarden(waterNow);
         var paintNow = _paintClock();
@@ -528,7 +528,7 @@ public sealed partial class SceneCompositor
             BoardScreen.WaterGarden => "Still water. Gentle ripples.",
             BoardScreen.Football => "Big kicks. Bouncy football.",
             BoardScreen.StrykersRun => "Recruit. Advance. Survive.",
-            BoardScreen.DuckHunt => "Track the red dot. Click to compare.",
+            BoardScreen.DuckHunt => "Hit ten times before the duck escapes.",
             BoardScreen.CrownDeed => "Build your fortune. Shape the city.",
             BoardScreen.Globe => "Zoom and rotate Earth",
             BoardScreen.Roulette => "Place your chips and spin",

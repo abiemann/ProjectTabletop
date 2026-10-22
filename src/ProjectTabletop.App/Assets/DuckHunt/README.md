@@ -14,3 +14,9 @@ haze. With the user's explicit approval, a final script cleared 1,851 residual
 pixels with alpha 1 or 2 located more than seven pixels from the opaque duck.
 All RGB values and the antialiased boundary were preserved. Alpha validation
 confirmed transparent canvas edges and no residue beyond that boundary.
+
+Walking reuses this unchanged PNG. Cached GPU geometry separates the body and
+two legs along their feathered roots; the legs alternate a small swing and lift
+while the body's centre stays at a fixed height. A brief horizontal turn mirrors
+the artwork, and the hit-test silhouette uses the same scale, direction and foot
+transforms. No additional raster frames or per-frame image copies are required.

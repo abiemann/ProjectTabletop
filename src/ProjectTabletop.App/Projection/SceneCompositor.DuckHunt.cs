@@ -1,5 +1,6 @@
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Brushes;
 using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.Text;
 using Microsoft.UI.Text;
@@ -13,6 +14,8 @@ public sealed partial class SceneCompositor
 {
     private static readonly Color DuckHuntBackground = Color.FromArgb(255, 218, 223, 213);
     private BitmapAssetSet? _duckHuntImages;
+    private CanvasImageBrush? _duckHuntPhotoBrush;
+    private CanvasGeometry? _duckHuntBodyClip, _duckHuntRearLegClip, _duckHuntNearLegClip;
     private bool _duckHuntArtworkPublished;
     internal bool DuckHuntArtworkReady => _duckHuntArtworkPublished &&
         _duckHuntImages?.Image("mallard-photo.png") is not null;
@@ -45,6 +48,7 @@ public sealed partial class SceneCompositor
         if (!images.IsLoaded) return false;
         if (!_duckHuntArtworkPublished)
         {
+            PrepareDuckHuntWalkRig(device);
             _duckHuntArtworkPublished = true;
             if (_boardSession.Screen == BoardScreen.DuckHunt) InvalidateBoardArtworkSurface();
             InvalidateMenuPreviewSurface();
@@ -54,6 +58,13 @@ public sealed partial class SceneCompositor
 
     private void DisposeDuckHuntArtwork()
     {
+        DisposeDuckHuntFeathers();
+        _duckHuntPhotoBrush?.Dispose();
+        _duckHuntBodyClip?.Dispose();
+        _duckHuntRearLegClip?.Dispose();
+        _duckHuntNearLegClip?.Dispose();
+        _duckHuntPhotoBrush = null;
+        _duckHuntBodyClip = _duckHuntRearLegClip = _duckHuntNearLegClip = null;
         _duckHuntImages?.Dispose();
         _duckHuntImages = null;
         _duckHuntArtworkPublished = false;
@@ -97,7 +108,8 @@ public sealed partial class SceneCompositor
 
     private void DrawDuckHuntBoard(CanvasDrawingSession drawing, DateTimeOffset now)
     {
-        _boardSession.TickDuckHunt(now);
+        UpdateDuckHuntRound(now);
+        var state = _boardSession.DuckHuntState;
         drawing.Clear(DuckHuntBackground);
         using var heading = new CanvasTextFormat
         {
@@ -113,13 +125,26 @@ public sealed partial class SceneCompositor
         };
         var ink = Color.FromArgb(255, 39, 60, 51);
         DrawBoardAspectText(drawing, "DUCK HUNT", new Rect(200, 45, 600, 80), ink, heading);
-        DrawBoardAspectText(drawing, "AIM MEASUREMENT",
+        DrawBoardAspectText(drawing, $"HITS {state.Hits} / {DuckHuntGame.HitsToWin}",
             new Rect(350, 135, 300, 45), ink, caption);
         DrawBoardAspectText(drawing, DuckHuntAudioHint, new Rect(120, 190, 760, 45), ink, caption);
-        DrawDuckHuntMallard(drawing, new Rect(320, 280, 360, 400), PaintBoardAspect());
+        DrawDuckHuntWalkingMallard(drawing, state, PaintBoardAspect());
+        DrawDuckHuntFeathers(drawing, PaintBoardAspect());
         DrawDuckHuntMeasurement(drawing);
         if (!_boardSession.DuckHuntMicrophoneMenuOpen)
-            DrawBoardAspectText(drawing, "Move the red dot. Click to compare positions.", new Rect(120, 745, 760, 55), ink, caption);
+        {
+            string status = state.Phase switch
+            {
+                DuckHuntPhase.PlayerWon => "YOU WIN!",
+                DuckHuntPhase.DuckWon => "DUCK WINS!",
+                _ => "Hit the duck 10 times before it escapes."
+            };
+            DrawBoardAspectText(drawing, status, new Rect(120, 730, 760, 55), ink,
+                state.RoundFinished ? heading : caption);
+            if (state.RoundFinished)
+                DrawBoardAspectText(drawing, "Hold PLAY AGAIN for another round.",
+                    new Rect(120, 785, 760, 45), ink, caption);
+        }
         DrawDuckHuntControls(drawing, now);
     }
 
@@ -159,6 +184,10 @@ public sealed partial class SceneCompositor
         }
         DrawBoardDrawerControls(drawing, buttons, [], [], _boardSession.DuckHuntDrawerOpen,
             (float)_boardSession.GetDuckHuntDrawerProgress(now), PaintBoardAspect(), _holdControlBrightness);
+        if (!_boardSession.DuckHuntDrawerOpen)
+            foreach (var button in buttons)
+                if (button.Id == "duck-hunt-replay")
+                    DrawDrawerButton(drawing, button, false, PaintBoardAspect(), _holdControlBrightness);
         if (_boardSession.DuckHuntMicrophoneMenuOpen && _boardSession.GetDuckHuntDrawerProgress(now) == 1)
         {
             var chosen = buttons.FirstOrDefault(button => button.Id == _boardSession.DuckHuntSelectedMicrophoneButtonId);
@@ -220,10 +249,79 @@ public sealed partial class SceneCompositor
             1, CanvasImageInterpolation.HighQualityCubic);
     }
 
+    private void PrepareDuckHuntWalkRig(CanvasDevice device)
+    {
+        if (_duckHuntPhotoBrush is not null || _duckHuntImages?.Image("mallard-photo.png") is not { } image) return;
+        _duckHuntPhotoBrush = new CanvasImageBrush(device, image)
+        {
+            Interpolation = CanvasImageInterpolation.HighQualityCubic
+        };
+        // These source-space contours follow the belly around the two leg roots.
+        // The legs tuck behind the original feather edge rather than shearing a
+        // rectangular strip through the photograph. The alpha silhouette remains
+        // the image's own, and the three reusable geometries never copy pixels.
+        _duckHuntBodyClip = CanvasGeometry.CreatePolygon(device,
+        [
+            new(0, 0), new(1312, 0), new(1312, 1199), new(900, 1199),
+            new(900, 930), new(850, 930), new(838, 907), new(802, 900),
+            new(770, 899), new(754, 913), new(640, 918), new(621, 895),
+            new(584, 889), new(552, 884), new(538, 899), new(0, 1199)
+        ]);
+        _duckHuntRearLegClip = CanvasGeometry.CreatePolygon(device,
+        [
+            new(553, 879), new(624, 885), new(655, 1037), new(679, 1074),
+            new(610, 1124), new(566, 1154), new(329, 1156), new(328, 1029), new(526, 1006)
+        ]);
+        _duckHuntNearLegClip = CanvasGeometry.CreatePolygon(device,
+        [
+            new(767, 892), new(841, 899), new(879, 1199), new(552, 1199),
+            new(565, 1141), new(636, 1091), new(729, 1078)
+        ]);
+        // The photographed feet overlap slightly. Give that small toe seam to
+        // the nearer foot so an original pixel cannot move with both legs.
+        var rear = _duckHuntRearLegClip;
+        _duckHuntRearLegClip = rear.CombineWith(_duckHuntNearLegClip, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
+        rear.Dispose();
+    }
+
+    internal void DrawDuckHuntWalkingMallard(CanvasDrawingSession drawing, DuckHuntSnapshot duck, double aspect)
+    {
+        if (!duck.DuckVisible || _duckHuntPhotoBrush is not { } brush || _duckHuntBodyClip is null ||
+            _duckHuntRearLegClip is null || _duckHuntNearLegClip is null) return;
+        var bounds = DuckHuntLayout.PhotoBounds(duck, aspect);
+        float width = (float)bounds.Width * BoardSurfaceSize;
+        float height = (float)bounds.Height * BoardSurfaceSize;
+        // The source faces left. A short eased squeeze through its centre turns
+        // it around without moving its horizontal path or shifting the hit pose.
+        float facing = (float)duck.Facing;
+        float scaleX = -MathF.CopySign(MathF.Max(.10f, MathF.Abs(facing)), facing);
+        var previous = drawing.Transform;
+        var pose = Matrix3x2.CreateTranslation(-656, -599.5f) *
+            Matrix3x2.CreateScale(width / 1312 * scaleX, height / 1199) *
+            Matrix3x2.CreateTranslation((float)duck.U * BoardSurfaceSize, (float)duck.V * BoardSurfaceSize) * previous;
+        try
+        {
+            DrawLeg(_duckHuntRearLegClip, true);
+            DrawLeg(_duckHuntNearLegClip, false);
+            drawing.Transform = pose;
+            drawing.FillGeometry(_duckHuntBodyClip, brush);
+        }
+        finally { drawing.Transform = previous; }
+
+        void DrawLeg(CanvasGeometry geometry, bool rear)
+        {
+            var foot = DuckHuntLayout.FootPose(duck, rear);
+            var pivot = new Vector2((float)foot.PivotU * 1312, (float)foot.PivotV * 1199);
+            drawing.Transform = Matrix3x2.CreateRotation((float)foot.Angle, pivot) *
+                Matrix3x2.CreateTranslation(0, (float)foot.Lift * 1199) * pose;
+            drawing.FillGeometry(geometry, brush);
+        }
+    }
+
     internal void DrawDuckHuntMeasurement(CanvasDrawingSession drawing)
     {
         var measurement = DuckHuntMeasurement;
-        BoardAim? anchor = measurement.HasCompletedPair ? measurement.OldDetectedXY : measurement.LiveDetectedXY;
+        BoardAim? anchor = measurement.OldDetectedXY ?? measurement.NewDetectedXY ?? measurement.LiveDetectedXY;
         if (anchor is not { } old) return;
         double aspect = PaintBoardAspect();
         // Board units are normalized independently in each axis. Scale the local

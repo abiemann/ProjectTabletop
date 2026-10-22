@@ -360,6 +360,41 @@ public class RedDotDetectorTests
     }
 
     [Fact]
+    public void WeakWarmFeatherEdgeCannotSupportAWhiteCore()
+    {
+        var frame = new Frame(110, 115, 120);
+        // Exact colours and relative geometry from the walking duck's rear-flank
+        // highlight. These five dim brown pixels passed the red hue ratio alone.
+        frame.Pixel(321, 237, 69, 80, 113);
+        frame.Pixel(322, 238, 65, 75, 104);
+        frame.Pixel(323, 239, 75, 83, 107);
+        frame.Pixel(324, 240, 82, 89, 116);
+        frame.Pixel(325, 241, 108, 113, 137);
+        frame.Pixel(320, 240, 245, 245, 245);
+        frame.Pixel(321, 240, 252, 251, 250);
+        frame.Pixel(322, 240, 250, 251, 251);
+        frame.Pixel(323, 241, 247, 248, 246);
+        var result = frame.Detect(new());
+        Assert.False(result.Detected);
+        Assert.Equal(0, result.CandidateCount);
+    }
+
+    [Theory]
+    [InlineData(20, 30, 200)]
+    [InlineData(112, 65, 118)]
+    public void ClippedCoreKeepsPureRedAndDimPinkFringes(byte blue, byte green, byte red)
+    {
+        var frame = new Frame(110, 115, 120);
+        frame.Disc(320, 240, 4, blue, green, red);
+        frame.Disc(320, 240, 1, 255, 244, 255);
+        var result = frame.Detect(new());
+        Assert.True(result.Detected);
+        Assert.Equal(1, result.CandidateCount);
+        Assert.Equal(320, result.CameraPosition!.Value.X, 5);
+        Assert.Equal(240, result.CameraPosition!.Value.Y, 5);
+    }
+
+    [Fact]
     public void CalibratedPolygonExcludesCameraSurroundingsAndMapsPerspective()
     {
         Point2[] camera = [new(160, 70), new(550, 105), new(580, 400), new(70, 420)];

@@ -1,81 +1,152 @@
 namespace ProjectTabletop.Interaction;
 
-public enum DuckHuntPhase { Aiming, Falling, Waiting }
+public enum DuckHuntPhase { Ready, Walking, Turning, DuckWon, PlayerWon }
 
 public readonly record struct DuckHuntSnapshot(DuckHuntPhase Phase, int Hits, int Shots,
-    double U, double V, double Rotation, long Revision)
+    double U, double V, double Rotation, long Revision, int Direction = -1,
+    double Facing = -1, double WalkPhase = 0, bool Paused = false)
 {
-    public bool DuckVisible => Phase != DuckHuntPhase.Waiting;
+    public bool DuckVisible => Phase is DuckHuntPhase.Walking or DuckHuntPhase.Turning or DuckHuntPhase.PlayerWon;
+    public bool RoundFinished => Phase is DuckHuntPhase.DuckWon or DuckHuntPhase.PlayerWon;
 }
 
-/// <summary>A stationary target, a short gravity fall, then a fresh target. Input timestamps
-/// are supplied by the caller; the camera/audio layer owns observation freshness.</summary>
+/// <summary>A horizontal, constant-speed crossing with a short turn after each hit.
+/// Motion is evaluated at the camera photo timestamp, independently of render ticks.</summary>
 public sealed class DuckHuntGame
 {
-    public static readonly TimeSpan FallDuration = TimeSpan.FromSeconds(1.15);
-    public static readonly TimeSpan RespawnDelay = TimeSpan.FromSeconds(.45);
+    public const int HitsToWin = 10;
+    public static readonly TimeSpan CrossingDuration = TimeSpan.FromSeconds(22);
+    public static readonly TimeSpan TurnDuration = TimeSpan.FromSeconds(.28);
+    private const double CentreV = .48;
+    private const double EntryMargin = .004;
+    private const double StepsPerSecond = 1.7;
     private DateTimeOffset _observedAt = DateTimeOffset.MinValue;
-    private DateTimeOffset _targetAppearedAt = DateTimeOffset.MinValue;
-    private DateTimeOffset? _hitAt;
+    private DateTimeOffset _segmentStartedAt, _inputNotBefore;
     private DateTimeOffset _lastShotAt = DateTimeOffset.MinValue;
-    private DuckHuntSnapshot _snapshot = new(DuckHuntPhase.Aiming, 0, 0, .5, .48, 0, 0);
+    private DateTimeOffset? _pausedAt;
+    private bool _started, _turningSegment, _playerWon;
+    private int _direction = -1, _previousDirection = -1, _hits, _shots;
+    private double _segmentU, _walkSecondsBeforeSegment, _halfWidth, _speed;
+    private DuckHuntSnapshot _snapshot = new(DuckHuntPhase.Ready, 0, 0, .5, CentreV, 0, 0);
 
     public DuckHuntSnapshot Snapshot => _snapshot;
+    public DuckHuntFeathers Feathers { get; } = new();
 
     public void Reset(DateTimeOffset now)
     {
-        _observedAt = now;
-        _targetAppearedAt = now;
+        _observedAt = _inputNotBefore = now;
         _lastShotAt = DateTimeOffset.MinValue;
-        _hitAt = null;
-        _snapshot = new(DuckHuntPhase.Aiming, 0, 0, .5, .48, 0, _snapshot.Revision + 1);
+        _pausedAt = null;
+        _started = _turningSegment = _playerWon = false;
+        _hits = _shots = 0;
+        _walkSecondsBeforeSegment = 0;
+        Feathers.Clear();
+        _snapshot = new(DuckHuntPhase.Ready, 0, 0, .5, CentreV, 0, _snapshot.Revision + 1);
+    }
+
+    /// <summary>Start only after camera, microphone and artwork are ready. The optional
+    /// side makes verification deterministic; normal rounds choose either edge randomly.</summary>
+    public bool Start(DateTimeOffset now, double boardAspect = 1, bool? enterFromLeft = null)
+    {
+        if (_started || now < _observedAt || !double.IsFinite(boardAspect) || boardAspect <= 0) return false;
+        _direction = _previousDirection = (enterFromLeft ?? Random.Shared.Next(2) == 0) ? 1 : -1;
+        _halfWidth = DuckHuntLayout.PhotoWidth(boardAspect) / 2;
+        _speed = (1 + 2 * _halfWidth + 2 * EntryMargin) / CrossingDuration.TotalSeconds;
+        _segmentU = _direction > 0 ? -_halfWidth - EntryMargin : 1 + _halfWidth + EntryMargin;
+        _segmentStartedAt = _inputNotBefore = now;
+        _started = true;
+        Advance(now);
+        return true;
     }
 
     public void Advance(DateTimeOffset now)
     {
         if (now < _observedAt) return;
         _observedAt = now;
-        if (_hitAt is not { } hitAt) return;
-        double seconds = (now - hitAt).TotalSeconds;
-        var phase = seconds < FallDuration.TotalSeconds ? DuckHuntPhase.Falling : DuckHuntPhase.Waiting;
-        if (seconds >= (FallDuration + RespawnDelay).TotalSeconds)
-        {
-            _hitAt = null;
-            _targetAppearedAt = hitAt + FallDuration + RespawnDelay;
-            SetPose(DuckHuntPhase.Aiming, .5, .48, 0);
-        }
-        else
-            SetPose(phase, .5 + .055 * seconds, .48 - .08 * seconds + .70 * seconds * seconds,
-                seconds * 2.1);
+        if (!_started) return;
+        var animationTime = _pausedAt ?? now;
+        bool feathersChanged = Feathers.Advance(animationTime);
+        Publish(PoseAt(animationTime) with { Paused = _pausedAt.HasValue }, feathersChanged);
     }
 
-    /// <summary>Returns true only for a hit on the visible silhouette. Missing/invalid aim
-    /// and repeated audio timestamps are ignored rather than counted as shots.</summary>
+    /// <summary>Freeze the crossing while input is unavailable. On resume, invalidate
+    /// earlier photos so a delayed click cannot cross the pause boundary.</summary>
+    public void SetPaused(bool paused, DateTimeOffset now)
+    {
+        if (!_started || now < _observedAt || paused == _pausedAt.HasValue) return;
+        Advance(now);
+        if (paused) _pausedAt = now;
+        else
+        {
+            var pause = now - _pausedAt!.Value;
+            _segmentStartedAt += pause;
+            Feathers.Delay(pause);
+            _pausedAt = null;
+            _inputNotBefore = now;
+        }
+        Advance(now);
+    }
+
+    /// <summary>Missing/invalid aim, duplicate timestamps and photos during a turn
+    /// or pause do not count as shots. The audio/camera gate owns freshness.</summary>
     public bool Shoot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1)
     {
-        if (aim is not { } point || !double.IsFinite(point.U) || !double.IsFinite(point.V) ||
+        if (!_started || _pausedAt.HasValue || _playerWon || aim is not { } point ||
+            !double.IsFinite(point.U) || !double.IsFinite(point.V) ||
             point.U is < 0 or > 1 || point.V is < 0 or > 1 ||
-            shotTime <= _lastShotAt || shotTime < _targetAppearedAt ||
+            shotTime <= _lastShotAt || shotTime < _inputNotBefore ||
             !double.IsFinite(boardAspect) || boardAspect <= 0) return false;
-        Advance(shotTime);
-        if (_snapshot.Phase != DuckHuntPhase.Aiming) return false;
+        var photographed = PoseAt(shotTime);
+        if (photographed.Phase != DuckHuntPhase.Walking) return false;
         _lastShotAt = shotTime;
-        bool hit = DuckHuntLayout.ContainsDuck(point, _snapshot, boardAspect);
-        _snapshot = _snapshot with
+        _shots++;
+        bool hit = DuckHuntLayout.ContainsDuck(point, photographed, boardAspect);
+        if (hit)
         {
-            Shots = _snapshot.Shots + 1,
-            Hits = _snapshot.Hits + (hit ? 1 : 0),
-            Phase = hit ? DuckHuntPhase.Falling : DuckHuntPhase.Aiming,
-            Revision = _snapshot.Revision + 1
-        };
-        if (hit) _hitAt = shotTime;
+            Feathers.Spawn(photographed, boardAspect, shotTime);
+            _hits++;
+            _walkSecondsBeforeSegment = WalkingSecondsAt(shotTime);
+            _segmentU = photographed.U;
+            _segmentStartedAt = shotTime;
+            _playerWon = _hits == HitsToWin;
+            _turningSegment = !_playerWon;
+            if (!_playerWon)
+            {
+                _previousDirection = _direction;
+                _direction = -_direction;
+            }
+        }
+        // A completed worker may arrive after a render tick, even just after the
+        // original escape time. Re-evaluate that tick with the new historical turn.
+        Advance(shotTime > _observedAt ? shotTime : _observedAt);
         return hit;
     }
 
-    private void SetPose(DuckHuntPhase phase, double u, double v, double rotation)
+    private double WalkingSecondsAt(DateTimeOffset now)
     {
-        if (_snapshot.Phase == phase && _snapshot.U == u && _snapshot.V == v && _snapshot.Rotation == rotation) return;
-        _snapshot = _snapshot with { Phase = phase, U = u, V = v, Rotation = rotation,
-            Revision = _snapshot.Revision + 1 };
+        double elapsed = Math.Max(0, (now - _segmentStartedAt).TotalSeconds);
+        double walking = Math.Max(0, elapsed - (_turningSegment ? TurnDuration.TotalSeconds : 0));
+        double exitU = _direction > 0 ? 1 + _halfWidth + EntryMargin : -_halfWidth - EntryMargin;
+        return _walkSecondsBeforeSegment + Math.Min(walking, Math.Abs(exitU - _segmentU) / _speed);
+    }
+
+    private DuckHuntSnapshot PoseAt(DateTimeOffset now)
+    {
+        double elapsed = Math.Max(0, (now - _segmentStartedAt).TotalSeconds);
+        double walkingSeconds = _playerWon ? _walkSecondsBeforeSegment : WalkingSecondsAt(now);
+        double u = _segmentU + _direction * _speed * (walkingSeconds - _walkSecondsBeforeSegment);
+        bool turning = _turningSegment && elapsed < TurnDuration.TotalSeconds;
+        double facing = turning ? _previousDirection * Math.Cos(Math.PI * elapsed / TurnDuration.TotalSeconds) : _direction;
+        double exitU = _direction > 0 ? 1 + _halfWidth + EntryMargin : -_halfWidth - EntryMargin;
+        bool escaped = !turning && Math.Abs(u - exitU) < 1e-10;
+        var phase = _playerWon ? DuckHuntPhase.PlayerWon : escaped ? DuckHuntPhase.DuckWon :
+            turning ? DuckHuntPhase.Turning : DuckHuntPhase.Walking;
+        return new(phase, _hits, _shots, u, CentreV, 0, _snapshot.Revision,
+            _direction, facing, walkingSeconds * StepsPerSecond * Math.Tau);
+    }
+
+    private void Publish(DuckHuntSnapshot next, bool feathersChanged)
+    {
+        if (feathersChanged || next != _snapshot) _snapshot = next with { Revision = _snapshot.Revision + 1 };
     }
 }

@@ -27,12 +27,28 @@ public sealed partial class BoardSession
         Array.FindIndex(_duckHuntMicrophones, choice => choice.Id == _duckHuntSelectedMicrophone);
 
     public DuckHuntSnapshot DuckHuntState => _duckHunt.Snapshot;
+    public DuckHuntFeathers DuckHuntFeathers => _duckHunt.Feathers;
+    public long DuckHuntRoundRevision { get; private set; }
+    public static readonly BoardRect DuckHuntReplayBounds = new(.535, .87, .245, .12);
     public void ShowDuckHunt(DateTimeOffset? now = null) =>
         Show(BoardScreen.DuckHunt, now ?? MonotonicClock.UtcNow);
     public void TickDuckHunt(DateTimeOffset now)
     {
         AdvanceBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, now);
-        if (Screen == BoardScreen.DuckHunt) _duckHunt.Advance(now);
+        if (Screen != BoardScreen.DuckHunt) return;
+        bool finished = _duckHunt.Snapshot.RoundFinished;
+        _duckHunt.Advance(now);
+        RefreshDuckHuntResultControls(finished, now);
+    }
+    public void SetDuckHuntReady(bool ready, DateTimeOffset now, double boardAspect = 1)
+    {
+        if (Screen != BoardScreen.DuckHunt) return;
+        ready &= !DuckHuntMicrophoneMenuOpen;
+        if (ready && _duckHunt.Snapshot.Phase == DuckHuntPhase.Ready)
+            _duckHunt.Start(now, boardAspect);
+        bool finished = _duckHunt.Snapshot.RoundFinished;
+        _duckHunt.SetPaused(!ready, now);
+        RefreshDuckHuntResultControls(finished, now);
     }
     public double GetDuckHuntDrawerProgress(DateTimeOffset now) =>
         BottomDrawerProgress(_duckHuntDrawer, BoardScreen.DuckHunt, now);
@@ -74,20 +90,36 @@ public sealed partial class BoardSession
         }
     }
 
-    public bool TryDuckHuntShot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1) =>
-        Screen == BoardScreen.DuckHunt && !DuckHuntMicrophoneMenuOpen && _duckHunt.Shoot(aim, shotTime, boardAspect);
+    public bool TryDuckHuntShot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1)
+    {
+        if (Screen != BoardScreen.DuckHunt || DuckHuntMicrophoneMenuOpen) return false;
+        bool finished = _duckHunt.Snapshot.RoundFinished;
+        bool hit = _duckHunt.Shoot(aim, shotTime, boardAspect);
+        RefreshDuckHuntResultControls(finished, shotTime);
+        return hit;
+    }
+
+    private void RefreshDuckHuntResultControls(bool wasFinished, DateTimeOffset now)
+    {
+        if (wasFinished != _duckHunt.Snapshot.RoundFinished)
+            BottomDrawerInputBarrier(_duckHuntDrawer, Later(now, _duckHuntDrawer.ObservedAt));
+    }
 
     private void InitializeDuckHunt(DateTimeOffset now)
     {
         _duckHunt.Reset(now);
+        DuckHuntRoundRevision++;
         _duckHuntMicrophoneExpanded = false;
         _duckHuntMicrophonePage = 0;
     }
 
     private IReadOnlyList<BoardButton> CurrentDuckHuntButtons()
     {
-        if (!DuckHuntDrawerOpen) return [new("duck-hunt-drawer-open", "^", BottomDrawerHandleBounds,
-            BoardScreen.DuckHunt, Hold: BoardButtonHold.Once)];
+        var replay = new BoardButton("duck-hunt-replay", "PLAY AGAIN", DuckHuntReplayBounds,
+            BoardScreen.DuckHunt, Hold: BoardButtonHold.Once);
+        if (!DuckHuntDrawerOpen) return _duckHunt.Snapshot.RoundFinished
+            ? [new("duck-hunt-drawer-open", "^", BottomDrawerHandleBounds, BoardScreen.DuckHunt, Hold: BoardButtonHold.Once), replay]
+            : [new("duck-hunt-drawer-open", "^", BottomDrawerHandleBounds, BoardScreen.DuckHunt, Hold: BoardButtonHold.Once)];
         var buttons = new List<BoardButton>
         {
             new("duck-hunt-drawer-close", "v", BottomDrawerHandleBounds, BoardScreen.DuckHunt, Hold: BoardButtonHold.Once),
@@ -96,6 +128,8 @@ public sealed partial class BoardSession
             new("duck-hunt-mic", "MIC", DuckHuntLayout.MicrophoneBounds, BoardScreen.DuckHunt,
                 Enabled: _duckHuntDrawer.OpeningReady, Hold: BoardButtonHold.Once)
         };
+        if (_duckHunt.Snapshot.RoundFinished && !_duckHuntMicrophoneExpanded)
+            buttons.Add(replay with { Enabled = _duckHuntDrawer.OpeningReady });
         if (!_duckHuntMicrophoneExpanded) return buttons;
         int first = _duckHuntMicrophonePage * DuckHuntLayout.MicrophonesPerPage;
         for (int index = first; index < Math.Min(_duckHuntMicrophones.Length, first + DuckHuntLayout.MicrophonesPerPage); index++)
@@ -117,6 +151,14 @@ public sealed partial class BoardSession
     private bool SelectDuckHuntButton(BoardButton button, DateTimeOffset now)
     {
         if (now < _duckHuntDrawer.ObservedAt) return false;
+        if (button.Id == "duck-hunt-replay" && _duckHunt.Snapshot.RoundFinished &&
+            !DuckHuntMicrophoneMenuOpen && (!DuckHuntDrawerOpen || _duckHuntDrawer.OpeningReady))
+        {
+            _duckHunt.Reset(now);
+            DuckHuntRoundRevision++;
+            BottomDrawerInputBarrier(_duckHuntDrawer, now);
+            return true;
+        }
         if (button.Id == "duck-hunt-drawer-open")
         {
             bool opened = SelectBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, open: true, now);

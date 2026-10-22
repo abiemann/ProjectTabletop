@@ -207,9 +207,11 @@ public sealed class RedDotDetector
                 if (red >= 245 && green >= 220 && blue >= 245) continue;
                 // A bright centre can desaturate its red fringe on dark photographic
                 // detail, so local red/green evidence need not satisfy the global intensity
-                // gate. Keep the red/pink hue requirement: orange/brown feather highlights
-                // can have a clipped white centre too.
-                if (red >= 100 && red - green >= 24 && IsRedHue(red, green, blue)) colourSupport++;
+                // gate. A pink fringe retains blue; a pure red fringe has strong red
+                // dominance. A weak warm-brown edge can surround a white feather
+                // highlight too, so hue purity alone is insufficient evidence.
+                if (red >= 100 && red - green >= 24 && IsRedHue(red, green, blue) &&
+                    (blue >= green || red - Math.Max(blue, green) >= 55)) colourSupport++;
             }
             if (colourSupport < 4) continue;
             var camera = new PixelPoint(sumX / tail, sumY / tail);

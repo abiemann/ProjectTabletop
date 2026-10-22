@@ -10,7 +10,7 @@ public sealed partial class SceneCompositor
     public sealed record DuckHuntInputContext(long Epoch, IReadOnlyList<double> CameraToBoard,
         DateTimeOffset NotBefore);
 
-    private readonly record struct DuckHuntInputKey(long Navigation, Homography? Camera,
+    private readonly record struct DuckHuntInputKey(long Navigation, long Round, Homography? Camera,
         Homography? Surface, DateTimeOffset InputReset, bool Active);
     private readonly DuckHuntMeasurementTracker _duckHuntMeasurement = new();
     private DuckHuntInputKey? _duckHuntInputKey;
@@ -22,6 +22,14 @@ public sealed partial class SceneCompositor
     private string _duckHuntRenderedHint = string.Empty;
     private BoardAim? _duckHuntRenderedLiveDot;
     private long _duckHuntInputVisualRevision;
+
+    private void UpdateDuckHuntRound(DateTimeOffset now)
+    {
+        bool ready = SyncDuckHuntInput(MonotonicClock.UtcNow) is not null &&
+            _duckHuntAudioReady && DuckHuntArtworkReady;
+        _boardSession.SetDuckHuntReady(ready, now, PaintBoardAspect());
+        _boardSession.TickDuckHunt(now);
+    }
 
     // Read while constructing the rendered-board cache key so microphone/learning
     // messages and the expiring dot hint refresh even while the duck is stationary.
@@ -107,9 +115,14 @@ public sealed partial class SceneCompositor
             var now = MonotonicClock.UtcNow;
             var context = SyncDuckHuntInput(now);
             if (context is null || context.Epoch != epoch || !_duckHuntAudioReady) return false;
-            // Keep the duck in place while measuring. The fresh snapshot supplies
-            // newDetectedXY; the timestamped history supplies oldDetectedXY.
+            UpdateDuckHuntRound(_blackjackClock());
+            if (_boardSession.DuckHuntState.Phase == DuckHuntPhase.Ready ||
+                _boardSession.DuckHuntState.Paused || _boardSession.DuckHuntState.Phase == DuckHuntPhase.PlayerWon) return false;
+            // The current photo decides the hit at its own timestamp, even if
+            // rendering has already advanced. Each valid shot replaces the
+            // previous dot/circle; neither mark follows the walking duck.
             if (!_duckHuntMeasurement.Capture(aim, frameTimestamp, clickOnset, confirmedAt, now)) return false;
+            _boardSession.TryDuckHuntShot(aim, frameTimestamp, PaintBoardAspect());
             _duckHuntInputVisualRevision++;
             return true;
         }
@@ -158,12 +171,12 @@ public sealed partial class SceneCompositor
             _duckHuntRenderedLiveDot = live;
             _duckHuntInputVisualRevision++;
         }
-        string hint = _duckHuntLearningActive ? "Click learning · measurements paused" :
+        string hint = _duckHuntLearningActive ? "Click learning · round paused" :
             DuckHuntMicrophoneMenuOpen ? "Choose a microphone" :
             context is null ? "Waiting for camera and board calibration" :
             !_duckHuntAudioReady ? _duckHuntAudioStatus :
             live.HasValue
-                ? "Red dot detected · click to measure" : "Show the red dot on the board";
+                ? "Red dot detected · click to shoot" : "Show the red dot on the board";
         if (_duckHuntRenderedHint == hint) return;
         _duckHuntRenderedHint = hint;
         _duckHuntInputVisualRevision++;
@@ -173,7 +186,7 @@ public sealed partial class SceneCompositor
     {
         bool active = _boardSession.Screen == BoardScreen.DuckHunt && MappedBoardInputReady &&
             !_cameraCheckRequired && !DuckHuntMicrophoneMenuOpen && !_duckHuntLearningActive;
-        var key = new DuckHuntInputKey(_boardSession.NavigationRevision, _boardCameraMap,
+        var key = new DuckHuntInputKey(_boardSession.NavigationRevision, _boardSession.DuckHuntRoundRevision, _boardCameraMap,
             _boardSurfaceMap, _handVisualResetThrough, active);
         if (_duckHuntInputKey == key) return _duckHuntInputContext;
         _duckHuntInputKey = key;
