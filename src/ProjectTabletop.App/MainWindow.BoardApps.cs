@@ -58,7 +58,7 @@ public sealed partial class MainWindow
         // hide the interactive game preview until explicit camera recovery.
         bool boardGame = !_cameraManualRestartRequired &&
             (blackjack || crownDeed || globe || slots || roulette || water || football || strykersRun || duckHunt);
-        BoardGamePreviewTitle.Text = duckHunt ? "DUCK HUNT  ·  aim the red dot and click" :
+        BoardGamePreviewTitle.Text = duckHunt ? "DUCK HUNT  ·  track the red dot and click to compare" :
             strykersRun ? "STRYKER'S RUN  ·  slide along the dots  ·  automatic fire" :
             football ? "FOOTBALL  ·  black cardboard bars or index fingers  ·  first to five" :
             water ? "WATER GARDEN  ·  double-bar marker makes ripples  ·  click controls" :
@@ -86,7 +86,7 @@ public sealed partial class MainWindow
              water ? "Move the learned double-bar marker across the water. Open the bottom-left arrow for Exit, Reset, and Duck+; you can also click those controls here." :
              football ? "Choose Football input for each player. Play the computer or switch to two players. First to five wins; tracking loss pauses the match." :
              strykersRun ? _scene.StrykersRunState.Banner :
-             duckHunt ? _duckHuntMicrophone.Status + " Aim the red dot at the duck; clicks without a dot are ignored." :
+             duckHunt ? _duckHuntMicrophone.Status + " Move the red dot and click to compare its positions; clicks without a dot are ignored." :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :
              _scene.CurrentBoardScreen == BoardScreen.PhotoCopy ? _scene.PhotoCopyStatus :

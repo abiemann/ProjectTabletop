@@ -1,6 +1,5 @@
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
-using Microsoft.Graphics.Canvas.Brushes;
 using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.Text;
 using Microsoft.UI.Text;
@@ -13,6 +12,52 @@ namespace ProjectTabletop.App.Projection;
 public sealed partial class SceneCompositor
 {
     private static readonly Color DuckHuntBackground = Color.FromArgb(255, 218, 223, 213);
+    private BitmapAssetSet? _duckHuntImages;
+    private bool _duckHuntArtworkPublished;
+    internal bool DuckHuntArtworkReady => _duckHuntArtworkPublished &&
+        _duckHuntImages?.Image("mallard-photo.png") is not null;
+    private string? DuckHuntArtworkError => _duckHuntImages?.Error ??
+        _duckHuntImages?.Errors.GetValueOrDefault("mallard-photo.png");
+
+    private BitmapAssetSet GetDuckHuntImages(CanvasDevice device)
+    {
+        if (_duckHuntImages is null || _duckHuntImages.Device != device)
+        {
+            DisposeDuckHuntArtwork();
+            _duckHuntImages = new(device, Path.Combine(AppContext.BaseDirectory, "Assets", "DuckHunt"),
+                ["mallard-photo.png"]);
+        }
+        return _duckHuntImages;
+    }
+
+    internal async Task EnsureDuckHuntResourcesAsync(CanvasDevice device)
+    {
+        BitmapAssetSet images;
+        lock (_gate) { ObjectDisposedException.ThrowIf(_disposed, this); images = GetDuckHuntImages(device); }
+        await images.EnsureLoadedAsync().ConfigureAwait(false);
+        lock (_gate)
+            if (!_disposed && ReferenceEquals(images, _duckHuntImages)) PrepareDuckHuntResources(device);
+    }
+
+    private bool PrepareDuckHuntResources(CanvasDevice device)
+    {
+        var images = GetDuckHuntImages(device);
+        if (!images.IsLoaded) return false;
+        if (!_duckHuntArtworkPublished)
+        {
+            _duckHuntArtworkPublished = true;
+            if (_boardSession.Screen == BoardScreen.DuckHunt) InvalidateBoardArtworkSurface();
+            InvalidateMenuPreviewSurface();
+        }
+        return DuckHuntArtworkReady;
+    }
+
+    private void DisposeDuckHuntArtwork()
+    {
+        _duckHuntImages?.Dispose();
+        _duckHuntImages = null;
+        _duckHuntArtworkPublished = false;
+    }
     public DuckHuntSnapshot DuckHuntState { get { lock (_gate) return _boardSession.DuckHuntState; } }
     public bool DuckHuntMicrophoneMenuOpen { get { lock (_gate) return _boardSession.DuckHuntMicrophoneMenuOpen; } }
     public event Action<string?>? DuckHuntMicrophoneSelected;
@@ -53,7 +98,6 @@ public sealed partial class SceneCompositor
     private void DrawDuckHuntBoard(CanvasDrawingSession drawing, DateTimeOffset now)
     {
         _boardSession.TickDuckHunt(now);
-        var duck = _boardSession.DuckHuntState;
         drawing.Clear(DuckHuntBackground);
         using var heading = new CanvasTextFormat
         {
@@ -69,12 +113,13 @@ public sealed partial class SceneCompositor
         };
         var ink = Color.FromArgb(255, 39, 60, 51);
         DrawBoardAspectText(drawing, "DUCK HUNT", new Rect(200, 45, 600, 80), ink, heading);
-        DrawBoardAspectText(drawing, $"{duck.Hits} HIT{(duck.Hits == 1 ? "" : "S")}",
+        DrawBoardAspectText(drawing, "AIM MEASUREMENT",
             new Rect(350, 135, 300, 45), ink, caption);
         DrawBoardAspectText(drawing, DuckHuntAudioHint, new Rect(120, 190, 760, 45), ink, caption);
-        if (duck.DuckVisible) DrawDuckHuntMallard(drawing, duck, PaintBoardAspect());
+        DrawDuckHuntMallard(drawing, new Rect(320, 280, 360, 400), PaintBoardAspect());
+        DrawDuckHuntMeasurement(drawing);
         if (!_boardSession.DuckHuntMicrophoneMenuOpen)
-            DrawBoardAspectText(drawing, "Aim the red dot. Click to shoot.", new Rect(200, 745, 600, 55), ink, caption);
+            DrawBoardAspectText(drawing, "Move the red dot. Click to compare positions.", new Rect(120, 745, 760, 55), ink, caption);
         DrawDuckHuntControls(drawing, now);
     }
 
@@ -138,6 +183,11 @@ public sealed partial class SceneCompositor
         lock (_gate)
         {
             if (_disposed || _boardSession.Screen != BoardScreen.DuckHunt) return;
+            if (!PrepareDuckHuntResources(drawing.Device))
+            {
+                DrawArtworkLoading(drawing, new Rect(0, 0, width, height));
+                return;
+            }
             double aspect = PaintBoardAspect();
             float drawWidth = (float)Math.Min(width, height * aspect), drawHeight = (float)(drawWidth / aspect);
             var previous = drawing.Transform;
@@ -150,81 +200,51 @@ public sealed partial class SceneCompositor
 
     private void DrawDuckHuntMenuPreview(CanvasDrawingSession drawing, Rect rect, Rect inside, float radius)
     {
+        if (!PrepareDuckHuntResources(drawing.Device)) return;
         using var clip = CanvasGeometry.CreateRoundedRectangle(drawing.Device, inside, radius, radius);
         using var layer = drawing.CreateLayer(1, clip);
-        var previous = drawing.Transform;
-        double aspect = PaintBoardAspect();
-        float scale = (float)Math.Min(rect.Width * .53 / 380, rect.Height * .75 / (240 * aspect));
-        drawing.Transform = Matrix3x2.CreateScale(scale) *
-            Matrix3x2.CreateTranslation((float)(rect.X + rect.Width * .73), (float)(rect.Y + rect.Height * .48)) * previous;
-        try { DrawDuckHuntMallard(drawing, new(DuckHuntPhase.Aiming, 0, 0, 0, 0, 0, 0), aspect); }
-        finally { drawing.Transform = previous; }
+        DrawDuckHuntMallard(drawing,
+            new Rect(rect.X + rect.Width * .46, rect.Y + rect.Height * .04, rect.Width * .52, rect.Height * .91),
+            PaintBoardAspect());
     }
 
-    // Geometry is drawn at destination resolution, so the silhouette and fine feather
-    // strokes stay sharp on a 4K projector. No red decoration can become a false aim dot.
-    private static void DrawDuckHuntMallard(CanvasDrawingSession drawing, DuckHuntSnapshot duck, double aspect)
+    private void DrawDuckHuntMallard(CanvasDrawingSession drawing, Rect bounds, double aspect)
     {
+        if (_duckHuntImages?.Image("mallard-photo.png") is not { } image) return;
+        // Source pixels retain their natural proportions in physical board space.
+        double width = Math.Min(bounds.Width, bounds.Height / aspect * image.Size.Width / image.Size.Height);
+        double height = width * aspect * image.Size.Height / image.Size.Width;
+        var destination = new Rect(bounds.X + (bounds.Width - width) / 2,
+            bounds.Y + (bounds.Height - height) / 2, width, height);
+        drawing.DrawImage(image, destination, new Rect(0, 0, image.Size.Width, image.Size.Height),
+            1, CanvasImageInterpolation.HighQualityCubic);
+    }
+
+    internal void DrawDuckHuntMeasurement(CanvasDrawingSession drawing)
+    {
+        var measurement = DuckHuntMeasurement;
+        BoardAim? anchor = measurement.HasCompletedPair ? measurement.OldDetectedXY : measurement.LiveDetectedXY;
+        if (anchor is not { } old) return;
+        double aspect = PaintBoardAspect();
+        // Board units are normalized independently in each axis. Scale the local
+        // y axis into the same physical units as x before drawing a true circle.
+        // Pixel sizes use the projected board raster, not 1000-unit layout pixels.
+        float pixel = BoardSurfaceSize / Math.Max(1, _boardRasterPixels.Width);
         var previous = drawing.Transform;
-        drawing.Transform = Matrix3x2.CreateRotation((float)duck.Rotation) *
-            Matrix3x2.CreateScale(1, (float)aspect) *
-            Matrix3x2.CreateTranslation((float)duck.U * BoardSurfaceSize, (float)duck.V * BoardSurfaceSize) * previous;
+        using var clip = drawing.CreateLayer(1, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize));
+        drawing.Transform = Matrix3x2.CreateScale(1, (float)aspect) *
+            Matrix3x2.CreateTranslation((float)old.U * BoardSurfaceSize, (float)old.V * BoardSurfaceSize) * previous;
         try
         {
-            DrawDuckHuntTriangle(drawing, DuckHuntLayout.Tail, Color.FromArgb(255, 57, 67, 68));
-            FillDuckHuntEllipse(drawing, DuckHuntLayout.Body, Color.FromArgb(255, 224, 230, 221), Color.FromArgb(255, 89, 107, 104));
-            FillDuckHuntEllipse(drawing, DuckHuntLayout.Neck, Color.FromArgb(255, 38, 126, 96), Color.FromArgb(255, 13, 55, 46));
-            FillDuckHuntEllipse(drawing, DuckHuntLayout.Head, Color.FromArgb(255, 48, 158, 112), Color.FromArgb(255, 13, 62, 49));
-            // Narrow white neck ring, kept inside the shared silhouette.
-            drawing.DrawLine(new Vector2(45, -14), new Vector2(92, -4), Color.FromArgb(255, 242, 245, 226), 6);
-            FillDuckHuntEllipse(drawing, new(-.12, .004, .186, .088),
-                Color.FromArgb(255, 140, 157, 151), Color.FromArgb(255, 51, 68, 65));
-            using (var wing = new CanvasPathBuilder(drawing.Device))
+            var black = Color.FromArgb(255, 0, 0, 0);
+            if (measurement.HasCompletedPair && measurement.NewDetectedXY is { } current)
             {
-                wing.BeginFigure(-105, 45);
-                wing.AddCubicBezier(new(-54, 7), new(10, 7), new(50, 38));
-                wing.AddCubicBezier(new(2, 79), new(-60, 93), new(-105, 45));
-                wing.EndFigure(CanvasFigureLoop.Closed);
-                using var geometry = CanvasGeometry.CreatePath(wing);
-                drawing.FillGeometry(geometry, Color.FromArgb(255, 70, 89, 83));
+                double dx = current.U - old.U, dy = (current.V - old.V) / aspect;
+                float radius = (float)Math.Sqrt(dx * dx + dy * dy) * BoardSurfaceSize;
+                if (radius > 0) drawing.DrawCircle(Vector2.Zero, radius, black, 5 * pixel);
             }
-            // A mallard's blue speculum and layered flight feathers.
-            drawing.DrawLine(new(-73, 53), new(20, 39), Color.FromArgb(255, 210, 218, 212), 14);
-            drawing.DrawLine(new(-72, 53), new(19, 39), Color.FromArgb(255, 35, 77, 126), 8);
-            for (int i = 0; i < 9; i++)
-            {
-                float x = -91 + i * 13;
-                drawing.DrawLine(new(x, 57), new(x + 20, 69 - i * 1.6f), Color.FromArgb(155, 175, 191, 181), 1.2f);
-            }
-            DrawDuckHuntTriangle(drawing, DuckHuntLayout.Bill, Color.FromArgb(255, 224, 207, 75));
-            drawing.DrawLine(new(140, -54), new(180, -55), Color.FromArgb(255, 90, 98, 41), 1.6f);
-            drawing.FillCircle(new(151, -58), 1.8f, Color.FromArgb(255, 51, 68, 39));
-            drawing.FillCircle(new(113, -77), 5, Color.FromArgb(255, 8, 19, 17));
-            drawing.FillCircle(new(114.5f, -78.5f), 1.4f, Color.FromArgb(255, 247, 250, 239));
+            drawing.FillCircle(Vector2.Zero, 10 * pixel, black);
         }
         finally { drawing.Transform = previous; }
-    }
-
-    private static void FillDuckHuntEllipse(CanvasDrawingSession drawing, BoardRect bounds, Color light, Color dark)
-    {
-        var center = new Vector2((float)(bounds.X + bounds.Width / 2) * BoardSurfaceSize,
-            (float)(bounds.Y + bounds.Height / 2) * BoardSurfaceSize);
-        float rx = (float)bounds.Width * BoardSurfaceSize / 2, ry = (float)bounds.Height * BoardSurfaceSize / 2;
-        using var brush = new CanvasRadialGradientBrush(drawing.Device, light, dark)
-        {
-            Center = center, OriginOffset = new(-rx * .25f, -ry * .4f), RadiusX = rx * 1.2f, RadiusY = ry * 1.2f
-        };
-        drawing.FillEllipse(center, rx, ry, brush);
-    }
-
-    private static void DrawDuckHuntTriangle(CanvasDrawingSession drawing, BoardAim[] points, Color color)
-    {
-        using var builder = new CanvasPathBuilder(drawing.Device);
-        builder.BeginFigure((float)points[0].U * BoardSurfaceSize, (float)points[0].V * BoardSurfaceSize);
-        builder.AddLine((float)points[1].U * BoardSurfaceSize, (float)points[1].V * BoardSurfaceSize);
-        builder.AddLine((float)points[2].U * BoardSurfaceSize, (float)points[2].V * BoardSurfaceSize);
-        builder.EndFigure(CanvasFigureLoop.Closed);
-        using var geometry = CanvasGeometry.CreatePath(builder);
-        drawing.FillGeometry(geometry, color);
     }
 }

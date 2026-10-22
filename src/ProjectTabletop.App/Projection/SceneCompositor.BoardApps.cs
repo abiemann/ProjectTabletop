@@ -528,7 +528,7 @@ public sealed partial class SceneCompositor
             BoardScreen.WaterGarden => "Still water. Gentle ripples.",
             BoardScreen.Football => "Big kicks. Bouncy football.",
             BoardScreen.StrykersRun => "Recruit. Advance. Survive.",
-            BoardScreen.DuckHunt => "Aim the red dot. Click to shoot.",
+            BoardScreen.DuckHunt => "Track the red dot. Click to compare.",
             BoardScreen.CrownDeed => "Build your fortune. Shape the city.",
             BoardScreen.Globe => "Zoom and rotate Earth",
             BoardScreen.Roulette => "Place your chips and spin",

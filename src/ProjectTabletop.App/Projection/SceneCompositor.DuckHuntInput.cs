@@ -12,16 +12,15 @@ public sealed partial class SceneCompositor
 
     private readonly record struct DuckHuntInputKey(long Navigation, Homography? Camera,
         Homography? Surface, DateTimeOffset InputReset, bool Active);
-    private readonly DuckHuntAimGate _duckHuntAimGate = new();
+    private readonly DuckHuntMeasurementTracker _duckHuntMeasurement = new();
     private DuckHuntInputKey? _duckHuntInputKey;
     private DuckHuntInputContext? _duckHuntInputContext;
     private long _duckHuntInputEpoch;
-    private DateTimeOffset _duckHuntDotFrameTime;
-    private bool _duckHuntDotDetected;
     private bool _duckHuntAudioReady;
     private bool _duckHuntLearningActive;
     private string _duckHuntAudioStatus = "Starting microphone…";
     private string _duckHuntRenderedHint = string.Empty;
+    private BoardAim? _duckHuntRenderedLiveDot;
     private long _duckHuntInputVisualRevision;
 
     // Read while constructing the rendered-board cache key so microphone/learning
@@ -41,6 +40,19 @@ public sealed partial class SceneCompositor
     public DuckHuntInputContext? GetDuckHuntInputContext()
     {
         lock (_gate) return SyncDuckHuntInput(MonotonicClock.UtcNow);
+    }
+
+    public DuckHuntMeasurementSnapshot DuckHuntMeasurement
+    {
+        get
+        {
+            lock (_gate)
+            {
+                var now = MonotonicClock.UtcNow;
+                SyncDuckHuntInput(now);
+                return _duckHuntMeasurement.GetSnapshot(now);
+            }
+        }
     }
 
     public bool DuckHuntInputReady
@@ -81,14 +93,8 @@ public sealed partial class SceneCompositor
         {
             var now = MonotonicClock.UtcNow;
             var context = SyncDuckHuntInput(now);
-            if (context is null || context.Epoch != epoch || frameTimestamp <= context.NotBefore ||
-                frameTimestamp <= _duckHuntDotFrameTime || frameTimestamp > now ||
-                now - frameTimestamp > DuckHuntAimGate.Freshness) return;
-            // Continuous observations are display feedback only. They never arm,
-            // cancel or submit the independent click-triggered snapshot decision.
-            _duckHuntDotFrameTime = frameTimestamp;
-            _duckHuntDotDetected = aim is { } point && double.IsFinite(point.U) && double.IsFinite(point.V) &&
-                point.U is >= 0 and <= 1 && point.V is >= 0 and <= 1;
+            if (context is null || context.Epoch != epoch || frameTimestamp <= context.NotBefore) return;
+            if (!_duckHuntMeasurement.Observe(aim, frameTimestamp, now)) return;
             RefreshDuckHuntInputHint(now);
         }
     }
@@ -101,11 +107,10 @@ public sealed partial class SceneCompositor
             var now = MonotonicClock.UtcNow;
             var context = SyncDuckHuntInput(now);
             if (context is null || context.Epoch != epoch || !_duckHuntAudioReady) return false;
-            // Each recognized sound checks one current frame. No earlier dot or
-            // temporary detection gap can arm, cancel or supply this snapshot's aim.
-            var shot = _duckHuntAimGate.EvaluateSnapshot(aim, frameTimestamp, clickOnset, confirmedAt, now);
-            if (shot is not { } hit) return false;
-            SubmitDuckHuntShot(hit.Aim, hit.ClickedAt);
+            // Keep the duck in place while measuring. The fresh snapshot supplies
+            // newDetectedXY; the timestamped history supplies oldDetectedXY.
+            if (!_duckHuntMeasurement.Capture(aim, frameTimestamp, clickOnset, confirmedAt, now)) return false;
+            _duckHuntInputVisualRevision++;
             return true;
         }
     }
@@ -116,7 +121,11 @@ public sealed partial class SceneCompositor
         {
             var now = MonotonicClock.UtcNow;
             SyncDuckHuntInput(now);
-            if (_duckHuntAudioReady && !ready) _duckHuntAimGate.Reset(now);
+            if (_duckHuntAudioReady && !ready)
+            {
+                _duckHuntMeasurement.Reset(now);
+                _duckHuntInputVisualRevision++;
+            }
             _duckHuntAudioReady = ready;
             // Keep platform/driver exception details in the main app's status. The projected
             // line must stay readable at normal board scale instead of shrinking to fit them.
@@ -143,12 +152,18 @@ public sealed partial class SceneCompositor
     private void RefreshDuckHuntInputHint(DateTimeOffset now)
     {
         var context = SyncDuckHuntInput(now);
-        string hint = _duckHuntLearningActive ? "Click learning · shots paused" :
+        var live = _duckHuntMeasurement.GetSnapshot(now).LiveDetectedXY;
+        if (_duckHuntRenderedLiveDot != live)
+        {
+            _duckHuntRenderedLiveDot = live;
+            _duckHuntInputVisualRevision++;
+        }
+        string hint = _duckHuntLearningActive ? "Click learning · measurements paused" :
             DuckHuntMicrophoneMenuOpen ? "Choose a microphone" :
             context is null ? "Waiting for camera and board calibration" :
             !_duckHuntAudioReady ? _duckHuntAudioStatus :
-            _duckHuntDotDetected && _duckHuntDotFrameTime <= now && now - _duckHuntDotFrameTime <= DuckHuntAimGate.Freshness
-                ? "Red dot detected · click to shoot" : "Show the red dot on the board";
+            live.HasValue
+                ? "Red dot detected · click to measure" : "Show the red dot on the board";
         if (_duckHuntRenderedHint == hint) return;
         _duckHuntRenderedHint = hint;
         _duckHuntInputVisualRevision++;
@@ -180,8 +195,7 @@ public sealed partial class SceneCompositor
     {
         _duckHuntInputEpoch++;
         _duckHuntInputContext = null;
-        _duckHuntAimGate.Reset(now);
-        _duckHuntDotFrameTime = now;
-        _duckHuntDotDetected = false;
+        _duckHuntMeasurement.Reset(now);
+        _duckHuntInputVisualRevision++;
     }
 }

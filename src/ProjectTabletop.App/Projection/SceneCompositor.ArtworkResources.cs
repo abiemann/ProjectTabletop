@@ -18,6 +18,7 @@ public sealed partial class SceneCompositor
         BoardScreen.WaterGarden => WaterGardenArtworkReady,
         BoardScreen.Football => FootballArtworkReady,
         BoardScreen.StrykersRun => StrykersRunArtworkReady,
+        BoardScreen.DuckHunt => DuckHuntArtworkReady,
         _ => true
     };
 
@@ -29,6 +30,7 @@ public sealed partial class SceneCompositor
         BoardScreen.WaterGarden => EnsureWaterGardenResourcesAsync(device),
         BoardScreen.Football => EnsureFootballResourcesAsync(device),
         BoardScreen.StrykersRun => EnsureStrykersRunResourcesAsync(device),
+        BoardScreen.DuckHunt => EnsureDuckHuntResourcesAsync(device),
         _ => Task.CompletedTask
     };
 
@@ -40,6 +42,7 @@ public sealed partial class SceneCompositor
         BoardScreen.WaterGarden => PrepareWaterGardenResources(device),
         BoardScreen.Football => PrepareFootballResources(device),
         BoardScreen.StrykersRun => PrepareStrykersRunResources(device),
+        BoardScreen.DuckHunt => PrepareDuckHuntResources(device),
         _ => true
     };
 
@@ -90,6 +93,7 @@ public sealed partial class SceneCompositor
             BoardScreen.WaterGarden => WaterGardenArtworkError,
             BoardScreen.Football => _footballRenderer?.PitchError,
             BoardScreen.StrykersRun => _strykersRunRenderer?.Error,
+            BoardScreen.DuckHunt => DuckHuntArtworkError,
             _ => null
         };
         var previous = drawing.Transform;

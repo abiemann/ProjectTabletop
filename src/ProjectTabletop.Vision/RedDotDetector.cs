@@ -17,6 +17,7 @@ public readonly record struct RedDotDetectionResult(PixelPoint? CameraPosition, 
 /// by colour alone.</summary>
 public sealed class RedDotDetector
 {
+    private const byte ColourMask = 7, ClippedCore = 8, AcceptedCore = 16;
     private readonly double[] _map = new double[9];
     private byte[] _mask = [];
     private int[] _queue = [], _first = [], _last = [], _redFirst = [], _redLast = [];
@@ -43,48 +44,56 @@ public sealed class RedDotDetector
             {
                 int source = y * stride + x * 4;
                 int r = bgra[source + 2], g = bgra[source + 1], b = bgra[source];
-                int other = Math.Max(b, g);
-                bool red = r >= 150 && r - other >= 55 && r >= other * 1.45;
+                bool red = IsStrongRed(r, g, b);
                 bool magenta = r >= 100 && r - g >= 16 && b - g >= 18 && r >= b * .72;
-                _mask[y * width + x] = 0;
+                bool clipped = r >= 245 && g >= 220 && b >= 245 && SmallClippedCore(bgra, stride, x, y);
+                _mask[y * width + x] = clipped ? ClippedCore : (byte)0;
+                if (clipped)
+                {
+                    _redFirst[y] = Math.Min(_redFirst[y], x); _redLast[y] = x + 1;
+                }
                 if (!red && !magenta)
                 {
-                    if (r >= 245 && g >= 220 && b >= 245 && SmallClippedCore(bgra, stride, x, y))
-                        _mask[y * width + x] = 3;
+                    if (clipped)
+                        _mask[y * width + x] |= 3;
                     else if (r >= 70 && r - g >= 16 && b - g >= 18 && r >= b * .72 && NearCore(bgra, stride, x, y))
-                        _mask[y * width + x] = 4;
+                        _mask[y * width + x] |= 4;
                     continue;
                 }
-                // Only red pixels seed candidates. Clipped white cores and their immediate
-                // dim magenta fringe connect a spot, but cannot create a candidate alone.
-                _mask[y * width + x] = red ? (byte)1 : (byte)2;
+                // Colour seeds retain the nonclipped path. Clipped cores are checked first
+                // against their local coloured fringe, independently of photo texture.
+                _mask[y * width + x] |= red ? (byte)1 : (byte)2;
                 _redFirst[y] = Math.Min(_redFirst[y], x); _redLast[y] = x + 1;
             }
         }
 
-        int candidates = 0;
-        RedDotDetectionResult selected = default;
+        int candidates = FindCores(bgra, stride, out RedDotDetectionResult selected);
         for (int y = _top; y < _bottom; y++)
         for (int x = _redFirst[y]; x < _redLast[y]; x++)
         {
-            byte kind = _mask[y * width + x];
+            byte kind = (byte)(_mask[y * width + x] & ColourMask);
             if (kind is 0 or 3 or 4) continue;
             int head = 0, tail = 1, minX = x, maxX = x, minY = y, maxY = y;
             double weightedX = 0, weightedY = 0, weight = 0, redExcess = 0;
+            int signalPixels = 0, clippedPixels = 0;
             int peakRedGreen = 0, magentaPixels = 0, colourPixels = 0, seedPixels = 0;
-            bool touchesBoundary = false;
+            bool touchesBoundary = false, acceptedCore = false;
             _queue[0] = y * width + x;
-            _mask[_queue[0]] = 0;
+            _mask[_queue[0]] &= AcceptedCore;
             while (head < tail)
             {
                 int pixel = _queue[head++], py = pixel / width, px = pixel - py * width;
+                acceptedCore |= (_mask[pixel] & AcceptedCore) != 0;
                 minX = Math.Min(minX, px); maxX = Math.Max(maxX, px);
                 minY = Math.Min(minY, py); maxY = Math.Max(maxY, py);
                 int source = py * stride + px * 4;
                 int excess = bgra[source + 2] - bgra[source + 1];
                 bool core = bgra[source + 2] >= 245 && bgra[source + 1] >= 220 && bgra[source] >= 245;
+                if (core) clippedPixels++;
                 if (!core)
                 {
+                    if (kind == 1 ? bgra[source + 2] - Math.Max(bgra[source], bgra[source + 1]) >= 90 :
+                        bgra[source + 2] >= 175 && bgra[source] >= 200 && excess >= 24) signalPixels++;
                     colourPixels++;
                     if (bgra[source + 2] >= 100) seedPixels++;
                     weightedX += px * excess; weightedY += py * excess; weight += excess;
@@ -101,12 +110,17 @@ public sealed class RedDotDetector
                     int next = ny * width + nx;
                     // Keep strong red separate from a tinted backdrop. Magenta fragments may
                     // connect through a clipped core and its three-pixel dim fringe only.
-                    if (_mask[next] != kind && _mask[next] != 3 && !(kind == 2 && _mask[next] == 4)) continue;
-                    _mask[next] = 0;
+                    int nextKind = _mask[next] & ColourMask;
+                    if (nextKind != kind && nextKind != 3 && !(kind == 2 && nextKind == 4)) continue;
+                    _mask[next] &= AcceptedCore;
                     _queue[tail++] = next;
                 }
             }
 
+            if (acceptedCore) continue;
+            // Dim tinted photo edges need a coherent bright colour signal. A single
+            // bright fringe pixel must not promote the surrounding photographic patch.
+            if (clippedPixels == 0 && (signalPixels < 2 || signalPixels * (kind == 1 ? 5 : 3) < colourPixels)) continue;
             int boxWidth = maxX - minX + 1, boxHeight = maxY - minY + 1;
             double fill = tail / (double)(boxWidth * boxHeight);
             if (touchesBoundary || seedPixels < 4 || tail > Math.Max(16, _boardArea * .0007) ||
@@ -144,17 +158,94 @@ public sealed class RedDotDetector
         return candidates == 1 ? selected : new(null, null, null, 0, candidates);
     }
 
+    private int FindCores(byte[] bgra, int stride, out RedDotDetectionResult selected)
+    {
+        // Isolate a clipped laser centre before its coloured fringe can join a large
+        // photographic feather/foot. Reuse mask bits and the flood queue; retain the
+        // colour mask for independent nonclipped dots and genuine two-dot ambiguity.
+        int count = 0;
+        selected = default;
+        for (int y = _top; y < _bottom; y++)
+        for (int x = _redFirst[y]; x < _redLast[y]; x++)
+        {
+            if ((_mask[y * _width + x] & ClippedCore) == 0) continue;
+            int head = 0, tail = 1, minX = x, maxX = x, minY = y, maxY = y;
+            double sumX = 0, sumY = 0;
+            bool touchesBoundary = false;
+            _queue[0] = y * _width + x;
+            _mask[_queue[0]] &= ColourMask;
+            while (head < tail)
+            {
+                int pixel = _queue[head++], py = pixel / _width, px = pixel - py * _width;
+                sumX += px; sumY += py;
+                minX = Math.Min(minX, px); maxX = Math.Max(maxX, px);
+                minY = Math.Min(minY, py); maxY = Math.Max(maxY, py);
+                touchesBoundary |= px <= _first[py] || px >= _last[py] - 1 || py <= _top || py >= _bottom - 1;
+                for (int ny = Math.Max(_top, py - 1); ny <= Math.Min(_bottom - 1, py + 1); ny++)
+                for (int nx = Math.Max(_first[ny], px - 1); nx <= Math.Min(_last[ny] - 1, px + 1); nx++)
+                {
+                    int next = ny * _width + nx;
+                    if ((_mask[next] & ClippedCore) == 0) continue;
+                    _mask[next] &= ColourMask;
+                    _queue[tail++] = next;
+                }
+            }
+
+            int boxWidth = maxX - minX + 1, boxHeight = maxY - minY + 1;
+            double fill = tail / (double)(boxWidth * boxHeight);
+            // Allow a bounded motion streak. Its exposure-average position remains the
+            // core centroid; a broad white patch or isolated hot pixel is not a dot.
+            if (touchesBoundary || tail < 4 || tail > Math.Max(16, _boardArea * .0007) || fill < .1 ||
+                boxWidth > _coreProbeDistance * 2.5 || boxHeight > _coreProbeDistance * 2.5 ||
+                Math.Min(boxWidth, boxHeight) > _coreProbeDistance) continue;
+            int colourSupport = 0;
+            for (int py = Math.Max(_top, minY - 3); py <= Math.Min(_bottom - 1, maxY + 3); py++)
+            for (int px = Math.Max(_first[py], minX - 3); px <= Math.Min(_last[py] - 1, maxX + 3); px++)
+            {
+                int source = py * stride + px * 4;
+                int red = bgra[source + 2], green = bgra[source + 1], blue = bgra[source];
+                if (red >= 245 && green >= 220 && blue >= 245) continue;
+                // A bright centre can desaturate its red fringe on dark photographic
+                // detail, so local red/green evidence need not satisfy the global intensity
+                // gate. Keep the red/pink hue requirement: orange/brown feather highlights
+                // can have a clipped white centre too.
+                if (red >= 100 && red - green >= 24 && IsRedHue(red, green, blue)) colourSupport++;
+            }
+            if (colourSupport < 4) continue;
+            var camera = new PixelPoint(sumX / tail, sumY / tail);
+            var board = Map(camera.X, camera.Y);
+            if (board.X is < 0 or > 1 || board.Y is < 0 or > 1 ||
+                !double.IsFinite(board.X) || !double.IsFinite(board.Y)) continue;
+            // The connected coloured fringe belongs to this core, not a second aim.
+            for (int i = 0; i < tail; i++) _mask[_queue[i]] |= AcceptedCore;
+            count++;
+            selected = new(camera, board.X, board.Y, .9, 1);
+        }
+        return count;
+    }
+
     private bool ContainsStrongRed(byte[] bgra, int stride, int minX, int minY, int maxX, int maxY)
     {
         for (int y = Math.Max(_top, minY - 1); y <= Math.Min(_bottom - 1, maxY + 1); y++)
         for (int x = Math.Max(_first[y], minX - 1); x <= Math.Min(_last[y] - 1, maxX + 1); x++)
         {
             int source = y * stride + x * 4;
-            int r = bgra[source + 2], other = Math.Max(bgra[source], bgra[source + 1]);
-            if (r >= 150 && r - other >= 55 && r >= other * 1.45) return true;
+            if (IsStrongRed(bgra[source + 2], bgra[source + 1], bgra[source])) return true;
         }
         return false;
     }
+
+    private static bool IsStrongRed(int red, int green, int blue)
+    {
+        int other = Math.Max(blue, green);
+        // Orange/brown photographic details can have a large red/green difference
+        // too. A red spot must also stay near the red hue axis, rather than gaining
+        // substantial green over blue. Keep the independent magenta path unchanged.
+        return red >= 150 && red - other >= 55 && red >= other * 1.45 && IsRedHue(red, green, blue);
+    }
+
+    private static bool IsRedHue(int red, int green, int blue) =>
+        (green - blue) * 20 <= (red - green) * 7;
 
     private bool NearCore(byte[] bgra, int stride, int cx, int cy)
     {

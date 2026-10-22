@@ -982,6 +982,7 @@ public sealed partial class SceneCompositor : IDisposable
             DisposeWaterGardenResources();
             DisposeFootballResources();
             DisposeStrykersRunResources();
+            DisposeDuckHuntArtwork();
             DisposeWaterGardenArtwork();
             DisposeMarkerProjectionReference();
         }

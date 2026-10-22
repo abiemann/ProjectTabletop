@@ -25,7 +25,7 @@ public class RedDotDetectorTests
     }
 
     [Fact]
-    public void WhiteClippedCoreKeepsTheRedFringeCentroid()
+    public void WhiteClippedCoreKeepsTheDotCentroid()
     {
         var frame = new Frame();
         frame.Disc(350, 220, 5, 20, 20, 255);
@@ -201,6 +201,162 @@ public class RedDotDetectorTests
         frame.Pixel(430, 180, 0, 0, 255);
         frame.Pixel(460, 180, 0, 0, 255);
         Assert.False(frame.Detect(new()).Detected);
+    }
+
+    [Fact]
+    public void CompactBrownPhotographicDetailIsNotARedDot()
+    {
+        var frame = new Frame(90, 110, 130);
+        // Five pixels from the photographed duck's foot passed the original
+        // brightness/compactness checks despite their orange-brown hue.
+        frame.Pixel(320, 238, 74, 104, 172);
+        frame.Pixel(320, 239, 59, 88, 156);
+        frame.Pixel(320, 240, 62, 90, 154);
+        frame.Pixel(321, 240, 75, 103, 168);
+        frame.Pixel(321, 241, 63, 93, 157);
+        var result = frame.Detect(new());
+        Assert.False(result.Detected);
+        Assert.Equal(0, result.CandidateCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RedOrMagentaDotOnBrownPhotographicArtworkStillTracks(bool magenta)
+    {
+        var frame = new Frame(74, 104, 172);
+        frame.Disc(320, 240, 3, magenta ? (byte)230 : (byte)30,
+            magenta ? (byte)150 : (byte)40, magenta ? (byte)245 : (byte)255);
+        var result = frame.Detect(new());
+        Assert.True(result.Detected);
+        Assert.Equal(1, result.CandidateCount);
+        Assert.Equal(320, result.CameraPosition!.Value.X, 5);
+        Assert.Equal(240, result.CameraPosition!.Value.Y, 5);
+    }
+
+    [Theory]
+    [InlineData(104, 103, 166)]
+    [InlineData(159, 133, 167)]
+    public void CameraTintedPhotographicColoursNeedAnActualDotSignal(byte b, byte g, byte r)
+    {
+        var frame = new Frame(132, 100, 110);
+        frame.Disc(320, 240, 3, b, g, r);
+        var result = frame.Detect(new());
+        Assert.False(result.Detected);
+        Assert.Equal(0, result.CandidateCount);
+    }
+
+    [Fact]
+    public void IsolatedBrightPixelsDoNotPromoteABroadMagentaFeatherEdge()
+    {
+        var frame = new Frame(132, 100, 110);
+        frame.Disc(320, 240, 7, 141, 120, 143);
+        frame.Pixel(320, 240, 210, 188, 212);
+        frame.Pixel(321, 240, 210, 188, 212);
+        Assert.Equal(0, frame.Detect(new()).CandidateCount);
+    }
+
+    [Theory]
+    [InlineData(160)]
+    [InlineData(190)]
+    public void ModeratelyBrightSaturatedRedDotDoesNotRequireAClippedCentre(byte red)
+    {
+        var frame = new Frame(110, 115, 120);
+        frame.Disc(320, 240, 3, 20, 25, red);
+        var result = frame.Detect(new());
+        Assert.True(result.Detected);
+        Assert.Equal(1, result.CandidateCount);
+    }
+
+    [Fact]
+    public void ClippedCorePositionIsNotDraggedIntoConnectedPhotographicTexture()
+    {
+        var frame = new Frame(132, 100, 110);
+        frame.Disc(310, 240, 30, 214, 156, 183);
+        frame.Disc(329, 243, 2, 255, 244, 255);
+        var result = frame.Detect(new());
+        Assert.True(result.Detected);
+        Assert.Equal(1, result.CandidateCount);
+        Assert.Equal(329, result.CameraPosition!.Value.X, 5);
+        Assert.Equal(243, result.CameraPosition!.Value.Y, 5);
+    }
+
+    [Fact]
+    public void ClippedCoreAcceptsLocalDesaturatedRedFringe()
+    {
+        var frame = new Frame(132, 100, 110);
+        // The camera's red fringe on the photographed neck is neither strong red
+        // nor magenta. It is meaningful locally around a multi-pixel bright core.
+        frame.Disc(320, 240, 5, 149, 140, 197);
+        frame.Disc(320, 240, 2, 255, 244, 255);
+        var result = frame.Detect(new());
+        Assert.True(result.Detected);
+        Assert.Equal(320, result.CameraPosition!.Value.X, 5);
+        Assert.Equal(240, result.CameraPosition!.Value.Y, 5);
+    }
+
+    [Fact]
+    public void MovingClippedStreakUsesItsExposureCentroidAndReleasesImmediately()
+    {
+        var frame = new Frame(208, 154, 166);
+        for (int y = 237; y <= 244; y++)
+        for (int x = 300; x <= 335; x++) frame.Pixel(x, y, 214, 156, 183);
+        for (int y = 240; y <= 241; y++)
+        for (int x = 303; x <= 332; x++) frame.Pixel(x, y, 255, 244, 255);
+        var detector = new RedDotDetector();
+        var result = frame.Detect(detector);
+        Assert.True(result.Detected);
+        Assert.Equal(317.5, result.CameraPosition!.Value.X, 5);
+        Assert.Equal(240.5, result.CameraPosition!.Value.Y, 5);
+        Assert.False(new Frame(208, 154, 166).Detect(detector).Detected);
+    }
+
+    [Fact]
+    public void ClippedDotDoesNotHideAnotherIndependentNonclippedDot()
+    {
+        var frame = new Frame();
+        frame.Disc(260, 240, 4, 241, 180, 210);
+        frame.Disc(260, 240, 2, 255, 244, 255);
+        frame.Disc(380, 240, 3, 20, 30, 245);
+        var result = frame.Detect(new());
+        Assert.False(result.Detected);
+        Assert.Equal(2, result.CandidateCount);
+    }
+
+    [Fact]
+    public void SparseTransientMagentaPhotographicPatchIsNotADot()
+    {
+        var frame = new Frame(132, 100, 110);
+        for (int y = 238; y <= 241; y++)
+        for (int x = 318; x <= 322; x++) frame.Pixel(x, y, 200, 150, 170);
+        frame.Pixel(320, 239, 209, 153, 177);
+        frame.Pixel(321, 239, 208, 152, 179);
+        frame.Pixel(320, 240, 209, 153, 177);
+        frame.Pixel(321, 240, 209, 153, 180);
+        Assert.False(frame.Detect(new()).Detected);
+    }
+
+    [Fact]
+    public void BroadClippedPatchWithRedSurroundingIsNotALaserCore()
+    {
+        var frame = new Frame(110, 115, 120);
+        frame.Disc(320, 240, 35, 241, 180, 210);
+        frame.Disc(320, 240, 30, 255, 244, 255);
+        Assert.False(frame.Detect(new()).Detected);
+    }
+
+    [Fact]
+    public void WhitePhotographicHighlightNeedsRedFringeNotBrownFeathers()
+    {
+        var frame = new Frame(110, 115, 120);
+        // Measured native photographic feather colours around a five-pixel white
+        // highlight: red/green contrast alone mistakes this orange-brown ring for a laser.
+        frame.Disc(320, 240, 5, 149, 169, 198);
+        frame.Pixel(320, 235, 111, 114, 138); // One incidental pinkish pixel is insufficient.
+        frame.Disc(320, 240, 1, 255, 244, 255);
+        var result = frame.Detect(new());
+        Assert.False(result.Detected);
+        Assert.Equal(0, result.CandidateCount);
     }
 
     [Fact]

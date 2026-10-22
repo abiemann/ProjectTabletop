@@ -38,6 +38,7 @@ public sealed partial class MainWindow
                 Homography.FromFourPoints([new(0, 0), new(dimensions.Width, 0), new(dimensions.Width, dimensions.Height), new(0, dimensions.Height)],
                     [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
             scene.SetBoardSetup(false);
+            await scene.EnsureBoardArtworkResourcesAsync(target.Device, BoardScreen.DuckHunt);
             // Calibration resets input with the real clock. Begin the isolated
             // navigation timeline after it, rather than replaying its older start.
             now = MonotonicClock.UtcNow.AddSeconds(1);
@@ -96,31 +97,45 @@ public sealed partial class MainWindow
             var acquisition = scene.GetHandAcquisitionContext(now);
             Check(acquisition is { AllowsSearchIllumination: false } &&
                 scene.ActiveHandSpotlightCount == 0, "Duck Hunt exposes hand search lighting.");
-            Check(!scene.SubmitDuckHuntShot(null, now.AddMilliseconds(10)) && scene.DuckHuntState.Shots == 0,
-                "A click without a dot counted as a shot.");
-            Check(!scene.SubmitDuckHuntShot(new(.1, .4), now.AddMilliseconds(20)) &&
-                scene.DuckHuntState.Hits == 0 && scene.DuckHuntState.Shots == 1,
-                "A background dot hit the duck.");
-            now += TimeSpan.FromMilliseconds(30);
-            Check(scene.SubmitDuckHuntShot(new(.5, .48), now) && scene.DuckHuntState.Hits == 1,
-                "The dot at the visible duck's centre did not hit it.");
-            Check(!scene.SubmitDuckHuntShot(new(.5, .48), now.AddMilliseconds(1)),
-                "The falling duck accepted a duplicate shot.");
-            now += TimeSpan.FromMilliseconds(650);
-            board.TickDuckHunt(now);
-            byte[] falling = Draw();
-            await Save("falling");
-            Check(scene.DuckHuntState is { Phase: DuckHuntPhase.Falling, V: > .6, Rotation: > 0 } &&
-                !initial.AsSpan().SequenceEqual(falling), "The native duck did not visibly fall.");
-            var fallingContext = scene.GetHoldButtonContext(now)!;
-            Check(ReferenceEquals(context.ExpectedScene, fallingContext.ExpectedScene) && context.Revision == fallingContext.Revision,
-                "Duck animation rebuilt the stationary EXIT caption reference.");
-            Check(scene.GetHandAcquisitionContext(now) is { AllowsSearchIllumination: false } && scene.ActiveHandSpotlightCount == 0,
-                "The falling duck enabled a hand spotlight.");
-            now += TimeSpan.FromMilliseconds(1100);
+            Check(scene.DuckHuntArtworkReady, "The photographic duck artwork was not loaded.");
+            scene.SetDuckHuntAudioStatus(true, "Microphone ready");
+            var input = scene.GetDuckHuntInputContext() ?? throw new InvalidOperationException("No calibrated measurement input.");
+            var oldAim = new BoardAim(.2, .43);
+            var newAim = new BoardAim(.32, .50);
+            var oldTime = MonotonicClock.UtcNow;
+            scene.PublishDuckHuntDot(oldAim, oldTime, input.Epoch);
+            Check(scene.DuckHuntMeasurement.LiveDetectedXY == oldAim, "Continuous red-dot coordinates were not published.");
+            var onset = MonotonicClock.UtcNow;
+            while (onset <= oldTime) onset = MonotonicClock.UtcNow;
+            var frameTime = MonotonicClock.UtcNow;
+            while (frameTime <= onset) frameTime = MonotonicClock.UtcNow;
+            Check(scene.SubmitDuckHuntSnapshot(newAim, frameTime, onset, MonotonicClock.UtcNow, input.Epoch),
+                "The click's current coordinates were rejected.");
+            var measurement = scene.DuckHuntMeasurement;
+            Check(measurement.HasCompletedPair && measurement.OldDetectedXY == oldAim && measurement.NewDetectedXY == newAim,
+                "The completed measurement did not preserve the before/after positions.");
+            byte[] measured = Draw();
+            await Save("measurement");
+            Check(!initial.AsSpan().SequenceEqual(measured), "The measurement overlay did not appear.");
+            Check(scene.DuckHuntState is { Phase: DuckHuntPhase.Aiming, Hits: 0, Shots: 0, U: .5, V: .48 },
+                "Coordinate measurement shot or moved the duck.");
+            VerifyMeasurementPixels();
+            var measurementContext = scene.GetHoldButtonContext(now)!;
+            Check(ReferenceEquals(context.ExpectedScene, measurementContext.ExpectedScene) && context.Revision == measurementContext.Revision,
+                "The dot/circle rebuilt the stationary EXIT caption reference.");
+            scene.PublishDuckHuntDot(new(.8, .65), MonotonicClock.UtcNow, input.Epoch);
+            Check(scene.DuckHuntMeasurement.OldDetectedXY == oldAim && scene.DuckHuntMeasurement.NewDetectedXY == newAim,
+                "Live movement moved the completed circle.");
+            now += TimeSpan.FromSeconds(2);
             board.TickDuckHunt(now);
             Draw();
-            Check(scene.DuckHuntState is { Phase: DuckHuntPhase.Aiming, Hits: 1 }, "The next duck did not return after falling away.");
+            Check(scene.DuckHuntState is { Phase: DuckHuntPhase.Aiming, Hits: 0, Shots: 0, U: .5, V: .48 },
+                "The duck moved after a completed measurement.");
+            Check(scene.GetHandAcquisitionContext(now) is { AllowsSearchIllumination: false } && scene.ActiveHandSpotlightCount == 0,
+                "Coordinate measurement enabled a hand spotlight.");
+            scene.ClearDuckHuntInput();
+            Check(!scene.DuckHuntMeasurement.HasCompletedPair && scene.DuckHuntMeasurement.LiveDetectedXY is null,
+                "Reset retained a measurement or stale live dot.");
 
             // Feed the actual rendered pixels through native caption recognition.
             // A clean caption must never press; separated occlusion strips break
@@ -144,6 +159,42 @@ public sealed partial class MainWindow
             results.Add(new { dimensions.Name, dimensions.Width, dimensions.Height, Caption = caption,
                 Hits = scene.DuckHuntState.Hits, NativeExit = exited, ExitHoldMilliseconds = (now - firstHeld).TotalMilliseconds });
 
+            void VerifyMeasurementPixels()
+            {
+                // Use the board's GPU overlay method without artwork underneath,
+                // so a duck feather cannot masquerade as circle coverage.
+                var resolution = scene.GetBoardResolutionDiagnostics();
+                int pixelWidth = resolution.BoardPixelWidth, pixelHeight = resolution.BoardPixelHeight;
+                using var overlay = new CanvasRenderTarget(target.Device, pixelWidth, pixelHeight, 96);
+                using (var drawing = overlay.CreateDrawingSession())
+                {
+                    drawing.Clear(Microsoft.UI.Colors.White);
+                    drawing.Transform = Matrix3x2.CreateScale(pixelWidth / 1000f, pixelHeight / 1000f);
+                    scene.DrawDuckHuntMeasurement(drawing);
+                }
+                byte[] pixels = overlay.GetPixelBytes();
+                double cx = oldAim.U * pixelWidth, cy = oldAim.V * pixelHeight;
+                double radius = Math.Sqrt(Math.Pow((newAim.U - oldAim.U) * pixelWidth, 2) +
+                    Math.Pow((newAim.V - oldAim.V) * pixelHeight, 2));
+                Check(BlackAt(cx, cy) && BlackAt(cx + 8, cy) && !BlackAt(cx + 12, cy),
+                    "The old-position dot is not approximately 20 projected pixels across.");
+                Check(BlackAt(newAim.U * pixelWidth, newAim.V * pixelHeight),
+                    "The circle does not pass through the new position.");
+                foreach (var direction in new[] { new Vector2(1, 0), new Vector2(0, 1), new Vector2(-1, 0), new Vector2(0, -1) })
+                {
+                    double x = cx + direction.X * radius, y = cy + direction.Y * radius;
+                    if (x < 5 || x >= pixelWidth - 5 || y < 5 || y >= pixelHeight - 5) continue;
+                    Check(BlackAt(x, y) && !BlackAt(x + direction.X * 5, y + direction.Y * 5),
+                        "Circle radius or five-pixel stroke changed with board orientation.");
+                }
+                bool BlackAt(double x, double y)
+                {
+                    int px = Math.Clamp((int)Math.Round(x), 0, pixelWidth - 1);
+                    int py = Math.Clamp((int)Math.Round(y), 0, pixelHeight - 1);
+                    int offset = (py * pixelWidth + px) * 4;
+                    return pixels[offset] < 90 && pixels[offset + 1] < 90 && pixels[offset + 2] < 90;
+                }
+            }
             byte[] Draw()
             {
                 using (var drawing = target.CreateDrawingSession())
@@ -215,6 +266,7 @@ public sealed partial class MainWindow
             Homography.FromFourPoints([new(0, 0), new(width, 0), new(width, height), new(0, height)],
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
         scene.SetBoardSetup(false);
+        await scene.EnsureBoardArtworkResourcesAsync(target.Device, BoardScreen.DuckHunt);
         uiNow = MonotonicClock.UtcNow;
         scene.ShowDuckHunt();
         byte[] clear;
@@ -334,12 +386,13 @@ public sealed partial class MainWindow
         await Task.Delay(60);
         var confirmedAt = Fresh();
         Check(scene.SubmitDuckHuntSnapshot(aim, confirmedAt.AddMilliseconds(-10), onset, confirmedAt, context.Epoch) &&
-            scene.DuckHuntState is { Hits: 1, Shots: 1, Phase: DuckHuntPhase.Falling },
-            "A current snapshot without prior visibility did not hit the calibrated duck.");
+            scene.DuckHuntState is { Hits: 0, Shots: 0, Phase: DuckHuntPhase.Aiming } &&
+            scene.DuckHuntMeasurement.NewDetectedXY == aim && !scene.DuckHuntMeasurement.HasCompletedPair,
+            "A snapshot without prior coordinates moved the duck or invented a circle.");
         Check(!scene.SubmitDuckHuntSnapshot(aim, Fresh(), onset, Fresh(), context.Epoch),
             "The same click was accepted again with newer pixels.");
         Snapshot(aim, context.Epoch);
-        Check(scene.DuckHuntState is { Hits: 1, Shots: 1 }, "A repeated click hit the falling duck again.");
+        Check(scene.DuckHuntState is { Hits: 0, Shots: 0, Phase: DuckHuntPhase.Aiming }, "A repeated click moved the stationary duck.");
 
         // Only the drawer animation uses an injected presentation clock. Camera
         // and microphone timestamps remain actual monotonic observations.
@@ -370,10 +423,10 @@ public sealed partial class MainWindow
         Check(!Snapshot(aim, oldContext.Epoch) &&
             !scene.SubmitDuckHuntSnapshot(aim, Fresh(), beforePickerClick, Fresh(), context.Epoch) &&
             scene.DuckHuntState.Shots == 0, "Closing MIC reused a snapshot or click from before the picker opened.");
-        Check(Snapshot(aim, context.Epoch) && scene.DuckHuntState is { Hits: 1, Shots: 1 },
+        Check(Snapshot(aim, context.Epoch) && scene.DuckHuntState is { Hits: 0, Shots: 0, Phase: DuckHuntPhase.Aiming },
             "A fresh snapshot did not recover after closing MIC.");
         return new { Ok = true, Assertions = assertions, Detection = detection, ClickLearningPauseVerified = true,
-            ClickSnapshotVerified = true, NoDotCandidates = empty.CandidateCount,
+            ClickSnapshotVerified = true, StationaryMeasurementVerified = true, NoDotCandidates = empty.CandidateCount,
             Images = new[] { clearPath }, Directory = directory };
 
         bool Snapshot(BoardAim? point, long epoch)
