@@ -151,10 +151,16 @@ public sealed partial class SceneCompositor
                 return new(_acquisitionRevision, observe, polygon, illuminated,
                     _acquisitionExpectedScene, _acquisitionLightStarted, centers,
                     RestrictAcquisitionToSearchRegions: _boardSession.Screen != BoardScreen.HandTracking,
-                    AllowsSearchIllumination: true,
+                    AllowsSearchIllumination: _boardSession.Screen != BoardScreen.DuckHunt,
                     ContinuousSearchPolygon: capturePolygon, LostHands: LostLitHands(),
                     HoldControls: HoldControlOutlines(),
                     DisabledControls: ControlOutlines(_boardSession.Buttons.Where(button => !button.Enabled && !button.IsHold)));
+            }
+            if (_boardSession.Screen == BoardScreen.DuckHunt)
+            {
+                ClearAcquisitionLight();
+                _acquisitionReason = "red-dot-input";
+                return Context(false, null);
             }
             if (animating || AcquisitionMustYieldToHandOrExecute(now))
             {
@@ -414,12 +420,13 @@ public sealed partial class SceneCompositor
         var globe = _boardSession.Screen == BoardScreen.Globe;
         var water = _boardSession.Screen == BoardScreen.WaterGarden;
         var football = _boardSession.Screen == BoardScreen.Football;
+        var duckHunt = _boardSession.Screen == BoardScreen.DuckHunt;
         var strykersRun = _boardSession.Screen == BoardScreen.StrykersRun;
         var slots = _boardSession.Screen == BoardScreen.Slots;
         bool roulette = _boardSession.Screen == BoardScreen.Roulette;
         if (_boardApplicationTarget is null || _renderedBoardState is not { } rendered ||
             rendered.Screen != _boardSession.Screen || rendered.ControlsVisualStep != BoardControlsVisualStep) return null;
-        if (!photoCopy && !paint && !globe && !roulette && !water && !football && !strykersRun &&
+        if (!photoCopy && !paint && !globe && !roulette && !water && !football && !duckHunt && !strykersRun &&
             (rendered.HoverMask != 0 || rendered.FingerSelectionStep != 0)) return null;
         if (_boardSession.Screen == BoardScreen.Blackjack &&
             (rendered.BlackjackRevision != _boardSession.BlackjackState.Revision ||
@@ -436,6 +443,8 @@ public sealed partial class SceneCompositor
             HasPhotoCopyDrawerAnimation(_blackjackClock()))) return null;
         if (paint && (rendered.PaintUiRevision != _boardSession.Revision ||
             HasPaintDrawerAnimation(_paintClock()))) return null;
+        if (duckHunt && (rendered.DuckHuntUiRevision != _boardSession.Revision ||
+            HasDuckHuntDrawerAnimation(_blackjackClock()))) return null;
         if (roulette && rendered.RouletteRevision != _boardSession.RouletteState.Revision) return null;
         if (_boardSession.Screen == BoardScreen.Menu &&
             (_boardSession.MenuScrolling || rendered.MenuFrame != MenuVisualFrame(_blackjackClock()))) return null;
@@ -488,6 +497,11 @@ public sealed partial class SceneCompositor
                 {
                     drawing.Clear(Colors.Black);
                     DrawFieldGameControls(drawing);
+                }
+                else if (duckHunt)
+                {
+                    drawing.Clear(Colors.Black);
+                    DrawDuckHuntControls(drawing, _blackjackClock());
                 }
                 else if (strykersRun)
                 {

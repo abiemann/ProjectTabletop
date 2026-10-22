@@ -92,7 +92,7 @@ public sealed partial class SceneCompositor
             return FieldGameButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Slots) return SlotButtonTextRegion(device, button);
         if (_boardSession.Screen == BoardScreen.Menu && button.Id == "settings") return SettingsCogTextRegion(device, button);
-        if (_boardSession.Screen is BoardScreen.Globe or BoardScreen.Paint)
+        if (_boardSession.Screen is BoardScreen.Globe or BoardScreen.Paint or BoardScreen.DuckHunt)
             return HoldButtonCaptionRegion(device, button, DrawerButtonTextRectangle(button), DrawerButtonCaption(button));
         if (_boardSession.Screen == BoardScreen.CrownDeed)
         {

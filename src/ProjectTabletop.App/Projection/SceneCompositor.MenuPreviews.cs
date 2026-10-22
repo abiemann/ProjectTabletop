@@ -76,6 +76,11 @@ public sealed partial class SceneCompositor
 
     private void DrawMenuPreview(CanvasDrawingSession ds, Rect rect, Rect inside, float radius, BoardScreen screen)
     {
+        if (screen == BoardScreen.DuckHunt)
+        {
+            DrawDuckHuntMenuPreview(ds, rect, inside, radius);
+            return;
+        }
         if (!_menuPreviewReady) return;
         var image = screen == BoardScreen.Football ? FootballMenuThumbnail(ds.Device) :
             screen == BoardScreen.StrykersRun ? StrykersRunMenuThumbnail(ds.Device) : _menuPreviewImages?.Image(screen);

@@ -46,8 +46,8 @@ public sealed partial class MainWindow
             var ready = scene.GetMenuPreviewDiagnostics();
             Require(ready.Ready && ready.LoadedCount == 9 && ready.Error is null,
                 "The menu did not load all nine static images, including the Settings hand preview: " + ready.Error);
-            Require(board.GetMenuCards(now).Count == 10,
-                "The menu must expose ten cards, including the rendered Football and Stryker's Run thumbnails.");
+            Require(board.GetMenuCards(now).Count == 11,
+                "The menu must expose eleven cards, including the rendered Football, Stryker's Run and Duck Hunt thumbnails.");
             object atlas = atlasField.GetValue(scene) ?? throw new InvalidOperationException("The ready menu has no image atlas.");
             CheckResourcesAndCache();
             Require(initial.AsSpan().SequenceEqual(Draw(target, dimensions.Width, dimensions.Height)),

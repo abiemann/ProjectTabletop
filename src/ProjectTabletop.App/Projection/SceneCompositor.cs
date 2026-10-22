@@ -686,7 +686,7 @@ public sealed partial class SceneCompositor : IDisposable
             DrawHandAcquisitionLight(ds, output);
             DrawHandSpotlights(ds, output);
         }
-        if (_boardSession.Screen != BoardScreen.Paint) DrawHandCursor(ds, output);
+        if (_boardSession.Screen is not (BoardScreen.Paint or BoardScreen.DuckHunt)) DrawHandCursor(ds, output);
     }
 
     private void DrawHandCursor(CanvasDrawingSession ds, Rect output)

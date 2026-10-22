@@ -174,6 +174,8 @@ static async Task RunMcpAsync()
             Tool("get_water_garden", "Read Water Garden simulation and fresh calibrated marker input diagnostics."),
             WaterGardenActionTool(),
             Tool("show_football", "Open Football with learned black cardboard bars or fingertip kickers, a bouncy speed-capped ball, and human-versus-AI or two-player matches. Does not start camera or projector."),
+            Tool("show_duck_hunt", "Open Duck Hunt. Uses the selected microphone for sharp clicks while its calibrated camera sees a red aiming dot; leaving the board stops listening. Does not start camera or projector."),
+            Tool("get_duck_hunt", "Read Duck Hunt game, red-dot freshness and microphone diagnostics."),
             Tool("get_football", "Read the current football match and separate player input diagnostics."),
             FootballActionTool(),
             LearnFootballBarTool(),

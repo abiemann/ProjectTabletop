@@ -56,7 +56,7 @@ public sealed partial class SceneCompositor
             lock (_gate)
             {
                 var now = MonotonicClock.UtcNow;
-                return _boardSession.Screen == BoardScreen.Paint || CrownDeedEntranceActive || HasBoardControlDrawerAnimation() ? 0 :
+                return _boardSession.Screen is BoardScreen.Paint or BoardScreen.DuckHunt || CrownDeedEntranceActive || HasBoardControlDrawerAnimation() ? 0 :
                     _handSpotlights.Count(hand => SpotlightOpacity(now, hand.SourceFrameTime) > 0);
             }
         }
@@ -67,7 +67,7 @@ public sealed partial class SceneCompositor
     // searching there; live CrownDeed attempts otherwise restarted every 1.5 s.
     private HandDetection[] LostLitHands()
     {
-        if (_boardSession.Screen == BoardScreen.Paint || CrownDeedEntranceActive || HasBoardControlDrawerAnimation()) return [];
+        if (_boardSession.Screen is BoardScreen.Paint or BoardScreen.DuckHunt || CrownDeedEntranceActive || HasBoardControlDrawerAnimation()) return [];
         var now = MonotonicClock.UtcNow;
         return _handSpotlights.Where(hand => hand.SourceFrameTime < _spotlightObservationFrameTime &&
             SpotlightOpacity(now, hand.SourceFrameTime) > 0).Select(hand => hand.Hand).ToArray();
@@ -185,7 +185,7 @@ public sealed partial class SceneCompositor
     private float SpotlightOpacity(DateTimeOffset now, DateTimeOffset sourceFrameTime)
     {
         var age = now - sourceFrameTime;
-        if (_boardSession.Screen == BoardScreen.Paint || _blackOutput || _boardSetup || IsBoardRevealActive || _calibrationTarget >= 0 || _boardMediaClip is null ||
+        if (_boardSession.Screen is BoardScreen.Paint or BoardScreen.DuckHunt || _blackOutput || _boardSetup || IsBoardRevealActive || _calibrationTarget >= 0 || _boardMediaClip is null ||
             age < TimeSpan.Zero || age >= SpotlightLifetime)
             return 0;
         return age <= SpotlightHold ? 1 :
@@ -197,7 +197,7 @@ public sealed partial class SceneCompositor
     // labels back over the light would put those dark markings back on the hand.
     private void DrawHandSpotlights(CanvasDrawingSession ds, Rect output)
     {
-        if (_boardSession.Screen == BoardScreen.Paint || CrownDeedEntranceActive || HasBoardControlDrawerAnimation()) return;
+        if (_boardSession.Screen is BoardScreen.Paint or BoardScreen.DuckHunt || CrownDeedEntranceActive || HasBoardControlDrawerAnimation()) return;
         var now = MonotonicClock.UtcNow;
         if (_handSpotlights.Length == 0 || SpotlightOpacity(now) <= 0) return;
         using var brush = new CanvasRadialGradientBrush(ds.Device,

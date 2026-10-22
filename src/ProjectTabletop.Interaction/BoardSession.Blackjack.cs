@@ -113,6 +113,7 @@ public sealed partial class BoardSession
         }
         if (Screen == BoardScreen.Football) return SelectFootballButton(button, now);
         if (Screen == BoardScreen.StrykersRun) return SelectStrykersRunButton(button, now);
+        if (Screen == BoardScreen.DuckHunt) return SelectDuckHuntButton(button, now);
         if (Screen == BoardScreen.Slots)
         {
             return SelectSlotsButton(button, now);
@@ -191,6 +192,7 @@ public sealed partial class BoardSession
             if (Screen == BoardScreen.WaterGarden) RequestWaterGardenReset();
             if (Screen == BoardScreen.Football) InitializeFootball(now, startMatch: false);
             if (Screen == BoardScreen.StrykersRun) InitializeStrykersRun(now, startRun: false);
+            if (Screen == BoardScreen.DuckHunt) InitializeDuckHunt(now);
             openedBoard = true;
         }
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

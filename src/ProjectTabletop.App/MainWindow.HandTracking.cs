@@ -149,6 +149,7 @@ public sealed partial class MainWindow
         ResetPieceDetections();
         ResetFootballInput();
         ResetStrykersRunInput();
+        ResetDuckHuntInput();
         ResetControlSwipeInput();
         lock (_handGate)
         lock (_captionGate)

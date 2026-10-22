@@ -49,14 +49,17 @@ public sealed partial class MainWindow
         bool water = _scene.CurrentBoardScreen == BoardScreen.WaterGarden;
         bool football = _scene.CurrentBoardScreen == BoardScreen.Football;
         bool strykersRun = _scene.CurrentBoardScreen == BoardScreen.StrykersRun;
+        bool duckHunt = _scene.CurrentBoardScreen == BoardScreen.DuckHunt;
+        UpdateDuckHuntMicrophone();
         SyncFootballControls();
         SettingsToolsPanel.Visibility = _scene.CurrentBoardScreen == BoardScreen.Settings
             ? Visibility.Visible : Visibility.Collapsed;
         // During a camera outage all boards use the shared projection warning;
         // hide the interactive game preview until explicit camera recovery.
         bool boardGame = !_cameraManualRestartRequired &&
-            (blackjack || crownDeed || globe || slots || roulette || water || football || strykersRun);
-        BoardGamePreviewTitle.Text = strykersRun ? "STRYKER'S RUN  ·  slide along the dots  ·  automatic fire" :
+            (blackjack || crownDeed || globe || slots || roulette || water || football || strykersRun || duckHunt);
+        BoardGamePreviewTitle.Text = duckHunt ? "DUCK HUNT  ·  aim the red dot and click" :
+            strykersRun ? "STRYKER'S RUN  ·  slide along the dots  ·  automatic fire" :
             football ? "FOOTBALL  ·  black cardboard bars or index fingers  ·  first to five" :
             water ? "WATER GARDEN  ·  double-bar marker makes ripples  ·  click controls" :
             roulette ? "VICE ROYALE  ·  ROULETTE  ·  click to place chips" :
@@ -66,9 +69,9 @@ public sealed partial class MainWindow
         BlackjackPreviewPanel.Visibility = boardGame ? Visibility.Visible : Visibility.Collapsed;
         // Water keeps the camera beside its interactive preview so the user can see
         // whether the double-bar marker is acquired.
-        Microsoft.UI.Xaml.Controls.Grid.SetRow(BlackjackPreviewPanel, water || football || strykersRun ? 1 : 0);
-        Microsoft.UI.Xaml.Controls.Grid.SetRowSpan(BlackjackPreviewPanel, water || football || strykersRun ? 1 : 2);
-        CameraPreviewPanel.Visibility = water || football || strykersRun || !boardGame ? Visibility.Visible : Visibility.Collapsed;
+        Microsoft.UI.Xaml.Controls.Grid.SetRow(BlackjackPreviewPanel, water || football || strykersRun || duckHunt ? 1 : 0);
+        Microsoft.UI.Xaml.Controls.Grid.SetRowSpan(BlackjackPreviewPanel, water || football || strykersRun || duckHunt ? 1 : 2);
+        CameraPreviewPanel.Visibility = water || football || strykersRun || duckHunt || !boardGame ? Visibility.Visible : Visibility.Collapsed;
         ProjectionPreviewPanel.Visibility = boardGame ? Visibility.Collapsed : Visibility.Visible;
         ApplyProjectionPreviewState();
         BoardAppStatusText.Text = _scene.CurrentBoardTitle + ". " +
@@ -83,6 +86,7 @@ public sealed partial class MainWindow
              water ? "Move the learned double-bar marker across the water. Open the bottom-left arrow for Exit, Reset, and Duck+; you can also click those controls here." :
              football ? "Choose Football input for each player. Play the computer or switch to two players. First to five wins; tracking loss pauses the match." :
              strykersRun ? _scene.StrykersRunState.Banner :
+             duckHunt ? _duckHuntMicrophone.Status + " Aim the red dot at the duck; clicks without a dot are ignored." :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :
              _scene.CurrentBoardScreen == BoardScreen.PhotoCopy ? _scene.PhotoCopyStatus :

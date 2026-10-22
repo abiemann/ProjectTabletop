@@ -914,7 +914,7 @@ public sealed partial class MainWindow
         {
             var menu = new BoardSession();
             var time = MonotonicClock.UtcNow;
-            Check(menu.GetMenuCards(time).Count == 10 && menu.Buttons.Any(button => button.Id == "strykers-run") &&
+            Check(menu.GetMenuCards(time).Count == 11 && menu.Buttons.Any(button => button.Id == "strykers-run") &&
                 menu.Buttons.All(button => button.Id != "blackjack"), "First-page menu placement is incorrect.");
             Check(menu.ActivateButton("menu-scroll-down", time) && menu.TickMenu(time.AddMilliseconds(650)) &&
                 menu.Buttons.Any(button => button.Id == "blackjack"), "Blackjack was not retained on the second page.");

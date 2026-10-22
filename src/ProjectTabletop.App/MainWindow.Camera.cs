@@ -422,6 +422,11 @@ public sealed partial class MainWindow
             QueuePatternRailDetection(frame);
             if (screen == BoardScreen.StrykersRun) return;
         }
+        if (!arrival.BoardSetupActive && screen == BoardScreen.DuckHunt)
+        {
+            QueueDuckHuntDetection(frame);
+            return;
+        }
         QueueMarkerDetection(frame);
         QueueFootballDetection(frame);
         QueueHandTrackingVideoFrame(frame);

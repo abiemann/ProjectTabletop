@@ -50,6 +50,11 @@ public sealed partial class SceneCompositor
         // actual held/clear observations intact: a veto is not proof of release.
         public IReadOnlyList<string> BlockedButtons(HandAcquisitionPresenceResult? result)
         {
+            if (EnabledHoldIds.Contains("duck-hunt-mic") && result?.TextPatterns?.Any(pattern =>
+                    pattern.CaptionHoldEvidence && pattern.ControlRegion >= 0 && pattern.ControlRegion < ButtonIds.Count &&
+                    (ButtonIds[pattern.ControlRegion].StartsWith("duck-hunt-microphone-", StringComparison.Ordinal) ||
+                     ButtonIds[pattern.ControlRegion].StartsWith("duck-hunt-microphones-", StringComparison.Ordinal))) == true)
+                return ["duck-hunt-mic"];
             // Reaching over MODEL/SAVE to the choices cancels the lower holds on
             // the very first broken-caption frame. Readable letters changing
             // brightness alone cannot veto it, just as they cannot press it.
@@ -233,6 +238,7 @@ public sealed partial class SceneCompositor
     {
         "globe-drawer-open" or "globe-drawer-close" or "photo-drawer-open" or "photo-drawer-close" or
             "water-drawer-open" or "water-drawer-close" or "paint-drawer-open" or "paint-drawer-close" or
+            "duck-hunt-drawer-open" or "duck-hunt-drawer-close" or
             "menu-scroll-down" or "menu-scroll-up" => 25,
         _ when button.Id.StartsWith("slot-", StringComparison.Ordinal) => 18,
         _ when button.Id.StartsWith("bj-", StringComparison.Ordinal) => 13,

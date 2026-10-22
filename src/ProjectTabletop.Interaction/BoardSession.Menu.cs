@@ -17,7 +17,8 @@ public sealed partial class BoardSession
         new BoardButton("roulette", "Roulette", new(.08, .85, .40, .16), BoardScreen.Roulette),
         new BoardButton("paint", "Paint", new(.52, .85, .40, .16), BoardScreen.Paint),
         new BoardButton("photo-copy", "Photo Copy", new(.08, 1.05, .40, .16), BoardScreen.PhotoCopy),
-        new BoardButton("blackjack", "Blackjack", new(.52, 1.05, .40, .16), BoardScreen.Blackjack)
+        new BoardButton("blackjack", "Blackjack", new(.52, 1.05, .40, .16), BoardScreen.Blackjack),
+        new BoardButton("duck-hunt", "Duck Hunt", new(.08, 1.25, .40, .16), BoardScreen.DuckHunt)
     });
     /// <summary>Number of launcher cards across both menu pages.</summary>
     public static int MenuCardCount => MenuCards.Count;

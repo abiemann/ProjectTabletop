@@ -58,6 +58,7 @@ public sealed partial class BoardSession
         AdvanceBottomDrawer(_photoCopyDrawer, BoardScreen.PhotoCopy, now);
         AdvanceBottomDrawer(_waterGardenDrawer, BoardScreen.WaterGarden, now);
         AdvanceBottomDrawer(_paintDrawer, BoardScreen.Paint, now);
+        AdvanceBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, now);
     }
 
     private bool BottomDrawerHoldFrameIsCurrent(DateTimeOffset frameTime) => Screen switch
@@ -66,6 +67,7 @@ public sealed partial class BoardSession
         BoardScreen.PhotoCopy => frameTime > _photoCopyDrawer.InputReadyAfter,
         BoardScreen.WaterGarden => frameTime > _waterGardenDrawer.InputReadyAfter,
         BoardScreen.Paint => frameTime > _paintDrawer.InputReadyAfter,
+        BoardScreen.DuckHunt => frameTime > _duckHuntDrawer.InputReadyAfter,
         _ => true
     };
 
@@ -79,7 +81,7 @@ public sealed partial class BoardSession
 
     private void ClearBottomDrawers(DateTimeOffset now)
     {
-        foreach (var drawer in new[] { _globeDrawer, _photoCopyDrawer, _waterGardenDrawer, _paintDrawer })
+        foreach (var drawer in new[] { _globeDrawer, _photoCopyDrawer, _waterGardenDrawer, _paintDrawer, _duckHuntDrawer })
         {
             ClearBottomDrawerUi(drawer);
             drawer.ObservedAt = Later(drawer.ObservedAt, now);

@@ -63,7 +63,7 @@ internal static class MenuScrollRegression
     {
         var board = new BoardSession();
         var firstPage = board.Buttons.Select(button => (button.Id, button.Bounds)).ToArray();
-        Require(board.GetMenuCards(At(0)).Count == 10 && board.Buttons.Select(button => button.Id).SequenceEqual(
+        Require(board.GetMenuCards(At(0)).Count == 11 && board.Buttons.Select(button => button.Id).SequenceEqual(
             ["slots", "football", "strykers-run", "water-garden", "crown-deed", "globe", "settings", "menu-scroll-down"]) &&
             Button(board, "football").Bounds == new BoardRect(.52, .25, .40, .16) &&
             Button(board, "water-garden").Bounds == new BoardRect(.52, .45, .40, .16),
@@ -91,14 +91,14 @@ internal static class MenuScrollRegression
             "Caption obstruction activated the replacement arrow while the menu was moving.");
         Require(board.TickMenu(At(1950)) && !board.MenuScrolling && !board.TickMenu(At(1950)) &&
             !board.TickMenu(At(1949)), "Menu settlement repeated or moved backward in time.");
-        Require(board.Buttons.Select(button => button.Id).SequenceEqual(["roulette", "paint", "photo-copy", "blackjack", "settings", "menu-scroll-up"]),
-            "The second page did not expose Roulette, Paint, Photo Copy, Blackjack and the fixed navigation controls.");
+        Require(board.Buttons.Select(button => button.Id).SequenceEqual(["roulette", "paint", "photo-copy", "blackjack", "duck-hunt", "settings", "menu-scroll-up"]),
+            "The second page did not expose Roulette, Paint, Photo Copy, Blackjack, Duck Hunt and the fixed navigation controls.");
         var secondPage = board.Buttons.Select(button => (button.Id, button.Bounds)).ToArray();
         Require(Near(Button(board, "roulette").Bounds.Y, .25) && Near(Button(board, "paint").Bounds.Y, .25) &&
             Near(Button(board, "roulette").Bounds.X, .08) && Near(Button(board, "paint").Bounds.X, .52) &&
             Near(Button(board, "photo-copy").Bounds.X, .08) && Near(Button(board, "photo-copy").Bounds.Y, .45) &&
             Near(Button(board, "blackjack").Bounds.X, .52) && Near(Button(board, "blackjack").Bounds.Y, .45) &&
-            board.GetMenuCards(At(1950)).Where(button => button.Id is not ("roulette" or "paint" or "photo-copy" or "blackjack"))
+            board.GetMenuCards(At(1950)).Where(button => button.Id is not ("roulette" or "paint" or "photo-copy" or "blackjack" or "duck-hunt"))
                 .All(button => button.Bounds.Y + button.Bounds.Height <= BoardSession.MenuCardViewport.Y),
             "A full-page scroll left an original card in the viewport or misplaced Roulette, Paint and Photo Copy.");
         var roulette = Button(board, "roulette");

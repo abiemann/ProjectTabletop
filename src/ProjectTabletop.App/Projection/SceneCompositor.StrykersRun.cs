@@ -40,8 +40,8 @@ public sealed partial class SceneCompositor
             // Stryker's controls change during play, so retain the full locked
             // policy and recheck the board after acquiring that lock.
             var screen = CurrentBoardScreen;
-            if (screen != BoardScreen.StrykersRun) return screen != BoardScreen.Paint;
-            lock (_gate) return _boardSession.Screen != BoardScreen.Paint &&
+            if (screen != BoardScreen.StrykersRun) return screen is not (BoardScreen.Paint or BoardScreen.DuckHunt);
+            lock (_gate) return _boardSession.Screen is not (BoardScreen.Paint or BoardScreen.DuckHunt) &&
                 (_boardSession.Screen != BoardScreen.StrykersRun ||
                     _boardSession.StrykersRunControlsVisible && !_boardSession.StrykersRunControlsAnimating &&
                     AcquisitionBoardReady);

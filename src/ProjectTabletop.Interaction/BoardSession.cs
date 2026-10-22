@@ -1,6 +1,6 @@
 namespace ProjectTabletop.Interaction;
 
-public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, CrownDeed, Globe, Media, Slots, Settings, Roulette, WaterGarden, Football, StrykersRun }
+public enum BoardScreen { Menu, HandTracking, PhotoCopy, Blackjack, Paint, CrownDeed, Globe, Media, Slots, Settings, Roulette, WaterGarden, Football, StrykersRun, DuckHunt }
 
 /// <summary>A rectangle in the board's normalized, perspective-corrected coordinate system.</summary>
 public readonly record struct BoardRect(double X, double Y, double Width, double Height)
@@ -116,6 +116,7 @@ public sealed partial class BoardSession
         BoardScreen.WaterGarden => "Water Garden",
         BoardScreen.Football => "Football",
         BoardScreen.StrykersRun => "Stryker's Run",
+        BoardScreen.DuckHunt => "Duck Hunt",
         BoardScreen.CrownDeed => "Crown & Deed",
         BoardScreen.Globe => "Globe",
         BoardScreen.Media => "Media",
@@ -134,6 +135,7 @@ public sealed partial class BoardSession
         BoardScreen.WaterGarden => CurrentWaterGardenButtons(),
         BoardScreen.Football => CurrentFootballButtons(),
         BoardScreen.StrykersRun => CurrentStrykersRunButtons(),
+        BoardScreen.DuckHunt => CurrentDuckHuntButtons(),
         BoardScreen.Blackjack => BlackjackButtons(),
         BoardScreen.CrownDeed => CrownDeedButtons(),
         BoardScreen.Globe => CurrentGlobeButtons(),
@@ -278,6 +280,7 @@ public sealed partial class BoardSession
         if (screen == BoardScreen.WaterGarden) RequestWaterGardenReset();
         if (screen == BoardScreen.Football) InitializeFootball(now, startMatch: false);
         if (screen == BoardScreen.StrykersRun) InitializeStrykersRun(now, startRun: false);
+        if (screen == BoardScreen.DuckHunt) InitializeDuckHunt(now);
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

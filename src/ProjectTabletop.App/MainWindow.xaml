@@ -141,6 +141,40 @@
                                 </StackPanel>
                             </StackPanel>
                         </Expander>
+                        <Button x:Name="ClickLearningButton" Content="Click learning" Click="ClickLearning_Click"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" />
+                        <Border x:Name="ClickLearningPanel" Visibility="Collapsed" Background="{StaticResource TabletopInsetBrush}"
+                                BorderBrush="{StaticResource TabletopPanelBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="Teach the app your click sound" FontWeight="SemiBold" />
+                                <TextBlock Text="First wait for CLICK NOW before making any clicks. Use the microphone and click sound you will play with. No camera, red dot or board setup is needed."
+                                           TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <ComboBox x:Name="ClickLearningMicrophoneCombo" Header="Microphone" HorizontalAlignment="Stretch"
+                                          PlaceholderText="Finding microphones…" SelectionChanged="ClickLearningMicrophone_SelectionChanged" />
+                                <TextBlock x:Name="ClickLearningMicrophoneText" Text="Selected microphone: System default"
+                                           TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <TextBlock Text="3 seconds quiet → 6 clicks → 3 test clicks → 3 seconds quiet → Save learning"
+                                           TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <TextBlock x:Name="ClickLearningPhaseText" Text="Ready to learn" FontSize="20" FontWeight="SemiBold"
+                                           TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                                <TextBlock x:Name="ClickLearningInstructionText"
+                                           Text="Choose your microphone, then press Start learning. Stay quiet until CLICK NOW appears, then make one click at a time."
+                                           TextWrapping="Wrap" />
+                                <ProgressBar x:Name="ClickLearningProgress" Minimum="0" Maximum="100" Value="0"
+                                             AutomationProperties.Name="Click learning progress" />
+                                <TextBlock x:Name="ClickLearningErrorText" Visibility="Collapsed" TextWrapping="Wrap"
+                                           AutomationProperties.LiveSetting="Polite" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Name="StartClickLearningButton" Content="Start learning" Click="StartClickLearning_Click" />
+                                    <Button x:Name="RetryClickLearningButton" Content="Retry" Click="StartClickLearning_Click" Visibility="Collapsed" />
+                                    <Button x:Name="CancelClickLearningButton" Content="Cancel" Click="CancelClickLearning_Click" IsEnabled="False" />
+                                </StackPanel>
+                                <Button x:Name="SaveClickLearningButton" Content="Save learning" Click="SaveClickLearning_Click" IsEnabled="False"
+                                        Background="{StaticResource TabletopPrimaryButtonBrush}" BorderBrush="{StaticResource TabletopAccentBrush}" />
+                                <TextBlock Text="Your previous learning stays in use until you choose Save learning. Duck Hunt shots pause during learning."
+                                           TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                            </StackPanel>
+                        </Border>
                         <Border Height="1" Background="{StaticResource TabletopPanelBorderBrush}" Margin="0,2" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Content="Board menu" Click="BoardMenu_Click" />
@@ -166,6 +200,7 @@
                         <TextBlock Text="Use Marker setup above to train the double-bar marker, then move it across the water to make ripples. Open the bottom-left arrow to find EXIT, RESET, and DUCK+. Hold a projected control for one second, then uncover it before pressing again. Laptop clicks also work." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Football" Click="OnOpenFootballBoard" />
                         <Button Content="Stryker's Run" Click="OnOpenStrykersRunBoard" />
+                        <Button Content="Duck Hunt" Click="OnOpenDuckHuntBoard" />
                         <TextBlock Text="Kick a lively football with a black bar, a double-bar marker or your index finger. Play against the computer or another person, defending opposite goals. Player 1 uses the left half; player 2 uses the right." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Expander Header="Football game" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <StackPanel Spacing="10">

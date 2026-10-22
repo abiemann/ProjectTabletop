@@ -10,8 +10,8 @@ public sealed partial class BoardSession
     /// <summary>Target visibility. Rendering samples the shared fade; input waits until it settles.</summary>
     public bool ButtonsVisible { get; private set; } = true;
 
-    /// <summary>The launcher and Roulette stay visible; Stryker's Run owns its control transitions.</summary>
-    public bool ControlSwipesEnabled => Screen is not (BoardScreen.Menu or BoardScreen.Roulette or BoardScreen.StrykersRun);
+    /// <summary>The launcher, Roulette and Duck Hunt stay visible; Stryker's Run owns its control transitions.</summary>
+    public bool ControlSwipesEnabled => Screen is not (BoardScreen.Menu or BoardScreen.Roulette or BoardScreen.StrykersRun or BoardScreen.DuckHunt);
 
     /// <summary>Current controls for rendering, including their dynamic enabled state while fading.</summary>
     public IReadOnlyList<BoardButton> GetVisibleButtons(DateTimeOffset now) =>

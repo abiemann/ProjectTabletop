@@ -91,6 +91,8 @@ public sealed partial class MainWindow : Window
         StartHandTrackingStatus();
         InitializeMarkerTracking();
         InitializeFootballInput();
+        InitializeDuckHunt();
+        InitializeClickLearningUi();
         InitializeMarkerSetup();
         RefreshDisplays();
         InitializeProjectionSettings();
@@ -250,6 +252,8 @@ public sealed partial class MainWindow : Window
     {
         if (_closing) return;
         _closing = true;
+        DisposeClickLearningUi();
+        CancelClickLearning();
         CancelCameraPictureRequest();
         _scene.BoardOpened -= BoardOpenedForCameraPicture;
         _markerSetupTimer?.Stop();
@@ -276,6 +280,7 @@ public sealed partial class MainWindow : Window
         await DisposeMarkerTrackingAsync();
         await DisposeFootballInputAsync();
         await DisposeStrykersRunInputAsync();
+        await DisposeDuckHuntAsync();
         await DisposeHandTrackingAsync();
         if (_crownDeedSaveTask is not null) await _crownDeedSaveTask;
         if (_globeSaveTask is not null) await _globeSaveTask;

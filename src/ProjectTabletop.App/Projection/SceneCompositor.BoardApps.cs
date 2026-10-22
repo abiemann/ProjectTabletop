@@ -30,7 +30,8 @@ public sealed partial class SceneCompositor
         long CrownDeedSessionRevision, int CrownDeedDrawerFrame, long CrownDeedEntranceRevision, int CrownDeedEntranceFrame, long CrownDeedDevelopmentFrame,
         long GlobeRevision, long GlobeFrame, long GlobeSessionRevision, long SlotsRevision, double SlotsAspect, int MenuFrame,
         long RouletteRevision, double RouletteAspect, string? RouletteHover, long WaterRevision, long FootballRevision,
-        long StrykersRunRevision, long MarkerSetupVisualRevision);
+        long StrykersRunRevision, long DuckHuntRevision, long DuckHuntInputVisualRevision,
+        long DuckHuntUiRevision, int DuckHuntDrawerFrame, long MarkerSetupVisualRevision);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
         Func<DateTimeOffset>? boardRevealClock = null, Func<DateTimeOffset>? paintClock = null,
@@ -54,6 +55,8 @@ public sealed partial class SceneCompositor
         _boardSession.CrownDeedRollOccurred += OnCrownDeedRoll;
         _boardSession.CrownDeedDevelopmentOccurred += OnCrownDeedDevelopment;
         _boardSession.BoardOpened += OnBoardOpened;
+        _boardSession.DuckHuntMicrophoneSelected += id => DuckHuntMicrophoneSelected?.Invoke(id);
+        _boardSession.DuckHuntMicrophonesRequested += () => DuckHuntMicrophonesRequested?.Invoke();
         _boardSession.LicensesRequested += () =>
         {
             _licensesNoticeNavigationRevision = _boardSession.NavigationRevision;
@@ -178,6 +181,8 @@ public sealed partial class SceneCompositor
         var water = _boardSession.Screen == BoardScreen.WaterGarden;
         var football = _boardSession.Screen == BoardScreen.Football;
         var strykersRun = _boardSession.Screen == BoardScreen.StrykersRun;
+        var duckHunt = _boardSession.Screen == BoardScreen.DuckHunt;
+        if (duckHunt) _boardSession.TickDuckHunt(blackjackNow);
         var waterNow = _waterClock();
         if (water) _boardSession.TickWaterGarden(waterNow);
         var paintNow = _paintClock();
@@ -233,7 +238,11 @@ public sealed partial class SceneCompositor
             water ? preview && CanReuseWaterGardenProjectorFrame(ds.Device, waterNow)
                 ? _waterRenderedFrame!.Value.Visual : WaterGardenVisualRevision(waterNow) : 0,
             football ? FootballVisualRevision() : 0,
-            strykersRun ? StrykersRunVisualRevision() : 0, _markerSetupVisualRevision);
+            strykersRun ? StrykersRunVisualRevision() : 0,
+            duckHunt ? _boardSession.DuckHuntState.Revision : 0,
+            duckHunt ? DuckHuntInputVisualRevision : 0,
+            duckHunt ? _boardSession.Revision : 0, duckHunt ? DuckHuntDrawerVisualFrame(blackjackNow) : 0,
+            _markerSetupVisualRevision);
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)
@@ -250,7 +259,7 @@ public sealed partial class SceneCompositor
                 DrawPhotoCopyObjectSpotlight(surface);
             }
             else if (_boardSession.Screen is not (BoardScreen.HandTracking or BoardScreen.Blackjack or BoardScreen.CrownDeed or
-                BoardScreen.Globe or BoardScreen.Slots or BoardScreen.Roulette or BoardScreen.WaterGarden or BoardScreen.Football))
+                BoardScreen.Globe or BoardScreen.Slots or BoardScreen.Roulette or BoardScreen.WaterGarden or BoardScreen.Football or BoardScreen.DuckHunt))
                 DrawMetalBackdrop(surface, drawFooterDivider: _boardSession.Screen != BoardScreen.Menu,
                     drawDarkInsetFrame: _boardSession.Screen != BoardScreen.Menu);
             using var heading = new CanvasTextFormat
@@ -303,6 +312,8 @@ public sealed partial class SceneCompositor
                 DrawStrykersRunSurface(surface);
                 DrawStrykersRunControls(surface);
             }
+            else if (duckHunt)
+                DrawDuckHuntBoard(surface, blackjackNow);
             else if (slots)
                 DrawSlotsMachine(surface, _boardSession.SlotsState, controls, PaintBoardAspect());
             else if (roulette)
@@ -517,6 +528,7 @@ public sealed partial class SceneCompositor
             BoardScreen.WaterGarden => "Still water. Gentle ripples.",
             BoardScreen.Football => "Big kicks. Bouncy football.",
             BoardScreen.StrykersRun => "Recruit. Advance. Survive.",
+            BoardScreen.DuckHunt => "Aim the red dot. Click to shoot.",
             BoardScreen.CrownDeed => "Build your fortune. Shape the city.",
             BoardScreen.Globe => "Zoom and rotate Earth",
             BoardScreen.Roulette => "Place your chips and spin",

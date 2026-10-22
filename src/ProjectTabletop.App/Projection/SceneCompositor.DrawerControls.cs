@@ -50,7 +50,8 @@ public sealed partial class SceneCompositor
 
     private static bool IsBoardDrawerHandle(BoardButton button) =>
         button.Id is "globe-drawer-open" or "globe-drawer-close" or "photo-drawer-open" or "photo-drawer-close" or
-            "water-drawer-open" or "water-drawer-close" or "paint-drawer-open" or "paint-drawer-close";
+            "water-drawer-open" or "water-drawer-close" or "paint-drawer-open" or "paint-drawer-close" or
+            "duck-hunt-drawer-open" or "duck-hunt-drawer-close";
 
     // The camera trigger measures the same vector silhouette that is rendered.
     // Its physical proportions remain stable on portrait and landscape boards.
@@ -79,7 +80,8 @@ public sealed partial class SceneCompositor
         float size = IsCrownDeedDrawerHandle(button) ? 22f / 27 : 1;
         float x = size * (aspect >= 1 ? (float)(1 / aspect) : 1);
         float y = size * (aspect >= 1 ? 1 : (float)aspect) *
-            (button.Id is "globe-drawer-open" or "photo-drawer-open" or "water-drawer-open" or "paint-drawer-open" or "mp-exit" ? -1 : 1);
+            (button.Id is "globe-drawer-open" or "photo-drawer-open" or "water-drawer-open" or "paint-drawer-open" or
+                "duck-hunt-drawer-open" or "mp-exit" ? -1 : 1);
         var center = new Vector2((float)(button.Bounds.X + button.Bounds.Width / 2) * BoardSurfaceSize,
             (float)(button.Bounds.Y + button.Bounds.Height / 2) * BoardSurfaceSize);
         return profile.Select(point => center + new Vector2(point.X * x, point.Y * y)).ToArray();

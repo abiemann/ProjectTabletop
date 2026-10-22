@@ -112,6 +112,8 @@ public sealed partial class MainWindow
                 return await VerifyCameraSafetyAsync();
             case "verify_strykers_run":
                 return await VerifyStrykersRunAsync();
+            case "verify_duck_hunt":
+                return await VerifyDuckHuntAsync();
             case "verify_camera_latency":
                 return VerifyCameraLatency();
             case "verify_photo_copy_memory_save":
@@ -352,6 +354,7 @@ public sealed partial class MainWindow
                     photoCopyLighting = _scene.PhotoCopyLightingStatus,
                     photoCopyObservation = _lastPhotoCopyObservation,
                     photoCopyCount = _scene.PhotoCopyCount,
+                    duckHunt = DuckHuntInputStatus(),
                     lastPhotoCopyCapture = _lastPhotoCopyCapture,
                     lastSavedPhotoPath = _lastSavedPhotoPath,
                     photoCopySaveDirectory = PhotoCopyImageStore.DefaultDirectory,
@@ -443,6 +446,11 @@ public sealed partial class MainWindow
                 ShowStrykersRun();
                 return new { boardApp = _scene.CurrentBoardTitle, boardClipReady = _scene.HasBoardMediaClip,
                     state = StrykersRunControlState() };
+            case "show_duck_hunt":
+                ShowDuckHunt();
+                return DuckHuntInputStatus();
+            case "get_duck_hunt":
+                return DuckHuntInputStatus();
             case "get_strykers_run":
                 return StrykersRunControlState();
             case "strykers_run_action":
