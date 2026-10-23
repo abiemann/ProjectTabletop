@@ -55,8 +55,6 @@ public sealed partial class SceneCompositor
         _boardSession.CrownDeedRollOccurred += OnCrownDeedRoll;
         _boardSession.CrownDeedDevelopmentOccurred += OnCrownDeedDevelopment;
         _boardSession.BoardOpened += OnBoardOpened;
-        _boardSession.DuckHuntMicrophoneSelected += id => DuckHuntMicrophoneSelected?.Invoke(id);
-        _boardSession.DuckHuntMicrophonesRequested += () => DuckHuntMicrophonesRequested?.Invoke();
         _boardSession.LicensesRequested += () =>
         {
             _licensesNoticeNavigationRevision = _boardSession.NavigationRevision;

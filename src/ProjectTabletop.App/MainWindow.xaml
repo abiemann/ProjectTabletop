@@ -200,7 +200,21 @@
                         <TextBlock Text="Use Marker setup above to train the double-bar marker, then move it across the water to make ripples. Open the bottom-left arrow to find EXIT, RESET, and DUCK+. Hold a projected control for one second, then uncover it before pressing again. Laptop clicks also work." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Football" Click="OnOpenFootballBoard" />
                         <Button Content="Stryker's Run" Click="OnOpenStrykersRunBoard" />
-                        <Button Content="Duck Hunt" Click="OnOpenDuckHuntBoard" />
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button Content="Duck Hunt" Click="OnOpenDuckHuntBoard" VerticalAlignment="Center" />
+                            <ComboBox x:Name="DuckHuntMicrophoneCombo" Grid.Column="1" HorizontalAlignment="Stretch"
+                                      VerticalAlignment="Center" PlaceholderText="Choose microphone"
+                                      AutomationProperties.Name="Duck Hunt microphone"
+                                      ToolTipService.ToolTip="Choose the microphone for Duck Hunt and click learning"
+                                      SelectionChanged="ClickLearningMicrophone_SelectionChanged"
+                                      DropDownOpened="DuckHuntMicrophone_DropDownOpened" />
+                        </Grid>
+                        <TextBlock x:Name="DuckHuntMicrophoneStatusText" Visibility="Collapsed" TextWrapping="Wrap"
+                                   Foreground="{StaticResource TabletopMutedBrush}" AutomationProperties.LiveSetting="Polite" />
                         <TextBlock Text="Kick a lively football with a black bar, a double-bar marker or your index finger. Play against the computer or another person, defending opposite goals. Player 1 uses the left half; player 2 uses the right." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Expander Header="Football game" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <StackPanel Spacing="10">

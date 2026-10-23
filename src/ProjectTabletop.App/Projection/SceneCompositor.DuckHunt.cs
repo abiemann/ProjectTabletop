@@ -70,15 +70,6 @@ public sealed partial class SceneCompositor
         _duckHuntArtworkPublished = false;
     }
     public DuckHuntSnapshot DuckHuntState { get { lock (_gate) return _boardSession.DuckHuntState; } }
-    public bool DuckHuntMicrophoneMenuOpen { get { lock (_gate) return _boardSession.DuckHuntMicrophoneMenuOpen; } }
-    public event Action<string?>? DuckHuntMicrophoneSelected;
-    public event Action? DuckHuntMicrophonesRequested;
-
-    public void SetDuckHuntMicrophones(IReadOnlyList<DuckHuntMicrophoneChoice> choices,
-        string? selectedDeviceId, bool loading, string? error = null)
-    {
-        lock (_gate) _boardSession.SetDuckHuntMicrophones(choices, selectedDeviceId, loading, error, _blackjackClock());
-    }
 
     public void ShowDuckHunt()
     {
@@ -124,27 +115,23 @@ public sealed partial class SceneCompositor
             VerticalAlignment = CanvasVerticalAlignment.Center
         };
         var ink = Color.FromArgb(255, 39, 60, 51);
-        DrawBoardAspectText(drawing, "DUCK HUNT", new Rect(200, 45, 600, 80), ink, heading);
+        DrawBoardAspectText(drawing, "- DRY FIRE -", new Rect(200, 45, 600, 80), ink, heading);
         DrawBoardAspectText(drawing, $"HITS {state.Hits} / {DuckHuntGame.HitsToWin}",
             new Rect(350, 135, 300, 45), ink, caption);
-        DrawBoardAspectText(drawing, DuckHuntAudioHint, new Rect(120, 190, 760, 45), ink, caption);
         DrawDuckHuntWalkingMallard(drawing, state, PaintBoardAspect());
         DrawDuckHuntFeathers(drawing, PaintBoardAspect());
         DrawDuckHuntMeasurement(drawing);
-        if (!_boardSession.DuckHuntMicrophoneMenuOpen)
+        string status = state.Phase switch
         {
-            string status = state.Phase switch
-            {
-                DuckHuntPhase.PlayerWon => "YOU WIN!",
-                DuckHuntPhase.DuckWon => "DUCK WINS!",
-                _ => "Hit the duck 10 times before it escapes."
-            };
-            DrawBoardAspectText(drawing, status, new Rect(120, 730, 760, 55), ink,
-                state.RoundFinished ? heading : caption);
-            if (state.RoundFinished)
-                DrawBoardAspectText(drawing, "Hold PLAY AGAIN for another round.",
-                    new Rect(120, 785, 760, 45), ink, caption);
-        }
+            DuckHuntPhase.PlayerWon => "YOU WIN!",
+            DuckHuntPhase.DuckWon => "DUCK WINS!",
+            _ => "Hit the duck 10 times before it escapes."
+        };
+        DrawBoardAspectText(drawing, status, new Rect(120, 730, 760, 55), ink,
+            state.RoundFinished ? heading : caption);
+        if (state.RoundFinished)
+            DrawBoardAspectText(drawing, "Hold PLAY AGAIN for another round.",
+                new Rect(120, 785, 760, 45), ink, caption);
         DrawDuckHuntControls(drawing, now);
     }
 
@@ -163,46 +150,8 @@ public sealed partial class SceneCompositor
         var buttons = BoardControlsForRendering;
         if (buttons.Count == 0) return;
         using var fade = CreateBoardControlsFadeLayer(drawing);
-        if (_boardSession.DuckHuntMicrophoneMenuOpen)
-        {
-            var ink = Color.FromArgb(255, 39, 60, 51);
-            drawing.FillRoundedRectangle(new Rect(350, 306, 605, 545), 18, 18,
-                Color.FromArgb(255, 201, 213, 205));
-            using var title = new CanvasTextFormat
-            {
-                FontFamily = "Segoe UI", FontSize = 20, WordWrapping = CanvasWordWrapping.Wrap,
-                HorizontalAlignment = CanvasHorizontalAlignment.Center,
-                VerticalAlignment = CanvasVerticalAlignment.Center
-            };
-            string status = _boardSession.DuckHuntMicrophonesLoading ? "Finding microphones…" :
-                _boardSession.DuckHuntMicrophonesError is { } error ? error :
-                "CURRENT: " + _boardSession.DuckHuntSelectedMicrophoneLabel;
-            DrawBoardAspectText(drawing, status, new Rect(370, 315, 565, 95), ink, title);
-            if (_boardSession.DuckHuntMicrophonePageCount > 1)
-                DrawBoardAspectText(drawing, $"{_boardSession.DuckHuntMicrophonePage + 1} / {_boardSession.DuckHuntMicrophonePageCount}",
-                    new Rect(200, 510, 155, 45), ink, title);
-        }
         DrawBoardDrawerControls(drawing, buttons, [], [], _boardSession.DuckHuntDrawerOpen,
             (float)_boardSession.GetDuckHuntDrawerProgress(now), PaintBoardAspect(), _holdControlBrightness);
-        if (!_boardSession.DuckHuntDrawerOpen)
-            foreach (var button in buttons)
-                if (button.Id == "duck-hunt-replay")
-                    DrawDrawerButton(drawing, button, false, PaintBoardAspect(), _holdControlBrightness);
-        if (_boardSession.DuckHuntMicrophoneMenuOpen && _boardSession.GetDuckHuntDrawerProgress(now) == 1)
-        {
-            var chosen = buttons.FirstOrDefault(button => button.Id == _boardSession.DuckHuntSelectedMicrophoneButtonId);
-            if (chosen is not null)
-            {
-                var b = chosen.Bounds;
-                drawing.DrawRoundedRectangle(new Rect(b.X * BoardSurfaceSize + 3, b.Y * BoardSurfaceSize + 3,
-                    b.Width * BoardSurfaceSize - 6, b.Height * BoardSurfaceSize - 6), 16, 16,
-                    Color.FromArgb(255, 44, 114, 82), 3);
-            }
-            var mic = DuckHuntLayout.MicrophoneBounds;
-            float x = (float)(mic.X + mic.Width / 2) * BoardSurfaceSize, y = (float)mic.Y * BoardSurfaceSize + 20;
-            drawing.DrawLine(new(x - 5, y + 3), new(x, y - 2), Color.FromArgb(255, 0, 0, 0), 2);
-            drawing.DrawLine(new(x, y - 2), new(x + 5, y + 3), Color.FromArgb(255, 0, 0, 0), 2);
-        }
     }
 
     public void DrawDuckHuntPreview(CanvasDrawingSession drawing, float width, float height)
@@ -321,7 +270,8 @@ public sealed partial class SceneCompositor
     internal void DrawDuckHuntMeasurement(CanvasDrawingSession drawing)
     {
         var measurement = DuckHuntMeasurement;
-        BoardAim? anchor = measurement.OldDetectedXY ?? measurement.NewDetectedXY ?? measurement.LiveDetectedXY;
+        // Tracking stays live for shot timing, but only a click creates a mark.
+        BoardAim? anchor = measurement.OldDetectedXY ?? measurement.NewDetectedXY;
         if (anchor is not { } old) return;
         double aspect = PaintBoardAspect();
         // Board units are normalized independently in each axis. Scale the local

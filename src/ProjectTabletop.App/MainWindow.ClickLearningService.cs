@@ -48,8 +48,7 @@ public sealed partial class MainWindow
             AppLog.Write("Save Duck Hunt microphone preference", error);
             _duckHuntMicrophoneSettingsError = "Microphone selected for this session; the choice could not be saved.";
         }
-        _scene.SetDuckHuntMicrophones(_duckHuntMicrophones, deviceId, loading: false,
-            error: _duckHuntMicrophoneSettingsError);
+        SetDuckHuntMicrophoneNotice(_duckHuntMicrophoneSettingsError);
         ApplyClickLearningInputs(_duckHuntMicrophones, deviceId, loading: false);
         UpdateDuckHuntMicrophone(forceRetry: true);
     }

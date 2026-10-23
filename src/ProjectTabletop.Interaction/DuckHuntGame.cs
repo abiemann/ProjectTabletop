@@ -10,7 +10,7 @@ public readonly record struct DuckHuntSnapshot(DuckHuntPhase Phase, int Hits, in
     public bool RoundFinished => Phase is DuckHuntPhase.DuckWon or DuckHuntPhase.PlayerWon;
 }
 
-/// <summary>A horizontal, constant-speed crossing with a short turn after each hit.
+/// <summary>A horizontal crossing with a short turn and 10% speed increase after each hit.
 /// Motion is evaluated at the camera photo timestamp, independently of render ticks.</summary>
 public sealed class DuckHuntGame
 {
@@ -26,7 +26,7 @@ public sealed class DuckHuntGame
     private DateTimeOffset? _pausedAt;
     private bool _started, _turningSegment, _playerWon;
     private int _direction = -1, _previousDirection = -1, _hits, _shots;
-    private double _segmentU, _walkSecondsBeforeSegment, _halfWidth, _speed;
+    private double _segmentU, _walkDistanceBeforeSegment, _halfWidth, _baseSpeed, _speed;
     private DuckHuntSnapshot _snapshot = new(DuckHuntPhase.Ready, 0, 0, .5, CentreV, 0, 0);
 
     public DuckHuntSnapshot Snapshot => _snapshot;
@@ -39,7 +39,7 @@ public sealed class DuckHuntGame
         _pausedAt = null;
         _started = _turningSegment = _playerWon = false;
         _hits = _shots = 0;
-        _walkSecondsBeforeSegment = 0;
+        _walkDistanceBeforeSegment = 0;
         Feathers.Clear();
         _snapshot = new(DuckHuntPhase.Ready, 0, 0, .5, CentreV, 0, _snapshot.Revision + 1);
     }
@@ -51,7 +51,7 @@ public sealed class DuckHuntGame
         if (_started || now < _observedAt || !double.IsFinite(boardAspect) || boardAspect <= 0) return false;
         _direction = _previousDirection = (enterFromLeft ?? Random.Shared.Next(2) == 0) ? 1 : -1;
         _halfWidth = DuckHuntLayout.PhotoWidth(boardAspect) / 2;
-        _speed = (1 + 2 * _halfWidth + 2 * EntryMargin) / CrossingDuration.TotalSeconds;
+        _speed = _baseSpeed = (1 + 2 * _halfWidth + 2 * EntryMargin) / CrossingDuration.TotalSeconds;
         _segmentU = _direction > 0 ? -_halfWidth - EntryMargin : 1 + _halfWidth + EntryMargin;
         _segmentStartedAt = _inputNotBefore = now;
         _started = true;
@@ -105,9 +105,10 @@ public sealed class DuckHuntGame
         {
             Feathers.Spawn(photographed, boardAspect, shotTime);
             _hits++;
-            _walkSecondsBeforeSegment = WalkingSecondsAt(shotTime);
+            _walkDistanceBeforeSegment = WalkingDistanceAt(shotTime);
             _segmentU = photographed.U;
             _segmentStartedAt = shotTime;
+            _speed *= 1.1;
             _playerWon = _hits == HitsToWin;
             _turningSegment = !_playerWon;
             if (!_playerWon)
@@ -122,19 +123,19 @@ public sealed class DuckHuntGame
         return hit;
     }
 
-    private double WalkingSecondsAt(DateTimeOffset now)
+    private double WalkingDistanceAt(DateTimeOffset now)
     {
         double elapsed = Math.Max(0, (now - _segmentStartedAt).TotalSeconds);
         double walking = Math.Max(0, elapsed - (_turningSegment ? TurnDuration.TotalSeconds : 0));
         double exitU = _direction > 0 ? 1 + _halfWidth + EntryMargin : -_halfWidth - EntryMargin;
-        return _walkSecondsBeforeSegment + Math.Min(walking, Math.Abs(exitU - _segmentU) / _speed);
+        return _walkDistanceBeforeSegment + Math.Min(walking * _speed, Math.Abs(exitU - _segmentU));
     }
 
     private DuckHuntSnapshot PoseAt(DateTimeOffset now)
     {
         double elapsed = Math.Max(0, (now - _segmentStartedAt).TotalSeconds);
-        double walkingSeconds = _playerWon ? _walkSecondsBeforeSegment : WalkingSecondsAt(now);
-        double u = _segmentU + _direction * _speed * (walkingSeconds - _walkSecondsBeforeSegment);
+        double walkingDistance = _playerWon ? _walkDistanceBeforeSegment : WalkingDistanceAt(now);
+        double u = _segmentU + _direction * (walkingDistance - _walkDistanceBeforeSegment);
         bool turning = _turningSegment && elapsed < TurnDuration.TotalSeconds;
         double facing = turning ? _previousDirection * Math.Cos(Math.PI * elapsed / TurnDuration.TotalSeconds) : _direction;
         double exitU = _direction > 0 ? 1 + _halfWidth + EntryMargin : -_halfWidth - EntryMargin;
@@ -142,7 +143,8 @@ public sealed class DuckHuntGame
         var phase = _playerWon ? DuckHuntPhase.PlayerWon : escaped ? DuckHuntPhase.DuckWon :
             turning ? DuckHuntPhase.Turning : DuckHuntPhase.Walking;
         return new(phase, _hits, _shots, u, CentreV, 0, _snapshot.Revision,
-            _direction, facing, walkingSeconds * StepsPerSecond * Math.Tau);
+            // Distance keeps the feet in step with faster travel without a phase jump at a hit.
+            _direction, facing, walkingDistance / _baseSpeed * StepsPerSecond * Math.Tau);
     }
 
     private void Publish(DuckHuntSnapshot next, bool feathersChanged)

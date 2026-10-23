@@ -57,39 +57,30 @@ public sealed partial class MainWindow
             Check(!board.ControlSwipesEnabled && board.Buttons.Count == 1 && board.Buttons[0] is
                 { Id: "duck-hunt-drawer-open", Hold: BoardButtonHold.Once },
                 "Duck Hunt did not start with only its shared drawer arrow.");
-            scene.SetDuckHuntMicrophones([new("usb", "USB recording microphone"),
-                new("desk", "Desktop microphone array")], null, false);
             now += TimeSpan.FromMilliseconds(1);
             Check(board.ActivateButton("duck-hunt-drawer-open", now), "The Duck Hunt drawer did not open.");
             now += TimeSpan.FromMilliseconds(300);
             board.TickDuckHunt(now);
             Draw();
-            Check(board.Buttons.Count == 3 && board.Buttons.All(button => button.Enabled),
-                "The settled drawer did not enable its arrow, EXIT and MIC.");
+            Check(board.Buttons.Select(button => button.Id).SequenceEqual(["duck-hunt-drawer-close", "duck-hunt-exit"]) &&
+                board.Buttons.All(button => button.Enabled),
+                "The settled drawer did not contain only its arrow and EXIT.");
             now += TimeSpan.FromMilliseconds(1);
-            Check(board.ActivateButton("duck-hunt-mic", now), "MIC did not open the input choices.");
+            Check(!board.ActivateButton("duck-hunt-mic", now) && !board.ActivateButton("duck-hunt-microphone-0", now),
+                "A removed projected microphone control could still be activated.");
+            scene.SetDuckHuntAudioStatus(true, "Microphone ready");
             Draw();
-            await Save("microphones");
-            Check(scene.DuckHuntMicrophoneMenuOpen && scene.DuckHuntBoardReady && !scene.DuckHuntInputReady,
-                "The input picker did not pause shots while keeping its calibrated board ready.");
-            var picker = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No microphone choice hold reference.");
-            int choiceRegion = picker.ButtonIds.ToList().IndexOf("duck-hunt-microphone-1");
-            Check(choiceRegion >= 0 && picker.EnabledHoldIds.Contains("duck-hunt-microphone-1"),
-                "The microphone choice has no enabled caption region.");
-            var reaching = new HandAcquisitionPresenceResult([], true, null, .1, "fixture",
-                [new(choiceRegion, false, .1, .1, .1, ShapeCorrupted: true)]);
-            Check(picker.BlockedButtons(reaching).SequenceEqual(["duck-hunt-mic"]),
-                "A broken upper microphone caption did not cancel the MIC hold underneath it.");
-            Check(picker.BlockedButtons(reaching with { TextPatterns =
-                [new(choiceRegion, true, 1, 0, 0, CaptionReflectanceChanged: true)] }).Count == 0,
-                "A readable microphone caption vetoed MIC from reflectance alone.");
+            Check(scene.DuckHuntState.Phase == DuckHuntPhase.Walking && !board.DuckHuntDrawerOpen &&
+                board.Buttons.Select(button => button.Id).SequenceEqual(["duck-hunt-drawer-open"]),
+                "The first round did not close an already open drawer when its input became ready.");
             now += TimeSpan.FromMilliseconds(1);
-            Check(board.ActivateButton("duck-hunt-mic", now) && !scene.DuckHuntMicrophoneMenuOpen,
-                "MIC did not remain available to close its choices.");
+            Check(board.ActivateButton("duck-hunt-drawer-open", now), "The active-round drawer did not reopen.");
+            now += TimeSpan.FromMilliseconds(300);
+            board.TickDuckHunt(now);
             byte[] initial = Draw();
             await Save("controls");
             var context = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No Duck Hunt hold reference.");
-            Check(context.ButtonIds.SequenceEqual(["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-mic"]) &&
+            Check(context.ButtonIds.SequenceEqual(["duck-hunt-drawer-close", "duck-hunt-exit"]) &&
                 context.EnabledHoldIds.Contains("duck-hunt-exit"), "The hold reference does not contain the enabled drawer controls.");
             var caption = context.ExpectedScene.BoardTriggerRegions![context.ButtonIds.ToList().IndexOf("duck-hunt-exit")];
             var exit = board.Buttons.Single(button => button.Id == "duck-hunt-exit").Bounds;
@@ -100,10 +91,10 @@ public sealed partial class MainWindow
             Check(acquisition is { AllowsSearchIllumination: false } &&
                 scene.ActiveHandSpotlightCount == 0, "Duck Hunt exposes hand search lighting.");
             Check(scene.DuckHuntArtworkReady, "The photographic duck artwork was not loaded.");
-            scene.SetDuckHuntAudioStatus(true, "Microphone ready");
             var input = scene.GetDuckHuntInputContext() ?? throw new InvalidOperationException("No calibrated measurement input.");
             var oldAim = new BoardAim(.2, .43);
             var newAim = new BoardAim(.32, .50);
+            VerifyLiveDotDoesNotDraw("before the first click");
             var oldTime = MonotonicClock.UtcNow;
             scene.PublishDuckHuntDot(oldAim, oldTime, input.Epoch);
             Check(scene.DuckHuntMeasurement.LiveDetectedXY == oldAim, "Continuous red-dot coordinates were not published.");
@@ -141,6 +132,9 @@ public sealed partial class MainWindow
             scene.ClearDuckHuntInput();
             Check(!scene.DuckHuntMeasurement.HasCompletedPair && scene.DuckHuntMeasurement.LiveDetectedXY is null,
                 "Reset retained a measurement or stale live dot.");
+            now += TimeSpan.FromMilliseconds(1);
+            Check(board.ActivateButton("duck-hunt-drawer-close", now) && !board.DuckHuntDrawerOpen,
+                "The winning-round fixture could not close its drawer before the result.");
 
             // A deterministic round exercises the actual renderer at several gait
             // and turning phases, plus both result messages and the replay hold.
@@ -195,9 +189,10 @@ public sealed partial class MainWindow
             }
             byte[] winningPixels = Draw();
             await Save("player-wins");
-            Check(scene.DuckHuntState is { Phase: DuckHuntPhase.PlayerWon, Hits: 10 } &&
-                board.Buttons.Any(button => button.Id == "duck-hunt-replay" && button.Hold == BoardButtonHold.Once),
-                "The tenth hit did not offer the player result and a replay hold.");
+            Check(scene.DuckHuntState is { Phase: DuckHuntPhase.PlayerWon, Hits: 10 } && board.DuckHuntDrawerOpen &&
+                board.Buttons.Any(button => button.Id == "duck-hunt-replay" && button.Hold == BoardButtonHold.Once &&
+                    !button.Enabled),
+                "The tenth hit did not automatically open the drawer with a replay hold waiting for its caption to settle.");
             CheckClearOptics("player win");
             Check(board.DuckHuntFeathers.Count == feathersPerHit * 10 && board.DuckHuntFeathers.IsAnimating,
                 "The winning hit lost a feather burst or stopped its flight.");
@@ -208,6 +203,7 @@ public sealed partial class MainWindow
             Check(scene.DuckHuntState is { Phase: DuckHuntPhase.PlayerWon, Hits: 10 } &&
                 scene.DuckHuntState.Revision > winningRevision && !winningPixels.AsSpan().SequenceEqual(fallingPixels),
                 "The winning scene cache froze the falling feathers.");
+            VerifyReplayCaption();
             CheckClearOptics("feathers after player win");
             now += TimeSpan.FromSeconds(4);
             Draw();
@@ -218,12 +214,30 @@ public sealed partial class MainWindow
             CheckFeathersVisible();
             CheckClearOptics("settled player-win feathers");
             now += TimeSpan.FromMilliseconds(1);
+            Check(board.ActivateButton("duck-hunt-drawer-close", now), "The result drawer could not be closed manually.");
+            now += TimeSpan.FromMilliseconds(500);
+            Draw();
+            await Save("player-win-controls-hidden");
+            Check(!board.DuckHuntDrawerOpen &&
+                board.Buttons.Select(button => button.Id).SequenceEqual(["duck-hunt-drawer-open"]) &&
+                scene.GetHoldButtonContext(now) is { } closedResultContext &&
+                !closedResultContext.ButtonIds.Contains("duck-hunt-replay") &&
+                !board.ActivateButton("duck-hunt-replay", now),
+                "A manually closed result drawer reopened itself or retained an exposed PLAY AGAIN control.");
+            now += TimeSpan.FromMilliseconds(1);
+            Check(board.ActivateButton("duck-hunt-drawer-open", now), "The result drawer could not be reopened.");
+            now += TimeSpan.FromMilliseconds(300);
+            Draw();
+            VerifyReplayCaption();
+            now += TimeSpan.FromMilliseconds(1);
             Check(board.ActivateButton("duck-hunt-replay", now), "PLAY AGAIN did not start a fresh round.");
             Draw();
             Check(scene.DuckHuntState is { Hits: 0, Shots: 0, Phase: DuckHuntPhase.Walking } &&
                 !scene.DuckHuntMeasurement.HasCompletedPair && board.DuckHuntFeathers.Count == 0 &&
-                !board.DuckHuntFeathers.IsAnimating,
-                "Replay retained an old score, shot mark or feather.");
+                !board.DuckHuntFeathers.IsAnimating && !board.DuckHuntDrawerOpen &&
+                board.Buttons.Select(button => button.Id).SequenceEqual(["duck-hunt-drawer-open"]),
+                "Replay retained an old score, shot mark, feather or open drawer.");
+            VerifyLiveDotDoesNotDraw("after replay");
             now += TimeSpan.FromSeconds(11);
             Draw();
             Check(board.TryDuckHuntShot(new(board.DuckHuntState.U, board.DuckHuntState.V), now,
@@ -231,9 +245,9 @@ public sealed partial class MainWindow
             now += TimeSpan.FromSeconds(24);
             Draw();
             await Save("duck-wins");
-            Check(scene.DuckHuntState is { Phase: DuckHuntPhase.DuckWon, DuckVisible: false } &&
+            Check(scene.DuckHuntState is { Phase: DuckHuntPhase.DuckWon, DuckVisible: false } && board.DuckHuntDrawerOpen &&
                 board.Buttons.Any(button => button.Id == "duck-hunt-replay"),
-                "A complete crossing did not end with the duck winner and replay control.");
+                "A complete crossing did not automatically open the duck winner's replay drawer.");
             CheckClearOptics("duck win");
             Check(board.DuckHuntFeathers.Count == feathersPerHit && !board.DuckHuntFeathers.IsAnimating &&
                 Enumerable.Range(0, board.DuckHuntFeathers.Count).All(index => board.DuckHuntFeathers.GetPose(index).Settled),
@@ -241,10 +255,19 @@ public sealed partial class MainWindow
             CheckFeathersVisible();
             await Save("feathers-settled-duck-win");
             CheckClearOptics("settled duck-win feathers");
+            now += TimeSpan.FromMilliseconds(300);
+            Draw();
+            VerifyReplayCaption();
             now += TimeSpan.FromMilliseconds(1);
             Check(board.ActivateButton("duck-hunt-replay", now), "The duck-win replay did not respond.");
             Draw();
-            Check(board.DuckHuntFeathers.Count == 0, "Replay after a duck win retained feathers.");
+            Check(board.DuckHuntFeathers.Count == 0 && !board.DuckHuntDrawerOpen &&
+                board.Buttons.Select(button => button.Id).SequenceEqual(["duck-hunt-drawer-open"]),
+                "Replay after a duck win retained feathers or left its drawer open.");
+            now += TimeSpan.FromMilliseconds(1);
+            Check(board.ActivateButton("duck-hunt-drawer-open", now), "The EXIT fixture could not reopen the round's drawer.");
+            now += TimeSpan.FromMilliseconds(300);
+            Draw();
 
             // Feed the actual rendered pixels through native caption recognition.
             // A clean caption must never press; separated occlusion strips break
@@ -267,6 +290,23 @@ public sealed partial class MainWindow
                 "Native EXIT lettering did not restore the second menu page.");
             results.Add(new { dimensions.Name, dimensions.Width, dimensions.Height, Caption = caption,
                 Hits = scene.DuckHuntState.Hits, NativeExit = exited, ExitHoldMilliseconds = (now - firstHeld).TotalMilliseconds });
+
+            void VerifyReplayCaption()
+            {
+                var replayContext = scene.GetHoldButtonContext(now) ??
+                    throw new InvalidOperationException("The settled replay drawer has no caption reference.");
+                Check(replayContext.ButtonIds.SequenceEqual(["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-replay"]) &&
+                    replayContext.EnabledHoldIds.Contains("duck-hunt-replay"),
+                    "The settled result drawer does not expose its arrow, EXIT and PLAY AGAIN holds together.");
+                var replayCaption = replayContext.ExpectedScene.BoardTriggerRegions![
+                    replayContext.ButtonIds.ToList().IndexOf("duck-hunt-replay")];
+                var replay = board.Buttons.Single(button => button.Id == "duck-hunt-replay").Bounds;
+                Check(replay.Y == exit.Y && replay.Height == exit.Height &&
+                    replay.Contains(replayCaption.X, replayCaption.Y) &&
+                    replay.Contains(replayCaption.X + replayCaption.Width, replayCaption.Y + replayCaption.Height) &&
+                    replayCaption.Width < replay.Width * .9 && replayCaption.Height < replay.Height * .8,
+                    "PLAY AGAIN's caption is outside the drawer row or uses the whole button as hold evidence.");
+            }
 
             void CheckClearOptics(string phase)
             {
@@ -318,6 +358,25 @@ public sealed partial class MainWindow
                         pixels.AsSpan(0, bodyRows * dimensions.Width * 4)), "A foot phase moved the duck's upper body.");
                     Check(!first.AsSpan().SequenceEqual(pixels), "The foot cycle did not change the lower-leg pixels.");
                 }
+            }
+
+            void VerifyLiveDotDoesNotDraw(string stage)
+            {
+                var liveInput = scene.GetDuckHuntInputContext() ?? throw new InvalidOperationException("No live-dot input context.");
+                var resolution = scene.GetBoardResolutionDiagnostics();
+                using var overlay = new CanvasRenderTarget(target.Device, resolution.BoardPixelWidth, resolution.BoardPixelHeight, 96);
+                using (var drawing = overlay.CreateDrawingSession())
+                {
+                    drawing.Clear(Microsoft.UI.Colors.White);
+                    drawing.Transform = Matrix3x2.CreateScale(resolution.BoardPixelWidth / 1000f, resolution.BoardPixelHeight / 1000f);
+                    scene.PublishDuckHuntDot(oldAim, MonotonicClock.UtcNow, liveInput.Epoch);
+                    var live = scene.DuckHuntMeasurement;
+                    Check(live.LiveDetectedXY == oldAim && live.OldDetectedXY is null && live.NewDetectedXY is null,
+                        $"The {stage} fixture did not retain a live aim without a shot.");
+                    scene.DrawDuckHuntMeasurement(drawing);
+                }
+                Check(overlay.GetPixelBytes().AsSpan().IndexOfAnyExcept((byte)255) < 0,
+                    $"Live aim drew a projected mark {stage}, before a click supplied a valid shot.");
             }
 
             void VerifyMeasurementPixels()
@@ -522,7 +581,7 @@ public sealed partial class MainWindow
         Check(scene.DuckHuntBoardReady && !scene.DuckHuntInputReady && scene.GetDuckHuntInputContext() is null,
             "Click learning did not pause shooting while keeping the calibrated board available.");
         Check(scene.DuckHuntInputVisualRevision > beforeLearningHint,
-            "Starting click learning did not refresh the projected shots-paused message.");
+            "Starting click learning did not refresh its input state.");
         Check(!Snapshot(aim, beforeLearning.Epoch) && scene.DuckHuntState.Shots == 0,
             "Click learning accepted a gameplay snapshot or a new training sound.");
         scene.SetDuckHuntLearningActive(false);
@@ -576,40 +635,47 @@ public sealed partial class MainWindow
             scene.DuckHuntMeasurement.NewDetectedXY == retainedPair.NewDetectedXY,
             "A no-dot click changed the latest valid shot mark.");
 
-        // Only the drawer animation uses an injected presentation clock. Camera
-        // and microphone timestamps remain actual monotonic observations.
+        // Opening the EXIT drawer must not change the camera/audio epoch or
+        // pause the round now that microphone selection lives in the main app.
         uiNow = Fresh();
         scene.ShowDuckHunt();
         context = Reset();
         oldContext = context;
-        var beforePickerClick = Fresh();
         uiNow = Fresh();
         Check(scene.ActivateDuckHuntAt(.10, .93), "The input fixture could not open the drawer.");
         uiNow += TimeSpan.FromMilliseconds(300);
         board.TickDuckHunt(uiNow);
         uiNow += TimeSpan.FromMilliseconds(1);
-        Check(scene.ActivateDuckHuntAt(.44, .93), "The input fixture could not open MIC.");
-        Check(scene.DuckHuntMicrophoneMenuOpen && scene.DuckHuntBoardReady &&
-            !scene.DuckHuntInputReady && scene.GetDuckHuntInputContext() is null,
-            "Opening MIC stopped the board microphone lifetime or retained shooting input.");
-        Check(!Snapshot(aim, oldContext.Epoch) && scene.DuckHuntState.Shots == 0,
-            "A snapshot hit the duck while choosing a microphone.");
-        uiNow += TimeSpan.FromMilliseconds(1);
-        Check(scene.ActivateDuckHuntAt(.44, .93) && !scene.DuckHuntMicrophoneMenuOpen,
-            "The input fixture could not close MIC.");
-        context = scene.GetDuckHuntInputContext() ?? throw new InvalidOperationException("Closing MIC did not restore input.");
-        Check(scene.DuckHuntBoardReady && context.Epoch != oldContext.Epoch,
-            "Closing MIC reused the picker entry's camera epoch.");
-        Check(!Snapshot(aim, oldContext.Epoch) &&
-            !scene.SubmitDuckHuntSnapshot(aim, Fresh(), beforePickerClick, Fresh(), context.Epoch) &&
-            scene.DuckHuntState.Shots == 0, "Closing MIC reused a snapshot or click from before the picker opened.");
+        Check(!scene.ActivateDuckHuntAt(.44, .93), "The removed MIC button still handled a board press.");
+        Check(scene.DuckHuntBoardReady && scene.DuckHuntInputReady &&
+            scene.GetDuckHuntInputContext()?.Epoch == oldContext.Epoch,
+            "Opening the EXIT drawer interrupted the calibrated shooting interval.");
         // The drawer fixture advances a presentation clock. Let actual camera
-        // time catch up before checking resumed snapshot acceptance.
+        // time catch up before checking snapshot acceptance.
         if (uiNow > MonotonicClock.UtcNow)
             await Task.Delay(uiNow - MonotonicClock.UtcNow + TimeSpan.FromMilliseconds(2));
         uiNow = Fresh();
         Check(Snapshot(aim, context.Epoch) && scene.DuckHuntState is { Hits: 0, Shots: 1, Phase: DuckHuntPhase.Walking },
-            "A fresh snapshot did not recover after closing MIC.");
+            "A fresh snapshot was blocked while the EXIT drawer was open.");
+        Check(scene.ActivateDuckHuntAt(.10, .93) && scene.GetDuckHuntInputContext()?.Epoch == context.Epoch,
+            "Closing the EXIT drawer interrupted shooting input.");
+
+        // A laptop microphone change clears old work before capture restarts.
+        var beforeMicrophoneChange = context;
+        var beforeMicrophoneClick = Fresh();
+        scene.SetDuckHuntAudioStatus(false, "Starting microphone…");
+        scene.ClearDuckHuntInput();
+        Check(scene.DuckHuntBoardReady && !Snapshot(aim, beforeMicrophoneChange.Epoch),
+            "Changing the laptop microphone accepted a shot before capture restarted.");
+        scene.SetDuckHuntAudioStatus(true, "Microphone ready");
+        context = scene.GetDuckHuntInputContext() ?? throw new InvalidOperationException("Microphone restart did not restore input.");
+        Check(context.Epoch != beforeMicrophoneChange.Epoch &&
+            !Snapshot(aim, beforeMicrophoneChange.Epoch) &&
+            !scene.SubmitDuckHuntSnapshot(aim, Fresh(), beforeMicrophoneClick, Fresh(), context.Epoch),
+            "A microphone change reused a snapshot or click from the old input.");
+        uiNow = Fresh();
+        Check(Snapshot(aim, context.Epoch) && scene.DuckHuntState.Shots == 2,
+            "A fresh shot did not recover after the laptop microphone changed.");
         return new { Ok = true, Assertions = assertions, Detection = detection, ClickLearningPauseVerified = true,
             ClickSnapshotVerified = true, WalkingMeasurementVerified = true, NoDotCandidates = empty.CandidateCount,
             Images = new[] { clearPath }, Directory = directory };

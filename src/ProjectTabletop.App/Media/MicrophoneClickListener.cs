@@ -122,8 +122,8 @@ internal sealed class MicrophoneClickListener : IAsyncDisposable
             if (string.IsNullOrWhiteSpace(selectedId))
             {
                 Volatile.Write(ref _status, deviceId is null
-                    ? "No default microphone found. Open MIC and choose an available microphone."
-                    : "The selected microphone is unavailable. Open MIC and choose another microphone.");
+                    ? "No default microphone found. Choose a microphone beside Duck Hunt in the main app window."
+                    : "The selected microphone is unavailable. Choose another microphone beside Duck Hunt in the main app window.");
                 return false;
             }
             var devices = await DeviceInformation.FindAllAsync(MediaDevice.GetAudioCaptureSelector());
@@ -133,7 +133,7 @@ internal sealed class MicrophoneClickListener : IAsyncDisposable
             {
                 // A saved preference is an exact endpoint, not a hint. An unplugged
                 // preferred microphone must never silently activate a different one.
-                Volatile.Write(ref _status, "The selected microphone is unavailable. Open MIC and choose another microphone.");
+                Volatile.Write(ref _status, "The selected microphone is unavailable. Choose another microphone beside Duck Hunt in the main app window.");
                 return false;
             }
             if (_disposed || generation != Interlocked.Read(ref _generation)) return false;
@@ -161,7 +161,7 @@ internal sealed class MicrophoneClickListener : IAsyncDisposable
             {
                 Volatile.Write(ref _status, inputResult.Status == AudioDeviceNodeCreationStatus.AccessDenied
                     ? "Microphone access is blocked. Allow microphone access for desktop apps in Windows Settings."
-                    : $"Microphone unavailable ({inputResult.Status}). Open MIC and choose another microphone.");
+                    : $"Microphone unavailable ({inputResult.Status}). Choose another microphone beside Duck Hunt in the main app window.");
                 StopCore();
                 return false;
             }
@@ -261,7 +261,7 @@ internal sealed class MicrophoneClickListener : IAsyncDisposable
     }
 
     private void OnUnrecoverableError(AudioGraph sender, AudioGraphUnrecoverableErrorOccurredEventArgs args) =>
-        Fail(sender, $"Microphone disconnected or unavailable ({args.Error}). Reconnect it or open MIC and choose another microphone.");
+        Fail(sender, $"Microphone disconnected or unavailable ({args.Error}). Reconnect it or choose another microphone beside Duck Hunt in the main app window.");
 
     private void Fail(AudioGraph sender, string status)
     {

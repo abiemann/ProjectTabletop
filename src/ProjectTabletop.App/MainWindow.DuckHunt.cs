@@ -43,25 +43,16 @@ public sealed partial class MainWindow
             _duckHuntMicrophoneSettingsError = "Saved microphone choice could not be read. Using Windows default.";
         }
         _scene.BoardOpened += BoardOpenedForDuckHunt;
-        _scene.DuckHuntMicrophonesRequested += DuckHuntMicrophonesRequested;
-        _scene.DuckHuntMicrophoneSelected += DuckHuntMicrophoneSelected;
         _duckHuntMicrophone.ClickDetected += DuckHuntClickDetected;
         LoadClickSoundProfiles();
     }
 
     private string DuckHuntMicrophoneSettingsPath => Path.Combine(_appDataDirectory, DuckHuntMicrophoneSettingsStore.FileName);
 
-    private void DuckHuntMicrophonesRequested() => DispatcherQueue.TryEnqueue(() =>
-    {
-        if (!_closing && _scene.CurrentBoardScreen == BoardScreen.DuckHunt)
-            _duckHuntMicrophoneListTask = RefreshDuckHuntMicrophonesAsync();
-    });
-
     private async Task RefreshDuckHuntMicrophonesAsync()
     {
         long generation = Interlocked.Increment(ref _duckHuntMicrophoneListGeneration);
-        _scene.SetDuckHuntMicrophones(_duckHuntMicrophones, _duckHuntSelectedMicrophoneId,
-            loading: true, error: _duckHuntMicrophoneSettingsError);
+        SetDuckHuntMicrophoneNotice(_duckHuntMicrophoneSettingsError);
         ApplyClickLearningInputs(_duckHuntMicrophones, _duckHuntSelectedMicrophoneId, loading: true);
         try
         {
@@ -71,7 +62,7 @@ public sealed partial class MainWindow
             string? error = _duckHuntSelectedMicrophoneId is { } selected &&
                 !_duckHuntMicrophones.Any(input => input.Id == selected)
                 ? "Selected microphone is unavailable. Choose another input." : _duckHuntMicrophoneSettingsError;
-            _scene.SetDuckHuntMicrophones(_duckHuntMicrophones, _duckHuntSelectedMicrophoneId, loading: false, error: error);
+            SetDuckHuntMicrophoneNotice(error);
             ApplyClickLearningInputs(_duckHuntMicrophones, _duckHuntSelectedMicrophoneId, loading: false);
         }
         catch (Exception error)
@@ -79,29 +70,17 @@ public sealed partial class MainWindow
             AppLog.Write("Duck Hunt microphone list", error);
             if (!_closing && generation == Interlocked.Read(ref _duckHuntMicrophoneListGeneration))
             {
-                _scene.SetDuckHuntMicrophones(_duckHuntMicrophones, _duckHuntSelectedMicrophoneId,
-                    loading: false, error: "Could not list microphones. Close and reopen MIC to retry.");
+                SetDuckHuntMicrophoneNotice("Could not list microphones. Reopen the microphone list to retry.");
                 ApplyClickLearningInputs(_duckHuntMicrophones, _duckHuntSelectedMicrophoneId, loading: false);
                 _clickLearningNotice = "Could not list microphones. Close click learning and reopen it to retry.";
             }
         }
     }
 
-    private void DuckHuntMicrophoneSelected(string? deviceId)
+    private void SetDuckHuntMicrophoneNotice(string? message)
     {
-        // Selection can arrive under the compositor lock. Invalidate shots now;
-        // publish the preference and perform device work on the UI thread.
-        Interlocked.Increment(ref _duckHuntGeneration);
-        Volatile.Write(ref _duckHuntObservation, null);
-        _scene.SetDuckHuntAudioStatus(false, "Starting microphone...");
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (_closing) return;
-            // A projected input change must not attach another microphone's
-            // samples to an in-progress training session.
-            CancelClickLearning();
-            SelectClickLearningInput(deviceId);
-        });
+        DuckHuntMicrophoneStatusText.Text = message ?? string.Empty;
+        DuckHuntMicrophoneStatusText.Visibility = string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void OnOpenDuckHuntBoard(object sender, RoutedEventArgs args) => ShowDuckHunt();
@@ -115,7 +94,8 @@ public sealed partial class MainWindow
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
         SetStatus("Duck Hunt: aim the red dot and click. Each hit turns the walking duck around; ten hits win. " +
-            "If the duck walks off the board, the duck wins. Open the arrow for EXIT and MIC.");
+            "If the duck walks off the board, the duck wins. Open the arrow for EXIT. " +
+            "Choose a microphone beside Duck Hunt in the main app window.");
     }
 
     private void BoardOpenedForDuckHunt(BoardScreen screen)
@@ -168,12 +148,17 @@ public sealed partial class MainWindow
             _scene.SetDuckHuntAudioStatus(start && _duckHuntMicrophone.IsRunning,
                 start ? (_duckHuntMicrophone.IsRunning ? "Microphone listening" : _duckHuntMicrophone.Status)
                     : "Waiting for camera and board setup");
+            if (start) SetDuckHuntMicrophoneNotice(_duckHuntMicrophone.IsRunning
+                ? _duckHuntMicrophoneSettingsError : _duckHuntMicrophone.Status);
         }
         catch (Exception error)
         {
             AppLog.Write("Duck Hunt microphone", error);
             if (!_closing && generation == Interlocked.Read(ref _duckHuntAudioGeneration))
-                _scene.SetDuckHuntAudioStatus(false, "Microphone unavailable. Choose MIC to retry.");
+            {
+                _scene.SetDuckHuntAudioStatus(false, "Microphone unavailable. Choose an input beside Duck Hunt in the main app window.");
+                SetDuckHuntMicrophoneNotice("Microphone unavailable. Reopen the list to retry or choose another input.");
+            }
         }
     }
 
@@ -303,10 +288,9 @@ public sealed partial class MainWindow
             feathers = _scene.DuckHuntFeatherStatus,
             measurement = _scene.DuckHuntMeasurement,
             ready,
-            microphoneMenuOpen = _scene.DuckHuntMicrophoneMenuOpen,
             clickLearning = ClickLearningStatus(),
             dot = observation?.Dot,
-            dotVisible = ready && !_clickLearningRequested && !_scene.DuckHuntMicrophoneMenuOpen && observation is { Dot.Detected: true } &&
+            dotVisible = ready && !_clickLearningRequested && observation is { Dot.Detected: true } &&
                 observation.Generation == Interlocked.Read(ref _duckHuntGeneration) &&
                 observation.Timestamp <= now && now - observation.Timestamp <= DuckHuntAimGate.Freshness,
             observation?.Timestamp, observation?.Milliseconds,
@@ -324,8 +308,6 @@ public sealed partial class MainWindow
     private async Task DisposeDuckHuntAsync()
     {
         _scene.BoardOpened -= BoardOpenedForDuckHunt;
-        _scene.DuckHuntMicrophonesRequested -= DuckHuntMicrophonesRequested;
-        _scene.DuckHuntMicrophoneSelected -= DuckHuntMicrophoneSelected;
         _duckHuntMicrophone.ClickDetected -= DuckHuntClickDetected;
         Interlocked.Increment(ref _duckHuntGeneration);
         Interlocked.Increment(ref _duckHuntAudioGeneration);

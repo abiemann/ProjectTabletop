@@ -68,8 +68,8 @@ public sealed partial class SceneCompositor
         get { lock (_gate) return SyncDuckHuntInput(MonotonicClock.UtcNow) is not null; }
     }
 
-    // Choosing an input pauses shots, but does not unnecessarily reopen the
-    // current microphone. Its lifetime follows the calibrated board itself.
+    // The microphone lifetime follows the calibrated board, independent of
+    // the click trainer's temporary shot pause.
     public bool DuckHuntBoardReady
     {
         get { lock (_gate) return _boardSession.Screen == BoardScreen.DuckHunt &&
@@ -145,20 +145,8 @@ public sealed partial class SceneCompositor
             _duckHuntAudioStatus = ready ? "Microphone ready" :
                 status?.StartsWith("Starting", StringComparison.OrdinalIgnoreCase) == true ? "Starting microphone…" :
                 status?.StartsWith("Waiting", StringComparison.OrdinalIgnoreCase) == true ? "Waiting for camera and board setup" :
-                "Microphone unavailable · choose MIC";
+                "Microphone unavailable · choose one in the main app";
             RefreshDuckHuntInputHint(now);
-        }
-    }
-
-    private string DuckHuntAudioHint
-    {
-        get
-        {
-            lock (_gate)
-            {
-                RefreshDuckHuntInputHint(MonotonicClock.UtcNow);
-                return _duckHuntRenderedHint;
-            }
         }
     }
 
@@ -172,7 +160,6 @@ public sealed partial class SceneCompositor
             _duckHuntInputVisualRevision++;
         }
         string hint = _duckHuntLearningActive ? "Click learning · round paused" :
-            DuckHuntMicrophoneMenuOpen ? "Choose a microphone" :
             context is null ? "Waiting for camera and board calibration" :
             !_duckHuntAudioReady ? _duckHuntAudioStatus :
             live.HasValue
@@ -185,7 +172,7 @@ public sealed partial class SceneCompositor
     private DuckHuntInputContext? SyncDuckHuntInput(DateTimeOffset now)
     {
         bool active = _boardSession.Screen == BoardScreen.DuckHunt && MappedBoardInputReady &&
-            !_cameraCheckRequired && !DuckHuntMicrophoneMenuOpen && !_duckHuntLearningActive;
+            !_cameraCheckRequired && !_duckHuntLearningActive;
         var key = new DuckHuntInputKey(_boardSession.NavigationRevision, _boardSession.DuckHuntRoundRevision, _boardCameraMap,
             _boardSurfaceMap, _handVisualResetThrough, active);
         if (_duckHuntInputKey == key) return _duckHuntInputContext;

@@ -7,11 +7,7 @@ public readonly record struct DuckHuntFootPose(double PivotU, double PivotV, dou
 public static class DuckHuntLayout
 {
     public static readonly BoardRect ExitBounds = new(.20, .87, .155, .12);
-    public static readonly BoardRect MicrophoneBounds = new(.365, .87, .155, .12);
-    public const int MicrophonesPerPage = 6;
     public const double PhotoPixelWidth = 1312, PhotoPixelHeight = 1199;
-    public static BoardRect MicrophoneChoiceBounds(int index) => new(.365 + (index % 2) * .295,
-        .425 + (index / 2) * .145, .28, .12);
 
     // Follow the visible body/head/bill/tail rather than accepting transparent
     // photo corners or the open space beneath the bill and between the legs.

@@ -30,7 +30,8 @@ public sealed partial class MainWindow
         _clickLearningUiTimer = DispatcherQueue.CreateTimer();
         _clickLearningUiTimer.Interval = TimeSpan.FromMilliseconds(100);
         _clickLearningUiTimer.Tick += ClickLearningUiTimer_Tick;
-        ApplyClickLearningInputs([], null, loading: false);
+        ApplyClickLearningInputs([], _duckHuntSelectedMicrophoneId, loading: false);
+        _duckHuntMicrophoneListTask = RefreshDuckHuntMicrophonesAsync();
     }
 
     private void DisposeClickLearningUi()
@@ -67,11 +68,26 @@ public sealed partial class MainWindow
 
     private void ClickLearningMicrophone_SelectionChanged(object sender, SelectionChangedEventArgs args)
     {
-        if (_clickLearningUiApplying || _closing || _clickLearningUiActive || _clickLearningUiBusy ||
-            ClickLearningMicrophoneCombo.SelectedItem is not ComboBoxItem { Tag: ClickLearningInputChoice { Available: true } choice }) return;
+        if (_clickLearningUiApplying || _closing || _clickLearningRequested || _clickLearningUiActive ||
+            _clickLearningUiCanSave || _clickLearningUiBusy || sender is not ComboBox
+            { SelectedItem: ComboBoxItem { Tag: ClickLearningInputChoice { Available: true } choice } }) return;
         ClickLearningErrorText.Visibility = Visibility.Collapsed;
         SelectClickLearningInput(choice.Id);
         UpdateClickLearningUi();
+    }
+
+    private async void DuckHuntMicrophone_DropDownOpened(object sender, object args)
+    {
+        if (!_closing && !_clickLearningInputsLoading && !_clickLearningRequested)
+        {
+            await RefreshClickLearningInputsAsync();
+            // Opening the list also retries a reconnected saved input. Selecting
+            // the already-selected ComboBox item does not raise SelectionChanged.
+            if (!_closing && !_clickLearningRequested && _duckHuntAudioTask.IsCompleted &&
+                !_duckHuntMicrophone.IsRunning && (_duckHuntSelectedMicrophoneId is null ||
+                    _duckHuntMicrophones.Any(input => input.Id == _duckHuntSelectedMicrophoneId)))
+                UpdateDuckHuntMicrophone(forceRetry: true);
+        }
     }
 
     private async void StartClickLearning_Click(object sender, RoutedEventArgs args) =>
@@ -126,17 +142,21 @@ public sealed partial class MainWindow
         _clickLearningUiApplying = true;
         try
         {
-            if (!ClickLearningMicrophoneCombo.Items.Cast<ComboBoxItem>().Select(item => (ClickLearningInputChoice)item.Tag).SequenceEqual(choices))
+            foreach (var combo in new[] { ClickLearningMicrophoneCombo, DuckHuntMicrophoneCombo })
             {
-                ClickLearningMicrophoneCombo.Items.Clear();
-                foreach (var choice in choices)
-                    ClickLearningMicrophoneCombo.Items.Add(new ComboBoxItem
+                if (!combo.Items.Cast<ComboBoxItem>().Select(item => (ClickLearningInputChoice)item.Tag).SequenceEqual(choices))
+                {
+                    combo.Items.Clear();
+                    foreach (var choice in choices)
                     {
-                        Content = choice.Label, Tag = choice, IsEnabled = choice.Available
-                    });
+                        var item = new ComboBoxItem { Content = choice.Label, Tag = choice, IsEnabled = choice.Available };
+                        ToolTipService.SetToolTip(item, choice.Label);
+                        combo.Items.Add(item);
+                    }
+                }
+                combo.SelectedItem = combo.Items.Cast<ComboBoxItem>()
+                    .First(item => ((ClickLearningInputChoice)item.Tag).Id == selectedId);
             }
-            ClickLearningMicrophoneCombo.SelectedItem = ClickLearningMicrophoneCombo.Items.Cast<ComboBoxItem>()
-                .First(item => ((ClickLearningInputChoice)item.Tag).Id == selectedId);
         }
         finally { _clickLearningUiApplying = false; }
         RefreshClickLearningUiButtons();
@@ -169,6 +189,9 @@ public sealed partial class MainWindow
     {
         ClickLearningMicrophoneCombo.IsEnabled = !_clickLearningUiActive && !_clickLearningUiCanSave &&
             !_clickLearningUiBusy && !_clickLearningInputsLoading;
+        // Keep an open picker usable while its device list refreshes. Both selectors
+        // stay locked during learning so samples cannot move to another microphone.
+        DuckHuntMicrophoneCombo.IsEnabled = !_clickLearningUiActive && !_clickLearningUiCanSave && !_clickLearningUiBusy;
         StartClickLearningButton.IsEnabled = RetryClickLearningButton.IsEnabled = _clickLearningUiCanStart &&
             !_clickLearningUiBusy && !_clickLearningInputsLoading;
         CancelClickLearningButton.IsEnabled = _clickLearningUiActive || _clickLearningUiCanSave || _clickLearningUiBusy;

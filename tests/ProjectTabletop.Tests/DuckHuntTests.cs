@@ -67,28 +67,59 @@ public class DuckHuntTests
     }
 
     [Fact]
-    public void HitTurnsInPlaceThenWalksBackAtTheSameSpeed()
+    public void HitTurnsInPlaceThenWalksBackTenPercentFasterWithMatchingFootsteps()
     {
         var game = Started();
         game.Advance(At(10000));
         double before = game.Snapshot.U;
+        double phaseBefore = game.Snapshot.WalkPhase;
         game.Advance(At(11000));
         var centre = game.Snapshot;
         Assert.True(game.Shoot(new(centre.U, centre.V), At(11000)));
         Assert.Equal(DuckHuntPhase.Turning, game.Snapshot.Phase);
         Assert.Equal(-1, game.Snapshot.Direction);
         Assert.Equal(1, game.Snapshot.Facing);
+        Assert.Equal(centre.WalkPhase, game.Snapshot.WalkPhase, 12);
         Assert.False(game.Shoot(new(centre.U, centre.V), At(11100)));
         Assert.Equal(1, game.Snapshot.Shots);
         game.Advance(At(11140));
         Assert.Equal(centre.U, game.Snapshot.U);
+        Assert.Equal(centre.WalkPhase, game.Snapshot.WalkPhase, 12);
         Assert.InRange(Math.Abs(game.Snapshot.Facing), 0, 1e-12);
         game.Advance(At(11280));
         Assert.Equal(DuckHuntPhase.Walking, game.Snapshot.Phase);
         Assert.Equal(-1, game.Snapshot.Facing);
+        Assert.Equal(centre.WalkPhase, game.Snapshot.WalkPhase, 12);
         game.Advance(At(12280));
-        Assert.Equal(centre.U - before, centre.U - game.Snapshot.U, 12);
+        Assert.Equal((centre.U - before) * 1.1, centre.U - game.Snapshot.U, 12);
+        Assert.Equal((centre.WalkPhase - phaseBefore) * 1.1, game.Snapshot.WalkPhase - centre.WalkPhase, 10);
         Assert.Equal(.48, game.Snapshot.V);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void EachHitCompoundsWalkingSpeedByTenPercent(bool fromLeft)
+    {
+        var game = Started(fromLeft);
+        game.Advance(At(10000));
+        double before = game.Snapshot.U;
+        game.Advance(At(11000));
+        double baseSpeed = Math.Abs(game.Snapshot.U - before);
+        for (int hit = 1; hit < DuckHuntGame.HitsToWin; hit++)
+        {
+            int ms = 11000 + (hit - 1) * 1000;
+            game.Advance(At(ms));
+            var photographed = game.Snapshot;
+            Assert.True(game.Shoot(new(photographed.U, photographed.V), At(ms)));
+            Assert.Equal(photographed.U, game.Snapshot.U, 12);
+            Assert.Equal(photographed.WalkPhase, game.Snapshot.WalkPhase, 10);
+            game.Advance(At(ms + 780));
+            Assert.Equal(baseSpeed * Math.Pow(1.1, hit) * .5,
+                Math.Abs(game.Snapshot.U - photographed.U), 12);
+            Assert.Equal(-photographed.Direction, game.Snapshot.Direction);
+            Assert.Equal(.48, game.Snapshot.V);
+        }
     }
 
     [Fact]
@@ -114,6 +145,10 @@ public class DuckHuntTests
         Assert.Equal(0, game.Snapshot.Shots);
         Assert.True(game.Start(At(61000), enterFromLeft: false));
         Assert.False(game.Shoot(new(.5, .5), At(20000)));
+        var fresh = Started(fromLeft: false);
+        fresh.Advance(At(4000));
+        game.Advance(At(65000));
+        Assert.Equal(fresh.Snapshot with { Revision = game.Snapshot.Revision }, game.Snapshot);
     }
 
     [Fact]
@@ -131,6 +166,11 @@ public class DuckHuntTests
         Assert.False(game.Shoot(new(.5, .5), At(11004)));
         Assert.False(game.Shoot(new(.5, .5), At(11000)));
         Assert.Equal(1, game.Snapshot.Shots);
+        var unshot = Started();
+        unshot.Advance(At(12000));
+        game.Advance(At(12000));
+        Assert.Equal(unshot.Snapshot.U, game.Snapshot.U, 12);
+        Assert.Equal(unshot.Snapshot.WalkPhase, game.Snapshot.WalkPhase, 12);
     }
 
     [Theory]
@@ -168,6 +208,11 @@ public class DuckHuntTests
         Assert.Equal(-1, game.Snapshot.Direction);
         Assert.True(game.Snapshot.U < photographed.U);
         Assert.Equal(DuckHuntPhase.Walking, game.Snapshot.Phase);
+        var immediate = Started();
+        immediate.Advance(At(11000));
+        Assert.True(immediate.Shoot(new(photographed.U, photographed.V), At(11000)));
+        immediate.Advance(At(16000));
+        Assert.Equal(immediate.Snapshot with { Revision = game.Snapshot.Revision }, game.Snapshot);
         var before = game.Snapshot;
         game.Advance(At(100));
         Assert.Equal(before, game.Snapshot);
@@ -193,6 +238,11 @@ public class DuckHuntTests
         game.Advance(At(62000));
         Assert.Equal(DuckHuntPhase.Walking, game.Snapshot.Phase);
         Assert.NotEqual(frozen.U, game.Snapshot.U);
+        var unpaused = Started();
+        unpaused.Advance(At(11000));
+        if (duringTurn) Assert.True(unpaused.Shoot(new(.5, .48), At(11000)));
+        unpaused.Advance(At(12000));
+        Assert.Equal(unpaused.Snapshot with { Revision = game.Snapshot.Revision }, game.Snapshot);
     }
 
     [Fact]
@@ -275,100 +325,30 @@ public class DuckHuntTests
     }
 
     [Fact]
-    public void MicrophonePickerRetainsExpansionAcrossDrawerAndSelectsOneDevice()
+    public void DrawerContainsOnlyExitAndClosingItDoesNotInterruptTheRound()
     {
         var board = OpenDrawer();
-        int requests = 0;
-        var selections = new List<string?>();
-        board.DuckHuntMicrophonesRequested += () => requests++;
-        board.DuckHuntMicrophoneSelected += selections.Add;
-        board.SetDuckHuntMicrophones([new("usb", "USB microphone"), new("array", "Desk microphone array")],
-            null, false, null, At(350));
-        Assert.True(board.ActivateButton("duck-hunt-mic", At(400)));
-        Assert.True(board.DuckHuntMicrophoneMenuOpen);
-        Assert.Equal(1, requests);
-        Assert.Equal("SYSTEM DEFAULT", board.Buttons.Single(button => button.Id == "duck-hunt-microphone-0").Label);
-        Assert.All(board.Buttons.Where(button => !button.Id.Contains("drawer")),
-            button => Assert.Equal(button.Label.ToUpperInvariant(), button.Label));
-        Assert.False(board.TryDuckHuntShot(new(.5, .48), At(410)));
-        Assert.Equal(0, board.DuckHuntState.Shots);
-        Assert.True(board.ActivateButton("duck-hunt-drawer-close", At(450)));
-        Assert.False(board.DuckHuntMicrophoneMenuOpen);
+        Assert.Equal(["duck-hunt-drawer-close", "duck-hunt-exit"], board.Buttons.Select(button => button.Id));
+        Assert.All(board.Buttons, button => Assert.True(button.Enabled));
+        Assert.False(board.ActivateButton("duck-hunt-mic", At(350)));
+        Assert.False(board.ActivateButton("duck-hunt-microphone-0", At(351)));
+        Assert.False(board.ActivateButton("duck-hunt-microphones-next", At(352)));
+        board.SetDuckHuntReady(true, At(400));
+        Assert.False(board.DuckHuntDrawerOpen);
         Assert.Equal("duck-hunt-drawer-open", Assert.Single(board.Buttons).Id);
         Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(500)));
-        Assert.True(board.DuckHuntMicrophoneMenuOpen);
-        Assert.Equal(2, requests);
-        Assert.False(board.ActivateButton("duck-hunt-microphone-1", At(600)));
-        board.TickDuckHunt(At(800));
-        Assert.True(board.ActivateButton("duck-hunt-microphone-1", At(810)));
-        Assert.Equal(["usb"], selections);
-        Assert.True(board.DuckHuntDrawerOpen);
-        Assert.False(board.DuckHuntMicrophoneMenuOpen);
-        Assert.Equal("USB microphone", board.DuckHuntSelectedMicrophoneLabel);
-        Assert.True(board.ActivateButton("duck-hunt-mic", At(850)));
-        Assert.True(board.Buttons.Single(button => button.Id == "duck-hunt-mic").Enabled);
-        Assert.True(board.ActivateButton("duck-hunt-microphone-0", At(900)));
-        Assert.Equal(new string?[] { "usb", null }, selections);
-    }
-
-    [Fact]
-    public void MicrophonePagesReachEveryDeviceAndLoadingLeavesExitAndMicUsable()
-    {
-        var board = OpenDrawer();
-        var devices = Enumerable.Range(0, 9).Select(index =>
-            new DuckHuntMicrophoneChoice("id" + index, "A very long microphone endpoint name " + index)).ToArray();
-        board.SetDuckHuntMicrophones(devices, "id8", true, null, At(350));
-        board.ActivateButton("duck-hunt-mic", At(400));
-        Assert.Equal(2, board.DuckHuntMicrophonePageCount);
-        Assert.True(board.Buttons.Single(button => button.Id == "duck-hunt-exit").Enabled);
-        Assert.True(board.Buttons.Single(button => button.Id == "duck-hunt-mic").Enabled);
-        Assert.All(board.Buttons.Where(button => button.Id.StartsWith("duck-hunt-microphone-")),
-            button => Assert.False(button.Enabled));
-        Assert.False(board.ActivateButton("duck-hunt-microphones-next", At(410)));
-        board.SetDuckHuntMicrophones(devices, "id8", false, null, At(450));
-        var firstPage = board.Buttons.Where(button => button.Id.StartsWith("duck-hunt-microphone-")).ToArray();
-        Assert.Equal(6, firstPage.Length);
-        Assert.All(firstPage, button =>
-        {
-            Assert.Equal(BoardButtonHold.Once, button.Hold);
-            Assert.All(button.Label.Split('\n'), line => Assert.InRange(line.Length, 1, 14));
-            Assert.True(button.Bounds.Y + button.Bounds.Height < DuckHuntLayout.MicrophoneBounds.Y);
-        });
-        Assert.True(board.ActivateButton("duck-hunt-microphones-next", At(500)));
-        var secondPage = board.Buttons.Where(button => button.Id.StartsWith("duck-hunt-microphone-")).ToArray();
-        Assert.Equal(4, secondPage.Length);
-        Assert.Equal(10, firstPage.Concat(secondPage).Select(button => button.Id).Distinct().Count());
-        Assert.Equal(10, firstPage.Concat(secondPage).Select(button => button.Label).Distinct().Count());
-        string? selected = null;
-        board.DuckHuntMicrophoneSelected += id => selected = id;
-        Assert.True(board.ActivateButton("duck-hunt-microphone-9", At(550)));
-        Assert.Equal("id8", selected);
-    }
-
-    [Fact]
-    public void RefreshedMicrophonesAndUpperChoiceEvidenceCancelPartialMicHold()
-    {
-        var board = OpenDrawer();
-        const string mic = "duck-hunt-mic";
-        board.ObserveHeldButtons([], At(350), At(350), [mic]);
-        for (int ms = 400; ms <= 1000; ms += 100)
-            Assert.Empty(board.ObserveHeldButtons([mic], At(ms), At(ms), []));
-        Assert.NotEmpty(board.HoldProgress(At(1000)));
-        board.SetDuckHuntMicrophones([new("usb", "USB input")], null, false, null, At(1050));
-        Assert.Empty(board.HoldProgress(At(1050)));
-        for (int ms = 1100; ms <= 2200; ms += 100)
-            Assert.Empty(board.ObserveHeldButtons([mic], At(ms), At(ms), []));
-        Assert.False(board.DuckHuntMicrophoneMenuOpen);
-        Assert.True(board.ActivateButton(mic, At(2300)));
-        board.ObserveHeldButtons([], At(2350), At(2350), [mic]);
-        for (int ms = 2400; ms <= 3000; ms += 100)
-            Assert.Empty(board.ObserveHeldButtons([mic], At(ms), At(ms), []));
-        Assert.NotEmpty(board.HoldProgress(At(3000)));
-        Assert.Empty(board.ObserveHeldButtons([mic], At(3100), At(3100), [], [mic]));
-        Assert.Empty(board.HoldProgress(At(3100)));
-        for (int ms = 3200; ms <= 4500; ms += 100)
-            Assert.Empty(board.ObserveHeldButtons([mic], At(ms), At(ms), []));
-        Assert.True(board.DuckHuntMicrophoneMenuOpen);
+        board.TickDuckHunt(At(1000));
+        var walking = board.DuckHuntState;
+        Assert.True(board.ActivateButton("duck-hunt-drawer-close", At(1100)));
+        Assert.Equal("duck-hunt-drawer-open", Assert.Single(board.Buttons).Id);
+        board.TickDuckHunt(At(2100));
+        Assert.False(board.DuckHuntState.Paused);
+        Assert.NotEqual(walking.U, board.DuckHuntState.U);
+        Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(2200)));
+        board.TickDuckHunt(At(2500));
+        Assert.Equal(["duck-hunt-drawer-close", "duck-hunt-exit"], board.Buttons.Select(button => button.Id));
+        Assert.True(board.ActivateButton("duck-hunt-exit", At(2600)));
+        Assert.Equal(BoardScreen.Menu, board.Screen);
     }
 
     private static BoardSession OpenDrawer()
@@ -376,7 +356,7 @@ public class DuckHuntTests
         var board = new BoardSession();
         board.ShowDuckHunt(At(0));
         Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(10)));
-        Assert.False(board.ActivateButton("duck-hunt-mic", At(200)));
+        Assert.False(board.ActivateButton("duck-hunt-exit", At(200)));
         board.TickDuckHunt(At(310));
         return board;
     }
