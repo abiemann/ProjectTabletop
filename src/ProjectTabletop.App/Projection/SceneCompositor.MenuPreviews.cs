@@ -77,14 +77,18 @@ public sealed partial class SceneCompositor
 
     private void DrawMenuPreview(CanvasDrawingSession ds, Rect rect, Rect inside, float radius, BoardScreen screen)
     {
+        CanvasBitmap? image;
         if (screen == BoardScreen.DuckHunt)
         {
-            DrawDuckHuntMenuPreview(ds, rect, inside, radius);
-            return;
+            if (!PrepareDuckHuntResources(ds.Device)) return;
+            image = _duckHuntImages?.Image("arcade-welcome-v1.png");
         }
-        if (!_menuPreviewReady) return;
-        var image = screen == BoardScreen.Football ? FootballMenuThumbnail(ds.Device) :
-            screen == BoardScreen.StrykersRun ? StrykersRunMenuThumbnail(ds.Device) : _menuPreviewImages?.Image(screen);
+        else
+        {
+            if (!_menuPreviewReady) return;
+            image = screen == BoardScreen.Football ? FootballMenuThumbnail(ds.Device) :
+                screen == BoardScreen.StrykersRun ? StrykersRunMenuThumbnail(ds.Device) : _menuPreviewImages?.Image(screen);
+        }
         if (image is null) return;
         // Keep the original diagonal sheen and rounded panel clip. Only the
         // destination artwork is baked; captions and hold rims remain live.

@@ -93,8 +93,8 @@ public sealed partial class MainWindow
         ResetDuckHuntInput();
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
-        SetStatus("Duck Hunt: aim the red dot and click. Each hit turns the walking duck around; ten hits win. " +
-            "If the duck walks off the board, the duck wins. Open the arrow for EXIT. " +
+        SetStatus("Duck Hunt: choose TARGET PRACTICE for the DRY FIRE game, or HUNT for the field scene. " +
+            "Hold a button's lettering for one second. Open the arrow for EXIT. " +
             "Choose a microphone beside Duck Hunt in the main app window.");
     }
 
@@ -176,7 +176,7 @@ public sealed partial class MainWindow
 
     private void QueueDuckHuntDetection(CameraFrame frame)
     {
-        if (!DuckHuntCameraAvailable) return;
+        if (!DuckHuntCameraReady) return;
         long generation = Interlocked.Read(ref _duckHuntGeneration);
         _duckHuntWorker.TryRun(Stopwatch.GetTimestamp(), TimeSpan.Zero, frame, _ =>
         {
@@ -200,7 +200,7 @@ public sealed partial class MainWindow
                 if (Current()) _scene.ClearDuckHuntInput();
             }
         });
-        bool Current() => generation == Interlocked.Read(ref _duckHuntGeneration) && DuckHuntCameraAvailable;
+        bool Current() => generation == Interlocked.Read(ref _duckHuntGeneration) && DuckHuntCameraReady;
     }
 
     private void DuckHuntClickDetected(DateTimeOffset at)
@@ -284,6 +284,7 @@ public sealed partial class MainWindow
         long lastClickTicks = Interlocked.Read(ref _duckHuntLastClickUtcTicks);
         return new
         {
+            view = _scene.CurrentDuckHuntView.ToString(),
             game = _scene.DuckHuntState,
             feathers = _scene.DuckHuntFeatherStatus,
             measurement = _scene.DuckHuntMeasurement,

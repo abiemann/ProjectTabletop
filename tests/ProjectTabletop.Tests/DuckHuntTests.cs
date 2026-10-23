@@ -303,6 +303,9 @@ public class DuckHuntTests
         Assert.True(board.ActivateButton("duck-hunt", At(800)));
         Assert.Equal(BoardScreen.DuckHunt, board.Screen);
         Assert.Equal("Duck Hunt", board.Title);
+        Assert.Equal(DuckHuntView.Menu, board.CurrentDuckHuntView);
+        Assert.True(board.ActivateButton("duck-hunt-target-practice", At(805)));
+        Assert.Equal(DuckHuntView.TargetPractice, board.CurrentDuckHuntView);
         Assert.Equal("duck-hunt-drawer-open", Assert.Single(board.Buttons).Id);
         Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(810)));
         board.TickDuckHunt(At(1110));
@@ -325,10 +328,10 @@ public class DuckHuntTests
     }
 
     [Fact]
-    public void DrawerContainsOnlyExitAndClosingItDoesNotInterruptTheRound()
+    public void DrawerContainsExitAndBackAndClosingItDoesNotInterruptTheRound()
     {
         var board = OpenDrawer();
-        Assert.Equal(["duck-hunt-drawer-close", "duck-hunt-exit"], board.Buttons.Select(button => button.Id));
+        Assert.Equal(["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-back"], board.Buttons.Select(button => button.Id));
         Assert.All(board.Buttons, button => Assert.True(button.Enabled));
         Assert.False(board.ActivateButton("duck-hunt-mic", At(350)));
         Assert.False(board.ActivateButton("duck-hunt-microphone-0", At(351)));
@@ -346,7 +349,7 @@ public class DuckHuntTests
         Assert.NotEqual(walking.U, board.DuckHuntState.U);
         Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(2200)));
         board.TickDuckHunt(At(2500));
-        Assert.Equal(["duck-hunt-drawer-close", "duck-hunt-exit"], board.Buttons.Select(button => button.Id));
+        Assert.Equal(["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-back"], board.Buttons.Select(button => button.Id));
         Assert.True(board.ActivateButton("duck-hunt-exit", At(2600)));
         Assert.Equal(BoardScreen.Menu, board.Screen);
     }
@@ -354,7 +357,7 @@ public class DuckHuntTests
     private static BoardSession OpenDrawer()
     {
         var board = new BoardSession();
-        board.ShowDuckHunt(At(0));
+        board.ShowDuckHuntTargetPractice(At(0));
         Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(10)));
         Assert.False(board.ActivateButton("duck-hunt-exit", At(200)));
         board.TickDuckHunt(At(310));

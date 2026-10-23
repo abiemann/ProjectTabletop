@@ -58,7 +58,12 @@ public sealed partial class MainWindow
         // hide the interactive game preview until explicit camera recovery.
         bool boardGame = !_cameraManualRestartRequired &&
             (blackjack || crownDeed || globe || slots || roulette || water || football || strykersRun || duckHunt);
-        BoardGamePreviewTitle.Text = duckHunt ? "DUCK HUNT  ·  ten hits before the duck escapes" :
+        BoardGamePreviewTitle.Text = duckHunt ? _scene.CurrentDuckHuntView switch
+            {
+                DuckHuntView.TargetPractice => "DUCK HUNT  ·  TARGET PRACTICE  ·  ten hits before the duck escapes",
+                DuckHuntView.Hunt => "DUCK HUNT  ·  HUNT",
+                _ => "DUCK HUNT  ·  choose TARGET PRACTICE or HUNT"
+            } :
             strykersRun ? "STRYKER'S RUN  ·  slide along the dots  ·  automatic fire" :
             football ? "FOOTBALL  ·  black cardboard bars or index fingers  ·  first to five" :
             water ? "WATER GARDEN  ·  double-bar marker makes ripples  ·  click controls" :
@@ -86,7 +91,12 @@ public sealed partial class MainWindow
              water ? "Move the learned double-bar marker across the water. Open the bottom-left arrow for Exit, Reset, and Duck+; you can also click those controls here." :
              football ? "Choose Football input for each player. Play the computer or switch to two players. First to five wins; tracking loss pauses the match." :
              strykersRun ? _scene.StrykersRunState.Banner :
-             duckHunt ? _duckHuntMicrophone.Status + " Aim the red dot and click. Each hit reverses the duck; ten hits win. Only the latest shot remains visible." :
+             duckHunt ? _scene.CurrentDuckHuntView switch
+             {
+                 DuckHuntView.TargetPractice => _duckHuntMicrophone.Status + " Aim the red dot and click. Each hit reverses the duck; ten hits win. Only the latest shot remains visible.",
+                 DuckHuntView.Hunt => "Enjoy the field scene. Open the bottom-left arrow for EXIT or BACK to Duck Hunt.",
+                 _ => "Hold TARGET PRACTICE for the DRY FIRE game, or HUNT for the field scene. Laptop clicks also work."
+             } :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :
              _scene.CurrentBoardScreen == BoardScreen.PhotoCopy ? _scene.PhotoCopyStatus :

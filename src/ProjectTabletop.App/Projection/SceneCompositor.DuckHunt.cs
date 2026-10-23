@@ -14,13 +14,20 @@ public sealed partial class SceneCompositor
 {
     private static readonly Color DuckHuntBackground = Color.FromArgb(255, 218, 223, 213);
     private BitmapAssetSet? _duckHuntImages;
+    private BitmapAssetSet? _duckHuntFieldImages;
     private CanvasImageBrush? _duckHuntPhotoBrush;
     private CanvasGeometry? _duckHuntBodyClip, _duckHuntRearLegClip, _duckHuntNearLegClip;
     private bool _duckHuntArtworkPublished;
+    private bool _duckHuntFieldPublished;
     internal bool DuckHuntArtworkReady => _duckHuntArtworkPublished &&
-        _duckHuntImages?.Image("mallard-photo.png") is not null;
+        _duckHuntImages?.Image("mallard-photo.png") is not null &&
+        _duckHuntImages.Image("arcade-welcome-v1.png") is not null &&
+        (_boardSession.Screen != BoardScreen.DuckHunt || _boardSession.CurrentDuckHuntView != DuckHuntView.Hunt ||
+            _duckHuntFieldPublished && _duckHuntFieldImages?.Image("hunt-field-v1.png") is not null);
     private string? DuckHuntArtworkError => _duckHuntImages?.Error ??
-        _duckHuntImages?.Errors.GetValueOrDefault("mallard-photo.png");
+        _duckHuntImages?.Errors.Values.FirstOrDefault() ??
+        (_boardSession.CurrentDuckHuntView == DuckHuntView.Hunt
+            ? _duckHuntFieldImages?.Error ?? _duckHuntFieldImages?.Errors.Values.FirstOrDefault() : null);
 
     private BitmapAssetSet GetDuckHuntImages(CanvasDevice device)
     {
@@ -28,16 +35,35 @@ public sealed partial class SceneCompositor
         {
             DisposeDuckHuntArtwork();
             _duckHuntImages = new(device, Path.Combine(AppContext.BaseDirectory, "Assets", "DuckHunt"),
-                ["mallard-photo.png"]);
+                ["mallard-photo.png", "arcade-welcome-v1.png"]);
         }
         return _duckHuntImages;
+    }
+
+    private BitmapAssetSet GetDuckHuntFieldImages(CanvasDevice device)
+    {
+        if (_duckHuntFieldImages is null || _duckHuntFieldImages.Device != device)
+        {
+            _duckHuntFieldImages?.Dispose();
+            _duckHuntFieldPublished = false;
+            _duckHuntFieldImages = new(device, Path.Combine(AppContext.BaseDirectory, "Assets", "DuckHunt"),
+                ["hunt-field-v1.png"]);
+        }
+        return _duckHuntFieldImages;
     }
 
     internal async Task EnsureDuckHuntResourcesAsync(CanvasDevice device)
     {
         BitmapAssetSet images;
-        lock (_gate) { ObjectDisposedException.ThrowIf(_disposed, this); images = GetDuckHuntImages(device); }
-        await images.EnsureLoadedAsync().ConfigureAwait(false);
+        BitmapAssetSet? field;
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            images = GetDuckHuntImages(device);
+            field = _boardSession.Screen == BoardScreen.DuckHunt && _boardSession.CurrentDuckHuntView == DuckHuntView.Hunt
+                ? GetDuckHuntFieldImages(device) : null;
+        }
+        await Task.WhenAll(images.EnsureLoadedAsync(), field?.EnsureLoadedAsync() ?? Task.CompletedTask).ConfigureAwait(false);
         lock (_gate)
             if (!_disposed && ReferenceEquals(images, _duckHuntImages)) PrepareDuckHuntResources(device);
     }
@@ -49,9 +75,21 @@ public sealed partial class SceneCompositor
         if (!_duckHuntArtworkPublished)
         {
             PrepareDuckHuntWalkRig(device);
+            PrepareDuckHuntWelcomeTitle(device);
             _duckHuntArtworkPublished = true;
             if (_boardSession.Screen == BoardScreen.DuckHunt) InvalidateBoardArtworkSurface();
             InvalidateMenuPreviewSurface();
+        }
+        if (_boardSession.Screen == BoardScreen.DuckHunt && _boardSession.CurrentDuckHuntView == DuckHuntView.Hunt)
+        {
+            // The main menu needs only the arcade preview, never the field.
+            var field = GetDuckHuntFieldImages(device);
+            if (!field.IsLoaded) return false;
+            if (!_duckHuntFieldPublished)
+            {
+                _duckHuntFieldPublished = true;
+                InvalidateBoardArtworkSurface();
+            }
         }
         return DuckHuntArtworkReady;
     }
@@ -59,6 +97,7 @@ public sealed partial class SceneCompositor
     private void DisposeDuckHuntArtwork()
     {
         DisposeDuckHuntFeathers();
+        DisposeDuckHuntWelcomeTitle();
         _duckHuntPhotoBrush?.Dispose();
         _duckHuntBodyClip?.Dispose();
         _duckHuntRearLegClip?.Dispose();
@@ -67,9 +106,13 @@ public sealed partial class SceneCompositor
         _duckHuntBodyClip = _duckHuntRearLegClip = _duckHuntNearLegClip = null;
         _duckHuntImages?.Dispose();
         _duckHuntImages = null;
+        _duckHuntFieldImages?.Dispose();
+        _duckHuntFieldImages = null;
+        _duckHuntFieldPublished = false;
         _duckHuntArtworkPublished = false;
     }
     public DuckHuntSnapshot DuckHuntState { get { lock (_gate) return _boardSession.DuckHuntState; } }
+    public DuckHuntView CurrentDuckHuntView { get { lock (_gate) return _boardSession.CurrentDuckHuntView; } }
 
     public void ShowDuckHunt()
     {
@@ -78,6 +121,28 @@ public sealed partial class SceneCompositor
             CancelBoardReveal();
             _blackOutput = false;
             _boardSession.ShowDuckHunt(_blackjackClock());
+            SyncPhotoCopySession();
+        }
+    }
+
+    public void ShowDuckHuntTargetPractice()
+    {
+        lock (_gate)
+        {
+            CancelBoardReveal();
+            _blackOutput = false;
+            _boardSession.ShowDuckHuntTargetPractice(_blackjackClock());
+            SyncPhotoCopySession();
+        }
+    }
+
+    public void ShowDuckHuntHunt()
+    {
+        lock (_gate)
+        {
+            CancelBoardReveal();
+            _blackOutput = false;
+            _boardSession.ShowDuckHuntHunt(_blackjackClock());
             SyncPhotoCopySession();
         }
     }
@@ -100,6 +165,11 @@ public sealed partial class SceneCompositor
     private void DrawDuckHuntBoard(CanvasDrawingSession drawing, DateTimeOffset now)
     {
         UpdateDuckHuntRound(now);
+        if (_boardSession.CurrentDuckHuntView != DuckHuntView.TargetPractice)
+        {
+            DrawDuckHuntSceneView(drawing, now);
+            return;
+        }
         var state = _boardSession.DuckHuntState;
         drawing.Clear(DuckHuntBackground);
         using var heading = new CanvasTextFormat
@@ -150,6 +220,15 @@ public sealed partial class SceneCompositor
         var buttons = BoardControlsForRendering;
         if (buttons.Count == 0) return;
         using var fade = CreateBoardControlsFadeLayer(drawing);
+        if (_boardSession.CurrentDuckHuntView == DuckHuntView.Menu)
+        {
+            // These stationary mode captions remain available above the drawer.
+            // This method also draws the camera's expected caption reference.
+            foreach (var button in buttons)
+                if (IsDuckHuntModeButton(button))
+                    DrawDrawerButton(drawing, button, false, PaintBoardAspect(), _holdControlBrightness);
+            buttons = buttons.Where(button => !IsDuckHuntModeButton(button)).ToArray();
+        }
         DrawBoardDrawerControls(drawing, buttons, [], [], _boardSession.DuckHuntDrawerOpen,
             (float)_boardSession.GetDuckHuntDrawerProgress(now), PaintBoardAspect(), _holdControlBrightness);
     }
@@ -174,28 +253,6 @@ public sealed partial class SceneCompositor
             try { DrawDuckHuntBoard(drawing, _blackjackClock()); }
             finally { drawing.Transform = previous; }
         }
-    }
-
-    private void DrawDuckHuntMenuPreview(CanvasDrawingSession drawing, Rect rect, Rect inside, float radius)
-    {
-        if (!PrepareDuckHuntResources(drawing.Device)) return;
-        using var clip = CanvasGeometry.CreateRoundedRectangle(drawing.Device, inside, radius, radius);
-        using var layer = drawing.CreateLayer(1, clip);
-        DrawDuckHuntMallard(drawing,
-            new Rect(rect.X + rect.Width * .46, rect.Y + rect.Height * .04, rect.Width * .52, rect.Height * .91),
-            PaintBoardAspect());
-    }
-
-    private void DrawDuckHuntMallard(CanvasDrawingSession drawing, Rect bounds, double aspect)
-    {
-        if (_duckHuntImages?.Image("mallard-photo.png") is not { } image) return;
-        // Source pixels retain their natural proportions in physical board space.
-        double width = Math.Min(bounds.Width, bounds.Height / aspect * image.Size.Width / image.Size.Height);
-        double height = width * aspect * image.Size.Height / image.Size.Width;
-        var destination = new Rect(bounds.X + (bounds.Width - width) / 2,
-            bounds.Y + (bounds.Height - height) / 2, width, height);
-        drawing.DrawImage(image, destination, new Rect(0, 0, image.Size.Width, image.Size.Height),
-            1, CanvasImageInterpolation.HighQualityCubic);
     }
 
     private void PrepareDuckHuntWalkRig(CanvasDevice device)

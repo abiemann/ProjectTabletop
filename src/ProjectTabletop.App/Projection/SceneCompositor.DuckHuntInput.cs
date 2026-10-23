@@ -68,11 +68,12 @@ public sealed partial class SceneCompositor
         get { lock (_gate) return SyncDuckHuntInput(MonotonicClock.UtcNow) is not null; }
     }
 
-    // The microphone lifetime follows the calibrated board, independent of
-    // the click trainer's temporary shot pause.
+    // Only Target Practice listens for shots. Its microphone lifetime follows
+    // calibration, independent of the click trainer's temporary shot pause.
     public bool DuckHuntBoardReady
     {
         get { lock (_gate) return _boardSession.Screen == BoardScreen.DuckHunt &&
+            _boardSession.CurrentDuckHuntView == DuckHuntView.TargetPractice &&
             MappedBoardInputReady && !_cameraCheckRequired; }
     }
 
@@ -171,7 +172,8 @@ public sealed partial class SceneCompositor
 
     private DuckHuntInputContext? SyncDuckHuntInput(DateTimeOffset now)
     {
-        bool active = _boardSession.Screen == BoardScreen.DuckHunt && MappedBoardInputReady &&
+        bool active = _boardSession.Screen == BoardScreen.DuckHunt &&
+            _boardSession.CurrentDuckHuntView == DuckHuntView.TargetPractice && MappedBoardInputReady &&
             !_cameraCheckRequired && !_duckHuntLearningActive;
         var key = new DuckHuntInputKey(_boardSession.NavigationRevision, _boardSession.DuckHuntRoundRevision, _boardCameraMap,
             _boardSurfaceMap, _handVisualResetThrough, active);

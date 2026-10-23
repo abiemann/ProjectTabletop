@@ -192,7 +192,7 @@ public sealed partial class BoardSession
             if (Screen == BoardScreen.WaterGarden) RequestWaterGardenReset();
             if (Screen == BoardScreen.Football) InitializeFootball(now, startMatch: false);
             if (Screen == BoardScreen.StrykersRun) InitializeStrykersRun(now, startRun: false);
-            if (Screen == BoardScreen.DuckHunt) InitializeDuckHunt(now);
+            if (Screen == BoardScreen.DuckHunt) InitializeDuckHuntMenu(now);
             openedBoard = true;
         }
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

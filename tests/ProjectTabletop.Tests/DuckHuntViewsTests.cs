@@ -1,0 +1,163 @@
+using ProjectTabletop.Interaction;
+
+namespace ProjectTabletop.Tests;
+
+public class DuckHuntViewsTests
+{
+    private static readonly DateTimeOffset Origin = new(2026, 10, 22, 20, 0, 0, TimeSpan.Zero);
+    private static DateTimeOffset At(int milliseconds) => Origin.AddMilliseconds(milliseconds);
+
+    [Fact]
+    public void MainMenuTileKeepsExistingPositionsAndOpensTheModeMenu()
+    {
+        var board = new BoardSession();
+        var cards = board.GetMenuCards(At(0));
+        Assert.Equal(new BoardRect(.08, .25, .40, .16), Assert.Single(cards, b => b.Id == "slots").Bounds);
+        Assert.Equal(new BoardRect(.52, 1.05, .40, .16), Assert.Single(cards, b => b.Id == "blackjack").Bounds);
+        Assert.Equal(new BoardRect(.08, 1.25, .40, .16), Assert.Single(cards, b => b.Id == "duck-hunt").Bounds);
+        Assert.DoesNotContain(board.Buttons, b => b.Id == "duck-hunt");
+        Assert.True(board.ActivateButton("menu-scroll-down", At(10)));
+        board.TickMenu(At(660));
+        Assert.True(board.ActivateButton("duck-hunt", At(800)));
+        Assert.Equal(DuckHuntView.Menu, board.CurrentDuckHuntView);
+        var practice = Assert.Single(board.Buttons, b => b.Id == "duck-hunt-target-practice");
+        var hunt = Assert.Single(board.Buttons, b => b.Id == "duck-hunt-hunt");
+        Assert.Equal("TARGET PRACTICE", practice.Label);
+        Assert.Equal("HUNT", hunt.Label);
+        Assert.Equal(BoardButtonHold.Once, practice.Hold);
+        Assert.Equal(BoardButtonHold.Once, hunt.Hold);
+        Assert.Equal(practice.Bounds.Width, hunt.Bounds.Width);
+        Assert.Equal(practice.Bounds.Height, hunt.Bounds.Height);
+        Assert.Equal(.5, practice.Bounds.X + practice.Bounds.Width / 2);
+        Assert.Equal(.5, hunt.Bounds.X + hunt.Bounds.Width / 2);
+        Assert.True(practice.Bounds.Y + practice.Bounds.Height < hunt.Bounds.Y);
+    }
+
+    [Theory]
+    [InlineData("duck-hunt-target-practice", DuckHuntView.TargetPractice)]
+    [InlineData("duck-hunt-hunt", DuckHuntView.Hunt)]
+    public void ModeChoiceNeedsFreshClearCaptionThenAFullHold(string id, DuckHuntView expected)
+    {
+        var board = new BoardSession();
+        board.ShowDuckHunt(At(0));
+        long epoch = board.DuckHuntRoundRevision;
+        long revision = board.Revision;
+        for (int ms = 100; ms <= 1200; ms += 100)
+            Assert.Empty(board.ObserveHeldButtons([id], At(ms), At(ms), []));
+        Assert.Equal(DuckHuntView.Menu, board.CurrentDuckHuntView);
+        board.ObserveHeldButtons([], At(1300), At(1300), [id]);
+        for (int ms = 1400; ms < 2400; ms += 100)
+            Assert.Empty(board.ObserveHeldButtons([id], At(ms), At(ms), []));
+        Assert.Equal([id], board.ObserveHeldButtons([id], At(2400), At(2400), []));
+        Assert.Equal(expected, board.CurrentDuckHuntView);
+        Assert.Equal(epoch + 1, board.DuckHuntRoundRevision);
+        Assert.True(board.Revision > revision);
+        Assert.False(board.DuckHuntDrawerOpen);
+        Assert.Equal("duck-hunt-drawer-open", Assert.Single(board.Buttons).Id);
+        Assert.Empty(board.HoldProgress(At(2400)));
+        // Frames from the old menu cannot prime the new view's controls.
+        Assert.Empty(board.ObserveHeldButtons([], At(2399), At(2450), ["duck-hunt-drawer-open"]));
+        for (int ms = 2500; ms <= 3600; ms += 100)
+            Assert.Empty(board.ObserveHeldButtons(["duck-hunt-drawer-open"], At(ms), At(ms), []));
+        Assert.False(board.DuckHuntDrawerOpen);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MenuAndHuntIgnoreGameReadinessAndShotsButKeepExitUsable(bool hunt)
+    {
+        var board = new BoardSession();
+        board.ShowDuckHunt(At(0));
+        if (hunt) Assert.True(board.ActivateButton("duck-hunt-hunt", At(10)));
+        var idle = board.DuckHuntState;
+        board.SetDuckHuntReady(true, At(100));
+        board.TickDuckHunt(At(100000));
+        board.SetDuckHuntReady(false, At(100100));
+        Assert.False(board.TryDuckHuntShot(new(.5, .48), At(100200)));
+        Assert.Equal(idle, board.DuckHuntState);
+        Assert.Equal(0, board.DuckHuntFeathers.Count);
+        Assert.False(board.DuckHuntDrawerOpen);
+        Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(100300)));
+        board.TickDuckHunt(At(100600));
+        Assert.DoesNotContain(board.Buttons, b => b.Id == "duck-hunt-replay");
+        Assert.DoesNotContain(board.Buttons, b => b.Id == "duck-hunt-mic");
+        Assert.True(board.ActivateButton("duck-hunt-exit", At(100700)));
+        Assert.Equal(BoardScreen.Menu, board.Screen);
+    }
+
+    [Fact]
+    public void ViewChangesDiscardThePreviousRoundAndCloseTheDrawer()
+    {
+        var board = new BoardSession();
+        board.ShowDuckHuntTargetPractice(At(0));
+        board.SetDuckHuntReady(true, At(100));
+        board.TickDuckHunt(At(11100));
+        var duck = board.DuckHuntState;
+        Assert.True(board.TryDuckHuntShot(new(duck.U, duck.V), At(11100)));
+        Assert.True(board.DuckHuntFeathers.Count > 0);
+        Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(11200)));
+        long epoch = board.DuckHuntRoundRevision;
+        board.ShowDuckHuntHunt(At(11500));
+        Assert.Equal(epoch + 1, board.DuckHuntRoundRevision);
+        Assert.Equal(DuckHuntView.Hunt, board.CurrentDuckHuntView);
+        Assert.Equal(DuckHuntPhase.Ready, board.DuckHuntState.Phase);
+        Assert.Equal(0, board.DuckHuntState.Shots);
+        Assert.Equal(0, board.DuckHuntFeathers.Count);
+        Assert.False(board.DuckHuntDrawerOpen);
+        board.ShowDuckHunt(At(12000));
+        Assert.Equal(DuckHuntView.Menu, board.CurrentDuckHuntView);
+        Assert.Equal(epoch + 2, board.DuckHuntRoundRevision);
+        Assert.False(board.ActivateButton("duck-hunt-replay", At(12010)));
+        board.ShowDuckHuntTargetPractice(At(12100));
+        board.SetDuckHuntReady(true, At(12200));
+        Assert.Equal(DuckHuntPhase.Walking, board.DuckHuntState.Phase);
+        Assert.Equal(0, board.DuckHuntState.Hits);
+    }
+
+    [Theory]
+    [InlineData(DuckHuntView.Hunt, false)]
+    [InlineData(DuckHuntView.TargetPractice, false)]
+    [InlineData(DuckHuntView.TargetPractice, true)]
+    public void BackReturnsToWelcomeAndClearsTheRound(DuckHuntView view, bool finished)
+    {
+        var board = new BoardSession();
+        board.ShowDuckHunt(At(0));
+        board.ActivateButton(view == DuckHuntView.Hunt ? "duck-hunt-hunt" : "duck-hunt-target-practice", At(10));
+        if (view == DuckHuntView.TargetPractice)
+        {
+            board.SetDuckHuntReady(true, At(100));
+            board.TickDuckHunt(At(11100));
+            var duck = board.DuckHuntState;
+            Assert.True(board.TryDuckHuntShot(new(duck.U, duck.V), At(11100)));
+            if (finished) board.TickDuckHunt(At(60000));
+        }
+        int openAt = finished ? 60100 : 11200;
+        if (!board.DuckHuntDrawerOpen)
+            Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(openAt)));
+        board.TickDuckHunt(At(openAt + 300));
+        Assert.Equal(finished, board.DuckHuntState.RoundFinished);
+        var back = Assert.Single(board.Buttons, button => button.Id == "duck-hunt-back");
+        var exit = Assert.Single(board.Buttons, button => button.Id == "duck-hunt-exit");
+        Assert.Equal(BoardButtonHold.Once, back.Hold);
+        Assert.Equal(exit.Bounds.Width, back.Bounds.Width);
+        Assert.Equal(.01, back.Bounds.X - exit.Bounds.X - exit.Bounds.Width, 10);
+        if (finished)
+        {
+            var replay = Assert.Single(board.Buttons, button => button.Id == "duck-hunt-replay");
+            Assert.Equal(.01, replay.Bounds.X - back.Bounds.X - back.Bounds.Width, 10);
+        }
+        long epoch = board.DuckHuntRoundRevision;
+        Assert.True(board.ActivateButton(back.Id, At(openAt + 400)));
+        Assert.Equal(BoardScreen.DuckHunt, board.Screen);
+        Assert.Equal(DuckHuntView.Menu, board.CurrentDuckHuntView);
+        Assert.Equal(epoch + 1, board.DuckHuntRoundRevision);
+        Assert.False(board.DuckHuntDrawerOpen);
+        Assert.Equal(DuckHuntPhase.Ready, board.DuckHuntState.Phase);
+        Assert.Equal(0, board.DuckHuntState.Hits);
+        Assert.Equal(0, board.DuckHuntFeathers.Count);
+        Assert.Equal(["duck-hunt-target-practice", "duck-hunt-hunt", "duck-hunt-drawer-open"],
+            board.Buttons.Select(button => button.Id));
+        Assert.False(board.ActivateButton("duck-hunt-back", At(openAt + 500)));
+    }
+}

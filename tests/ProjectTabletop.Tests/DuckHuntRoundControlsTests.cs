@@ -11,7 +11,7 @@ public class DuckHuntRoundControlsTests
     public void RoundWaitsForInputAndPausesWhileCaptureOrLearningIsUnavailable()
     {
         var board = new BoardSession();
-        board.ShowDuckHunt(At(0));
+        board.ShowDuckHuntTargetPractice(At(0));
         board.SetDuckHuntReady(false, At(100));
         board.TickDuckHunt(At(30000));
         Assert.Equal(DuckHuntPhase.Ready, board.DuckHuntState.Phase);
@@ -39,7 +39,7 @@ public class DuckHuntRoundControlsTests
     public void EscapeOpensDrawerAndFreshFullCaptionHoldRestartsWithDrawerClosed()
     {
         var board = new BoardSession();
-        board.ShowDuckHunt(At(0));
+        board.ShowDuckHuntTargetPractice(At(0));
         long firstRound = board.DuckHuntRoundRevision;
         board.SetDuckHuntReady(true, At(100));
         Assert.DoesNotContain(board.Buttons, button => button.Id == "duck-hunt-replay");
@@ -76,7 +76,7 @@ public class DuckHuntRoundControlsTests
     public void FinishedRoundCanCloseDrawerAndReplayIsAvailableOnlyAfterReopening()
     {
         var board = new BoardSession();
-        board.ShowDuckHunt(At(0));
+        board.ShowDuckHuntTargetPractice(At(0));
         board.SetDuckHuntReady(true, At(100));
         board.TickDuckHunt(At(30000));
         Assert.True(board.DuckHuntDrawerOpen);
@@ -93,7 +93,7 @@ public class DuckHuntRoundControlsTests
         Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(31700)));
         Assert.False(board.ActivateButton("duck-hunt-replay", At(31900)));
         board.TickDuckHunt(At(32000));
-        Assert.Equal(["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-replay"],
+        Assert.Equal(["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-back", "duck-hunt-replay"],
             board.Buttons.Select(button => button.Id));
         Assert.True(board.ActivateButton("duck-hunt-replay", At(32100)));
         Assert.False(board.DuckHuntDrawerOpen);
@@ -105,7 +105,7 @@ public class DuckHuntRoundControlsTests
     public void TenthHitOpensDrawerAndStartingAfterReplayClosesIt()
     {
         var board = new BoardSession();
-        board.ShowDuckHunt(At(0));
+        board.ShowDuckHuntTargetPractice(At(0));
         board.SetDuckHuntReady(true, At(100));
         for (int hit = 1; hit <= DuckHuntGame.HitsToWin; hit++)
         {
@@ -135,7 +135,7 @@ public class DuckHuntRoundControlsTests
     public void DelayedPreEscapeHitResumesPlayAndClosesTheAutomaticResultDrawer()
     {
         var board = new BoardSession();
-        board.ShowDuckHunt(At(0));
+        board.ShowDuckHuntTargetPractice(At(0));
         board.SetDuckHuntReady(true, At(100));
         long round = board.DuckHuntRoundRevision;
         board.TickDuckHunt(At(21970));

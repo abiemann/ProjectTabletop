@@ -280,7 +280,7 @@ public sealed partial class BoardSession
         if (screen == BoardScreen.WaterGarden) RequestWaterGardenReset();
         if (screen == BoardScreen.Football) InitializeFootball(now, startMatch: false);
         if (screen == BoardScreen.StrykersRun) InitializeStrykersRun(now, startRun: false);
-        if (screen == BoardScreen.DuckHunt) InitializeDuckHunt(now);
+        if (screen == BoardScreen.DuckHunt) InitializeDuckHuntMenu(now);
         HoveredButtonIds = Array.Empty<string>();
         _ignoreExecutionsThrough = Later(_ignoreExecutionsThrough, now);
         _ignoreSelectionsThrough = Later(_ignoreSelectionsThrough, now);

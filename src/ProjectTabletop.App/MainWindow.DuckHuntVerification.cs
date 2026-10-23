@@ -50,6 +50,17 @@ public sealed partial class MainWindow
             Check(board.TickMenu(now), "The second menu page did not settle.");
             now += TimeSpan.FromMilliseconds(1);
             Check(board.ActivateButton("duck-hunt", now), "The menu could not open Duck Hunt.");
+            Check(board.CurrentDuckHuntView == DuckHuntView.Menu &&
+                board.Buttons.Any(button => button.Id == "duck-hunt-target-practice") &&
+                board.Buttons.Any(button => button.Id == "duck-hunt-hunt"),
+                "The launcher skipped Duck Hunt's mode menu.");
+            Draw();
+            await Save("welcome");
+            Check(!scene.DuckHuntBoardReady && scene.GetDuckHuntInputContext() is null,
+                "The welcome screen requested shooting input or microphone capture.");
+            now += TimeSpan.FromMilliseconds(1);
+            Check(board.ActivateButton("duck-hunt-target-practice", now), "TARGET PRACTICE did not open the current game.");
+            await scene.EnsureBoardArtworkResourcesAsync(target.Device, BoardScreen.DuckHunt);
             Draw();
             await Save("ready");
             Check(scene.CurrentBoardScreen == BoardScreen.DuckHunt && !scene.HandDetectionRequired,
@@ -62,9 +73,9 @@ public sealed partial class MainWindow
             now += TimeSpan.FromMilliseconds(300);
             board.TickDuckHunt(now);
             Draw();
-            Check(board.Buttons.Select(button => button.Id).SequenceEqual(["duck-hunt-drawer-close", "duck-hunt-exit"]) &&
+            Check(board.Buttons.Select(button => button.Id).SequenceEqual(["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-back"]) &&
                 board.Buttons.All(button => button.Enabled),
-                "The settled drawer did not contain only its arrow and EXIT.");
+                "The settled drawer did not contain its arrow, EXIT and BACK.");
             now += TimeSpan.FromMilliseconds(1);
             Check(!board.ActivateButton("duck-hunt-mic", now) && !board.ActivateButton("duck-hunt-microphone-0", now),
                 "A removed projected microphone control could still be activated.");
@@ -80,7 +91,7 @@ public sealed partial class MainWindow
             byte[] initial = Draw();
             await Save("controls");
             var context = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("No Duck Hunt hold reference.");
-            Check(context.ButtonIds.SequenceEqual(["duck-hunt-drawer-close", "duck-hunt-exit"]) &&
+            Check(context.ButtonIds.SequenceEqual(["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-back"]) &&
                 context.EnabledHoldIds.Contains("duck-hunt-exit"), "The hold reference does not contain the enabled drawer controls.");
             var caption = context.ExpectedScene.BoardTriggerRegions![context.ButtonIds.ToList().IndexOf("duck-hunt-exit")];
             var exit = board.Buttons.Single(button => button.Id == "duck-hunt-exit").Bounds;
@@ -295,12 +306,17 @@ public sealed partial class MainWindow
             {
                 var replayContext = scene.GetHoldButtonContext(now) ??
                     throw new InvalidOperationException("The settled replay drawer has no caption reference.");
-                Check(replayContext.ButtonIds.SequenceEqual(["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-replay"]) &&
+                Check(replayContext.ButtonIds.SequenceEqual(["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-back", "duck-hunt-replay"]) &&
                     replayContext.EnabledHoldIds.Contains("duck-hunt-replay"),
-                    "The settled result drawer does not expose its arrow, EXIT and PLAY AGAIN holds together.");
+                    "The settled result drawer does not expose its arrow, EXIT, BACK and PLAY AGAIN holds together.");
                 var replayCaption = replayContext.ExpectedScene.BoardTriggerRegions![
                     replayContext.ButtonIds.ToList().IndexOf("duck-hunt-replay")];
                 var replay = board.Buttons.Single(button => button.Id == "duck-hunt-replay").Bounds;
+                var back = board.Buttons.Single(button => button.Id == "duck-hunt-back").Bounds;
+                Check(back.Y == exit.Y && back.Height == exit.Height &&
+                    Math.Abs(back.X - (exit.X + exit.Width) - .01) < .000001 &&
+                    Math.Abs(replay.X - (back.X + back.Width) - .01) < .000001,
+                    "EXIT, BACK and PLAY AGAIN do not have the same row alignment and regular gaps.");
                 Check(replay.Y == exit.Y && replay.Height == exit.Height &&
                     replay.Contains(replayCaption.X, replayCaption.Y) &&
                     replay.Contains(replayCaption.X + replayCaption.Width, replayCaption.Y + replayCaption.Height) &&
@@ -488,7 +504,8 @@ public sealed partial class MainWindow
         scene.SetBoardSetup(false);
         await scene.EnsureBoardArtworkResourcesAsync(target.Device, BoardScreen.DuckHunt);
         uiNow = MonotonicClock.UtcNow;
-        scene.ShowDuckHunt();
+        scene.ShowDuckHuntTargetPractice();
+        await scene.EnsureBoardArtworkResourcesAsync(target.Device, BoardScreen.DuckHunt);
         var board = (BoardSession)typeof(SceneCompositor).GetField("_boardSession",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scene)!;
         var game = (DuckHuntGame)typeof(BoardSession).GetField("_duckHunt",
@@ -528,7 +545,7 @@ public sealed partial class MainWindow
         Check(detection.Detected && Math.Abs(detection.BoardX!.Value - .5) < .002 &&
             Math.Abs(detection.BoardY!.Value - .48) < .002, "The synthetic camera dot missed the calibrated duck centre.");
         var aim = new BoardAim(detection.BoardX!.Value, detection.BoardY!.Value);
-        scene.ShowDuckHunt();
+        scene.ShowDuckHuntTargetPractice();
         scene.SetDuckHuntAudioStatus(true, "Microphone ready");
         DateTimeOffset latest = MonotonicClock.UtcNow;
 
@@ -603,7 +620,7 @@ public sealed partial class MainWindow
 
         scene.ShowBoardMenu();
         Check(scene.GetDuckHuntInputContext() is null, "Duck Hunt input stayed active on the menu.");
-        scene.ShowDuckHunt();
+        scene.ShowDuckHuntTargetPractice();
         context = scene.GetDuckHuntInputContext()!;
         Check(!Snapshot(aim, oldContext.Epoch) && scene.DuckHuntState.Shots == 0,
             "A previous visit's snapshot activated the reopened board.");
@@ -638,7 +655,7 @@ public sealed partial class MainWindow
         // Opening the EXIT drawer must not change the camera/audio epoch or
         // pause the round now that microphone selection lives in the main app.
         uiNow = Fresh();
-        scene.ShowDuckHunt();
+        scene.ShowDuckHuntTargetPractice();
         context = Reset();
         oldContext = context;
         uiNow = Fresh();
@@ -646,7 +663,7 @@ public sealed partial class MainWindow
         uiNow += TimeSpan.FromMilliseconds(300);
         board.TickDuckHunt(uiNow);
         uiNow += TimeSpan.FromMilliseconds(1);
-        Check(!scene.ActivateDuckHuntAt(.44, .93), "The removed MIC button still handled a board press.");
+        Check(!board.ActivateButton("duck-hunt-mic", uiNow), "The removed MIC button still handled a board press.");
         Check(scene.DuckHuntBoardReady && scene.DuckHuntInputReady &&
             scene.GetDuckHuntInputContext()?.Epoch == oldContext.Epoch,
             "Opening the EXIT drawer interrupted the calibrated shooting interval.");

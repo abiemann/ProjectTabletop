@@ -20,3 +20,9 @@ two legs along their feathered roots; the legs alternate a small swing and lift
 while the body's centre stays at a fixed height. A brief horizontal turn mirrors
 the artwork, and the hit-test silhouette uses the same scale, direction and foot
 transforms. No additional raster frames or per-frame image copies are required.
+
+## Mode backgrounds
+
+`arcade-welcome-v1.png` and `hunt-field-v1.png` are original opaque RGB images generated with the built-in image tool on 2026-10-22. The welcome image supplies a colorful wetland, pond and ducks around an open center for the native title and buttons. The field image uses a low grass-level viewpoint, pines on both sides and open sky, inspired by the user's reference. No lettering or controls are baked into either image.
+
+Both files are 1672 × 941 pixels. The prompts requested native 3840 × 2160, but the tool returned these smaller images; they are not native 4K and have not been artificially upscaled. The renderer crops to the physical board aspect instead of stretching the scene and caches each decoded image per graphics device. The field is loaded when Hunt is first opened. Full generation prompts and tool provenance are in [background-prompts.txt](background-prompts.txt).
