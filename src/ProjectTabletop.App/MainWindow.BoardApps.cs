@@ -94,7 +94,7 @@ public sealed partial class MainWindow
              duckHunt ? _scene.CurrentDuckHuntView switch
              {
                  DuckHuntView.TargetPractice => _duckHuntMicrophone.Status + " Aim the red dot and click. Each hit reverses the duck; ten hits win. Only the latest shot remains visible.",
-                 DuckHuntView.Hunt => "Enjoy the field scene. Open the bottom-left arrow for EXIT or BACK to Duck Hunt.",
+                 DuckHuntView.Hunt => _duckHuntMicrophone.Status + " Aim the red dot at START and click. Hit the ten flying birds for one point each. Open the arrow for EXIT or BACK.",
                  _ => "Hold TARGET PRACTICE for the DRY FIRE game, or HUNT for the field scene. Laptop clicks also work."
              } :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :

@@ -26,3 +26,19 @@ transforms. No additional raster frames or per-frame image copies are required.
 `arcade-welcome-v1.png` and `hunt-field-v1.png` are original opaque RGB images generated with the built-in image tool on 2026-10-22. The welcome image supplies a colorful wetland, pond and ducks around an open center for the native title and buttons. The field image uses a low grass-level viewpoint, pines on both sides and open sky, inspired by the user's reference. No lettering or controls are baked into either image.
 
 Both files are 1672 × 941 pixels. The prompts requested native 3840 × 2160, but the tool returned these smaller images; they are not native 4K and have not been artificially upscaled. The renderer crops to the physical board aspect instead of stretching the scene and caches each decoded image per graphics device. The field is loaded when Hunt is first opened. Full generation prompts and tool provenance are in [background-prompts.txt](background-prompts.txt).
+
+## Flying mallard
+
+`flying-mallard-body.png` (1983 × 793) and `flying-mallard-wing.png` (1024 × 1536)
+are original photorealistic female mallard layers generated with the built-in
+image tool on 2026-10-23. The horizontal body faces right, with tucked feet; the
+separate wing preserves individual feather tips and a blue speculum. Reusing the
+wing behind and in front of the body permits continuous wingbeat animation from
+two cached textures instead of a large animation sheet.
+
+Both files are RGBA PNGs with verified alpha-zero exteriors. With the user's
+explicit approval, an alpha-only cleanup cleared 801 nearly invisible body
+pixels and 1,013 wing pixels more than seven pixels from the main feather
+component. All RGB values and antialiased feather boundaries were preserved.
+Generation prompts, hashes, alpha bounds and cleanup details are recorded in
+[flying-mallard-prompts.txt](flying-mallard-prompts.txt).

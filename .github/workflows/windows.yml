@@ -1,4 +1,4 @@
-name: Windows CI and release
+name: Windows CI
 
 on:
   push:

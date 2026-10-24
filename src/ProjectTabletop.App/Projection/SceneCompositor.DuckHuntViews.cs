@@ -25,6 +25,7 @@ public sealed partial class SceneCompositor
         if (images?.Image(file) is { } image)
             DrawDuckHuntScenery(drawing, image, PaintBoardAspect());
         if (menu) DrawDuckHuntWelcomeTitle(drawing, PaintBoardAspect());
+        else DrawDuckHuntFlight(drawing, _boardSession.HuntFlightState, PaintBoardAspect());
         DrawDuckHuntControls(drawing, now);
     }
 

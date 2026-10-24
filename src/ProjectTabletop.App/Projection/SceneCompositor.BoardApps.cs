@@ -237,7 +237,8 @@ public sealed partial class SceneCompositor
                 ? _waterRenderedFrame!.Value.Visual : WaterGardenVisualRevision(waterNow) : 0,
             football ? FootballVisualRevision() : 0,
             strykersRun ? StrykersRunVisualRevision() : 0,
-            duckHunt ? _boardSession.DuckHuntState.Revision : 0,
+            duckHunt ? _boardSession.CurrentDuckHuntView == DuckHuntView.Hunt
+                ? _boardSession.HuntFlightState.Revision : _boardSession.DuckHuntState.Revision : 0,
             duckHunt ? DuckHuntInputVisualRevision : 0,
             duckHunt ? _boardSession.Revision : 0, duckHunt ? DuckHuntDrawerVisualFrame(blackjackNow) : 0,
             _markerSetupVisualRevision);

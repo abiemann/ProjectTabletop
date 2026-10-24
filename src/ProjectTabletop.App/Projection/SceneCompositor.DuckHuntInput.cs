@@ -68,12 +68,12 @@ public sealed partial class SceneCompositor
         get { lock (_gate) return SyncDuckHuntInput(MonotonicClock.UtcNow) is not null; }
     }
 
-    // Only Target Practice listens for shots. Its microphone lifetime follows
+    // Both play modes listen for shots. Their microphone lifetime follows
     // calibration, independent of the click trainer's temporary shot pause.
     public bool DuckHuntBoardReady
     {
         get { lock (_gate) return _boardSession.Screen == BoardScreen.DuckHunt &&
-            _boardSession.CurrentDuckHuntView == DuckHuntView.TargetPractice &&
+            _boardSession.CurrentDuckHuntView is DuckHuntView.TargetPractice or DuckHuntView.Hunt &&
             MappedBoardInputReady && !_cameraCheckRequired; }
     }
 
@@ -117,11 +117,15 @@ public sealed partial class SceneCompositor
             var context = SyncDuckHuntInput(now);
             if (context is null || context.Epoch != epoch || !_duckHuntAudioReady) return false;
             UpdateDuckHuntRound(_blackjackClock());
-            if (_boardSession.DuckHuntState.Phase == DuckHuntPhase.Ready ||
-                _boardSession.DuckHuntState.Paused || _boardSession.DuckHuntState.Phase == DuckHuntPhase.PlayerWon) return false;
+            if (_boardSession.CurrentDuckHuntView == DuckHuntView.TargetPractice &&
+                (_boardSession.DuckHuntState.Phase == DuckHuntPhase.Ready ||
+                 _boardSession.DuckHuntState.Paused || _boardSession.DuckHuntState.Phase == DuckHuntPhase.PlayerWon)) return false;
+            if (_boardSession.CurrentDuckHuntView == DuckHuntView.Hunt &&
+                (!DuckHuntArtworkReady || _boardSession.HuntFlightState.Paused)) return false;
             // The current photo decides the hit at its own timestamp, even if
             // rendering has already advanced. Each valid shot replaces the
-            // previous dot/circle; neither mark follows the walking duck.
+            // previous Target Practice dot/circle; Hunt uses the same fresh-photo
+            // gate for its START target and moving birds without drawing those marks.
             if (!_duckHuntMeasurement.Capture(aim, frameTimestamp, clickOnset, confirmedAt, now)) return false;
             _boardSession.TryDuckHuntShot(aim, frameTimestamp, PaintBoardAspect());
             _duckHuntInputVisualRevision++;
@@ -173,7 +177,7 @@ public sealed partial class SceneCompositor
     private DuckHuntInputContext? SyncDuckHuntInput(DateTimeOffset now)
     {
         bool active = _boardSession.Screen == BoardScreen.DuckHunt &&
-            _boardSession.CurrentDuckHuntView == DuckHuntView.TargetPractice && MappedBoardInputReady &&
+            _boardSession.CurrentDuckHuntView is DuckHuntView.TargetPractice or DuckHuntView.Hunt && MappedBoardInputReady &&
             !_cameraCheckRequired && !_duckHuntLearningActive;
         var key = new DuckHuntInputKey(_boardSession.NavigationRevision, _boardSession.DuckHuntRoundRevision, _boardCameraMap,
             _boardSurfaceMap, _handVisualResetThrough, active);

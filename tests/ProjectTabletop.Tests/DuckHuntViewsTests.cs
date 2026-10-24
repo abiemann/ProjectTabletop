@@ -65,7 +65,7 @@ public class DuckHuntViewsTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void MenuAndHuntIgnoreGameReadinessAndShotsButKeepExitUsable(bool hunt)
+    public void MenuAndHuntKeepThePracticeGameIdleAndExitUsable(bool hunt)
     {
         var board = new BoardSession();
         board.ShowDuckHunt(At(0));

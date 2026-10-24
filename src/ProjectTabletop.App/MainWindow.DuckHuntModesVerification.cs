@@ -105,10 +105,10 @@ public sealed partial class MainWindow
             Check(!welcome.AsSpan().SequenceEqual(field), "HUNT still draws the welcome image.");
             Check(board.Buttons.Select(button => button.Id).SequenceEqual(["duck-hunt-drawer-open"]),
                 "HUNT initially exposes controls other than its up-arrow.");
-            CheckIdleInput("hunt");
+            CheckHuntReady("hunt");
             now += TimeSpan.FromSeconds(30);
-            Check(field.AsSpan().SequenceEqual(Draw()), "The empty HUNT field started a round or animated stale practice marks.");
-            CheckIdleInput("hunt after waiting");
+            Check(field.AsSpan().SequenceEqual(Draw()), "HUNT started without a laser shot on START.");
+            CheckHuntReady("hunt after waiting");
             now += TimeSpan.FromMilliseconds(1);
             Check(scene.ActivateDuckHuntAt(.10, .93), "HUNT's drawer arrow did not open.");
             now += TimeSpan.FromMilliseconds(300);
@@ -117,7 +117,7 @@ public sealed partial class MainWindow
             Check(board.Buttons.Select(button => button.Id).SequenceEqual(["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-back"]) &&
                 board.Buttons.All(button => button.Enabled), "HUNT's drawer does not contain only its down-arrow, EXIT and BACK.");
             CheckBackLayout();
-            CheckIdleInput("hunt with controls");
+            CheckHuntReady("hunt with controls");
             await HoldControl("duck-hunt-back", DuckHuntView.Menu, "hunt-back");
             CheckIdleInput("welcome after Hunt BACK");
             Check(!board.DuckHuntDrawerOpen &&
@@ -136,7 +136,7 @@ public sealed partial class MainWindow
             Check(board.ActivateButton("duck-hunt-exit", now) && board.Screen == BoardScreen.Menu && board.MenuScrolled,
                 "EXIT did not return to the main menu's preserved second page.");
             results.Add(new { dimensions.Name, Width = dimensions.Width, Height = dimensions.Height,
-                CaptionHolds = 4, HuntRemainsIdle = true, BackReturnsToWelcome = true, ExitReturnsToPageTwo = true });
+                CaptionHolds = 4, HuntWaitsForLaserStart = true, BackReturnsToWelcome = true, ExitReturnsToPageTwo = true });
 
             void CheckBackLayout()
             {
@@ -164,6 +164,20 @@ public sealed partial class MainWindow
                         { LiveDetectedXY: null, OldDetectedXY: null, NewDetectedXY: null },
                     $"The {stage} view retained a duck round, feather or shot mark.");
                 Check(!scene.SubmitDuckHuntShot(new(.5, .48), now), $"The {stage} view accepted a direct shot.");
+            }
+
+            void CheckHuntReady(string stage)
+            {
+                scene.SetDuckHuntAudioStatus(true, "Isolated microphone fixture");
+                Check(scene.DuckHuntBoardReady && scene.DuckHuntInputReady && scene.GetDuckHuntInputContext() is not null,
+                    $"The {stage} view cannot listen for a shot on START.");
+                Check(scene.HuntFlightState is { Phase: DuckHuntFlightPhase.Ready, Score: 0, BirdsLaunched: 0 } &&
+                    scene.DuckHuntState is { Phase: DuckHuntPhase.Ready, Hits: 0, Shots: 0 } &&
+                    board.DuckHuntFeathers.Count == 0,
+                    $"The {stage} view started birds without a shot or retained Target Practice state.");
+                Check(!scene.ActivateDuckHuntAt(.5, .5) &&
+                    board.Buttons.All(button => button.Id != "duck-hunt-start"),
+                    $"The {stage} START target can be activated by a hand or laptop tap.");
             }
 
             async Task HoldControl(string id, DuckHuntView expected, string? captureName = null)

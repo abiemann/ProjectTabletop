@@ -23,7 +23,9 @@ public sealed partial class SceneCompositor
         _duckHuntImages?.Image("mallard-photo.png") is not null &&
         _duckHuntImages.Image("arcade-welcome-v1.png") is not null &&
         (_boardSession.Screen != BoardScreen.DuckHunt || _boardSession.CurrentDuckHuntView != DuckHuntView.Hunt ||
-            _duckHuntFieldPublished && _duckHuntFieldImages?.Image("hunt-field-v1.png") is not null);
+            _duckHuntFieldPublished && _duckHuntFieldImages?.Image("hunt-field-v1.png") is not null &&
+            _duckHuntFieldImages.Image("flying-mallard-body.png") is not null &&
+            _duckHuntFieldImages.Image("flying-mallard-wing.png") is not null);
     private string? DuckHuntArtworkError => _duckHuntImages?.Error ??
         _duckHuntImages?.Errors.Values.FirstOrDefault() ??
         (_boardSession.CurrentDuckHuntView == DuckHuntView.Hunt
@@ -47,7 +49,7 @@ public sealed partial class SceneCompositor
             _duckHuntFieldImages?.Dispose();
             _duckHuntFieldPublished = false;
             _duckHuntFieldImages = new(device, Path.Combine(AppContext.BaseDirectory, "Assets", "DuckHunt"),
-                ["hunt-field-v1.png"]);
+                ["hunt-field-v1.png", "flying-mallard-body.png", "flying-mallard-wing.png"]);
         }
         return _duckHuntFieldImages;
     }
@@ -87,6 +89,7 @@ public sealed partial class SceneCompositor
             if (!field.IsLoaded) return false;
             if (!_duckHuntFieldPublished)
             {
+                PrepareDuckHuntFlightResources();
                 _duckHuntFieldPublished = true;
                 InvalidateBoardArtworkSurface();
             }
@@ -98,6 +101,7 @@ public sealed partial class SceneCompositor
     {
         DisposeDuckHuntFeathers();
         DisposeDuckHuntWelcomeTitle();
+        DisposeDuckHuntFlightResources();
         _duckHuntPhotoBrush?.Dispose();
         _duckHuntBodyClip?.Dispose();
         _duckHuntRearLegClip?.Dispose();
@@ -112,6 +116,7 @@ public sealed partial class SceneCompositor
         _duckHuntArtworkPublished = false;
     }
     public DuckHuntSnapshot DuckHuntState { get { lock (_gate) return _boardSession.DuckHuntState; } }
+    public DuckHuntFlightSnapshot HuntFlightState { get { lock (_gate) return _boardSession.HuntFlightState; } }
     public DuckHuntView CurrentDuckHuntView { get { lock (_gate) return _boardSession.CurrentDuckHuntView; } }
 
     public void ShowDuckHunt()

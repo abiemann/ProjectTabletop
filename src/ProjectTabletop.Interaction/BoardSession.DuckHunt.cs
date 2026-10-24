@@ -6,11 +6,13 @@ public enum DuckHuntView { Menu, TargetPractice, Hunt }
 public sealed partial class BoardSession
 {
     private readonly DuckHuntGame _duckHunt = new();
+    private readonly DuckHuntFlightGame _huntFlight = new();
     private readonly BottomDrawerState _duckHuntDrawer = new();
     public bool DuckHuntDrawerOpen => Screen == BoardScreen.DuckHunt && _duckHuntDrawer.Open;
     public DuckHuntView CurrentDuckHuntView { get; private set; }
 
     public DuckHuntSnapshot DuckHuntState => _duckHunt.Snapshot;
+    public DuckHuntFlightSnapshot HuntFlightState => _huntFlight.Snapshot;
     public DuckHuntFeathers DuckHuntFeathers => _duckHunt.Feathers;
     public long DuckHuntRoundRevision { get; private set; }
     public static readonly BoardRect DuckHuntTargetPracticeBounds = new(.30, .40, .40, .12);
@@ -40,6 +42,11 @@ public sealed partial class BoardSession
     public void TickDuckHunt(DateTimeOffset now)
     {
         AdvanceBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, now);
+        if (Screen == BoardScreen.DuckHunt && CurrentDuckHuntView == DuckHuntView.Hunt)
+        {
+            _huntFlight.Advance(now);
+            return;
+        }
         if (Screen != BoardScreen.DuckHunt || CurrentDuckHuntView != DuckHuntView.TargetPractice) return;
         bool finished = _duckHunt.Snapshot.RoundFinished;
         _duckHunt.Advance(now);
@@ -47,6 +54,11 @@ public sealed partial class BoardSession
     }
     public void SetDuckHuntReady(bool ready, DateTimeOffset now, double boardAspect = 1)
     {
+        if (Screen == BoardScreen.DuckHunt && CurrentDuckHuntView == DuckHuntView.Hunt)
+        {
+            _huntFlight.SetReady(ready && double.IsFinite(boardAspect) && boardAspect > 0, now);
+            return;
+        }
         if (Screen != BoardScreen.DuckHunt || CurrentDuckHuntView != DuckHuntView.TargetPractice) return;
         if (ready && _duckHunt.Snapshot.Phase == DuckHuntPhase.Ready && _duckHunt.Start(now, boardAspect))
             SelectBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, open: false,
@@ -60,6 +72,17 @@ public sealed partial class BoardSession
 
     public bool TryDuckHuntShot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1)
     {
+        if (Screen == BoardScreen.DuckHunt && CurrentDuckHuntView == DuckHuntView.Hunt)
+        {
+            bool acted = _huntFlight.Shoot(aim, shotTime, boardAspect);
+            if (acted && _huntFlight.Snapshot.Phase == DuckHuntFlightPhase.Launching)
+            {
+                DuckHuntRoundRevision++;
+                SelectBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, open: false,
+                    Later(shotTime, _duckHuntDrawer.ObservedAt));
+            }
+            return acted;
+        }
         if (Screen != BoardScreen.DuckHunt || CurrentDuckHuntView != DuckHuntView.TargetPractice) return false;
         bool finished = _duckHunt.Snapshot.RoundFinished;
         bool hit = _duckHunt.Shoot(aim, shotTime, boardAspect);
@@ -81,6 +104,7 @@ public sealed partial class BoardSession
     private void InitializeDuckHunt(DateTimeOffset now)
     {
         _duckHunt.Reset(now);
+        _huntFlight.Reset(now);
         DuckHuntRoundRevision++;
     }
 
