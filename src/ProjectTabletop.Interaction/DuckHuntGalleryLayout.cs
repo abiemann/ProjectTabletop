@@ -71,6 +71,10 @@ public static partial class DuckHuntGalleryLayout
     public const double PaperCenterV = .5 + (536.5 - 1337.0 / 2) * TargetAspect / 1177;
     public const double PaperRadiusU = 432.0 / 1177;
     public const double PaperRadiusV = PaperRadiusU * TargetAspect;
+    // Least-squares circles through 96 samples of each printed ring in the
+    // source artwork. Its printed centre differs slightly from the paper edge.
+    public const double InnerRingSourceX = 585.0, InnerRingSourceY = 535.3, InnerRingSourceRadius = 160.8;
+    public const double OuterRingSourceX = 585.8, OuterRingSourceY = 529.5, OuterRingSourceRadius = 356.7;
     // Centre of the opaque pedestal bottom, excluding the transparent canvas margin.
     public const double TargetBaseU = 585.5 / 1177;
     public const double TargetBaseV = .5 + (1304.5 - 1337.0 / 2) * TargetAspect / 1177;
@@ -95,6 +99,18 @@ public static partial class DuckHuntGalleryLayout
         for (int i = 0; i < PaperClipBounds.Count; i++)
             if (PaperClipBounds[i].Contains(local.U, local.V)) return false;
         return true;
+    }
+
+    public static int PaperScore(BoardAim local)
+    {
+        if (!ContainsPaper(local)) return 0;
+        double x = local.U * 1177;
+        double y = (local.V - .5) * 1177 / TargetAspect + 1337.0 / 2;
+        if (InRing(InnerRingSourceX, InnerRingSourceY, InnerRingSourceRadius)) return 100;
+        return InRing(OuterRingSourceX, OuterRingSourceY, OuterRingSourceRadius) ? 50 : 0;
+
+        bool InRing(double centerX, double centerY, double radius) =>
+            (x - centerX) * (x - centerX) + (y - centerY) * (y - centerY) <= radius * radius + 1e-7;
     }
 
     public static BoardRect SceneBounds(double boardAspect)

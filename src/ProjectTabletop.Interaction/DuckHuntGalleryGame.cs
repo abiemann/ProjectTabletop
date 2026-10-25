@@ -29,7 +29,8 @@ public readonly record struct DuckHuntGallerySnapshot(DuckHuntGalleryPhase Phase
     double Skull3HitSeconds = -1, double Skull4HitSeconds = -1,
     DuckHuntGalleryMiddlePhase MiddlePhase = DuckHuntGalleryMiddlePhase.Closed,
     double MiddleOpenProgress = 0, int MiddleTargetIndex = -1,
-    double MiddleMotionProgress = 0, int MiddleHitMask = 0)
+    double MiddleMotionProgress = 0, int MiddleHitMask = 0,
+    int Score = 0, double ScoreAnimationSeconds = 0)
 {
     public bool PlayVisible => Phase == DuckHuntGalleryPhase.Ready && UpperPhase == DuckHuntGalleryUpperPhase.Closed &&
         MiddlePhase is DuckHuntGalleryMiddlePhase.Closed or DuckHuntGalleryMiddlePhase.Complete;
@@ -52,6 +53,9 @@ public sealed class DuckHuntGalleryGame
     public const int SkullCount = 5;
     public const int MiddleTargetCount = 5;
     public const int MiddlePunctureOffset = TargetCount;
+    public const int SkullScore = 100;
+    public const int MaximumScore = (TargetCount + MiddleTargetCount + SkullCount) * 100;
+    public const double ScoreAnimationDurationSeconds = 1;
     public static readonly TimeSpan OpeningDuration = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan RevealWaitDuration = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan AdvanceDuration = TimeSpan.FromSeconds(1.8);
@@ -79,10 +83,12 @@ public sealed class DuckHuntGalleryGame
     private DateTimeOffset _lastShotAt = DateTimeOffset.MinValue;
     private DateTimeOffset? _pausedAt = DateTimeOffset.MinValue;
     private DateTimeOffset? _middleStartedAt;
+    private DateTimeOffset? _scoreChangedAt;
     private bool _ready;
     private int _hitMask, _shots, _cycle;
     private int _skullHitMask;
     private int _middleHitMask;
+    private int _score;
     private double _skull0HitSeconds = -1, _skull1HitSeconds = -1, _skull2HitSeconds = -1,
         _skull3HitSeconds = -1, _skull4HitSeconds = -1;
     private DuckHuntGalleryPhase _phase = DuckHuntGalleryPhase.Ready;
@@ -106,6 +112,8 @@ public sealed class DuckHuntGalleryGame
         _upperPhase = DuckHuntGalleryUpperPhase.Closed;
         _middleStartedAt = null;
         _middleHitMask = 0;
+        _score = 0;
+        _scoreChangedAt = null;
         ClearSkulls();
         _punctures.Clear();
         Publish(now);
@@ -123,6 +131,7 @@ public sealed class DuckHuntGalleryGame
             _upperPhaseStartedAt += pause;
             _playStartedAt += pause;
             if (_middleStartedAt is { } middle) _middleStartedAt = middle + pause;
+            if (_scoreChangedAt is { } scoreAt) _scoreChangedAt = scoreAt + pause;
             _pausedAt = null;
             _inputNotBefore = now;
         }
@@ -190,6 +199,8 @@ public sealed class DuckHuntGalleryGame
             _cycle++;
             _middleStartedAt = null;
             _middleHitMask = 0;
+            _score = 0;
+            _scoreChangedAt = null;
             _phase = DuckHuntGalleryPhase.Opening;
             _phaseStartedAt = _inputNotBefore = shotTime;
             _upperPhase = DuckHuntGalleryUpperPhase.Raising;
@@ -213,6 +224,7 @@ public sealed class DuckHuntGalleryGame
             overAssembly |= DuckHuntGalleryLayout.ContainsAssembly(local);
             if (!DuckHuntGalleryLayout.ContainsPaper(local)) continue;
             _punctures.Add(new(index, local.U, local.V, shotTime));
+            if ((_hitMask & (1 << index)) == 0) AddScore(DuckHuntGalleryLayout.PaperScore(local), shotTime);
             _hitMask |= 1 << index;
             hit = true;
             if (_hitMask == (1 << TargetCount) - 1)
@@ -227,6 +239,7 @@ public sealed class DuckHuntGalleryGame
             if ((_skullHitMask & (1 << index)) != 0 ||
                 !DuckHuntGalleryLayout.ContainsSkull(index, point, boardAspect)) continue;
             _skullHitMask |= 1 << index;
+            AddScore(SkullScore, shotTime);
             double seconds = (shotTime - _playStartedAt).TotalSeconds;
             switch (index)
             {
@@ -253,6 +266,8 @@ public sealed class DuckHuntGalleryGame
             if (paper.TryMapToLocal(point, out var local) && DuckHuntGalleryLayout.ContainsPaper(local))
             {
                 _punctures.Add(new(MiddlePunctureOffset + middleAtShot.Index, local.U, local.V, shotTime));
+                if ((_middleHitMask & (1 << middleAtShot.Index)) == 0)
+                    AddScore(DuckHuntGalleryLayout.PaperScore(local), shotTime);
                 _middleHitMask |= 1 << middleAtShot.Index;
                 hit = true;
             }
@@ -297,6 +312,13 @@ public sealed class DuckHuntGalleryGame
         _skull0HitSeconds = _skull1HitSeconds = _skull2HitSeconds = _skull3HitSeconds = _skull4HitSeconds = -1;
     }
 
+    private void AddScore(int points, DateTimeOffset shotTime)
+    {
+        if (points <= 0) return;
+        _score += points;
+        _scoreChangedAt = shotTime;
+    }
+
     private void Publish(DateTimeOffset now)
     {
         double elapsed = Math.Max(0, (now - _phaseStartedAt).TotalSeconds);
@@ -331,10 +353,12 @@ public sealed class DuckHuntGalleryGame
         var animationAt = _upperPhase == DuckHuntGalleryUpperPhase.Closed ? _upperPhaseStartedAt : now;
         double animation = _cycle == 0 ? 0 : Math.Floor(Math.Max(0, (animationAt - _playStartedAt).TotalSeconds) * 60) / 60;
         var middle = MiddleAt(now);
+        double scoreAnimation = _scoreChangedAt is { } scoreAt
+            ? Math.Clamp(Math.Floor((now - scoreAt).TotalSeconds * 60) / 60, 0, ScoreAnimationDurationSeconds) : 0;
         var next = new DuckHuntGallerySnapshot(_phase, angle, belt, fall,
             _hitMask, _shots, _cycle, _snapshot.Revision, !_ready, _upperPhase, upperOpen, _skullHitMask, animation,
             _skull0HitSeconds, _skull1HitSeconds, _skull2HitSeconds, _skull3HitSeconds, _skull4HitSeconds,
-            middle.Phase, middle.Open, middle.Index, middle.Progress, _middleHitMask);
+            middle.Phase, middle.Open, middle.Index, middle.Progress, _middleHitMask, _score, scoreAnimation);
         if (next != _snapshot) _snapshot = next with { Revision = _snapshot.Revision + 1 };
     }
 

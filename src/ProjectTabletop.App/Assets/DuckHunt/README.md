@@ -41,6 +41,12 @@ the paper. The renderer preserves the native aspect so the rings stay round;
 paper hit testing and puncture clipping share the measured surface geometry and
 exclude the metal clips.
 
+Scoring follows the printed artwork, separately from that physical paper outline.
+Fits to 96 dark-ring samples in the native image give an inner circle centred at
+(585.0, 535.3), radius 160.8 pixels, and an outer circle centred at (585.8, 529.5),
+radius 356.7 pixels. The first paper hit awards 100 inside the inner ring, 50 in
+the surrounding band, or zero outside the outer ring. The source PNG is unchanged.
+
 The middle-row challenge reuses this assembly and puncture artwork. Its holder
 travels along the shelf; the paper and retaining ring turn around the vertical
 stem while the circular pedestal remains supported. The rising middle backdrop

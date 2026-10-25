@@ -112,6 +112,7 @@ public sealed partial class SceneCompositor
         PrepareGalleryCandles(device);
         PrepareGallerySkulls(device);
         PrepareGalleryMiddle(device);
+        PrepareGalleryScore(device);
     }
 
     private void DisposeDuckHuntGalleryResources()
@@ -119,6 +120,7 @@ public sealed partial class SceneCompositor
         DisposeGalleryCandles();
         DisposeGallerySkulls();
         DisposeGalleryMiddle();
+        DisposeGalleryScore();
         _galleryFlapEffect?.Dispose();
         if (_galleryTargetEffects is not null) foreach (var effect in _galleryTargetEffects) effect?.Dispose();
         if (_galleryTargets is not null) foreach (var target in _galleryTargets) target?.Dispose();
@@ -171,6 +173,7 @@ public sealed partial class SceneCompositor
             DrawGalleryTargets(drawing, state, aspect, inFrontOfLip: true);
         }
         DrawGalleryFlap(drawing, state.FlapAngleDegrees, aspect);
+        DrawGalleryScore(drawing, state, aspect);
         if (state.PlayVisible)
         {
             var bounds = GalleryRect(DuckHuntGalleryLayout.PlayBounds);
