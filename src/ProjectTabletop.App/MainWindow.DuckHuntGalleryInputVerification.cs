@@ -70,8 +70,9 @@ public sealed partial class MainWindow
             "Learning reused previous click work.");
         context = learned;
         Check(Snapshot(play, context.Epoch) && scene.GalleryState is
-            { Phase: DuckHuntGalleryPhase.Opening, Cycle: 1, HitTargets: 0 },
-            "A fresh click photo on PLAY did not open the gallery.");
+            { Phase: DuckHuntGalleryPhase.Opening, UpperPhase: DuckHuntGalleryUpperPhase.Raising,
+                Cycle: 1, HitTargets: 0, SkullHitMask: 0 },
+            "A fresh click photo on PLAY did not start both shelves together.");
         Check(!board.DuckHuntDrawerOpen, "Starting the gallery left its drawer open.");
         var roundContext = Context();
         Check(roundContext.Epoch != context.Epoch && !Snapshot(play, context.Epoch),
@@ -85,8 +86,24 @@ public sealed partial class MainWindow
         Check(game.Shoot(play, began, aspect), "Could not prepare the paper-target fixture.");
         Draw();
         context = Context();
-        Check(scene.GalleryState.Phase == DuckHuntGalleryPhase.WaitingForHits,
-            "The stationary paper fixture is not ready.");
+        Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.WaitingForHits,
+            UpperPhase: DuckHuntGalleryUpperPhase.WaitingForHits },
+            "The two stationary target rows are not ready.");
+        var skullBounds = DuckHuntGalleryLayout.SkullBounds(0, aspect);
+        var skull = new BoardAim(skullBounds.X + skullBounds.Width / 2,
+            skullBounds.Y + skullBounds.Height / 2);
+        long roundRevision = board.DuckHuntRoundRevision;
+        Check(!Snapshot(null, context.Epoch) && scene.GalleryState.SkullHitMask == 0,
+            "A no-dot click shattered a skull.");
+        Check(Snapshot(new(skullBounds.X, skullBounds.Y), context.Epoch) && scene.GalleryState.SkullHitMask == 0,
+            "The empty sprite corner counted as crystal.");
+        Check(Snapshot(skull, context.Epoch) && scene.GalleryState.SkullHitMask == 1 &&
+            scene.GalleryState.HitTargets == 0 && scene.GalleryPunctures.Count == 0,
+            "A skull photo hit did not remain independent of the paper row.");
+        Check(board.DuckHuntRoundRevision == roundRevision && Context().Epoch == context.Epoch,
+            "A skull hit reset the round or invalidated its camera context.");
+        Check(Snapshot(skull, context.Epoch) && scene.GalleryState.SkullHitMask == 1,
+            "A destroyed skull counted as another target.");
         var paperQuad = DuckHuntGalleryLayout.TargetQuad(0, scene.GalleryState, aspect);
         double paperU = DuckHuntGalleryLayout.PaperCenterU - .24 * DuckHuntGalleryLayout.PaperRadiusU;
         double paperV = DuckHuntGalleryLayout.PaperCenterV + .18 * DuckHuntGalleryLayout.PaperRadiusV;
@@ -108,6 +125,10 @@ public sealed partial class MainWindow
             scene.GalleryPunctures.Count == 2, "A repeated target hit changed the distinct-target count.");
         Check(!Snapshot(null, context.Epoch) && scene.GalleryPunctures.Count == 2,
             "A missing dot altered the existing holes.");
+        var nextSkull = DuckHuntGalleryLayout.SkullBounds(1, aspect);
+        Check(Snapshot(new(nextSkull.X + nextSkull.Width / 2, nextSkull.Y + nextSkull.Height / 2), context.Epoch) &&
+            scene.GalleryState is { SkullHitMask: 3, HitTargets: 1 } && scene.GalleryPunctures.Count == 2,
+            "Alternating back to the skull row interrupted the paper targets.");
 
         scene.SetDuckHuntAudioStatus(false, "Microphone unavailable");
         Draw();
@@ -115,8 +136,8 @@ public sealed partial class MainWindow
             "Microphone loss failed to pause or preserve the gallery.");
         scene.SetDuckHuntAudioStatus(true, "Isolated microphone fixture");
         Draw();
-        Check(!scene.GalleryState.Paused && scene.GalleryPunctures.Count == 2,
-            "Microphone recovery reset the target row.");
+        Check(!scene.GalleryState.Paused && scene.GalleryPunctures.Count == 2 && scene.GalleryState.SkullHitMask == 3,
+            "Microphone recovery reset either target row.");
         uiNow = MonotonicClock.UtcNow;
         scene.ShowDuckHunt();
         Check(!scene.DuckHuntBoardReady && scene.GetDuckHuntInputContext() is null &&
@@ -126,8 +147,9 @@ public sealed partial class MainWindow
         Draw();
         var reopened = Context();
         Check(reopened.Epoch != context.Epoch && !Snapshot(paper, context.Epoch) &&
-            scene.GalleryState is { Phase: DuckHuntGalleryPhase.Ready, Cycle: 0 } &&
-            scene.GalleryPunctures.Count == 0, "Reopening retained a previous cycle or shot.");
+            scene.GalleryState is { Phase: DuckHuntGalleryPhase.Ready, UpperPhase: DuckHuntGalleryUpperPhase.Closed,
+                SkullHitMask: 0, Cycle: 0 } &&
+            scene.GalleryPunctures.Count == 0, "Reopening retained a previous shelf, cycle or shot.");
         scene.SetBoardSetup(true);
         Check(!scene.DuckHuntBoardReady && !Snapshot(play, reopened.Epoch),
             "Calibration allowed a gallery shot.");

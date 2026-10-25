@@ -74,8 +74,9 @@ public sealed partial class BoardSession
             return acted;
         }
         if (Screen != BoardScreen.DuckHunt || CurrentDuckHuntView != DuckHuntView.TargetPractice) return false;
+        int cycleBefore = _gallery.Snapshot.Cycle;
         bool accepted = _gallery.Shoot(aim, shotTime, boardAspect);
-        if (accepted && _gallery.Snapshot.Phase == DuckHuntGalleryPhase.Opening)
+        if (_gallery.Snapshot.Cycle != cycleBefore)
         {
             DuckHuntRoundRevision++;
             SelectBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, open: false,

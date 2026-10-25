@@ -175,7 +175,7 @@ static async Task RunMcpAsync()
             WaterGardenActionTool(),
             Tool("show_football", "Open Football with learned black cardboard bars or fingertip kickers, a bouncy speed-capped ball, and human-versus-AI or two-player matches. Does not start camera or projector."),
             Tool("show_duck_hunt", "Open Duck Hunt's welcome screen with TARGET PRACTICE and HUNT choices. Both modes use click sounds and the red aiming dot: shoot PLAY for the saloon gallery, or START for ten flying birds. Does not start camera or projector."),
-            Tool("get_duck_hunt", "Read Duck Hunt's current view, gallery phase and paper punctures, Hunt score and flight state, red-dot freshness and microphone diagnostics."),
+            Tool("get_duck_hunt", "Read Duck Hunt's current view, both gallery phases, skull hits and paper punctures, Hunt score and flight state, red-dot freshness and microphone diagnostics."),
             Tool("get_football", "Read the current football match and separate player input diagnostics."),
             FootballActionTool(),
             LearnFootballBarTool(),

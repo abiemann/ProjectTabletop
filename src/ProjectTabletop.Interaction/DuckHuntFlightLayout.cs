@@ -74,7 +74,7 @@ public static class DuckHuntFlightLayout
         if (bird.Direction < 0) u = 1 - u;
         var body = BodyArtworkBounds;
         var source = BodySourceBounds;
-        if (PolygonContains(BodySilhouette, new(
+        if (BoardPolygon.Contains(BodySilhouette, new(
             source.X + (u - body.X) / body.Width * source.Width,
             source.Y + (v - body.Y) / body.Height * source.Height))) return true;
         return ContainsWing(u, v, NearWingPose(bird)) || ContainsWing(u, v, FarWingPose(bird));
@@ -85,19 +85,7 @@ public static class DuckHuntFlightLayout
         double x = u - wing.PivotU, y = v - wing.PivotV;
         double s = Math.Sin(wing.Angle), c = Math.Cos(wing.Angle);
         double scale = wing.Length / (WingRootV - WingTopV);
-        return PolygonContains(WingSilhouette, new(WingRootU + (x * c + y * s) / scale,
+        return BoardPolygon.Contains(WingSilhouette, new(WingRootU + (x * c + y * s) / scale,
             WingRootV + (-x * s + y * c) / scale));
-    }
-
-    private static bool PolygonContains(BoardAim[] outline, BoardAim point)
-    {
-        bool inside = false;
-        for (int i = 0, j = outline.Length - 1; i < outline.Length; j = i++)
-        {
-            var a = outline[i]; var b = outline[j];
-            if ((a.V > point.V) != (b.V > point.V) &&
-                point.U < (b.U - a.U) * (point.V - a.V) / (b.V - a.V) + a.U) inside = !inside;
-        }
-        return inside;
     }
 }

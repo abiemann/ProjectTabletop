@@ -55,8 +55,9 @@ public sealed partial class MainWindow
             Check(scene.SubmitDuckHuntShot(new(.5, .46), now), "A shot on PLAY did not open the gallery.");
             Draw();
             await Save("opening-zero");
-            Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.Opening, FlapAngleDegrees: 0 },
-                "The flap did not begin from its exact closed plane.");
+            Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.Opening, FlapAngleDegrees: 0,
+                UpperPhase: DuckHuntGalleryUpperPhase.Raising, UpperOpenProgress: 0 },
+                "One PLAY shot did not begin both the flap and upper curtain together.");
             now += TimeSpan.FromMilliseconds(350);
             Draw();
             await Save("opening-front");
@@ -65,11 +66,30 @@ public sealed partial class MainWindow
             await Save("opening-reverse");
             now += TimeSpan.FromMilliseconds(250);
             byte[] revealed = Draw();
+            var revealedState = scene.GalleryState;
             Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.RevealWait, FlapAngleDegrees: 95, ConveyorPosition: 0 },
                 "The panel did not reach 95 degrees before the reveal pause.");
             await Save("revealed");
             now += TimeSpan.FromMilliseconds(700);
-            Check(revealed.AsSpan().SequenceEqual(Draw()), "The conveyor moved during the one-second reveal pause.");
+            byte[] revealPaused = Draw();
+            if (scene.GalleryState is not { Phase: DuckHuntGalleryPhase.RevealWait, FlapAngleDegrees: 95, ConveyorPosition: 0 } ||
+                !LowerEqual(revealed, revealPaused))
+            {
+                await Save("reveal-pause-failure");
+                var pausedState = scene.GalleryState;
+                byte[] repeated = Draw();
+                await Save("reveal-pause-repeat");
+                string diagnosticPath = Path.Combine(directory, dimensions.Name + "-reveal-pause-difference.json");
+                await File.WriteAllTextAsync(diagnosticPath, System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    dimensions.Name, dimensions.Width, dimensions.Height, Aspect = aspect,
+                    Before = revealedState, After = pausedState, Repeated = scene.GalleryState,
+                    Difference = RegionDifference(revealed, revealPaused, LowerRegion()),
+                    SameTimeDifference = RegionDifference(revealPaused, repeated, LowerRegion())
+                }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                Check(false, $"The conveyor moved during the one-second reveal pause ({dimensions.Name}); diagnostics: {diagnosticPath}");
+            }
+            else Check(true, "The conveyor moved during the one-second reveal pause.");
             now += TimeSpan.FromMilliseconds(650);
             Draw();
             await Save("advancing");
@@ -79,6 +99,47 @@ public sealed partial class MainWindow
                 "Five papers did not stop at the firing position.");
             CheckClearOptics("five clean papers");
             await Save("waiting");
+            Check(scene.GalleryState is { UpperPhase: DuckHuntGalleryUpperPhase.WaitingForHits, HitSkulls: 0, UpperOpenProgress: 1 },
+                "The upper curtain did not reveal five independently hittable skulls.");
+            for (int index = 0; index < DuckHuntGalleryGame.SkullCount; index++)
+            {
+                var skull = DuckHuntGalleryLayout.SkullBounds(index, aspect);
+                var forehead = new BoardAim(skull.X + skull.Width * .5, skull.Y + skull.Height * .28);
+                Check(PixelBrightness(forehead) > 70, "A revealed crystal skull is missing or concealed by its curtain.");
+                if (index == 0) CheckLaser(forehead, "crystal skull forehead");
+            }
+            var targetBeforeFlicker = TargetTexture(0).GetPixelBytes();
+            foreach (double advance in new[] { .071, .113, .217, .339, .531, .823, 1.039, 1.377 })
+            {
+                now += TimeSpan.FromSeconds(advance);
+                Draw();
+                CheckClearOptics("crystal reflections at varied flicker phases");
+            }
+            Check(targetBeforeFlicker.AsSpan().SequenceEqual(TargetTexture(0).GetPixelBytes()),
+                "Skull-light animation rebuilt or changed an unmarked paper texture.");
+            await Save("skulls-lit");
+            var firstSkull = DuckHuntGalleryLayout.SkullBounds(0, aspect);
+            var firstSkullAim = new BoardAim(firstSkull.X + firstSkull.Width * .5, firstSkull.Y + firstSkull.Height * .4);
+            now += TimeSpan.FromMilliseconds(1);
+            Check(scene.SubmitDuckHuntShot(firstSkullAim, now) && scene.GalleryState is { HitSkulls: 1, HitTargets: 0 },
+                "A skull could not be shot before the lower papers.");
+            now += TimeSpan.FromMilliseconds(45);
+            byte[] shattering = Draw();
+            await Save("skull-shatter-start");
+            CheckClearOptics("initial crystal shatter");
+            now += TimeSpan.FromMilliseconds(250);
+            Draw();
+            await Save("skull-shatter-flying");
+            CheckClearOptics("flying crystal fragments");
+            now += TimeSpan.FromSeconds(1);
+            byte[] crumbs = Draw();
+            var firstSkullRegion = new BoardRect(firstSkull.X - firstSkull.Width * .6, firstSkull.Y,
+                firstSkull.Width * 2.2, firstSkull.Height * 1.05);
+            Check(!RegionEqual(shattering, crumbs, firstSkullRegion), "The crystal fragments did not fall onto the shelf.");
+            CheckClearOptics("settled crystal crumbs");
+            await Save("skull-crumbs-settled");
+            now += TimeSpan.FromSeconds(1);
+            Check(RegionEqual(crumbs, Draw(), firstSkullRegion), "Settled skull crumbs moved or disappeared from the shelf.");
             for (int index = 0; index < DuckHuntGalleryGame.TargetCount; index++)
             {
                 var paper = DuckHuntGalleryLayout.TargetQuad(index, scene.GalleryState, aspect);
@@ -103,7 +164,7 @@ public sealed partial class MainWindow
                 }
             }
             now += TimeSpan.FromSeconds(2);
-            Check(waiting.AsSpan().SequenceEqual(Draw()), "The stationary target row continued moving before all five hits.");
+            Check(LowerEqual(waiting, Draw()), "The stationary target row continued moving before all five hits.");
             var firstQuad = DuckHuntGalleryLayout.TargetQuad(0, scene.GalleryState, aspect);
             var firstLocal = PaperPoint(-.24, .18);
             var firstAim = firstQuad.Map(firstLocal.U, firstLocal.V);
@@ -115,7 +176,7 @@ public sealed partial class MainWindow
             await Save("puncture-forming");
             now += TimeSpan.FromMilliseconds(200);
             byte[] settled = Draw();
-            Check(!forming.AsSpan().SequenceEqual(settled) && scene.GalleryVisualFrame(now) == 0,
+            Check(!LowerEqual(forming, settled) && scene.GalleryVisualFrame(now) == 0,
                 "The torn rim did not animate briefly and settle.");
             Check(PixelDark(firstAim), "The paper's projected hit location has no black opening.");
             CheckClearOptics("punctured paper");
@@ -123,7 +184,7 @@ public sealed partial class MainWindow
             CheckLaser(firstQuad.Map(besideHole.U, besideHole.V), "paper beside its puncture");
             await Save("puncture-settled");
             now += TimeSpan.FromSeconds(1);
-            Check(settled.AsSpan().SequenceEqual(Draw()), "A settled puncture changed while its paper was stationary.");
+            Check(LowerEqual(settled, Draw()), "A settled puncture changed while its paper was stationary.");
             now += TimeSpan.FromMilliseconds(1);
             var repeatedLocal = PaperPoint(.28, .28);
             Check(scene.SubmitDuckHuntShot(firstQuad.Map(repeatedLocal.U, repeatedLocal.V), now) && scene.GalleryState.HitTargets == 1 &&
@@ -151,11 +212,13 @@ public sealed partial class MainWindow
             var allHitAt = now;
             now += TimeSpan.FromMilliseconds(400);
             byte[] complete = Draw();
-            Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.SuccessWait, HitTargets: 5, ConveyorPosition: 1 },
+            Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.SuccessWait, HitTargets: 5, FlapAngleDegrees: 95, ConveyorPosition: 1 },
                 "The completed row did not hold before departing.");
             await Save("all-hit");
             now += TimeSpan.FromMilliseconds(300);
-            Check(complete.AsSpan().SequenceEqual(Draw()), "The completed row skipped its one-second pause.");
+            byte[] completedPaused = Draw();
+            Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.SuccessWait, FlapAngleDegrees: 95, ConveyorPosition: 1 } &&
+                LowerEqual(complete, completedPaused), "The completed row skipped its one-second pause.");
             now += TimeSpan.FromMilliseconds(400);
             Draw();
             await Save("departing");
@@ -202,12 +265,35 @@ public sealed partial class MainWindow
             await Save("closing");
             now += TimeSpan.FromSeconds(1);
             Draw();
-            Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.Ready, PlayVisible: true, FlapAngleDegrees: 0 },
-                "The saloon did not return to its closed PLAY state.");
+            Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.Ready, PlayVisible: false, FlapAngleDegrees: 0,
+                UpperPhase: DuckHuntGalleryUpperPhase.WaitingForHits, HitSkulls: 1 },
+                "The lower flap did not close independently while the remaining skulls stayed available.");
+            await Save("lower-closed-skulls-open");
+            for (int index = 1; index < DuckHuntGalleryGame.SkullCount; index++)
+            {
+                var skull = DuckHuntGalleryLayout.SkullBounds(index, aspect);
+                now += TimeSpan.FromMilliseconds(1);
+                Check(scene.SubmitDuckHuntShot(new(skull.X + skull.Width * .5, skull.Y + skull.Height * .4), now),
+                    "A remaining skull did not accept its shot after the lower stage closed.");
+            }
+            now += TimeSpan.FromMilliseconds(400);
+            Draw();
+            Check(scene.GalleryState is { HitSkulls: 5, UpperPhase: DuckHuntGalleryUpperPhase.ShatterWait, PlayVisible: false },
+                "The upper row did not allow its last fragments to settle.");
+            CheckClearOptics("all skulls shattered");
+            await Save("all-skulls-shattered");
+            now += TimeSpan.FromMilliseconds(800);
+            Draw();
+            Check(scene.GalleryState.UpperPhase == DuckHuntGalleryUpperPhase.Lowering, "The upper curtain did not begin closing.");
+            await Save("upper-curtain-lowering");
+            now += DuckHuntGalleryGame.UpperLowerDuration;
+            Draw();
+            Check(scene.GalleryState is { PlayVisible: true, UpperPhase: DuckHuntGalleryUpperPhase.Closed },
+                "PLAY did not return after both stages had closed.");
             await Save("complete");
             now += TimeSpan.FromMilliseconds(1);
             Check(scene.SubmitDuckHuntShot(new(.5, .46), now) && scene.GalleryPunctures.Count == 0 &&
-                scene.GalleryState.HitTargets == 0, "The next row retained the old punctures.");
+                scene.GalleryState is { HitTargets: 0, HitSkulls: 0 }, "The next round retained old holes or shattered skulls.");
             now += DuckHuntGalleryGame.OpeningDuration + DuckHuntGalleryGame.RevealWaitDuration + DuckHuntGalleryGame.AdvanceDuration;
             Draw();
             now += TimeSpan.FromMilliseconds(1);
@@ -222,7 +308,77 @@ public sealed partial class MainWindow
             Check(board.ActivateButton("duck-hunt-back", now) && scene.CurrentDuckHuntView == DuckHuntView.Menu,
                 "BACK did not return from the gallery to the Duck Hunt entry screen.");
             results.Add(new { dimensions.Name, dimensions.Width, dimensions.Height,
-                Papers = 5, Punctures = 7, ClosedAngle = 0, OpenAngle = 95, OpticalCandidates = 0 });
+                Papers = 5, Punctures = 7, Skulls = 5, ClosedAngle = 0, OpenAngle = 95, OpticalCandidates = 0 });
+
+            bool LowerEqual(byte[] before, byte[] after)
+            {
+                // Shared-device render order can round a few minified target-edge
+                // samples differently: the captured portrait failure changed 14
+                // pixels by only 1/255, with identical poses and a stable repeat.
+                // Bound that GPU rounding strictly; movement must still fail.
+                var region = LowerRegion();
+                var top = CameraPoint(new(region.X, region.Y));
+                var bottom = CameraPoint(new(region.X + region.Width, region.Y + region.Height));
+                int left = Math.Clamp((int)Math.Floor(top.X), 0, dimensions.Width - 1);
+                int right = Math.Clamp((int)Math.Ceiling(bottom.X), left + 1, dimensions.Width);
+                int first = Math.Clamp((int)Math.Floor(top.Y), 0, dimensions.Height - 1);
+                int last = Math.Clamp((int)Math.Ceiling(bottom.Y), first + 1, dimensions.Height);
+                int changed = 0;
+                for (int y = first; y < last; y++)
+                for (int x = left; x < right; x++)
+                {
+                    int pixel = (y * dimensions.Width + x) * 4;
+                    if (before.AsSpan(pixel, 4).SequenceEqual(after.AsSpan(pixel, 4))) continue;
+                    if (++changed > 64) return false;
+                    for (int channel = 0; channel < 4; channel++)
+                        if (Math.Abs(before[pixel + channel] - after[pixel + channel]) > 1) return false;
+                }
+                return true;
+            }
+            BoardRect LowerRegion()
+            {
+                var top = DuckHuntGalleryLayout.ScenePoint(.09, .50, aspect);
+                var bottom = DuckHuntGalleryLayout.ScenePoint(.91, .86, aspect);
+                return new(top.U, top.V, bottom.U - top.U, bottom.V - top.V);
+            }
+            object RegionDifference(byte[] before, byte[] after, BoardRect region)
+            {
+                var top = CameraPoint(new(region.X, region.Y));
+                var bottom = CameraPoint(new(region.X + region.Width, region.Y + region.Height));
+                int left = Math.Clamp((int)Math.Floor(top.X), 0, dimensions.Width - 1);
+                int right = Math.Clamp((int)Math.Ceiling(bottom.X), left + 1, dimensions.Width);
+                int first = Math.Clamp((int)Math.Floor(top.Y), 0, dimensions.Height - 1);
+                int last = Math.Clamp((int)Math.Ceiling(bottom.Y), first + 1, dimensions.Height);
+                int changed = 0, maximumChannelDelta = 0, minX = right, minY = last, maxX = -1, maxY = -1;
+                for (int y = first; y < last; y++)
+                for (int x = left; x < right; x++)
+                {
+                    int pixel = (y * dimensions.Width + x) * 4;
+                    if (before.AsSpan(pixel, 4).SequenceEqual(after.AsSpan(pixel, 4))) continue;
+                    changed++;
+                    minX = Math.Min(minX, x); minY = Math.Min(minY, y);
+                    maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y);
+                    for (int channel = 0; channel < 4; channel++)
+                        maximumChannelDelta = Math.Max(maximumChannelDelta,
+                            Math.Abs(before[pixel + channel] - after[pixel + channel]));
+                }
+                return new { ChangedPixels = changed, MaximumChannelDelta = maximumChannelDelta,
+                    MinX = minX, MinY = minY, MaxX = maxX, MaxY = maxY,
+                    Region = region, CameraTop = new { top.X, top.Y }, CameraBottom = new { bottom.X, bottom.Y } };
+            }
+            bool RegionEqual(byte[] before, byte[] after, BoardRect region)
+            {
+                var top = CameraPoint(new(region.X, region.Y));
+                var bottom = CameraPoint(new(region.X + region.Width, region.Y + region.Height));
+                int x = Math.Clamp((int)Math.Floor(top.X), 0, dimensions.Width - 1);
+                int right = Math.Clamp((int)Math.Ceiling(bottom.X), x + 1, dimensions.Width);
+                int y = Math.Clamp((int)Math.Floor(top.Y), 0, dimensions.Height - 1);
+                int last = Math.Clamp((int)Math.Ceiling(bottom.Y), y + 1, dimensions.Height);
+                for (; y < last; y++)
+                    if (!before.AsSpan((y * dimensions.Width + x) * 4, (right - x) * 4)
+                        .SequenceEqual(after.AsSpan((y * dimensions.Width + x) * 4, (right - x) * 4))) return false;
+                return true;
+            }
 
             BoardAim PaperPoint(double radiusX, double radiusY) => new(
                 DuckHuntGalleryLayout.PaperCenterU + radiusX * DuckHuntGalleryLayout.PaperRadiusU,

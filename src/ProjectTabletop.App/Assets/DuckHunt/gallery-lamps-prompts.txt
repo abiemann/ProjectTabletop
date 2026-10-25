@@ -1,0 +1,48 @@
+Animated gallery lamp source artwork
+Date: 2026-10-25
+Generation: built-in image_gen tool, transparent_background=false for both assets.
+No scripted image changes, resizing or color correction were applied.
+
+Asset: gallery-unlit-lamps.png
+Native dimensions: 1672 x 941 RGB PNG.
+SHA256: E611E45FE826ABC92438977880EB73E5BACFB58316960B2DEB58EE861D1A73A0
+Edit target: target-practice-saloon-v1.png.
+
+The two main foreground oil-lamp flames were removed by the image tool, leaving unlit glass and the original burner positions. The original scene framing and aspect are retained. This edited full frame is a source for the two chimney regions only: compose those regions over the original saloon instead of replacing the whole background, preserving all original pixels outside the lamps. The edit is not claimed to be pixel-identical elsewhere.
+
+Approximate anchors in the 1672 x 941 scene:
+- Left wick/base: (78,267).
+- Right wick/base: (1595,267).
+- Typical animated bright tongue: about 12-15 pixels wide and 45 pixels high.
+- Visually measured left chimney polygon: (66,174),(90,174),(91,204),(103,227),(110,246),(106,261),(95,273),(62,273),(50,261),(46,246),(53,226),(65,204). The right chimney is approximately offset by 1517 pixels horizontally. Check final physical clipping against the glass contour.
+
+Asset: gallery-candle-flames.png
+Native dimensions: 1774 x 887 RGB PNG.
+SHA256: 8330131A03904B3F4BE0E2E256FE4461CE052F3E2F90D5EA176F1766604F508E
+
+Eight photographic flame poses in four columns and two rows, in reading order. Logical cell size is 443.5 x 443.5 pixels. The intended runtime effect uses an opaque black-backed texture with additive composition; this is deliberately not a transparent PNG. Each cell contains one narrow ivory/yellow flame, a small blue base and restrained amber edges, without a visible lamp, candle, smoke or sparks. Frame2 is shorter and frame5 taller; use one common scale and blend between adjacent poses so the wick remains anchored.
+
+Nominal local wick anchor: (221.75,394). Approximate maxRGB>=32 visible bounds:
+- Frame0: x176-267, y60-393.
+- Frame1: x169-268, y87-393.
+- Frame2: x176-269, y164-393.
+- Frame3: x178-269, y59-393.
+- Frame4: x176-277, y70-394.
+- Frame5: x177-268, y21-394.
+- Frame6: x177-268, y68-394.
+- Frame7: x178-269, y60-394.
+These measurements use integer cell origins (443-pixel steps), so compensate the subpixel offset when sampling exact 443.5-pixel logical cells.
+
+Pixel inspection found all pixels opaque, 1,131,684 exactly black pixels and 1,319,729 pixels whose largest RGB component is at most2. The maximum RGB value at the full atlas boundary is1. The corners and representative cell separators are exactly black. A renderer blackpoint subtraction of2/255 followed by clamping makes these near-black pixels optically inert without modifying the source asset.
+
+Whole-cell luminance relative to frame0 is approximately:
+[1.000,0.902,0.709,0.994,0.950,1.061,0.966,0.996].
+Every frame has a peak channel value of255. These are artwork measurements, not a claim about physical camera detection.
+
+Runtime composition note: the cached GPU light texture adds 0.75 times blue into green, with the corresponding combined 3.5/255 green black-point subtraction. This avoids a blue flame base becoming magenta over the warm glass. The source PNG remains unchanged; the detector is not changed for this visual effect.
+
+Unlit-lamps image-edit prompt:
+Use case: precise-object-edit. Edit target: this existing 1672 x 941 saloon shooting-gallery background. Make ONLY one exact change: extinguish/remove the bright baked-in flame in EACH of the two LARGE MAIN foreground oil-lamp glass chimneys on the far left and far right. Left main flame center is approximately pixel (78,240), its wick at (78,267); right main flame center is approximately (1595,240), wick at (1595,267), in this full 1672 x 941 image. Remove the entire white-yellow flame tongue and bright flame reflections INSIDE those two glass chimneys; reconstruct natural unlit clear glass with gentle existing edge reflections and the warm dark wooden panel visible through it. Keep both brass burners, the two chimney glass silhouettes, all metal bases, all wood, all carved details, scene lighting outside the glass, all shelves, conveyor, ceiling and mirrors EXACTLY in place and unchanged. Do not alter distant lights or mirror reflections. Empty intact glass chimneys, NOT candles, no replacement flame, no smoke, no soot. Preserve the original image's precise camera angle, field of view, framing, aspect ratio and full-frame dimensions of 1672 x 941 pixels. No crop, no zoom, no repositioning, no invented geometry. High-quality photorealistic local retouch. The rest of the image must match the provided original.
+
+Flame-sheet generation prompt:
+Use case: product-mockup. Asset type: production animation sprite atlas of exactly EIGHT sequential realistic small candle/oil-lamp FLAMES on an OPAQUE PURE BLACK RGB(0,0,0) background. Canvas 2048 x 1024 pixels, exact regular grid of 4 columns by 2 rows, eight equal 512 x 512 cells. No drawn grid, lines, labels or numbers. Each cell contains exactly ONE isolated narrow upright small oil-wick flame, at the SAME SCALE and the SAME fixed bottom-center wick position within its cell: local x256,y430. Flame visible body roughly 85 pixels wide and 300 pixels tall, approximately 1:3 width-to-height, with ample pure black margin on every side and absolutely no overlap between cells. Photorealistic high-speed macro flame photography, exquisite luminous translucency, natural wispy needle tip, convincing hot ivory-white core, pale yellow-white luminous body, restrained narrow golden-amber edge and a tiny faint blue base. No deep red, no red/orange embers, no sparks. These are eight consecutive moments of ONE delicate steady oil flame moving gently: first straight, then tip slowly leans slightly left, becomes briefly shorter and rounder, recovers upright, leans gently right, elongates slightly, then recovers toward first pose for a seamless animation loop. Bases never move; tips evolve subtly, no large horizontal swings, no oversized blaze or bonfire. The flame is not a hard cartoon teardrop: give it realistic asymmetry, tiny internal currents and a softly luminous optical edge. Everything except the flame and its very narrow natural optical glow must be exactly pure black. No candle, no wick object, lamp, glass chimney, holder, wood, floor, smoke, reflected flame, shadows, backdrop texture, text, watermark or checkerboard. Opaque RGB PNG intentionally, not transparency; black will be added optically over a separate lamp.

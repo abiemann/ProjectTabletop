@@ -58,3 +58,31 @@ After one image-tool cleanup pass, the user's approved alpha-only cleanup cleare
 main component. All RGB values and the antialiased torn edges were preserved;
 exterior transparency was verified from the decoded PNG. Details and prompts are
 in [gallery-paper-puncture-prompts.txt](gallery-paper-puncture-prompts.txt).
+
+`gallery-crystal-skull.png` is an original 1254 × 1254 RGBA crystal skull generated
+with the built-in image tool on 2026-10-25. Its polished facets, refraction, teeth
+and eye sockets are photographic artwork. The renderer reuses it for the five
+upper-shelf targets, with animated side-light reflections and fragments sampled
+from the same crystal texture.
+
+After a targeted image-tool cleanup attempt left exterior residue, the user
+approved clearing precisely 2,697 nearly invisible exterior pixels: 2,683 at
+alpha 1 and 14 at alpha 2. All RGB values and every other alpha value are
+unchanged. Canvas edges and representative exterior pixels are alpha zero.
+The native dimensions, measured silhouette, hash, prompts and exact cleanup
+criteria are recorded in [gallery-crystal-skull-prompts.txt](gallery-crystal-skull-prompts.txt).
+
+`gallery-unlit-lamps.png` is a 1672 × 941 image-tool edit of the saloon, with
+only the two main chimney flames removed. The renderer samples this image only
+inside the physical glass-chimney outlines, retaining the original saloon
+everywhere else.
+
+`gallery-candle-flames.png` contains eight photographic flame poses in a 4 × 2
+sheet at 1774 × 887 native pixels. It is deliberately opaque RGB on black for
+additive light composition, not a transparent cutout. Both PNGs are unmodified
+built-in image-tool outputs. The renderer removes the tiny black-level residue
+in its cached light texture and balances blue light against the warm glass so
+the projected base does not resemble a magenta aiming dot. It anchors the flames
+at the wicks, blends adjacent poses, and uses independent lamp timing. See
+[gallery-lamps-prompts.txt](gallery-lamps-prompts.txt) for prompts, hashes and
+measured placement details.

@@ -54,7 +54,7 @@ public class DuckHuntGalleryTests
         Assert.Equal(1, game.Snapshot.ConveyorPosition);
         var stopped = game.Snapshot;
         game.Advance(At(90000));
-        Assert.Equal(stopped, game.Snapshot);
+        Assert.Equal(stopped with { Revision = game.Snapshot.Revision, AnimationSeconds = game.Snapshot.AnimationSeconds }, game.Snapshot);
     }
 
     [Fact]
@@ -494,8 +494,10 @@ public class DuckHuntGalleryTests
         Assert.True(board.TryDuckHuntShot(Play, At(100)));
         board.TickDuckHunt(At(4000));
         for (int i = 0; i < 5; i++)
+            Assert.True(board.TryDuckHuntShot(SkullCenter(i), At(4000 + i * 10)));
+        for (int i = 0; i < 5; i++)
             Assert.True(board.TryDuckHuntShot(PaperPoint(DuckHuntGalleryLayout.TargetQuad(i,
-                board.GalleryState, 1)), At(4000 + i * 10)));
+                board.GalleryState, 1)), At(4100 + i * 10)));
         long epoch = board.DuckHuntRoundRevision;
         board.TickDuckHunt(At(10000));
         Assert.Equal(DuckHuntGalleryPhase.Ready, board.GalleryState.Phase);
@@ -525,9 +527,18 @@ public class DuckHuntGalleryTests
 
     private static DuckHuntGalleryGame Completed()
     {
-        var game = Waiting();
+        var game = Started();
+        game.Advance(At(1300));
+        for (int i = 0; i < 5; i++) Assert.True(game.Shoot(SkullCenter(i), At(1400 + i * 10)));
+        game.Advance(At(3900));
         for (int i = 0; i < 5; i++) Assert.True(game.Shoot(PaperPoint(Target(game, i)), At(4000 + i * 10)));
         return game;
+    }
+
+    private static BoardAim SkullCenter(int index, double aspect = 1)
+    {
+        var bounds = DuckHuntGalleryLayout.SkullBounds(index, aspect);
+        return new(bounds.X + bounds.Width * .5, bounds.Y + bounds.Height * .5);
     }
 
     private static DuckHuntGalleryQuad Target(DuckHuntGalleryGame game, int index, double aspect = 1) =>

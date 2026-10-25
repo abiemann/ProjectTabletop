@@ -159,7 +159,8 @@ public sealed partial class MainWindow
                 scene.SetDuckHuntAudioStatus(true, "Isolated microphone fixture");
                 Check(!scene.DuckHuntBoardReady && !scene.DuckHuntInputReady && scene.GetDuckHuntInputContext() is null,
                     $"The {stage} view requests microphone/laser gameplay input.");
-                Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.Ready, HitTargets: 0, Shots: 0 } &&
+                Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.Ready, HitTargets: 0, Shots: 0, SkullHitMask: 0,
+                        UpperPhase: DuckHuntGalleryUpperPhase.Closed } &&
                     board.GalleryPunctures.Count == 0 && scene.DuckHuntMeasurement is
                         { LiveDetectedXY: null, OldDetectedXY: null, NewDetectedXY: null },
                     $"The {stage} view retained a gallery round, puncture or shot mark.");
@@ -172,7 +173,8 @@ public sealed partial class MainWindow
                 Check(scene.DuckHuntBoardReady && scene.DuckHuntInputReady && scene.GetDuckHuntInputContext() is not null,
                     $"The {stage} view cannot listen for a shot on START.");
                 Check(scene.HuntFlightState is { Phase: DuckHuntFlightPhase.Ready, Score: 0, BirdsLaunched: 0 } &&
-                    scene.GalleryState is { Phase: DuckHuntGalleryPhase.Ready, HitTargets: 0, Shots: 0 } &&
+                    scene.GalleryState is { Phase: DuckHuntGalleryPhase.Ready, HitTargets: 0, Shots: 0, SkullHitMask: 0,
+                        UpperPhase: DuckHuntGalleryUpperPhase.Closed } &&
                     board.GalleryPunctures.Count == 0,
                     $"The {stage} view started birds without a shot or retained Target Practice state.");
                 Check(!scene.ActivateDuckHuntAt(.5, .5) &&

@@ -1,0 +1,26 @@
+Crystal skull gallery target
+Date: 2026-10-25
+Generation: built-in image_gen tool, transparent_background=true.
+Final asset: gallery-crystal-skull.png
+Native dimensions: 1254 x 1254 RGBA PNG; no resizing.
+SHA256: 3F3917E05F746C9B4C828E0F7BE0D6A58D1DBA59FCF1D0DDFC75E70E26250010
+
+Original photorealistic clear-crystal skull artwork for the upper Target Practice saloon shelf. The selected image is the initial generation: a full frontal skull with a complete lower jaw, readable teeth and eye sockets, polished crystalline facets, neutral internal reflections and restrained warm side-light highlights. It has no platform or exterior shadow. Runtime light modulation belongs to the renderer; the source image itself is static.
+
+Image geometry in full-canvas coordinates:
+- Canvas aspect: 1.0; preserve aspect when drawing.
+- Approximate jaw contact: (627,1207), UV (0.5,0.9625199362).
+- Alpha>=128 silhouette bounds: (204,44)-(1049,1208), inclusive.
+- Alpha>=8 bounds: (203,42)-(1050,1209), inclusive.
+- Final alpha>0 bounds: (196,35)-(1057,1216), inclusive; this includes the retained anti-aliased contour.
+- The skull silhouette is narrower than its square canvas. Do not stretch the canvas to the silhouette's ratio.
+
+The image tool left faint isolated background residue after the initial generation and after one targeted cleanup attempt. With explicit user approval, a script cleared only 2,697 exterior pixels: 2,683 with alpha=1 and 14 with alpha=2, each farther than seven pixels (Chebyshev distance) from the largest 8-connected component whose alpha>=8. No other alpha value and no RGB value was changed. The decoded final PNG was compared with the selected source: exactly 2,697 alpha-only clears, zero RGB changes, unchanged dimensions, all canvas-boundary pixels alpha0. Representative exterior points (100,600), (1100,600), (600,15), (600,1238), (300,1150) and (950,1150), and all four corners, are also alpha0. No resizing, color correction, shadow, glow, blur, matte or background was added.
+
+Initial generation prompt:
+Use case: product-mockup. Asset type: one premium photorealistic crystal skull sprite for a late-Victorian shooting-gallery saloon game, to be placed on a wooden shelf against a warm ivory plaster wall. Create a beautifully crafted human skull carved from entirely clear COLORLESS polished lead crystal, with a complete closed lower jaw and individual carved teeth. Real optical glass, not bone, stone, metal or plastic. Detailed rounded cranium, strong readable eye sockets, nasal cavity, cheekbones and teeth at small display size. Rich physically plausible internal refraction, total internal reflections, fine polished bevels and a few precise crystal facets; restrained dark neutral glass edges and luminous transparent pale silver interior, avoiding a black opaque skull. Subtle small pale-gold highlights from two warm oil sconces far to the left and right, with neutral cool silver fill. These highlights are trapped within the crystal, not glows outside it. Frontal symmetric view, very slightly looking down so the top of the cranium is visible, long lens product photography with almost no perspective distortion. Skull rests on its own lower jaw with a visually level contact, no pedestal or stand. Entire skull visible with 4 percent clear padding, roughly square portrait composition, isolated centered, high resolution natural photographic detail, crisp antialiased silhouette. No text, people, weapons, blood, cracks, holes, smoke, sparks, extra objects, ground, shelf, floor, backdrop or cast shadow. Genuine transparent RGBA PNG: all intended exterior pixels must have alpha 0, absolutely no background haze, alpha-1 speckles, matte, halo, checkerboard pattern or shadow rectangle. Crystal itself may have genuine semitransparency while retaining the visible refraction and readable facial features.
+
+Image-tool cleanup attempt (not selected):
+Background extraction only: preserve this exact beautifully detailed transparent crystal skull, its complete silhouette, colors, faceted optical refraction, eyes, nose, jaw and teeth. Preserve its size and frontal pose exactly. Remove every stray nearly invisible alpha-1/alpha-2 pixel in the exterior background and outside the skull contour, including all canvas-edge pixels. Make every intended exterior background pixel alpha=0, with no residual speckles, haze, glow, ground shadow, matte or checkerboard. Preserve clean natural antialiasing immediately along the skull contour. Do not change the crystal interior or its highlights and do not flatten transparency. This is a clean product cutout asset, RGBA PNG with truly empty exterior.
+
+The cleanup attempt preserved the general artwork but left more faint exterior pixels, so the approved minimal alpha correction was applied to the initial generation instead.

@@ -108,10 +108,14 @@ public sealed partial class SceneCompositor
             new() { Position = .35f, Color = Color.FromArgb(0, 0, 0, 0) },
             new() { Position = 1, Color = Color.FromArgb(110, 0, 0, 0) }
         ]);
+        PrepareGalleryCandles(device);
+        PrepareGallerySkulls(device);
     }
 
     private void DisposeDuckHuntGalleryResources()
     {
+        DisposeGalleryCandles();
+        DisposeGallerySkulls();
         _galleryFlapEffect?.Dispose();
         if (_galleryTargetEffects is not null) foreach (var effect in _galleryTargetEffects) effect?.Dispose();
         if (_galleryTargets is not null) foreach (var target in _galleryTargets) target?.Dispose();
@@ -132,6 +136,9 @@ public sealed partial class SceneCompositor
         var frame = DuckHuntGalleryLayout.SceneBounds(aspect);
         drawing.DrawImage(scene, GalleryRect(frame), new Rect(0, 0, scene.Size.Width, scene.Size.Height),
             1, CanvasImageInterpolation.HighQualityCubic);
+        GalleryLampVisualFrame(_blackjackClock());
+        DrawGalleryCandles(drawing, aspect);
+        DrawGalleryUpperStage(drawing, state, aspect);
         if (state.FlapAngleDegrees > .001)
         {
             var aperture = GallerySceneRect(DuckHuntGalleryLayout.FlapSceneBounds, aspect);

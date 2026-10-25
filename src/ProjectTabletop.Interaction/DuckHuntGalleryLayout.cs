@@ -45,12 +45,27 @@ public readonly record struct DuckHuntGalleryQuad(
 public readonly record struct DuckHuntGalleryTargetPose(DuckHuntGalleryQuad Quad,
     BoardAim BaseContact, double TiltDegrees, bool Supported, bool InFrontOfLip);
 
+public readonly record struct DuckHuntGallerySkullPose(BoardRect Bounds, BoardAim BaseContact);
+
 /// <summary>Scene anchors for the approved 16:9 saloon artwork. The entire scene
 /// is contained on every board aspect so all five papers remain reachable.</summary>
 public static class DuckHuntGalleryLayout
 {
     public const double SceneAspect = 1672.0 / 941;
     public const double TargetAspect = .88;
+    public const double SkullAspect = 1, SkullBaseU = .5, SkullBaseV = 1207.0 / 1254;
+    private static readonly BoardAim[] SkullSilhouette =
+    [
+        new(610, 44), new(644, 44), new(711, 53), new(789, 80), new(899, 150), new(984, 250),
+        new(1029, 350), new(1048, 450), new(1042, 550), new(1011, 650), new(1011, 690),
+        new(1029, 730), new(1006, 770), new(986, 810), new(967, 821), new(960, 850), new(932, 900),
+        new(916, 908), new(912, 1000), new(900, 1100), new(803, 1170), new(764, 1190),
+        new(738, 1200), new(712, 1205), new(672, 1208), new(582, 1208), new(541, 1205),
+        new(516, 1200), new(489, 1190), new(451, 1170), new(354, 1100), new(341, 1000),
+        new(338, 908), new(321, 900), new(294, 850), new(285, 821), new(267, 810),
+        new(247, 770), new(224, 730), new(242, 690), new(242, 650), new(212, 550),
+        new(205, 450), new(224, 350), new(269, 250), new(355, 150), new(465, 80), new(546, 53)
+    ];
     // Measured in the 1177×1337 assembly, contained in the existing 0.88 surface.
     public const double PaperCenterU = 585.5 / 1177;
     public const double PaperCenterV = .5 + (536.5 - 1337.0 / 2) * TargetAspect / 1177;
@@ -68,6 +83,7 @@ public static class DuckHuntGalleryLayout
     });
     public static readonly BoardRect PlayBounds = new(.39, .40, .22, .12);
     public static readonly BoardRect FlapSceneBounds = new(.124, .577, .748, .129);
+    public static readonly BoardRect UpperPanelSceneBounds = new(.114, .172, .762, .170);
     public const double BeltBackV = .708, BeltFrontV = .795;
 
     public static bool ContainsPaper(BoardAim local)
@@ -93,6 +109,31 @@ public static class DuckHuntGalleryLayout
     {
         var scene = SceneBounds(boardAspect);
         return new(scene.X + u * scene.Width, scene.Y + v * scene.Height);
+    }
+
+    public static BoardRect SkullBounds(int index, double boardAspect = 1) => SkullPose(index, boardAspect).Bounds;
+
+    public static DuckHuntGallerySkullPose SkullPose(int index, double boardAspect = 1)
+    {
+        if (index is < 0 or >= DuckHuntGalleryGame.SkullCount ||
+            !double.IsFinite(boardAspect) || boardAspect <= 0) return default;
+        const double height = .135, shelfV = .342;
+        double width = height * SkullAspect / SceneAspect;
+        double center = .5 + (index - 2) * .14;
+        var scene = SceneBounds(boardAspect);
+        var topLeft = ScenePoint(center - width * SkullBaseU, shelfV - height * SkullBaseV, boardAspect);
+        return new(new(topLeft.U, topLeft.V, width * scene.Width, height * scene.Height),
+            ScenePoint(center, shelfV, boardAspect));
+    }
+
+    public static bool ContainsSkull(int index, BoardAim point, double boardAspect = 1)
+    {
+        if (index is < 0 or >= DuckHuntGalleryGame.SkullCount ||
+            !double.IsFinite(point.U) || !double.IsFinite(point.V) ||
+            !double.IsFinite(boardAspect) || boardAspect <= 0) return false;
+        var bounds = SkullBounds(index, boardAspect);
+        return BoardPolygon.Contains(SkullSilhouette, new(
+            (point.U - bounds.X) / bounds.Width * 1254, (point.V - bounds.Y) / bounds.Height * 1254));
     }
 
     public static DuckHuntGalleryQuad TargetQuad(int index, DuckHuntGallerySnapshot state, double boardAspect = 1) =>

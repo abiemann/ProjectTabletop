@@ -256,6 +256,7 @@ public sealed partial class MainWindow
                         flightBefore.StartVisible && !flightAfter.StartVisible ? "Hunt started" :
                         flightAfter.Shots > flightBefore.Shots ? "Shot missed" : "No active target hit"
                     : after.Cycle > before.Cycle ? "Gallery started" :
+                        after.SkullHitMask != before.SkullHitMask ? "Crystal skull hit" :
                         _scene.GalleryPunctures.Count > puncturesBefore ? "Paper target hit" :
                         after.Shots > before.Shots ? "Shot missed" : "No active target hit";
                 Report(accepted ? acceptedOutcome : dot.Detected ? "Snapshot rejected by current board" :
