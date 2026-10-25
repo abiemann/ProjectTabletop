@@ -147,12 +147,13 @@ public class DuckHuntGalleryTests
         }
         for (int i = 0; i < outside.Count; i++)
         {
+            game = Waiting();
             var local = outside[i];
             Assert.False(DuckHuntGalleryLayout.ContainsPaper(local));
             Assert.True(target.TryMapToLocal(target.Map(local.U, local.V), out _));
             Assert.False(game.Shoot(target.Map(local.U, local.V), At(4000 + i * 10), aspect));
+            Assert.Equal(1, game.Snapshot.Shots);
         }
-        Assert.Equal(outside.Count, game.Snapshot.Shots);
         Assert.Equal(0, game.Snapshot.HitTargets);
         Assert.Empty(game.Punctures);
         Assert.False(DuckHuntGalleryLayout.ContainsPaper(new(double.NaN, .5)));
@@ -214,7 +215,7 @@ public class DuckHuntGalleryTests
     }
 
     [Fact]
-    public void CompletedRowWaitsOneSecondThenDepartsFallsClosesAndWaitsForAnotherPlay()
+    public void CompletedRowWaitsOneSecondThenDepartsFallsClosesAndStartsTheMiddleSequence()
     {
         var game = Completed();
         game.Advance(At(5039));
@@ -236,13 +237,18 @@ public class DuckHuntGalleryTests
         Assert.Equal(47.5, game.Snapshot.FlapAngleDegrees, 10);
         game.Advance(At(7940));
         Assert.Equal(DuckHuntGalleryPhase.Ready, game.Snapshot.Phase);
-        Assert.True(game.Snapshot.PlayVisible);
+        Assert.False(game.Snapshot.PlayVisible);
+        Assert.Equal(DuckHuntGalleryMiddlePhase.Raising, game.Snapshot.MiddlePhase);
         Assert.Equal(0, game.Snapshot.FlapAngleDegrees);
         Assert.Equal(5, game.Punctures.Count);
         Assert.False(game.Shoot(Play, At(7939)));
         Assert.False(game.Shoot(new(.01, .01), At(7941)));
         Assert.Equal(5, game.Punctures.Count);
-        Assert.True(game.Shoot(Play, At(7950)));
+        Assert.False(game.Shoot(Play, At(7950)));
+        game.Advance(At(33940));
+        Assert.True(game.Snapshot.PlayVisible);
+        Assert.False(game.Shoot(Play, At(33939)));
+        Assert.True(game.Shoot(Play, At(33950)));
         Assert.Empty(game.Punctures);
         Assert.Equal(2, game.Snapshot.Cycle);
         Assert.Equal(0, game.Snapshot.HitTargets);
@@ -503,7 +509,15 @@ public class DuckHuntGalleryTests
         Assert.Equal(DuckHuntGalleryPhase.Ready, board.GalleryState.Phase);
         Assert.False(board.DuckHuntDrawerOpen);
         Assert.Equal("duck-hunt-drawer-open", Assert.Single(board.Buttons).Id);
+        Assert.False(board.GalleryState.PlayVisible);
+        // The former PLAY position now overlaps the middle paper; this is a
+        // normal paper hit, not another round or input epoch.
         Assert.True(board.TryDuckHuntShot(Play, At(10010)));
+        Assert.Equal(epoch, board.DuckHuntRoundRevision);
+        Assert.Equal(1, board.GalleryState.Cycle);
+        board.TickDuckHunt(At(35000));
+        Assert.True(board.GalleryState.PlayVisible);
+        Assert.True(board.TryDuckHuntShot(Play, At(35010)));
         Assert.Equal(epoch + 1, board.DuckHuntRoundRevision);
         Assert.Empty(board.GalleryPunctures);
         Assert.False(board.TryDuckHuntShot(Play, At(4000)));

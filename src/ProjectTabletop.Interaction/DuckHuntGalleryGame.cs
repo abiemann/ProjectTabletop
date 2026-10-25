@@ -12,6 +12,11 @@ public enum DuckHuntGalleryUpperPhase
     Closed, Raising, WaitingForHits, ShatterWait, Lowering
 }
 
+public enum DuckHuntGalleryMiddlePhase
+{
+    Closed, Raising, Entering, TurningToFace, WaitingForHit, TurningAway, Leaving, Lowering, Complete
+}
+
 public readonly record struct DuckHuntGalleryPuncture(
     int TargetIndex, double U, double V, DateTimeOffset ShotTime);
 
@@ -21,9 +26,13 @@ public readonly record struct DuckHuntGallerySnapshot(DuckHuntGalleryPhase Phase
     DuckHuntGalleryUpperPhase UpperPhase = DuckHuntGalleryUpperPhase.Closed,
     double UpperOpenProgress = 0, int SkullHitMask = 0, double AnimationSeconds = 0,
     double Skull0HitSeconds = -1, double Skull1HitSeconds = -1, double Skull2HitSeconds = -1,
-    double Skull3HitSeconds = -1, double Skull4HitSeconds = -1)
+    double Skull3HitSeconds = -1, double Skull4HitSeconds = -1,
+    DuckHuntGalleryMiddlePhase MiddlePhase = DuckHuntGalleryMiddlePhase.Closed,
+    double MiddleOpenProgress = 0, int MiddleTargetIndex = -1,
+    double MiddleMotionProgress = 0, int MiddleHitMask = 0)
 {
-    public bool PlayVisible => Phase == DuckHuntGalleryPhase.Ready && UpperPhase == DuckHuntGalleryUpperPhase.Closed;
+    public bool PlayVisible => Phase == DuckHuntGalleryPhase.Ready && UpperPhase == DuckHuntGalleryUpperPhase.Closed &&
+        MiddlePhase is DuckHuntGalleryMiddlePhase.Closed or DuckHuntGalleryMiddlePhase.Complete;
     public bool TargetsVisible => Phase is not (DuckHuntGalleryPhase.Ready or DuckHuntGalleryPhase.Closing);
     public bool UpperTargetsVisible => UpperPhase != DuckHuntGalleryUpperPhase.Closed;
     public int HitTargets => BitOperations.PopCount((uint)HitMask);
@@ -35,12 +44,14 @@ public readonly record struct DuckHuntGallerySnapshot(DuckHuntGalleryPhase Phase
     };
 }
 
-/// <summary>Parallel paper and crystal-skull galleries share one shot-only PLAY.
-/// Each row accepts validated click photos and completes independently.</summary>
+/// <summary>Independent paper and skull rows lead into a timed middle gallery.
+/// Validated camera timestamps decide hits, including near exposure deadlines.</summary>
 public sealed class DuckHuntGalleryGame
 {
     public const int TargetCount = 5;
     public const int SkullCount = 5;
+    public const int MiddleTargetCount = 5;
+    public const int MiddlePunctureOffset = TargetCount;
     public static readonly TimeSpan OpeningDuration = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan RevealWaitDuration = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan AdvanceDuration = TimeSpan.FromSeconds(1.8);
@@ -51,6 +62,15 @@ public sealed class DuckHuntGalleryGame
     public static readonly TimeSpan UpperRaiseDuration = TimeSpan.FromSeconds(1.2);
     public static readonly TimeSpan UpperShatterWaitDuration = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan UpperLowerDuration = TimeSpan.FromSeconds(1.2);
+    public static readonly TimeSpan MiddleRaiseDuration = TimeSpan.FromSeconds(1);
+    public static readonly TimeSpan MiddleEnterDuration = TimeSpan.FromSeconds(.65);
+    public static readonly TimeSpan MiddleTurnDuration = TimeSpan.FromSeconds(.25);
+    public static readonly TimeSpan MiddleFaceDuration = TimeSpan.FromSeconds(3);
+    public static readonly TimeSpan MiddleLeaveDuration = TimeSpan.FromSeconds(.65);
+    public static readonly TimeSpan MiddleLowerDuration = TimeSpan.FromSeconds(1);
+    public static readonly TimeSpan MiddleTargetDuration = MiddleEnterDuration + MiddleTurnDuration +
+        MiddleFaceDuration + MiddleTurnDuration + MiddleLeaveDuration;
+    public static readonly TimeSpan MiddleSequenceDuration = MiddleRaiseDuration + MiddleTargetDuration * MiddleTargetCount + MiddleLowerDuration;
 
     private readonly List<DuckHuntGalleryPuncture> _punctures = new(32);
     private readonly IReadOnlyList<DuckHuntGalleryPuncture> _readOnlyPunctures;
@@ -58,9 +78,11 @@ public sealed class DuckHuntGalleryGame
     private DateTimeOffset _upperPhaseStartedAt, _playStartedAt;
     private DateTimeOffset _lastShotAt = DateTimeOffset.MinValue;
     private DateTimeOffset? _pausedAt = DateTimeOffset.MinValue;
+    private DateTimeOffset? _middleStartedAt;
     private bool _ready;
     private int _hitMask, _shots, _cycle;
     private int _skullHitMask;
+    private int _middleHitMask;
     private double _skull0HitSeconds = -1, _skull1HitSeconds = -1, _skull2HitSeconds = -1,
         _skull3HitSeconds = -1, _skull4HitSeconds = -1;
     private DuckHuntGalleryPhase _phase = DuckHuntGalleryPhase.Ready;
@@ -82,6 +104,8 @@ public sealed class DuckHuntGalleryGame
         _hitMask = _shots = _cycle = 0;
         _phase = DuckHuntGalleryPhase.Ready;
         _upperPhase = DuckHuntGalleryUpperPhase.Closed;
+        _middleStartedAt = null;
+        _middleHitMask = 0;
         ClearSkulls();
         _punctures.Clear();
         Publish(now);
@@ -98,6 +122,7 @@ public sealed class DuckHuntGalleryGame
             _phaseStartedAt += pause;
             _upperPhaseStartedAt += pause;
             _playStartedAt += pause;
+            if (_middleStartedAt is { } middle) _middleStartedAt = middle + pause;
             _pausedAt = null;
             _inputNotBefore = now;
         }
@@ -139,6 +164,9 @@ public sealed class DuckHuntGalleryGame
                     _ => DuckHuntGalleryUpperPhase.Closed
                 };
             }
+            if (_cycle > 0 && _middleStartedAt is null && _phase == DuckHuntGalleryPhase.Ready &&
+                _upperPhase == DuckHuntGalleryUpperPhase.Closed)
+                _middleStartedAt = _phaseStartedAt > _upperPhaseStartedAt ? _phaseStartedAt : _upperPhaseStartedAt;
         }
         Publish(_pausedAt ?? now);
     }
@@ -153,12 +181,15 @@ public sealed class DuckHuntGalleryGame
         Advance(shotTime > _observedAt ? shotTime : _observedAt);
         if (_snapshot.PlayVisible)
         {
-            if (shotTime < _phaseStartedAt || shotTime < _upperPhaseStartedAt) return false;
+            if (shotTime < _phaseStartedAt || shotTime < _upperPhaseStartedAt ||
+                _middleStartedAt is { } middleStart && shotTime < middleStart + MiddleSequenceDuration) return false;
             _lastShotAt = shotTime;
             if (!DuckHuntGalleryLayout.PlayBounds.Contains(point.U, point.V)) return false;
             _punctures.Clear();
             _hitMask = _shots = 0;
             _cycle++;
+            _middleStartedAt = null;
+            _middleHitMask = 0;
             _phase = DuckHuntGalleryPhase.Opening;
             _phaseStartedAt = _inputNotBefore = shotTime;
             _upperPhase = DuckHuntGalleryUpperPhase.Raising;
@@ -169,14 +200,18 @@ public sealed class DuckHuntGalleryGame
         }
         bool paperReady = _phase == DuckHuntGalleryPhase.WaitingForHits && shotTime >= _phaseStartedAt;
         bool skullReady = _upperPhase == DuckHuntGalleryUpperPhase.WaitingForHits && shotTime >= _upperPhaseStartedAt;
-        if (!paperReady && !skullReady) return false;
+        var middleAtShot = MiddleAt(shotTime);
+        bool middleReady = middleAtShot.Phase == DuckHuntGalleryMiddlePhase.WaitingForHit;
+        if (!paperReady && !skullReady && !middleReady) return false;
         _lastShotAt = shotTime;
         _shots++;
-        bool hit = false;
+        bool hit = false, overAssembly = false;
         for (int index = 0; paperReady && index < TargetCount; index++)
         {
             var paper = DuckHuntGalleryLayout.TargetQuad(index, _snapshot, boardAspect);
-            if (!paper.TryMapToLocal(point, out var local) || !DuckHuntGalleryLayout.ContainsPaper(local)) continue;
+            if (!paper.TryMapToLocal(point, out var local)) continue;
+            overAssembly |= DuckHuntGalleryLayout.ContainsAssembly(local);
+            if (!DuckHuntGalleryLayout.ContainsPaper(local)) continue;
             _punctures.Add(new(index, local.U, local.V, shotTime));
             _hitMask |= 1 << index;
             hit = true;
@@ -207,6 +242,30 @@ public sealed class DuckHuntGalleryGame
                 _upperPhase = DuckHuntGalleryUpperPhase.ShatterWait;
                 _upperPhaseStartedAt = shotTime;
             }
+        }
+        if (!hit && middleReady)
+        {
+            var paper = DuckHuntGalleryLayout.MiddleTargetQuad(_snapshot with
+            {
+                MiddlePhase = middleAtShot.Phase, MiddleTargetIndex = middleAtShot.Index,
+                MiddleMotionProgress = middleAtShot.Progress
+            }, boardAspect);
+            if (paper.TryMapToLocal(point, out var local) && DuckHuntGalleryLayout.ContainsPaper(local))
+            {
+                _punctures.Add(new(MiddlePunctureOffset + middleAtShot.Index, local.U, local.V, shotTime));
+                _middleHitMask |= 1 << middleAtShot.Index;
+                hit = true;
+            }
+        }
+        if (!hit && !overAssembly && paperReady && DuckHuntGalleryLayout.ContainsLowerMiss(point, boardAspect))
+        {
+            _phase = DuckHuntGalleryPhase.Departing;
+            _phaseStartedAt = shotTime;
+        }
+        if (!hit && skullReady && DuckHuntGalleryLayout.ContainsUpperMiss(point, boardAspect))
+        {
+            _upperPhase = DuckHuntGalleryUpperPhase.Lowering;
+            _upperPhaseStartedAt = shotTime;
         }
         Advance(shotTime > _observedAt ? shotTime : _observedAt);
         return hit;
@@ -271,11 +330,45 @@ public sealed class DuckHuntGalleryGame
         };
         var animationAt = _upperPhase == DuckHuntGalleryUpperPhase.Closed ? _upperPhaseStartedAt : now;
         double animation = _cycle == 0 ? 0 : Math.Floor(Math.Max(0, (animationAt - _playStartedAt).TotalSeconds) * 60) / 60;
+        var middle = MiddleAt(now);
         var next = new DuckHuntGallerySnapshot(_phase, angle, belt, fall,
             _hitMask, _shots, _cycle, _snapshot.Revision, !_ready, _upperPhase, upperOpen, _skullHitMask, animation,
-            _skull0HitSeconds, _skull1HitSeconds, _skull2HitSeconds, _skull3HitSeconds, _skull4HitSeconds);
+            _skull0HitSeconds, _skull1HitSeconds, _skull2HitSeconds, _skull3HitSeconds, _skull4HitSeconds,
+            middle.Phase, middle.Open, middle.Index, middle.Progress, _middleHitMask);
         if (next != _snapshot) _snapshot = next with { Revision = _snapshot.Revision + 1 };
     }
 
     private static double Smooth(double value) => value * value * (3 - 2 * value);
+
+    private (DuckHuntGalleryMiddlePhase Phase, double Open, int Index, double Progress) MiddleAt(DateTimeOffset now)
+    {
+        if (_middleStartedAt is not { } started || now < started)
+            return (DuckHuntGalleryMiddlePhase.Closed, 0, -1, 0);
+        TimeSpan elapsed = now - started;
+        if (elapsed < MiddleRaiseDuration)
+            return (DuckHuntGalleryMiddlePhase.Raising, Smooth(elapsed / MiddleRaiseDuration), -1, 0);
+        elapsed -= MiddleRaiseDuration;
+        int index = (int)(elapsed.Ticks / MiddleTargetDuration.Ticks);
+        if (index >= MiddleTargetCount)
+        {
+            elapsed -= MiddleTargetDuration * MiddleTargetCount;
+            return elapsed < MiddleLowerDuration
+                ? (DuckHuntGalleryMiddlePhase.Lowering, 1 - Smooth(elapsed / MiddleLowerDuration), -1, 0)
+                : (DuckHuntGalleryMiddlePhase.Complete, 0, -1, 0);
+        }
+        elapsed -= MiddleTargetDuration * index;
+        if (elapsed < MiddleEnterDuration)
+            return (DuckHuntGalleryMiddlePhase.Entering, 1, index, elapsed / MiddleEnterDuration);
+        elapsed -= MiddleEnterDuration;
+        if (elapsed < MiddleTurnDuration)
+            return (DuckHuntGalleryMiddlePhase.TurningToFace, 1, index, elapsed / MiddleTurnDuration);
+        elapsed -= MiddleTurnDuration;
+        if (elapsed < MiddleFaceDuration)
+            return (DuckHuntGalleryMiddlePhase.WaitingForHit, 1, index, 0);
+        elapsed -= MiddleFaceDuration;
+        if (elapsed < MiddleTurnDuration)
+            return (DuckHuntGalleryMiddlePhase.TurningAway, 1, index, elapsed / MiddleTurnDuration);
+        elapsed -= MiddleTurnDuration;
+        return (DuckHuntGalleryMiddlePhase.Leaving, 1, index, elapsed / MiddleLeaveDuration);
+    }
 }

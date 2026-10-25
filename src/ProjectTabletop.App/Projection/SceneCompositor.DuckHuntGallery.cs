@@ -20,6 +20,7 @@ public sealed partial class SceneCompositor
     private CanvasLinearGradientBrush? _galleryApertureBrush, _galleryBeltShade;
     private int _galleryCachedCycle = -1, _galleryCachedPunctures = -1;
     private int _galleryCachedImpactFrame = -1;
+    private int _galleryCachedMiddleTarget = -1;
     private double _galleryCachedAspect;
     private float _galleryCachedRasterWidth;
 
@@ -110,12 +111,14 @@ public sealed partial class SceneCompositor
         ]);
         PrepareGalleryCandles(device);
         PrepareGallerySkulls(device);
+        PrepareGalleryMiddle(device);
     }
 
     private void DisposeDuckHuntGalleryResources()
     {
         DisposeGalleryCandles();
         DisposeGallerySkulls();
+        DisposeGalleryMiddle();
         _galleryFlapEffect?.Dispose();
         if (_galleryTargetEffects is not null) foreach (var effect in _galleryTargetEffects) effect?.Dispose();
         if (_galleryTargets is not null) foreach (var target in _galleryTargets) target?.Dispose();
@@ -127,6 +130,7 @@ public sealed partial class SceneCompositor
         _galleryPaperClip = null;
         _galleryApertureBrush = _galleryBeltShade = null;
         _galleryCachedCycle = _galleryCachedPunctures = -1;
+        _galleryCachedMiddleTarget = -1;
     }
 
     private void DrawDuckHuntGallery(CanvasDrawingSession drawing, DuckHuntGallerySnapshot state, double aspect)
@@ -139,6 +143,7 @@ public sealed partial class SceneCompositor
         GalleryLampVisualFrame(_blackjackClock());
         DrawGalleryCandles(drawing, aspect);
         DrawGalleryUpperStage(drawing, state, aspect);
+        DrawGalleryMiddleStage(drawing, state, aspect);
         if (state.FlapAngleDegrees > .001)
         {
             var aperture = GallerySceneRect(DuckHuntGalleryLayout.FlapSceneBounds, aspect);
@@ -218,23 +223,30 @@ public sealed partial class SceneCompositor
             _duckHuntGalleryImages?.Image("gallery-paper-puncture.png") is not { } puncture) return;
         var holes = _boardSession.GalleryPunctures;
         int impactFrame = GalleryVisualFrame(now);
+        int middleIndex = state.MiddleTargetIndex;
         float rasterWidth = Math.Max(1, _boardRasterPixels.Width);
         if (_galleryCachedCycle == state.Cycle && _galleryCachedPunctures == holes.Count &&
             _galleryCachedAspect == aspect && _galleryCachedRasterWidth == rasterWidth &&
-            _galleryCachedImpactFrame == impactFrame) return;
+            _galleryCachedImpactFrame == impactFrame && _galleryCachedMiddleTarget == middleIndex) return;
         var resting = state with { Phase = DuckHuntGalleryPhase.WaitingForHits, ConveyorPosition = 1, FallProgress = 0 };
-        for (int index = 0; index < _galleryTargets.Length; index++)
+        // Only one middle assembly is onstage, after the lower row has closed.
+        // Reuse its first cached surface instead of retaining another five copies.
+        int count = middleIndex >= 0 ? 1 : _galleryTargets.Length;
+        for (int index = 0; index < count; index++)
         {
             using var draw = _galleryTargets[index].CreateDrawingSession();
             draw.Clear(Color.FromArgb(0, 0, 0, 0));
             draw.DrawImage(_galleryTargetBase);
-            var quad = DuckHuntGalleryLayout.TargetQuad(index, resting, aspect);
+            int logicalIndex = middleIndex >= 0 ? DuckHuntGalleryGame.MiddlePunctureOffset + middleIndex : index;
+            var quad = middleIndex >= 0
+                ? DuckHuntGalleryLayout.MiddleTargetQuad(state with { MiddlePhase = DuckHuntGalleryMiddlePhase.WaitingForHit }, aspect)
+                : DuckHuntGalleryLayout.TargetQuad(index, resting, aspect);
             double diameter = Math.Clamp(20 / (quad.Bounds.Width * rasterWidth), .055, .18) * GalleryTargetWidth;
             double fullSize = diameter * 1254 / 807;
             using var paperLayer = draw.CreateLayer(1, _galleryPaperClip);
             foreach (var hole in holes)
             {
-                if (hole.TargetIndex != index) continue;
+                if (hole.TargetIndex != logicalIndex) continue;
                 double x = hole.U * GalleryTargetWidth, y = hole.V * GalleryTargetHeight;
                 double progress = Math.Clamp((now - hole.ShotTime).TotalSeconds / .22, 0, 1);
                 double spread = .72 + .28 * (1 - Math.Pow(1 - progress, 3)) + .06 * Math.Sin(progress * Math.PI);
@@ -246,6 +258,7 @@ public sealed partial class SceneCompositor
         _galleryCachedCycle = state.Cycle; _galleryCachedPunctures = holes.Count;
         _galleryCachedAspect = aspect; _galleryCachedRasterWidth = rasterWidth;
         _galleryCachedImpactFrame = impactFrame;
+        _galleryCachedMiddleTarget = middleIndex;
     }
 
     private void DrawGalleryTargets(CanvasDrawingSession drawing, DuckHuntGallerySnapshot state, double aspect, bool inFrontOfLip)

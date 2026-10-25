@@ -49,7 +49,7 @@ public readonly record struct DuckHuntGallerySkullPose(BoardRect Bounds, BoardAi
 
 /// <summary>Scene anchors for the approved 16:9 saloon artwork. The entire scene
 /// is contained on every board aspect so all five papers remain reachable.</summary>
-public static class DuckHuntGalleryLayout
+public static partial class DuckHuntGalleryLayout
 {
     public const double SceneAspect = 1672.0 / 941;
     public const double TargetAspect = .88;

@@ -258,6 +258,10 @@ public sealed partial class MainWindow
                     : after.Cycle > before.Cycle ? "Gallery started" :
                         after.SkullHitMask != before.SkullHitMask ? "Crystal skull hit" :
                         _scene.GalleryPunctures.Count > puncturesBefore ? "Paper target hit" :
+                        before.UpperPhase == DuckHuntGalleryUpperPhase.WaitingForHits &&
+                            after.UpperPhase == DuckHuntGalleryUpperPhase.Lowering ? "Miss closed upper row" :
+                        before.Phase == DuckHuntGalleryPhase.WaitingForHits &&
+                            after.Phase == DuckHuntGalleryPhase.Departing ? "Miss cleared lower row" :
                         after.Shots > before.Shots ? "Shot missed" : "No active target hit";
                 Report(accepted ? acceptedOutcome : dot.Detected ? "Snapshot rejected by current board" :
                     dot.Ambiguous ? "Ambiguous red dots" : "No red dot",

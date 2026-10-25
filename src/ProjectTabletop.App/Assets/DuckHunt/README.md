@@ -41,6 +41,11 @@ the paper. The renderer preserves the native aspect so the rings stay round;
 paper hit testing and puncture clipping share the measured surface geometry and
 exclude the metal clips.
 
+The middle-row challenge reuses this assembly and puncture artwork. Its holder
+travels along the shelf; the paper and retaining ring turn around the vertical
+stem while the circular pedestal remains supported. The rising middle backdrop
+is a cached crop of the original saloon panel, clipped inside its ornate frame.
+
 With the user's approval, an alpha-only cleanup removed 486 isolated alpha-1
 background pixels more than seven pixels from the object. Decoded-file checks
 confirmed unchanged RGB and object-edge alpha, with transparent canvas edges.

@@ -95,23 +95,17 @@ public sealed partial class MainWindow
         long roundRevision = board.DuckHuntRoundRevision;
         Check(!Snapshot(null, context.Epoch) && scene.GalleryState.SkullHitMask == 0,
             "A no-dot click shattered a skull.");
-        Check(Snapshot(new(skullBounds.X, skullBounds.Y), context.Epoch) && scene.GalleryState.SkullHitMask == 0,
-            "The empty sprite corner counted as crystal.");
         Check(Snapshot(skull, context.Epoch) && scene.GalleryState.SkullHitMask == 1 &&
             scene.GalleryState.HitTargets == 0 && scene.GalleryPunctures.Count == 0,
             "A skull photo hit did not remain independent of the paper row.");
         Check(board.DuckHuntRoundRevision == roundRevision && Context().Epoch == context.Epoch,
             "A skull hit reset the round or invalidated its camera context.");
-        Check(Snapshot(skull, context.Epoch) && scene.GalleryState.SkullHitMask == 1,
-            "A destroyed skull counted as another target.");
         var paperQuad = DuckHuntGalleryLayout.TargetQuad(0, scene.GalleryState, aspect);
         double paperU = DuckHuntGalleryLayout.PaperCenterU - .24 * DuckHuntGalleryLayout.PaperRadiusU;
         double paperV = DuckHuntGalleryLayout.PaperCenterV + .18 * DuckHuntGalleryLayout.PaperRadiusV;
         var paper = paperQuad.Map(paperU, paperV);
         Check(!Snapshot(null, context.Epoch) && scene.GalleryPunctures.Count == 0,
             "A no-dot click punctured a paper target.");
-        Check(Snapshot(paperQuad.Map(.02, .02), context.Epoch) && scene.GalleryPunctures.Count == 0 &&
-            scene.GalleryState.HitTargets == 0, "The rectangular sprite corner counted as round paper.");
         var holder = paperQuad.Map(DuckHuntGalleryLayout.PaperCenterU,
             (1 + DuckHuntGalleryLayout.PaperCenterV + DuckHuntGalleryLayout.PaperRadiusV) / 2);
         Check(Snapshot(holder, context.Epoch) && scene.GalleryPunctures.Count == 0 &&
@@ -138,6 +132,57 @@ public sealed partial class MainWindow
         Draw();
         Check(!scene.GalleryState.Paused && scene.GalleryPunctures.Count == 2 && scene.GalleryState.SkullHitMask == 3,
             "Microphone recovery reset either target row.");
+
+        // A real background hit now dismisses its row. Check those silhouette
+        // misses after the ordinary hits so they cannot hide target coverage.
+        Check(Snapshot(new(skullBounds.X, skullBounds.Y), context.Epoch) && scene.GalleryState is
+            { UpperPhase: DuckHuntGalleryUpperPhase.Lowering, SkullHitMask: 3,
+                Phase: DuckHuntGalleryPhase.WaitingForHits },
+            "A transparent skull corner did not close only the upper row.");
+        Check(Snapshot(skull, context.Epoch) && scene.GalleryState.SkullHitMask == 3,
+            "A closing or destroyed skull counted as another target.");
+        Check(!Snapshot(null, context.Epoch) && scene.GalleryState.Phase == DuckHuntGalleryPhase.WaitingForHits,
+            "A no-dot click closed the paper row.");
+        Check(Snapshot(paperQuad.Map(.02, .02), context.Epoch) && scene.GalleryPunctures.Count == 2 &&
+            scene.GalleryState is { Phase: DuckHuntGalleryPhase.Departing, HitTargets: 1 },
+            "A transparent paper corner counted as paper or failed to start belt cleanup.");
+        Check(Snapshot(paper, context.Epoch) && scene.GalleryPunctures.Count == 2,
+            "A departing paper accepted a new puncture.");
+        Check(board.DuckHuntRoundRevision == roundRevision && Context().Epoch == context.Epoch,
+            "A missed shot reset the round or invalidated the camera context.");
+
+        // The renderer may already have begun the quarter-turn when a fresh
+        // camera result arrives. Its photo timestamp, not render time, decides
+        // whether the three-second facing window was still open.
+        var boundaryClick = MonotonicClock.UtcNow;
+        var boundaryFrame = LaterThan(boundaryClick);
+        var faceDeadline = boundaryFrame + TimeSpan.FromTicks(1);
+        var lowerMissAt = faceDeadline - DuckHuntGalleryGame.DepartDuration - DuckHuntGalleryGame.FallDuration -
+            DuckHuntGalleryGame.ClosingDuration - DuckHuntGalleryGame.MiddleRaiseDuration -
+            DuckHuntGalleryGame.MiddleEnterDuration - DuckHuntGalleryGame.MiddleTurnDuration - DuckHuntGalleryGame.MiddleFaceDuration;
+        var boundaryBegan = lowerMissAt - TimeSpan.FromSeconds(4);
+        game.Reset(boundaryBegan);
+        game.SetReady(true, boundaryBegan);
+        Check(game.Shoot(play, boundaryBegan, aspect), "Could not prepare the middle photo-boundary fixture.");
+        game.Advance(lowerMissAt - TimeSpan.FromMilliseconds(1));
+        game.Shoot(DuckHuntGalleryLayout.ScenePoint(.5, .19, aspect), lowerMissAt - TimeSpan.FromMilliseconds(1), aspect);
+        game.Shoot(DuckHuntGalleryLayout.ScenePoint(.5, .78, aspect), lowerMissAt, aspect);
+        game.Advance(boundaryFrame);
+        Check(game.Snapshot.MiddlePhase == DuckHuntGalleryMiddlePhase.WaitingForHit,
+            "The captured middle-boundary frame was not face-on.");
+        var middleQuad = DuckHuntGalleryLayout.MiddleTargetQuad(game.Snapshot, aspect);
+        var middleAim = middleQuad.Map(paperU, paperV);
+        uiNow = faceDeadline + TimeSpan.FromMilliseconds(20);
+        Check(scene.SubmitDuckHuntSnapshot(middleAim, boundaryFrame, boundaryClick, LaterThan(boundaryFrame), context.Epoch) &&
+            scene.GalleryState.MiddlePhase == DuckHuntGalleryMiddlePhase.TurningAway &&
+            scene.GalleryPunctures.Count == 1 && scene.GalleryPunctures[0].TargetIndex == DuckHuntGalleryGame.MiddlePunctureOffset,
+            "A fresh face-on photo was lost because rendering had already begun turning away.");
+        Check(scene.SubmitDuckHuntSnapshot(middleAim, faceDeadline, boundaryFrame, LaterThan(faceDeadline), context.Epoch) &&
+            scene.GalleryPunctures.Count == 1,
+            "A photo at the exact three-second deadline punctured the turning target.");
+        Check(!Snapshot(null, context.Epoch) && scene.GalleryPunctures.Count == 1,
+            "A missing middle-stage dot changed the last puncture.");
+
         uiNow = MonotonicClock.UtcNow;
         scene.ShowDuckHunt();
         Check(!scene.DuckHuntBoardReady && scene.GetDuckHuntInputContext() is null &&

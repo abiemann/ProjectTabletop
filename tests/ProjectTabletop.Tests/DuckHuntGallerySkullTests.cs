@@ -36,7 +36,7 @@ public class DuckHuntGallerySkullTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void EitherRowCanFinishFirstButReplayWaitsForBoth(bool skullsFirst)
+    public void EitherRowCanFinishFirstButReplayWaitsForBothAndTheMiddleSequence(bool skullsFirst)
     {
         var game = Started();
         game.Advance(At(3900));
@@ -62,11 +62,14 @@ public class DuckHuntGallerySkullTests
         for (int i = 0; i < 5; i++)
             Assert.True(game.Shoot(skullsFirst ? Paper(game, i) : Skull(i), At(8100 + i * 10)));
         game.Advance(At(13000));
-        Assert.True(game.Snapshot.PlayVisible);
+        Assert.False(game.Snapshot.PlayVisible);
+        Assert.NotEqual(DuckHuntGalleryMiddlePhase.Closed, game.Snapshot.MiddlePhase);
         Assert.Equal(5, game.Snapshot.HitTargets);
         Assert.Equal(5, game.Snapshot.HitSkulls);
         Assert.False(game.Shoot(Play, At(8140)));
-        Assert.True(game.Shoot(Play, At(13010)));
+        game.Advance(At(40000));
+        Assert.True(game.Snapshot.PlayVisible);
+        Assert.True(game.Shoot(Play, At(40010)));
         Assert.Equal(2, game.Snapshot.Cycle);
         Assert.Empty(game.Punctures);
         Assert.Equal(0, game.Snapshot.SkullHitMask);
@@ -84,7 +87,7 @@ public class DuckHuntGallerySkullTests
         {
             Assert.True(game.Shoot(Skull(i), At(4000 + i * 30)));
             Assert.True(game.Shoot(Paper(game, i), At(4010 + i * 30)));
-            Assert.False(game.Shoot(Skull(i), At(4020 + i * 30)));
+            Assert.False(game.Shoot(Skull(i), At(4000 + i * 30)));
             Assert.Equal(i + 1, game.Snapshot.HitSkulls);
             Assert.Equal(i + 1, game.Snapshot.HitTargets);
         }

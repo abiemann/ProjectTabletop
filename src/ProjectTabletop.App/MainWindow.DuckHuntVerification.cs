@@ -276,6 +276,7 @@ public sealed partial class MainWindow
                 Check(scene.SubmitDuckHuntShot(new(skull.X + skull.Width * .5, skull.Y + skull.Height * .4), now),
                     "A remaining skull did not accept its shot after the lower stage closed.");
             }
+            var finalSkullHitAt = now;
             now += TimeSpan.FromMilliseconds(400);
             Draw();
             Check(scene.GalleryState is { HitSkulls: 5, UpperPhase: DuckHuntGalleryUpperPhase.ShatterWait, PlayVisible: false },
@@ -286,14 +287,106 @@ public sealed partial class MainWindow
             Draw();
             Check(scene.GalleryState.UpperPhase == DuckHuntGalleryUpperPhase.Lowering, "The upper curtain did not begin closing.");
             await Save("upper-curtain-lowering");
-            now += DuckHuntGalleryGame.UpperLowerDuration;
+            var middleStartedAt = finalSkullHitAt + DuckHuntGalleryGame.UpperShatterWaitDuration +
+                DuckHuntGalleryGame.UpperLowerDuration;
+            now = middleStartedAt;
+            byte[] closedMiddle = Draw();
+            Check(scene.GalleryState is { PlayVisible: false, UpperPhase: DuckHuntGalleryUpperPhase.Closed,
+                Phase: DuckHuntGalleryPhase.Ready, MiddlePhase: DuckHuntGalleryMiddlePhase.Raising },
+                "The middle curtain did not start only after the two original rows closed.");
+            await Save("middle-curtain-start");
+            now += DuckHuntGalleryGame.MiddleRaiseDuration / 2;
             Draw();
-            Check(scene.GalleryState is { PlayVisible: true, UpperPhase: DuckHuntGalleryUpperPhase.Closed },
-                "PLAY did not return after both stages had closed.");
+            await Save("middle-curtain-raising");
+            for (int index = 0; index < DuckHuntGalleryGame.MiddleTargetCount; index++)
+            {
+                var enteredAt = middleStartedAt + DuckHuntGalleryGame.MiddleRaiseDuration +
+                    DuckHuntGalleryGame.MiddleTargetDuration * index;
+                now = enteredAt + DuckHuntGalleryGame.MiddleEnterDuration / 2;
+                byte[] arriving = Draw();
+                var arrivingPose = DuckHuntGalleryLayout.MiddleTargetPose(scene.GalleryState, aspect);
+                Check(scene.GalleryState is { MiddlePhase: DuckHuntGalleryMiddlePhase.Entering, PlayVisible: false } &&
+                    scene.GalleryState.MiddleTargetIndex == index && arrivingPose.Visible &&
+                    arrivingPose.YawDegrees == 90 && arrivingPose.BaseContact.U > .5,
+                    "A middle target did not enter from the right edge-on in sequence.");
+                var panel = DuckHuntGalleryLayout.MiddlePanelSceneBounds;
+                var frameTop = DuckHuntGalleryLayout.ScenePoint(panel.X + panel.Width + .004, panel.Y, aspect);
+                var frameBottom = DuckHuntGalleryLayout.ScenePoint(panel.X + panel.Width + .018,
+                    panel.Y + panel.Height, aspect);
+                Check(RegionEqual(closedMiddle, arriving, new(frameTop.U, frameTop.V,
+                    frameBottom.U - frameTop.U, frameBottom.V - frameTop.V)),
+                    "An entering target or curtain painted over the middle stage's side frame.");
+                var faceAt = enteredAt + DuckHuntGalleryGame.MiddleEnterDuration + DuckHuntGalleryGame.MiddleTurnDuration;
+                now = faceAt - DuckHuntGalleryGame.MiddleTurnDuration / 2;
+                Draw();
+                var turningPose = DuckHuntGalleryLayout.MiddleTargetPose(scene.GalleryState, aspect);
+                Check(scene.GalleryState.MiddlePhase == DuckHuntGalleryMiddlePhase.TurningToFace &&
+                    turningPose.YawDegrees > 0 && turningPose.YawDegrees < 90,
+                    "The middle target did not rotate from its edge to its paper face.");
+                if (index == 0) await Save("middle-turning-front");
+                now = faceAt;
+                Draw();
+                var facePose = DuckHuntGalleryLayout.MiddleTargetPose(scene.GalleryState, aspect);
+                var local = PaperPoint(-.24, .18);
+                var aim = facePose.Quad.Map(local.U, local.V);
+                Check(scene.GalleryState.MiddlePhase == DuckHuntGalleryMiddlePhase.WaitingForHit &&
+                    facePose.YawDegrees == 0 && Math.Abs(facePose.BaseContact.U - .5) < 1e-8 &&
+                    PixelLight(aim), "The middle paper did not stop fully facing the player at the stage centre.");
+                Check(!scene.SubmitDuckHuntShot(null, now) && scene.GalleryPunctures.Count == 7 + index,
+                    "A missing dot punctured a middle target.");
+                Check(scene.SubmitDuckHuntShot(aim, now) && scene.GalleryPunctures.Count == 8 + index &&
+                    scene.GalleryState.MiddlePhase == DuckHuntGalleryMiddlePhase.WaitingForHit,
+                    "A middle hit failed or skipped its three-second facing window.");
+                var middleHole = scene.GalleryPunctures[^1];
+                Check(middleHole.TargetIndex == DuckHuntGalleryGame.MiddlePunctureOffset + index &&
+                    Math.Abs(middleHole.U - local.U) < 1e-6 && Math.Abs(middleHole.V - local.V) < 1e-6,
+                    "A middle puncture was attached to the wrong target or paper coordinate.");
+                now += TimeSpan.FromMilliseconds(300);
+                Draw();
+                Check(PixelDark(aim), "The photographed middle-paper hit location has no black opening.");
+                CheckClearOptics("punctured middle paper");
+                if (index == 0)
+                {
+                    CheckLaser(facePose.Quad.Map(PaperPoint(.24, .18).U, local.V), "middle paper beside its puncture");
+                    await Save("middle-puncture-face");
+                }
+                now = faceAt + DuckHuntGalleryGame.MiddleFaceDuration - TimeSpan.FromTicks(1);
+                Draw();
+                Check(scene.GalleryState.MiddlePhase == DuckHuntGalleryMiddlePhase.WaitingForHit &&
+                    scene.GalleryState.MiddleTargetIndex == index, "A target shortened the full three-second aiming window.");
+                now += TimeSpan.FromTicks(1);
+                Draw();
+                Check(scene.GalleryState.MiddlePhase == DuckHuntGalleryMiddlePhase.TurningAway &&
+                    !scene.SubmitDuckHuntShot(aim, now), "The middle target remained hittable after three seconds.");
+                now += DuckHuntGalleryGame.MiddleTurnDuration / 2;
+                Draw();
+                var away = DuckHuntGalleryLayout.MiddleTargetPose(scene.GalleryState, aspect);
+                Check(away.YawDegrees < 0 && away.YawDegrees > -90,
+                    "The punctured middle target did not turn away through ninety degrees.");
+                Check(PixelDark(away.Quad.Map(local.U, local.V)),
+                    "The middle puncture detached from its paper during the turn away.");
+                if (index == 0) await Save("middle-puncture-turn-away");
+                now += DuckHuntGalleryGame.MiddleTurnDuration / 2 + DuckHuntGalleryGame.MiddleLeaveDuration / 2;
+                Draw();
+                var leavingPose = DuckHuntGalleryLayout.MiddleTargetPose(scene.GalleryState, aspect);
+                Check(scene.GalleryState.MiddlePhase == DuckHuntGalleryMiddlePhase.Leaving &&
+                    leavingPose.YawDegrees == -90 && leavingPose.BaseContact.U < .5,
+                    "A middle target did not leave edge-on toward the left.");
+            }
+            now = middleStartedAt + DuckHuntGalleryGame.MiddleSequenceDuration - DuckHuntGalleryGame.MiddleLowerDuration / 2;
+            Draw();
+            Check(scene.GalleryState is { MiddlePhase: DuckHuntGalleryMiddlePhase.Lowering, PlayVisible: false },
+                "The middle curtain did not lower after exactly five targets.");
+            await Save("middle-curtain-lowering");
+            now = middleStartedAt + DuckHuntGalleryGame.MiddleSequenceDuration;
+            Draw();
+            Check(scene.GalleryState is { PlayVisible: true, MiddlePhase: DuckHuntGalleryMiddlePhase.Complete,
+                MiddleTargetIndex: -1, MiddleHitMask: 31 }, "The round did not end after the middle curtain closed.");
             await Save("complete");
             now += TimeSpan.FromMilliseconds(1);
             Check(scene.SubmitDuckHuntShot(new(.5, .46), now) && scene.GalleryPunctures.Count == 0 &&
-                scene.GalleryState is { HitTargets: 0, HitSkulls: 0 }, "The next round retained old holes or shattered skulls.");
+                scene.GalleryState is { HitTargets: 0, HitSkulls: 0, MiddleHitMask: 0,
+                    MiddlePhase: DuckHuntGalleryMiddlePhase.Closed }, "The next round retained old holes or shattered skulls.");
             now += DuckHuntGalleryGame.OpeningDuration + DuckHuntGalleryGame.RevealWaitDuration + DuckHuntGalleryGame.AdvanceDuration;
             Draw();
             now += TimeSpan.FromMilliseconds(1);
@@ -308,7 +401,9 @@ public sealed partial class MainWindow
             Check(board.ActivateButton("duck-hunt-back", now) && scene.CurrentDuckHuntView == DuckHuntView.Menu,
                 "BACK did not return from the gallery to the Duck Hunt entry screen.");
             results.Add(new { dimensions.Name, dimensions.Width, dimensions.Height,
-                Papers = 5, Punctures = 7, Skulls = 5, ClosedAngle = 0, OpenAngle = 95, OpticalCandidates = 0 });
+                Papers = 5, Punctures = 12, Skulls = 5, MiddleTargets = 5,
+                MiddleFaceSeconds = DuckHuntGalleryGame.MiddleFaceDuration.TotalSeconds,
+                ClosedAngle = 0, OpenAngle = 95, OpticalCandidates = 0 });
 
             bool LowerEqual(byte[] before, byte[] after)
             {
