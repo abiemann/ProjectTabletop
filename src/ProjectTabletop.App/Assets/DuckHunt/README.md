@@ -65,6 +65,11 @@ and eye sockets are photographic artwork. The renderer reuses it for the five
 upper-shelf targets, with animated side-light reflections and fragments sampled
 from the same crystal texture.
 
+Laser-hover feedback uses a cached, socket-shaped warm yellow glow of those same
+crystal facets. The source PNG is unchanged. The tint fades with the current
+laser position and is composed without bright red hotspots that could resemble
+an aiming dot.
+
 After a targeted image-tool cleanup attempt left exterior residue, the user
 approved clearing precisely 2,697 nearly invisible exterior pixels: 2,683 at
 alpha 1 and 14 at alpha 2. All RGB values and every other alpha value are

@@ -63,6 +63,7 @@ public sealed partial class SceneCompositor
         }
         _gallerySkullLeftGlint = CreateGallerySkullGlint(device, left: true);
         _gallerySkullRightGlint = CreateGallerySkullGlint(device, left: false);
+        PrepareGalleryEyes(device);
         _galleryCrystalShardAtlas = new CanvasRenderTarget(device, GalleryShardRasterSize * 4, GalleryShardRasterSize * 3, 96);
         using var atlas = _galleryCrystalShardAtlas.CreateDrawingSession();
         atlas.Clear(Color.FromArgb(0, 0, 0, 0));
@@ -116,6 +117,7 @@ public sealed partial class SceneCompositor
 
     private void DisposeGallerySkulls()
     {
+        DisposeGalleryEyes();
         _galleryUpperCurtain?.Dispose(); _gallerySkullSprite?.Dispose();
         _gallerySkullLeftGlint?.Dispose(); _gallerySkullRightGlint?.Dispose();
         _galleryCrystalShardAtlas?.Dispose();
@@ -128,6 +130,7 @@ public sealed partial class SceneCompositor
 
     private void DrawGalleryUpperStage(CanvasDrawingSession drawing, DuckHuntGallerySnapshot state, double aspect)
     {
+        GalleryEyeVisualFrame(_blackjackClock());
         if (!state.UpperTargetsVisible || _galleryUpperArchSource is null || _galleryUpperCurtain is null || _gallerySkullSprite is null) return;
         if (_galleryUpperArch is null || _galleryUpperArchAspect != aspect)
         {
@@ -163,6 +166,7 @@ public sealed partial class SceneCompositor
                         (float)((.08 + .18 * leftLight) * (1 - index * .1)), CanvasImageInterpolation.HighQualityCubic);
                     drawing.DrawImage(_gallerySkullRightGlint!, bounds, source,
                         (float)((.08 + .18 * rightLight) * (.6 + index * .1)), CanvasImageInterpolation.HighQualityCubic);
+                    DrawGalleryEyes(drawing, index, bounds);
                 }
                 else DrawGallerySkullShards(drawing, index, pose.Bounds, state.AnimationSeconds - state.SkullHitSeconds(index), aspect);
             }
