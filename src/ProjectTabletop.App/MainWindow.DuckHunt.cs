@@ -93,7 +93,7 @@ public sealed partial class MainWindow
         ResetDuckHuntInput();
         if (!_handTrackingEnabled) SetHandTrackingEnabled(true);
         UpdateBoardAppStatus();
-        SetStatus("Duck Hunt: choose TARGET PRACTICE for the DRY FIRE game, or HUNT for ten flying birds. " +
+        SetStatus("Duck Hunt: choose TARGET PRACTICE for the saloon gallery, or HUNT for ten flying birds. " +
             "Hold a button's lettering for one second. Open the arrow for EXIT. " +
             "Choose a microphone beside Duck Hunt in the main app window.");
     }
@@ -243,20 +243,21 @@ public sealed partial class MainWindow
                 double elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                 if (!Current()) { Report("Input changed", frame.Timestamp, dot, elapsed); return; }
                 if (!Fresh()) { Report("Click frame expired", frame.Timestamp, dot, elapsed); return; }
-                var before = _scene.DuckHuntState;
+                var before = _scene.GalleryState;
+                int puncturesBefore = _scene.GalleryPunctures.Count;
                 var flightBefore = _scene.HuntFlightState;
                 bool accepted = _scene.SubmitDuckHuntSnapshot(dot.Detected
                         ? new BoardAim(dot.BoardX!.Value, dot.BoardY!.Value) : null,
                     frame.Timestamp, at, confirmedAt, context.Epoch);
-                var after = _scene.DuckHuntState;
+                var after = _scene.GalleryState;
                 var flightAfter = _scene.HuntFlightState;
                 string acceptedOutcome = _scene.CurrentDuckHuntView == DuckHuntView.Hunt
                     ? flightAfter.Score > flightBefore.Score ? "Bird hit" :
                         flightBefore.StartVisible && !flightAfter.StartVisible ? "Hunt started" :
                         flightAfter.Shots > flightBefore.Shots ? "Shot missed" : "No active target hit"
-                    : after.Hits > before.Hits ? "Duck hit" : after.Shots > before.Shots ? "Shot missed" :
-                    after.Phase == DuckHuntPhase.Turning ? "Shot during turn" : after.RoundFinished ? "Round finished" :
-                    "Shot not applied";
+                    : after.Cycle > before.Cycle ? "Gallery started" :
+                        _scene.GalleryPunctures.Count > puncturesBefore ? "Paper target hit" :
+                        after.Shots > before.Shots ? "Shot missed" : "No active target hit";
                 Report(accepted ? acceptedOutcome : dot.Detected ? "Snapshot rejected by current board" :
                     dot.Ambiguous ? "Ambiguous red dots" : "No red dot",
                     frame.Timestamp, dot, elapsed);
@@ -292,9 +293,9 @@ public sealed partial class MainWindow
         return new
         {
             view = _scene.CurrentDuckHuntView.ToString(),
-            game = _scene.DuckHuntState,
+            gallery = _scene.GalleryState,
+            punctures = _scene.GalleryPunctures.ToArray(),
             hunt = _scene.HuntFlightState,
-            feathers = _scene.DuckHuntFeatherStatus,
             measurement = _scene.DuckHuntMeasurement,
             ready,
             clickLearning = ClickLearningStatus(),

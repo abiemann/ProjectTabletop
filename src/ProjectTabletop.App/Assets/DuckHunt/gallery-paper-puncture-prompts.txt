@@ -1,0 +1,16 @@
+Paper-target puncture decal
+Date: 2026-10-24
+Generation: built-in image_gen tool with transparent_background=true.
+Asset: gallery-paper-puncture.png
+Native dimensions: 1254 x 1254 RGBA PNG; no resizing.
+SHA256: 470B1F78554492D8C026CF7FB9B4C11D50BD13AB3B40D9F08D32A6607BC251B5
+
+Original compact photographic paper/cardboard puncture artwork. The black opening is retained as near-opaque black (centre RGB 0,0,0; alpha 253), with a narrow torn grey fibre rim and small inward white paper flaps. The application can underlay an opaque black core when compositing the decal.
+
+After one image-tool transparency pass, the user explicitly approved clearing 185 isolated nearly invisible background pixels. The final script changed only alpha=1 pixels farther than seven pixels (Chebyshev distance) from the largest 8-connected component with alpha>=8. All RGB values, alpha>=2 pixels, and pixels within the seven-pixel edge safety band remain unchanged. Canvas edges and representative exterior pixels have alpha 0. Final nonzero bounds are (259,219)-(996,1025), inclusive. No exterior shadow or matte was added.
+
+Initial generation prompt:
+Use case: photorealistic-natural. Asset type: small isolated transparent PNG decal for a realistic projected paper-target arcade game. Create ONE clean round puncture in white paper over thin light-grey cardboard, viewed straight-on at macro close-up. The actual hole is a deep matte BLACK opaque circular opening, slightly irregular but compact. Around it is a NARROW irregular torn grey cardboard fibre rim with small broken white paper flaps and fine white torn fibres curling inward along the inside edge of the black hole. The black opening fills about 70 percent of the overall effect diameter. This is a small neat paper puncture, NOT an explosion, crater, shattered glass, large starburst or bullet impact in metal. No large radial cracks or splashes. No loose fragments beyond the compact rim. Soft natural overhead light reveals subtle fibre texture and relief only inside the rim; no exterior cast shadow, halo, glow or colored border. Center the complete circular decal in a square canvas with 12 percent clear margin all around. Exterior beyond the torn rim is fully transparent alpha=0; black central hole stays fully opaque, it is not a transparent hole. Genuine RGBA PNG. Clean antialiased outside edges. No paper sheet rectangle, background, ground, shadow, checkerboard pattern, backdrop, lettering, logos, blood, body parts, ammunition or weapon. Highest-quality natural photographic detail, still clearly readable when displayed at a small 20-pixel size.
+
+Image-tool transparency pass:
+Preserve this exact compact white-paper puncture decal, including its black opening and realistic narrow torn grey cardboard rim with little white inward paper flaps. Clean transparency only: every exterior pixel beyond the actual torn-paper edge must have exactly alpha=0, removing any alpha-1 or alpha-2 speckles and faint haze. Keep antialiasing directly at the physical edge. Make the BLACK CENTRAL OPENING FULLY OPAQUE alpha=255 with RGB black, not a transparent opening. Keep all subject geometry, size, texture, colours and framing unchanged. No cast shadow, matte, backdrop or checkerboard. Return real RGBA PNG.

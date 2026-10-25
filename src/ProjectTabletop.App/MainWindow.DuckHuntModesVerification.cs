@@ -73,8 +73,8 @@ public sealed partial class MainWindow
             scene.SetDuckHuntAudioStatus(true, "Isolated microphone fixture");
             Draw();
             await Save("target-practice");
-            Check(scene.DuckHuntState.Phase == DuckHuntPhase.Walking && scene.DuckHuntInputReady,
-                "Target Practice did not start the preserved DRY FIRE game when ready.");
+            Check(scene.GalleryState.Phase == DuckHuntGalleryPhase.Ready && scene.DuckHuntInputReady,
+                "Target Practice did not wait for a shot on PLAY.");
             var practiceInput = scene.GetDuckHuntInputContext()!;
             var oldPoint = new BoardAim(.21, .36);
             var newPoint = new BoardAim(.27, .42);
@@ -159,10 +159,10 @@ public sealed partial class MainWindow
                 scene.SetDuckHuntAudioStatus(true, "Isolated microphone fixture");
                 Check(!scene.DuckHuntBoardReady && !scene.DuckHuntInputReady && scene.GetDuckHuntInputContext() is null,
                     $"The {stage} view requests microphone/laser gameplay input.");
-                Check(scene.DuckHuntState is { Phase: DuckHuntPhase.Ready, Hits: 0, Shots: 0 } &&
-                    board.DuckHuntFeathers.Count == 0 && scene.DuckHuntMeasurement is
+                Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.Ready, HitTargets: 0, Shots: 0 } &&
+                    board.GalleryPunctures.Count == 0 && scene.DuckHuntMeasurement is
                         { LiveDetectedXY: null, OldDetectedXY: null, NewDetectedXY: null },
-                    $"The {stage} view retained a duck round, feather or shot mark.");
+                    $"The {stage} view retained a gallery round, puncture or shot mark.");
                 Check(!scene.SubmitDuckHuntShot(new(.5, .48), now), $"The {stage} view accepted a direct shot.");
             }
 
@@ -172,8 +172,8 @@ public sealed partial class MainWindow
                 Check(scene.DuckHuntBoardReady && scene.DuckHuntInputReady && scene.GetDuckHuntInputContext() is not null,
                     $"The {stage} view cannot listen for a shot on START.");
                 Check(scene.HuntFlightState is { Phase: DuckHuntFlightPhase.Ready, Score: 0, BirdsLaunched: 0 } &&
-                    scene.DuckHuntState is { Phase: DuckHuntPhase.Ready, Hits: 0, Shots: 0 } &&
-                    board.DuckHuntFeathers.Count == 0,
+                    scene.GalleryState is { Phase: DuckHuntGalleryPhase.Ready, HitTargets: 0, Shots: 0 } &&
+                    board.GalleryPunctures.Count == 0,
                     $"The {stage} view started birds without a shot or retained Target Practice state.");
                 Check(!scene.ActivateDuckHuntAt(.5, .5) &&
                     board.Buttons.All(button => button.Id != "duck-hunt-start"),

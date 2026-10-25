@@ -93,9 +93,9 @@ public sealed partial class MainWindow
              strykersRun ? _scene.StrykersRunState.Banner :
              duckHunt ? _scene.CurrentDuckHuntView switch
              {
-                 DuckHuntView.TargetPractice => _duckHuntMicrophone.Status + " Aim the red dot and click. Each hit reverses the duck; ten hits win. Only the latest shot remains visible.",
+                 DuckHuntView.TargetPractice => _duckHuntMicrophone.Status + " Shoot PLAY to open the saloon gallery. Wait for the targets to stop, then hit every paper target. Open the arrow for EXIT or BACK.",
                  DuckHuntView.Hunt => _duckHuntMicrophone.Status + " Aim the red dot at START and click. Hit the ten flying birds for one point each. Open the arrow for EXIT or BACK.",
-                 _ => "Hold TARGET PRACTICE for the DRY FIRE game, or HUNT for the field scene. Laptop clicks also work."
+                 _ => "Hold TARGET PRACTICE for the saloon gallery, or HUNT for flying birds. Laptop clicks also select these modes."
              } :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :
              !_handTrackingEnabled ? "Enable hand tracking to use board buttons." :

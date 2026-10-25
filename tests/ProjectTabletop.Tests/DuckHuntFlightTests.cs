@@ -237,7 +237,7 @@ public class DuckHuntFlightTests
         long revision = board.DuckHuntRoundRevision;
         Assert.True(board.TryDuckHuntShot(new(.5, .5), At(1500)));
         Assert.Equal(revision + 1, board.DuckHuntRoundRevision);
-        Assert.Equal(DuckHuntPhase.Ready, board.DuckHuntState.Phase);
+        Assert.Equal(DuckHuntGalleryPhase.Ready, board.GalleryState.Phase);
         Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(1600)));
         board.TickDuckHunt(At(1900));
         Assert.True(board.ActivateButton("duck-hunt-back", At(2000)));

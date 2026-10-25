@@ -32,7 +32,7 @@ public sealed partial class SceneCompositor
     }
 
     // Read while constructing the rendered-board cache key so microphone/learning
-    // messages and the expiring dot hint refresh even while the duck is stationary.
+    // messages and the expiring dot hint refresh while the gallery is stationary.
     internal long DuckHuntInputVisualRevision
     {
         get
@@ -118,14 +118,13 @@ public sealed partial class SceneCompositor
             if (context is null || context.Epoch != epoch || !_duckHuntAudioReady) return false;
             UpdateDuckHuntRound(_blackjackClock());
             if (_boardSession.CurrentDuckHuntView == DuckHuntView.TargetPractice &&
-                (_boardSession.DuckHuntState.Phase == DuckHuntPhase.Ready ||
-                 _boardSession.DuckHuntState.Paused || _boardSession.DuckHuntState.Phase == DuckHuntPhase.PlayerWon)) return false;
+                (!DuckHuntArtworkReady || _boardSession.GalleryState.Paused)) return false;
             if (_boardSession.CurrentDuckHuntView == DuckHuntView.Hunt &&
                 (!DuckHuntArtworkReady || _boardSession.HuntFlightState.Paused)) return false;
             // The current photo decides the hit at its own timestamp, even if
             // rendering has already advanced. Each valid shot replaces the
-            // previous Target Practice dot/circle; Hunt uses the same fresh-photo
-            // gate for its START target and moving birds without drawing those marks.
+            // measurement for diagnostics. Both modes use the same fresh-photo
+            // gate; gallery punctures are attached to the paper that was hit.
             if (!_duckHuntMeasurement.Capture(aim, frameTimestamp, clickOnset, confirmedAt, now)) return false;
             _boardSession.TryDuckHuntShot(aim, frameTimestamp, PaintBoardAspect());
             _duckHuntInputVisualRevision++;

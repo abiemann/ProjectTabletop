@@ -1,26 +1,5 @@
 # Duck Hunt artwork
 
-`mallard-photo.png` is an original photorealistic female mallard generated with
-the built-in image tool on 2026-10-22, using the user's duck photograph as subject
-inspiration. It is a 1312 × 1199 RGBA PNG with a transparent exterior and no ground
-shadow. The source reference is not distributed with the application.
-
-Generation prompt:
-
-> Use case: photorealistic-natural. Asset type: high-resolution transparent PNG game sprite for a 4K projected tabletop. Create a NEW original photorealistic full-body female mallard duck, standing naturally on two webbed feet and facing left in a three-quarter side view. The user's reference shows a brown mottled duck with cream feather edges, a softly streaked tan head, glossy dark eye, and a muted yellow-ochre bill. Use that subject and natural photographic quality as inspiration, not the reference's watermark or background. Show exquisitely detailed overlapping brown and cream feathers, realistic proportions, complete bill, tail and both feet. Soft neutral daylight. Center the complete duck with a little empty margin on all sides. No ground plane, cast shadow, platform, props, text, logos or watermarks. The entire exterior and gaps between toes and legs must be genuinely transparent alpha=0, not a checkerboard, matte or colored background. Clean antialiased feather edges. Avoid saturated red markings and cartoon or painted styling. Produce the highest available image detail.
-
-An image-tool cleanup pass preserved the same subject and removed background
-haze. With the user's explicit approval, a final script cleared 1,851 residual
-pixels with alpha 1 or 2 located more than seven pixels from the opaque duck.
-All RGB values and the antialiased boundary were preserved. Alpha validation
-confirmed transparent canvas edges and no residue beyond that boundary.
-
-Walking reuses this unchanged PNG. Cached GPU geometry separates the body and
-two legs along their feathered roots; the legs alternate a small swing and lift
-while the body's centre stays at a fixed height. A brief horizontal turn mirrors
-the artwork, and the hit-test silhouette uses the same scale, direction and foot
-transforms. No additional raster frames or per-frame image copies are required.
-
 ## Mode backgrounds
 
 `arcade-welcome-v1.png` and `hunt-field-v1.png` are original opaque RGB images generated with the built-in image tool on 2026-10-22. The welcome image supplies a colorful wetland, pond and ducks around an open center for the native title and buttons. The field image uses a low grass-level viewpoint, pines on both sides and open sky, inspired by the user's reference. No lettering or controls are baked into either image.
@@ -42,3 +21,40 @@ pixels and 1,013 wing pixels more than seven pixels from the main feather
 component. All RGB values and antialiased feather boundaries were preserved.
 Generation prompts, hashes, alpha bounds and cleanup details are recorded in
 [flying-mallard-prompts.txt](flying-mallard-prompts.txt).
+
+## Target Practice saloon gallery
+
+`target-practice-saloon-v1.png` is the user-approved original saloon environment
+generated with the built-in image tool on 2026-10-24. It is copied unchanged from
+the approved concept: a front-facing Gilded Age New York saloon gallery with
+carved walnut, brass details, two empty target shelves and a lower conveyor.
+It is a native 1672 × 941 RGB PNG, not native 4K and not artificially upscaled.
+Targets and controls are supplied by the application, not baked into the image.
+Its full prompt and hash are in
+[target-practice-saloon-prompts.txt](target-practice-saloon-prompts.txt).
+
+`gallery-steampunk-target.png` is an original 1177 × 1337 RGBA target assembly
+generated with the built-in image tool on 2026-10-24. Its round, visibly fibrous
+ivory paper has two printed charcoal rings and a central plus. An aged brass and
+blackened-steel retaining frame, four clips and a short pedestal visibly support
+the paper. The renderer preserves the native aspect so the rings stay round;
+paper hit testing and puncture clipping share the measured surface geometry and
+exclude the metal clips.
+
+With the user's approval, an alpha-only cleanup removed 486 isolated alpha-1
+background pixels more than seven pixels from the object. Decoded-file checks
+confirmed unchanged RGB and object-edge alpha, with transparent canvas edges.
+Measured paper coordinates, prompt history and hash are in
+[gallery-steampunk-target-prompts.txt](gallery-steampunk-target-prompts.txt).
+
+`gallery-paper-puncture.png` is an original 1254 × 1254 RGBA decal generated with
+the built-in image tool on the same date. A near-opaque black opening is bordered
+by a compact grey cardboard-fibre rim with small broken white paper flaps curling
+inward. The application can place opaque black beneath the opening when drawing
+the decal. No sheet rectangle, exterior shadow or matte is included.
+
+After one image-tool cleanup pass, the user's approved alpha-only cleanup cleared
+185 isolated alpha-1 background pixels more than seven pixels from the paper's
+main component. All RGB values and the antialiased torn edges were preserved;
+exterior transparency was verified from the decoded PNG. Details and prompts are
+in [gallery-paper-puncture-prompts.txt](gallery-paper-puncture-prompts.txt).
