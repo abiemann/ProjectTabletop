@@ -24,6 +24,7 @@ public sealed partial class MainWindow
         {
             (Name: "landscape", Width: 1920, Height: 1080),
             (Name: "square", Width: 1000, Height: 1000),
+            (Name: "tabletop", Width: 2048, Height: 1631),
             (Name: "portrait", Width: 1080, Height: 1920)
         })
         {
@@ -75,6 +76,7 @@ public sealed partial class MainWindow
             now += TimeSpan.FromMilliseconds(350);
             Draw();
             await Save("target-practice");
+            await SaveCeilingJoin();
             Check(scene.GalleryState.Phase == DuckHuntGalleryPhase.Ready && scene.DuckHuntInputReady && board.DuckHuntDrawerOpen,
                 "Target Practice did not open its drawer and wait for a hold on PLAY.");
             var practiceInput = scene.GetDuckHuntInputContext()!;
@@ -268,6 +270,23 @@ public sealed partial class MainWindow
             {
                 string path = Path.Combine(directory, dimensions.Name + "-" + name + ".png");
                 await target.SaveAsync(path, CanvasBitmapFileFormat.Png);
+                images.Add(path);
+            }
+            async Task SaveCeilingJoin()
+            {
+                double margin = DuckHuntGalleryLayout.SceneBounds(dimensions.Width / (double)dimensions.Height).Y;
+                if (margin <= 0) return;
+                // Native-resolution detail of the actual rendered cabinet join,
+                // including the foreground capitals and the ceiling behind them.
+                const int detailHeight = 240;
+                double joinY = dimensions.Height * (.04 + .92 * margin);
+                double top = Math.Clamp(joinY - detailHeight / 2, 0, dimensions.Height - detailHeight);
+                using var detail = new CanvasRenderTarget(target.Device, dimensions.Width, detailHeight, 96);
+                using (var drawing = detail.CreateDrawingSession())
+                    drawing.DrawImage(target, new Windows.Foundation.Rect(0, 0, dimensions.Width, detailHeight),
+                        new Windows.Foundation.Rect(0, top, dimensions.Width, detailHeight));
+                string path = Path.Combine(directory, dimensions.Name + "-ceiling-join.png");
+                await detail.SaveAsync(path, CanvasBitmapFileFormat.Png);
                 images.Add(path);
             }
             void BreakCaption(byte[] pixels, IReadOnlyList<double> matrix, HandTrackingBounds bounds)

@@ -98,7 +98,8 @@ public static partial class DuckHuntGalleryLayout
         local = default;
         if (!double.IsFinite(point.U) || !double.IsFinite(point.V) || !double.IsFinite(aspect) || aspect <= 0) return false;
         var bounds = SceneBounds(aspect);
-        local = new((point.U - bounds.X) / bounds.Width, (point.V - bounds.Y) / bounds.Height);
+        local = new((point.U - bounds.X) / bounds.Width,
+            LayoutYToSourceY((point.V - bounds.Y) / bounds.Height));
         return true;
     }
 }

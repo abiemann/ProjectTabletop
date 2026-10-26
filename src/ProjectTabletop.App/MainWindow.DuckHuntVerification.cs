@@ -474,7 +474,10 @@ public sealed partial class MainWindow
             {
                 var top = DuckHuntGalleryLayout.ScenePoint(.09, .50, aspect);
                 var bottom = DuckHuntGalleryLayout.ScenePoint(.91, .86, aspect);
-                return new(top.U, top.V, bottom.U - top.U, bottom.V - top.V);
+                // Wide boards keep the score above the screen edge when the
+                // cabinet grows. Its independent awards are not target motion.
+                double bottomV = Math.Min(bottom.V, SceneCompositor.GalleryScoreBounds(aspect).Y);
+                return new(top.U, top.V, bottom.U - top.U, bottomV - top.V);
             }
             object RegionDifference(byte[] before, byte[] after, BoardRect region)
             {

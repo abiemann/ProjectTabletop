@@ -14,6 +14,8 @@ public sealed partial class SceneCompositor
     private const int GalleryTargetWidth = 440, GalleryTargetHeight = 500;
     private CanvasRenderTarget? _galleryFlapFront, _galleryFlapBack, _galleryTargetBase;
     private CanvasGeometry? _galleryPaperClip;
+    private CanvasGeometry? _galleryCabinetClipSource, _galleryCabinetClip;
+    private double _galleryCabinetClipAspect;
     private CanvasRenderTarget[]? _galleryTargets;
     private Transform3DEffect[]? _galleryTargetEffects;
     private Transform3DEffect? _galleryFlapEffect;
@@ -36,6 +38,27 @@ public sealed partial class SceneCompositor
     {
         if (_galleryTargetBase is not null || _duckHuntGalleryImages?.Image("target-practice-saloon-v1.png") is not { } scene ||
             _duckHuntGalleryImages.Image("gallery-steampunk-target.png") is not { } assembly) return;
+        // Trace the actual wooden cornice and projecting capitals in the
+        // 1672×941 cabinet. Its first rows also contain an old ceiling; keeping
+        // those pixels would leave a straight pasted joint through the gold.
+        ReadOnlySpan<Vector2> cabinetTop =
+        [
+            new(0, 22), new(21, 22), new(13, 0), new(139, 0), new(176, 25),
+            new(493, 25), new(501, 26), new(555, 26), new(563, 25),
+            new(828, 25), new(833, 22), new(835, 18), new(838, 18), new(841, 23), new(847, 25),
+            new(1107, 25), new(1115, 26), new(1175, 26), new(1182, 25),
+            new(1499, 25), new(1533, 0), new(1657, 0), new(1649, 22), new(1672, 22)
+        ];
+        using (var cabinetPath = new CanvasPathBuilder(device))
+        {
+            cabinetPath.BeginFigure(cabinetTop[0]);
+            for (int point = 1; point < cabinetTop.Length; point++) cabinetPath.AddLine(cabinetTop[point]);
+            float cabinetBottom = (float)(941 * DuckHuntGalleryLayout.SourceYToLayoutY(1));
+            cabinetPath.AddLine(new Vector2(1672, cabinetBottom));
+            cabinetPath.AddLine(new Vector2(0, cabinetBottom));
+            cabinetPath.EndFigure(CanvasFigureLoop.Closed);
+            _galleryCabinetClipSource = CanvasGeometry.CreatePath(cabinetPath);
+        }
         var flap = DuckHuntGalleryLayout.FlapSceneBounds;
         int width = (int)Math.Ceiling(flap.Width * scene.Size.Width);
         int height = (int)Math.Ceiling(flap.Height * scene.Size.Height);
@@ -126,10 +149,13 @@ public sealed partial class SceneCompositor
         if (_galleryTargets is not null) foreach (var target in _galleryTargets) target?.Dispose();
         _galleryFlapFront?.Dispose(); _galleryFlapBack?.Dispose(); _galleryTargetBase?.Dispose();
         _galleryPaperClip?.Dispose();
+        _galleryCabinetClip?.Dispose(); _galleryCabinetClipSource?.Dispose();
         _galleryApertureBrush?.Dispose(); _galleryBeltShade?.Dispose();
         _galleryFlapEffect = null; _galleryTargetEffects = null; _galleryTargets = null;
         _galleryFlapFront = _galleryFlapBack = _galleryTargetBase = null;
         _galleryPaperClip = null;
+        _galleryCabinetClip = _galleryCabinetClipSource = null;
+        _galleryCabinetClipAspect = 0;
         _galleryApertureBrush = _galleryBeltShade = null;
         _galleryCachedCycle = _galleryCachedPunctures = -1;
         _galleryCachedMiddleTarget = -1;
@@ -140,9 +166,23 @@ public sealed partial class SceneCompositor
         drawing.Clear(Color.FromArgb(255, 25, 16, 10));
         if (_duckHuntGalleryImages?.Image("target-practice-saloon-v1.png") is not { } scene) return;
         var frame = DuckHuntGalleryLayout.SceneBounds(aspect);
-        DrawGalleryCeiling(drawing, frame.Y, aspect);
-        drawing.DrawImage(scene, GalleryRect(frame), new Rect(0, 0, scene.Size.Width, scene.Size.Height),
-            1, CanvasImageInterpolation.HighQualityCubic);
+        bool hasCeiling = DrawGalleryCeiling(drawing, frame, aspect);
+        if (hasCeiling && _galleryCabinetClipSource is not null)
+        {
+            if (_galleryCabinetClip is null || _galleryCabinetClipAspect != aspect)
+            {
+                _galleryCabinetClip?.Dispose();
+                _galleryCabinetClip = _galleryCabinetClipSource.Transform(
+                    Matrix3x2.CreateScale((float)(frame.Width * BoardSurfaceSize / 1672),
+                        (float)(frame.Height * BoardSurfaceSize / 941)) *
+                    Matrix3x2.CreateTranslation((float)(frame.X * BoardSurfaceSize), (float)(frame.Y * BoardSurfaceSize)));
+                _galleryCabinetClipAspect = aspect;
+            }
+            using var cabinetLayer = drawing.CreateLayer(1, _galleryCabinetClip);
+            DrawGalleryCabinet(drawing, scene, aspect);
+        }
+        else
+            DrawGalleryCabinet(drawing, scene, aspect);
         GalleryLampVisualFrame(_blackjackClock());
         DrawGalleryCandles(drawing, aspect);
         DrawGalleryUpperStage(drawing, state, aspect);
@@ -170,24 +210,50 @@ public sealed partial class SceneCompositor
             new Rect(lip.X * scene.Size.Width, lip.Y * scene.Size.Height, lip.Width * scene.Size.Width, lip.Height * scene.Size.Height));
         if (state.TargetsVisible)
         {
-            using var clip = drawing.CreateLayer(1, GalleryRect(frame));
+            using var clip = drawing.CreateLayer(1, GallerySceneRect(new(0, 0, 1, 1), aspect));
             DrawGalleryTargets(drawing, state, aspect, inFrontOfLip: true);
         }
         DrawGalleryFlap(drawing, state.FlapAngleDegrees, aspect);
         DrawGalleryScore(drawing, state, aspect);
     }
 
-    private void DrawGalleryCeiling(CanvasDrawingSession drawing, double marginHeight, double aspect)
+    private static void DrawGalleryCabinet(CanvasDrawingSession drawing, CanvasBitmap scene, double aspect)
     {
-        if (marginHeight <= 0 || _duckHuntGalleryImages?.Image("gallery-golden-ceiling-v1.png") is not { } ceiling) return;
-        // Cover only the unused space above the cabinet, preserving physical
-        // proportions and the ceiling's lower edge against the ornate crown.
-        double cropAspect = aspect / marginHeight;
-        double sourceHeight = Math.Min(ceiling.Size.Height, ceiling.Size.Width / cropAspect);
-        double sourceWidth = sourceHeight * cropAspect;
-        drawing.DrawImage(ceiling, new Rect(0, 0, BoardSurfaceSize, marginHeight * BoardSurfaceSize),
-            new Rect((ceiling.Size.Width - sourceWidth) / 2, ceiling.Size.Height - sourceHeight,
-                sourceWidth, sourceHeight), 1, CanvasImageInterpolation.HighQualityCubic);
+        // Lengthen only the lower opening and its side posts. The upper shelves
+        // keep their positions; the conveyor and apron move down intact.
+        ReadOnlySpan<double> cuts = [0, DuckHuntGalleryLayout.LowerCompartmentTop,
+            DuckHuntGalleryLayout.LowerCompartmentBottom, 1];
+        for (int band = 0; band < cuts.Length - 1; band++)
+        {
+            double top = cuts[band], height = cuts[band + 1] - top;
+            drawing.DrawImage(scene, GallerySceneRect(new(0, top, 1, height), aspect),
+                new Rect(0, top * scene.Size.Height, scene.Size.Width, height * scene.Size.Height),
+                1, CanvasImageInterpolation.HighQualityCubic);
+        }
+    }
+
+    private bool DrawGalleryCeiling(CanvasDrawingSession drawing, BoardRect frame, double aspect)
+    {
+        if (frame.Y <= 0 || _duckHuntGalleryImages?.Image("gallery-golden-ceiling-v3.png") is not { } ceiling) return false;
+        // Keep the full width attached to the cabinet. A centred horizontal
+        // crop would move the beams away from their supports on portrait boards.
+        // The selected outpaint includes a second cabinet. Use only its ceiling,
+        // ending above its corner caps. Extend underneath the original wooden
+        // silhouette so the two textures meet at the physical cornice, not at
+        // the old image's rectangular top edge. Interactive geometry stays fixed.
+        double ceilingHeight = frame.Y + frame.Height * (30.0 / 941);
+        double ceilingBottom = ceiling.Size.Height * (384.0 / 1211);
+        double sourceHeight = Math.Min(ceilingBottom, ceiling.Size.Width * ceilingHeight / aspect);
+        ReadOnlySpan<double> source = [0, 72.0 / 1299, 446.0 / 1299, 851.0 / 1299, 1227.0 / 1299, 1];
+        ReadOnlySpan<double> attached = [0, 92.0 / 1672, 527.0 / 1672, 1150.0 / 1672, 1580.0 / 1672, 1];
+        for (int span = 0; span < source.Length - 1; span++)
+            drawing.DrawImage(ceiling,
+                new Rect(attached[span] * BoardSurfaceSize, 0,
+                    (attached[span + 1] - attached[span]) * BoardSurfaceSize, ceilingHeight * BoardSurfaceSize),
+                new Rect(source[span] * ceiling.Size.Width, ceilingBottom - sourceHeight,
+                    (source[span + 1] - source[span]) * ceiling.Size.Width, sourceHeight),
+                1, CanvasImageInterpolation.HighQualityCubic);
+        return true;
     }
 
     private void DrawGalleryBelt(CanvasDrawingSession drawing, DuckHuntGallerySnapshot state, double aspect)
@@ -214,7 +280,7 @@ public sealed partial class SceneCompositor
         // motion stays inside the belt rather than sliding the saloon artwork.
         var supportedPose = DuckHuntGalleryLayout.TargetPose(2,
             state with { Phase = DuckHuntGalleryPhase.Departing, FallProgress = 0 }, DuckHuntGalleryLayout.SceneAspect);
-        double phase = Math.Max(0, supportedPose.BaseContact.V - .697) % .014;
+        double phase = Math.Max(0, DuckHuntGalleryLayout.LayoutYToSourceY(supportedPose.BaseContact.V) - .697) % .014;
         for (double v = .684 + phase; v < .805; v += .014)
         {
             var a = DuckHuntGalleryLayout.ScenePoint(.095, v, aspect);
@@ -308,18 +374,20 @@ public sealed partial class SceneCompositor
     {
         if (_galleryFlapEffect is null || _galleryFlapFront is null || _galleryFlapBack is null) return;
         var flap = DuckHuntGalleryLayout.FlapSceneBounds;
-        double angle = degrees * Math.PI / 180, depth = flap.Height * Math.Sin(angle);
+        double top = DuckHuntGalleryLayout.SourceYToLayoutY(flap.Y);
+        double height = DuckHuntGalleryLayout.SourceYToLayoutY(flap.Y + flap.Height) - top;
+        double angle = degrees * Math.PI / 180, depth = height * Math.Sin(angle);
         double center = flap.X + flap.Width / 2;
         double reach = flap.Width / (1 - depth * .35);
-        double edgeY = flap.Y + flap.Height * Math.Cos(angle) - depth * .55;
+        double edgeY = top + height * Math.Cos(angle) - depth * .55;
         var quad = new DuckHuntGalleryQuad(
-            DuckHuntGalleryLayout.ScenePoint(flap.X, flap.Y, aspect),
-            DuckHuntGalleryLayout.ScenePoint(flap.X + flap.Width, flap.Y, aspect),
-            DuckHuntGalleryLayout.ScenePoint(center + reach / 2, edgeY, aspect),
-            DuckHuntGalleryLayout.ScenePoint(center - reach / 2, edgeY, aspect));
-        if (Math.Abs(edgeY - flap.Y) > .0003)
+            DuckHuntGalleryLayout.LayoutPoint(flap.X, top, aspect),
+            DuckHuntGalleryLayout.LayoutPoint(flap.X + flap.Width, top, aspect),
+            DuckHuntGalleryLayout.LayoutPoint(center + reach / 2, edgeY, aspect),
+            DuckHuntGalleryLayout.LayoutPoint(center - reach / 2, edgeY, aspect));
+        if (Math.Abs(edgeY - top) > .0003)
         {
-            bool reverse = edgeY < flap.Y;
+            bool reverse = edgeY < top;
             _galleryFlapEffect.Source = reverse ? _galleryFlapBack : _galleryFlapFront;
             _galleryFlapEffect.TransformMatrix = GalleryProjectiveMatrix(quad,
                 (float)_galleryFlapFront.Size.Width, (float)_galleryFlapFront.Size.Height);
@@ -345,12 +413,8 @@ public sealed partial class SceneCompositor
     private static Rect GalleryRect(BoardRect rect) => new(rect.X * BoardSurfaceSize, rect.Y * BoardSurfaceSize,
         rect.Width * BoardSurfaceSize, rect.Height * BoardSurfaceSize);
 
-    private static Rect GallerySceneRect(BoardRect rect, double aspect)
-    {
-        var frame = DuckHuntGalleryLayout.SceneBounds(aspect);
-        return GalleryRect(new(frame.X + rect.X * frame.Width, frame.Y + rect.Y * frame.Height,
-            rect.Width * frame.Width, rect.Height * frame.Height));
-    }
+    private static Rect GallerySceneRect(BoardRect rect, double aspect) =>
+        GalleryRect(DuckHuntGalleryLayout.SceneRect(rect, aspect));
 
     private static Matrix4x4 GalleryProjectiveMatrix(DuckHuntGalleryQuad quad, float width, float height)
     {

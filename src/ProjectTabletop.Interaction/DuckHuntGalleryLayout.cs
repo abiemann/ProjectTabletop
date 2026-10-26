@@ -47,11 +47,13 @@ public readonly record struct DuckHuntGalleryTargetPose(DuckHuntGalleryQuad Quad
 
 public readonly record struct DuckHuntGallerySkullPose(BoardRect Bounds, BoardAim BaseContact);
 
-/// <summary>Scene anchors for the approved 16:9 saloon artwork. The entire scene
-/// is contained on every board aspect so all five papers remain reachable.</summary>
+/// <summary>Scene anchors for the approved saloon artwork. The lower compartment
+/// extends down to match the middle shelf while targets retain their proportions.</summary>
 public static partial class DuckHuntGalleryLayout
 {
     public const double SceneAspect = 1672.0 / 941;
+    public const double LowerCompartmentTop = 544.0 / 941, LowerCompartmentBottom = 666.0 / 941;
+    public const double LowerCompartmentScale = 170.0 / 122, LowerCompartmentExtension = 48.0 / 941;
     public const double TargetAspect = .88;
     public const double SkullAspect = 1, SkullBaseU = .5, SkullBaseV = 1207.0 / 1254;
     private static readonly BoardAim[] SkullSilhouette =
@@ -120,7 +122,26 @@ public static partial class DuckHuntGalleryLayout
         return new((1 - width) / 2, (1 - height) / 2, width, height);
     }
 
-    public static BoardAim ScenePoint(double u, double v, double boardAspect)
+    public static double SourceYToLayoutY(double y) => y <= LowerCompartmentTop ? y :
+        y < LowerCompartmentBottom ? LowerCompartmentTop + (y - LowerCompartmentTop) * LowerCompartmentScale :
+        y + LowerCompartmentExtension;
+
+    public static double LayoutYToSourceY(double y) => y <= LowerCompartmentTop ? y :
+        y < LowerCompartmentBottom + LowerCompartmentExtension ?
+            LowerCompartmentTop + (y - LowerCompartmentTop) / LowerCompartmentScale :
+        y - LowerCompartmentExtension;
+
+    public static BoardAim ScenePoint(double u, double v, double boardAspect) =>
+        LayoutPoint(u, SourceYToLayoutY(v), boardAspect);
+
+    public static BoardRect SceneRect(BoardRect source, double boardAspect)
+    {
+        var topLeft = ScenePoint(source.X, source.Y, boardAspect);
+        var bottomRight = ScenePoint(source.X + source.Width, source.Y + source.Height, boardAspect);
+        return new(topLeft.U, topLeft.V, bottomRight.U - topLeft.U, bottomRight.V - topLeft.V);
+    }
+
+    public static BoardAim LayoutPoint(double u, double v, double boardAspect)
     {
         var scene = SceneBounds(boardAspect);
         return new(scene.X + u * scene.Width, scene.Y + v * scene.Height);
@@ -199,8 +220,10 @@ public static partial class DuckHuntGalleryLayout
             baseV += releaseVelocity * seconds + .6 * seconds * seconds;
             angle = releaseAngle + angularVelocity * seconds;
         }
+        var scene = SceneBounds(boardAspect);
+        var baseContact = ScenePoint(center, baseV, boardAspect);
         var quad = new DuckHuntGalleryQuad(Project(0, 0), Project(1, 0), Project(1, 1), Project(0, 1));
-        return new(quad, ScenePoint(center, baseV, boardAspect), angle * 180 / Math.PI,
+        return new(quad, baseContact, angle * 180 / Math.PI,
             supported, angle > 0 || !supported);
 
         BoardAim Project(double u, double v)
@@ -209,8 +232,10 @@ public static partial class DuckHuntGalleryLayout
             // Forward tipping brings the upper edge closer. Project about the
             // actual foot, so its point stays exactly on the belt/roller arc.
             double perspective = 1 - .30 * aboveBase * Math.Sin(angle);
-            return ScenePoint(center + (u - TargetBaseU) * width / perspective,
-                baseV - aboveBase * height * Math.Cos(angle) / perspective, boardAspect);
+            // Move the foot with the taller cabinet, not every surface point:
+            // stretching the paper itself would turn its printed circles oval.
+            return new(baseContact.U + (u - TargetBaseU) * width * scene.Width / perspective,
+                baseContact.V - aboveBase * height * scene.Height * Math.Cos(angle) / perspective);
         }
     }
 

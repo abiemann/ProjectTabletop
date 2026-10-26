@@ -294,6 +294,55 @@ public class DuckHuntGalleryTests
     [InlineData(1)]
     [InlineData(1.8)]
     [InlineData(2.4)]
+    public void LowerCompartmentMatchesMiddleHeightWithoutMovingTheUpperShelves(double aspect)
+    {
+        var frame = DuckHuntGalleryLayout.SceneBounds(aspect);
+        var middle = DuckHuntGalleryLayout.SceneRect(DuckHuntGalleryLayout.MiddlePanelSceneBounds, aspect);
+        var lower = DuckHuntGalleryLayout.SceneRect(new(208.0 / 1672, 544.0 / 941, 1256.0 / 1672, 122.0 / 941), aspect);
+        Assert.Equal(170.0 / 941 * frame.Height, lower.Height, 10);
+        Assert.Equal(middle.Height, lower.Height, 10);
+        Assert.Equal(frame.Y + 350.0 / 941 * frame.Height, middle.Y, 10);
+        Assert.Equal(frame.Y + 544.0 / 941 * frame.Height, lower.Y, 10);
+        Assert.Equal(frame.Y + 714.0 / 941 * frame.Height, lower.Y + lower.Height, 10);
+        Assert.Equal(frame.Y + 989.0 / 941 * frame.Height,
+            DuckHuntGalleryLayout.ScenePoint(0, 1, aspect).V, 10);
+
+        // Check the extended recess and shifted belt using their displayed pixel
+        // positions, including the wood immediately below the belt.
+        Assert.True(DuckHuntGalleryLayout.ContainsLowerMiss(DuckHuntGalleryLayout.LayoutPoint(.5, 700.0 / 941, aspect), aspect));
+        Assert.True(DuckHuntGalleryLayout.ContainsLowerMiss(DuckHuntGalleryLayout.LayoutPoint(.5, 780.0 / 941, aspect), aspect));
+        Assert.False(DuckHuntGalleryLayout.ContainsLowerMiss(DuckHuntGalleryLayout.LayoutPoint(.5, 800.0 / 941, aspect), aspect));
+    }
+
+    [Theory]
+    [InlineData(.55)]
+    [InlineData(1)]
+    [InlineData(1.8)]
+    [InlineData(2.4)]
+    public void TallerCabinetMovesThePedestalsWithoutStretchingPapersOnTheRearDeck(double aspect)
+    {
+        var state = Waiting().Snapshot;
+        var frame = DuckHuntGalleryLayout.SceneBounds(aspect);
+        foreach (double position in new[] { 0.0, .2, .5, 1.0 })
+        {
+            var pose = DuckHuntGalleryLayout.TargetPose(2, state with { ConveyorPosition = position }, aspect);
+            Assert.Equal((.101 + (.135 - .101) * position) * frame.Height, pose.Quad.Bounds.Height, 10);
+            Assert.Equal(DuckHuntGalleryLayout.TargetAspect,
+                pose.Quad.Bounds.Width * aspect / pose.Quad.Bounds.Height, 10);
+            var foot = pose.Quad.Map(DuckHuntGalleryLayout.TargetBaseU, DuckHuntGalleryLayout.TargetBaseV);
+            Assert.Equal(pose.BaseContact.U, foot.U, 10);
+            Assert.Equal(pose.BaseContact.V, foot.V, 10);
+            double diameterX = pose.Quad.Bounds.Width * DuckHuntGalleryLayout.PaperRadiusU * 2 * aspect;
+            double diameterY = pose.Quad.Bounds.Height * DuckHuntGalleryLayout.PaperRadiusV * 2;
+            Assert.Equal(diameterX, diameterY, 10);
+        }
+    }
+
+    [Theory]
+    [InlineData(.55)]
+    [InlineData(1)]
+    [InlineData(1.8)]
+    [InlineData(2.4)]
     public void AllFivePapersRemainVisibleEvenlySpacedAndPhysicallyProportioned(double aspect)
     {
         var game = Waiting();

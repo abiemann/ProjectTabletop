@@ -23,7 +23,7 @@ public sealed partial class SceneCompositor
             _duckHuntFieldImages.Image("flying-mallard-wing.png") is not null) &&
         (_boardSession.Screen != BoardScreen.DuckHunt || _boardSession.CurrentDuckHuntView != DuckHuntView.TargetPractice ||
             _duckHuntGalleryPublished && _duckHuntGalleryImages?.Image("target-practice-saloon-v1.png") is not null &&
-            _duckHuntGalleryImages.Image("gallery-golden-ceiling-v1.png") is not null &&
+            _duckHuntGalleryImages.Image("gallery-golden-ceiling-v3.png") is not null &&
             _duckHuntGalleryImages.Image("gallery-steampunk-target.png") is not null &&
             _duckHuntGalleryImages.Image("gallery-paper-puncture.png") is not null &&
             _duckHuntGalleryImages.Image("gallery-crystal-skull.png") is not null &&
@@ -67,7 +67,7 @@ public sealed partial class SceneCompositor
             DisposeDuckHuntGalleryResources();
             _duckHuntGalleryPublished = false;
             _duckHuntGalleryImages = new(device, Path.Combine(AppContext.BaseDirectory, "Assets", "DuckHunt"),
-                ["target-practice-saloon-v1.png", "gallery-golden-ceiling-v1.png", "gallery-steampunk-target.png", "gallery-paper-puncture.png",
+                ["target-practice-saloon-v1.png", "gallery-golden-ceiling-v3.png", "gallery-steampunk-target.png", "gallery-paper-puncture.png",
                     "gallery-crystal-skull.png", "gallery-unlit-lamps.png", "gallery-candle-flames.png"]);
         }
         return _duckHuntGalleryImages;

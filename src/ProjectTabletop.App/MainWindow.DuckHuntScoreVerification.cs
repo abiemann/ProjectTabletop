@@ -53,9 +53,11 @@ public sealed partial class MainWindow
             now += TimeSpan.FromSeconds(4);
             byte[] zero = Draw();
             CheckScore(0);
-            var score = SceneRect(SceneCompositor.GalleryScoreSceneBounds);
+            var score = SceneCompositor.GalleryScoreBounds(aspect);
             Check(Math.Abs(score.X + score.Width / 2 - .5) < 1e-8,
                 "The score is not centred on the lower wooden panel.");
+            Check(score.Y >= 0 && score.Y + score.Height <= .96000001,
+                "The taller cabinet pushed the score off the board.");
             for (int digit = 0; digit < 4; digit++)
                 Check(WhitePixels(zero, new(score.X + digit * score.Width / 4, score.Y,
                     score.Width / 4, score.Height)) > 8, "A white zero is missing from the four-digit display.");
@@ -292,12 +294,6 @@ public sealed partial class MainWindow
                     Check(flip.Item2 == digits[digit] - '0' && (flip.Item1 == flip.Item2 || flip.Item3 == 1),
                         "The settled score display does not show the zero-padded total.");
                 }
-            }
-            BoardRect SceneRect(BoardRect local)
-            {
-                var point = DuckHuntGalleryLayout.ScenePoint(local.X, local.Y, aspect);
-                var bounds = DuckHuntGalleryLayout.SceneBounds(aspect);
-                return new(point.U, point.V, local.Width * bounds.Width, local.Height * bounds.Height);
             }
             (int Left, int Top, int Right, int Bottom) Pixels(BoardRect region)
             {

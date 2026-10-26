@@ -13,6 +13,13 @@ namespace ProjectTabletop.App.Projection;
 public sealed partial class SceneCompositor
 {
     internal static readonly BoardRect GalleryScoreSceneBounds = new(.441, .886, .118, .070);
+    internal static BoardRect GalleryScoreBounds(double aspect)
+    {
+        var bounds = DuckHuntGalleryLayout.SceneRect(GalleryScoreSceneBounds, aspect);
+        // The taller cabinet may extend behind the controls, but its score must
+        // stay visible even on a wide board with no spare margin below the scene.
+        return bounds with { Y = Math.Min(bounds.Y, .96 - bounds.Height) };
+    }
     private const int GalleryScoreCardWidth = 144, GalleryScoreCardHeight = 208;
     private const double GalleryScoreFlipSeconds = .072, GalleryScoreDigitDelay = .055;
     private CanvasRenderTarget? _galleryScoreDigits;
@@ -148,7 +155,7 @@ public sealed partial class SceneCompositor
     {
         GalleryScoreVisualFrame(_blackjackClock());
         if (state.Cycle == 0 || _boardSession.DuckHuntDrawerOpen || _galleryScoreDigits is null) return;
-        var bounds = GallerySceneRect(GalleryScoreSceneBounds, aspect);
+        var bounds = GalleryRect(GalleryScoreBounds(aspect));
         double gap = bounds.Width * .025, width = (bounds.Width - 3 * gap) / 4;
         for (int place = 0; place < 4; place++)
         {
