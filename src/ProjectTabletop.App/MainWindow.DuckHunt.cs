@@ -302,6 +302,7 @@ public sealed partial class MainWindow
             punctures = _scene.GalleryPunctures.ToArray(),
             hunt = _scene.HuntFlightState,
             measurement = _scene.DuckHuntMeasurement,
+            inputContext = _scene.GetDuckHuntInputContext(),
             ready,
             clickLearning = ClickLearningStatus(),
             dot = observation?.Dot,

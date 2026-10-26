@@ -1,0 +1,89 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "stride": 7680,
+  "map": [
+    -0.0006953790736822747,
+    -4.2602889308357894e-05,
+    1.2534008750249843,
+    1.5136867282612982e-05,
+    -0.001301231127589016,
+    1.2450370873770549,
+    1.4944998469619994e-05,
+    -7.016986783029634e-05,
+    1
+  ],
+  "mapDescription": "Recorded camera-to-projector homography used as a search polygon for this optical regression; camera positions are the asserted output. No simulation or resampling of image pixels.",
+  "fixtures": [
+    {
+      "file": "gallery-clear.bgra.gz",
+      "sourceFrame": "camera-0060.png",
+      "sha256Bgra": "b72b2822aa641f3e4e5457b743cb77cd1ae43d4d5fb1fd209645d3097c72c732",
+      "expectedCandidateCount": 0,
+      "expectedCameraPosition": null,
+      "visibleClippedCores": [],
+      "originalCandidateCount": 9,
+      "note": "Clear scene, no visible laser. Warm wood and gold create nine false red components in the original detector."
+    },
+    {
+      "file": "gallery-clear-small-highlight.bgra.gz",
+      "sourceFrame": "camera-0048.png",
+      "sha256Bgra": "f54c21643f61ef1d3878f631691a1a165f34116bc199b74b22289510977fcd1d",
+      "expectedCandidateCount": 0,
+      "expectedCameraPosition": null,
+      "visibleClippedCores": [],
+      "originalCandidateCount": 9,
+      "note": "Clear scene, no visible laser. Small wood highlight at camera1233,269 survives the weaker pure-signal-pixel trial."
+    },
+    {
+      "file": "gallery-clear-pure-warm-speck.bgra.gz",
+      "sourceFrame": "camera-0015.png",
+      "sha256Bgra": "c875363b008134b43054b45530abad36454cff1a7d725bb56910acf2fc930f27",
+      "expectedCandidateCount": 0,
+      "expectedCameraPosition": null,
+      "visibleClippedCores": [],
+      "originalCandidateCount": 8,
+      "note": "Clear scene, no visible laser. Five warm pixels at camera599,668 satisfy mean hue purity but lack strong local contrast."
+    },
+    {
+      "file": "gallery-laser-on-skull.bgra.gz",
+      "sourceFrame": "camera-0005.png",
+      "sha256Bgra": "589da3ab9601b579d2c431ca2855792dc316aaf436d3938329e1eda17012e9f8",
+      "expectedCandidateCount": 1,
+      "expectedCameraPosition": {
+        "x": 1045.6666666666667,
+        "y": 461.875
+      },
+      "visibleClippedCores": [
+        {
+          "x": 1045.6666666666667,
+          "y": 461.875,
+          "pixels": 24
+        }
+      ],
+      "originalCandidateCount": 7,
+      "note": "Visible laser on the central skull. Camera-white clipped core independently measured within the displayed laser region."
+    },
+    {
+      "file": "gallery-split-motion-streak.bgra.gz",
+      "sourceFrame": "camera-0028.png",
+      "sha256Bgra": "1a5188a6121c2cc168f0ce7632c6c952898e41aaac1b83bbe8e549b28386cd58",
+      "expectedCandidateCount": 2,
+      "expectedCameraPosition": null,
+      "visibleClippedCores": [
+        {
+          "x": 779.5,
+          "y": 401.0,
+          "pixels": 4
+        },
+        {
+          "x": 771.2173913043479,
+          "y": 415.2608695652174,
+          "pixels": 23
+        }
+      ],
+      "originalCandidateCount": 7,
+      "note": "Visible moving laser produces two separated clipped cores. Remain conservative and ambiguous; this is not evidence of two physical devices."
+    }
+  ]
+}

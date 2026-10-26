@@ -219,6 +219,29 @@ public class RedDotDetectorTests
         Assert.Equal(0, result.CandidateCount);
     }
 
+    [Fact]
+    public void SaturatedWarmHighlightNeedsCoherentRedHueWithoutAClippedCore()
+    {
+        var frame = new Frame(35, 45, 80);
+        // This warm highlight passes the broad red seed and local contrast gates.
+        // A few purer pixels must not turn the entire wood detail into a laser.
+        frame.Disc(320, 240, 4, 80, 100, 200);
+        frame.Pixel(320, 240, 85, 90, 200);
+        frame.Pixel(321, 240, 85, 90, 200);
+        Assert.Equal(0, frame.Detect(new()).CandidateCount);
+    }
+
+    [Fact]
+    public void NearRedHighlightMustStandOutFromAnAlreadyRedSurrounding()
+    {
+        var frame = new Frame(60, 70, 130);
+        frame.Disc(320, 240, 3, 85, 90, 190);
+        Assert.Equal(0, frame.Detect(new()).CandidateCount);
+        // Genuine nonclipped laser colour remains accepted over the same wood.
+        frame.Disc(320, 240, 3, 20, 25, 190);
+        Assert.True(frame.Detect(new()).Detected);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

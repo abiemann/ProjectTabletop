@@ -74,7 +74,7 @@ public sealed class RedDotDetector
             byte kind = (byte)(_mask[y * width + x] & ColourMask);
             if (kind is 0 or 3 or 4) continue;
             int head = 0, tail = 1, minX = x, maxX = x, minY = y, maxY = y;
-            double weightedX = 0, weightedY = 0, weight = 0, redExcess = 0;
+            double weightedX = 0, weightedY = 0, weight = 0, redExcess = 0, greenBlue = 0;
             int signalPixels = 0, clippedPixels = 0;
             int peakRedGreen = 0, magentaPixels = 0, colourPixels = 0, seedPixels = 0;
             bool touchesBoundary = false, acceptedCore = false;
@@ -95,6 +95,7 @@ public sealed class RedDotDetector
                     if (kind == 1 ? bgra[source + 2] - Math.Max(bgra[source], bgra[source + 1]) >= 90 :
                         bgra[source + 2] >= 175 && bgra[source] >= 200 && excess >= 24) signalPixels++;
                     colourPixels++;
+                    greenBlue += bgra[source + 1] - bgra[source];
                     if (bgra[source + 2] >= 100) seedPixels++;
                     weightedX += px * excess; weightedY += py * excess; weight += excess;
                     peakRedGreen = Math.Max(peakRedGreen, excess);
@@ -135,7 +136,7 @@ public sealed class RedDotDetector
             // second ambiguous aim. Inspect raw colours because its flood may be cleared.
             if (kind == 2 && ContainsStrongRed(bgra, stride, minX, minY, maxX, maxY)) continue;
 
-            // Preserve the strong-red path. Blue-biased camera white balance can make a real
+            // Blue-biased camera white balance can make a real
             // red spot magenta, with blue exceeding red even in its brightest pixels. Require
             // both a local red/green peak and mean contrast so lavender cardboard, blue duck
             // feathers and small chromatic fringes around projected lettering remain clear.
@@ -146,6 +147,13 @@ public sealed class RedDotDetector
             bool strongRed = localRed >= 35;
             if (!strongRed && (magentaPixels * 2 < colourPixels || peakRedGreen < 24 || localRedGreen < 8 ||
                 peakRedGreen - surroundingRedGreen < 14)) continue;
+            // Warm photographic highlights can form compact red seeds too. Without
+            // a clipped centre, require a coherent near-red hue and at least twice
+            // the surrounding red dominance. Check the whole component rather than
+            // tightening seed colours, which would split wood texture into tiny dots.
+            // Clipped centres and blue-biased magenta evidence keep their own checks.
+            if (kind == 1 && clippedPixels == 0 &&
+                (greenBlue * 10 > weight || localRed < surroundingRed)) continue;
             var camera = new PixelPoint(weightedX / weight, weightedY / weight);
             var board = Map(camera.X, camera.Y);
             if (board.X is < 0 or > 1 || board.Y is < 0 or > 1 ||

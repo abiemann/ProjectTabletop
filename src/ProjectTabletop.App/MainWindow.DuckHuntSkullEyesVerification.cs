@@ -74,11 +74,44 @@ public sealed partial class MainWindow
                 scene.SetDuckHuntAudioStatus(true, "Isolated eye resume"); Draw();
             }
 
+            if (size.Name == "1080p")
+            {
+                // Camera observations can alternate between a valid skull and
+                // a brief loss. Exercise the actual publisher and renderer:
+                // resetting every transition's elapsed time starves the fade.
+                scene.ClearDuckHuntInput(); Draw();
+                var samples = new List<object>();
+                float peak = 0;
+                for (int sample = 0; sample < 12; sample++)
+                {
+                    await Task.Delay(16);
+                    now += TimeSpan.FromMilliseconds(16);
+                    bool detected = sample % 2 == 0;
+                    Aim(detected ? 2 : null);
+                    var observation = scene.DuckHuntMeasurement;
+                    Check(observation.LiveDetectedXY.HasValue == detected,
+                        "The intermittent eye fixture did not publish the intended live observation.");
+                    Draw();
+                    float amount = scene.GallerySkullEyeAmount(2);
+                    peak = Math.Max(peak, amount);
+                    samples.Add(new { Sample = sample, Detected = detected,
+                        observation.LiveFrameTimestamp, AnimationTime = now, EyeAmount = amount });
+                }
+                // Retain evidence even when this regression fails: the old
+                // renderer records twelve zero amounts despite fresh aims.
+                await Save("intermittent-hover");
+                await File.WriteAllTextAsync(Path.Combine(directory, "1080p-intermittent-hover.json"),
+                    System.Text.Json.JsonSerializer.Serialize(new { PeakEyeAmount = peak, Samples = samples },
+                        new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                Check(peak >= .5f, "Fresh repeated skull observations with 16 ms losses never produced visible eye feedback.");
+            }
+
             Aim(0); Draw(); now += TimeSpan.FromMilliseconds(120); Aim(0); Draw();
             Aim(4); Draw(); now += TimeSpan.FromMilliseconds(50); Aim(4);
             await CheckOptics(Capture(), "changing skull during the fade", variants: true);
             now += TimeSpan.FromMilliseconds(100); Aim(4); Draw();
-            Check(scene.GallerySkullEyeAmount(0) == 0 && scene.GallerySkullEyeAmount(4) >= .99f,
+            Check(Enumerable.Range(0, 5).Where(index => index != 4).All(index => scene.GallerySkullEyeAmount(index) == 0) &&
+                scene.GallerySkullEyeAmount(4) >= .99f,
                 "The previous skull retained its glow after aiming at another skull.");
             Aim(null); Draw(); now += TimeSpan.FromMilliseconds(50);
             await CheckOptics(Capture(), "null aim during the fade", variants: true);

@@ -15,7 +15,6 @@ public sealed partial class SceneCompositor
     private readonly float[] _galleryEyeAmounts = new float[DuckHuntGalleryGame.SkullCount];
     private DateTimeOffset? _galleryEyesObservedAt;
     private long _galleryEyesInputEpoch = -1, _galleryEyesRoundRevision = -1;
-    private int _galleryEyesDesiredIndex = -1;
 
     internal float GallerySkullEyeAmount(int index) => _galleryEyeAmounts[index];
 
@@ -52,18 +51,16 @@ public sealed partial class SceneCompositor
                 }
         }
         double elapsed = _galleryEyesObservedAt is { } previous ? Math.Max(0, (animationNow - previous).TotalSeconds) : 0;
-        if (_galleryEyesDesiredIndex != desired)
-        {
-            // The interval before this new aim belongs to the previous target.
-            elapsed = 0;
-            _galleryEyesDesiredIndex = desired;
-        }
         _galleryEyesObservedAt = animationNow;
         int frame = 0;
         for (int index = 0; index < _galleryEyeAmounts.Length; index++)
         {
-            float amount = (state.SkullHitMask & (1 << index)) != 0 ? 0 :
-                (float)Math.Clamp(_galleryEyeAmounts[index] + (index == desired ? elapsed : -elapsed) / GalleryEyeFadeSeconds, 0, 1);
+            // Confirmed aim lights the sockets immediately. Restarting a fade-in
+            // on every valid/null transition could leave them dark indefinitely
+            // during brief camera dropouts. Only the visual fade-out bridges gaps;
+            // shot detection still requires its own fresh camera snapshot.
+            float amount = (state.SkullHitMask & (1 << index)) != 0 ? 0 : index == desired ? 1 :
+                (float)Math.Clamp(_galleryEyeAmounts[index] - elapsed / GalleryEyeFadeSeconds, 0, 1);
             _galleryEyeAmounts[index] = amount;
             frame |= (int)Math.Round(amount * 31) << (index * 5);
         }
@@ -73,7 +70,6 @@ public sealed partial class SceneCompositor
     private void ClearGalleryEyes(DateTimeOffset now)
     {
         Array.Clear(_galleryEyeAmounts);
-        _galleryEyesDesiredIndex = -1;
         _galleryEyesObservedAt = now;
     }
 
