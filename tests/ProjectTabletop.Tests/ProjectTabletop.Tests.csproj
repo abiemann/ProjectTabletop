@@ -24,6 +24,8 @@
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
+    <None Update="Fixtures/menu-down-border.json;Fixtures/menu-down-border-*.bgra.gz" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures/menu-up-palette.json;Fixtures/menu-up-palette-*.bgra.gz" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="..\..\src\ProjectTabletop.App\ExclusiveProcessLease.cs" Link="App\ExclusiveProcessLease.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\BoardImageDirectories.cs" Link="App\BoardImageDirectories.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Projection\WaterGarden\WaterFountainFluid.cs" Link="App\WaterFountainFluid.cs" />

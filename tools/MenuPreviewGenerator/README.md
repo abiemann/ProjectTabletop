@@ -45,8 +45,10 @@ detail. It contains no landing controls or duplicated title. Its before images
 retain the previous simplified house illustration for comparison.
 Roulette's complete bowl and spindle fill the thumbnail's height, without
 foreground chips. Its composition stays anchored right, so
-changing the board aspect crops the quiet left background instead of resizing
-the wheel. Roulette's before images retain the previous rim-only framing.
+changing the board aspect normally crops the quiet left background. When a card
+is wider than its source image, the preview scales uniformly to fill the width
+and crops vertically about the centre instead of repeating an edge column.
+Roulette's before images retain the previous rim-only framing.
 The Globe uses the fixed captured opening pose and NASA imagery already credited
 in `THIRD_PARTY_NOTICES.md`.
 

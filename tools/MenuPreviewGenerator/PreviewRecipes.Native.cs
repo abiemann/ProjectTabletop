@@ -181,7 +181,7 @@ internal sealed partial class PreviewRecipes
             recipeVersion = 5,
             generation = "Offline native Win2D previews using the project's existing artwork, geometry and shaders, with a retained original generated Water Garden illustration; never run during app startup.",
             width = ImageWidth, height = ImageHeight, logicalWidth = CanonicalSpan, logicalHeight = MenuPreviewUnits,
-            framing = "Scale uniformly by destination height; align the right edge, crop the left or extend quiet left background; never stretch.",
+            framing = "Cover the destination uniformly in physical pixels. Crop from the left when height sets the scale; crop vertically about the centre when width sets the scale. Never stretch an edge column.",
             crownDeed = new { composition = "Close-up of the native lamplit city, property boulevard and silver pieces.",
                 boardRaster = 2400, crop = new { x = 0, y = 0, width = 1000, height = 350 },
                 snapshot = "Fixed representative game; hat on Amber Exchange, car on Festival Dues, three shops on each Crown Quarter property.",
@@ -205,9 +205,8 @@ internal sealed partial class PreviewRecipes
         }, options) + Environment.NewLine);
     }
 
-    // Match SceneCompositor.DrawMenuThumbnail: the menu scales by height and
-    // keeps the right edge fixed. An unusually wide card repeats only the
-    // image's quiet leftmost column, leaving the focal artwork at full scale.
+    // Match SceneCompositor.DrawMenuThumbnail: cover the card uniformly, using
+    // a right-aligned horizontal crop or a centred vertical crop.
     private static void DrawHeightFramedPreview(CanvasDrawingSession drawing,
         CanvasBitmap image, int width, int height)
     {
@@ -219,11 +218,9 @@ internal sealed partial class PreviewRecipes
                 1, CanvasImageInterpolation.HighQualityCubic);
             return;
         }
-        double artWidth = width * image.Size.Width / sourceWidth;
-        drawing.DrawImage(image, new Rect(0, 0, width - artWidth, height),
-            new Rect(0, 0, 1, image.Size.Height));
-        drawing.DrawImage(image, new Rect(width - artWidth, 0, artWidth, height),
-            new Rect(0, 0, image.Size.Width, image.Size.Height),
+        double sourceHeight = image.Size.Height * image.Size.Width / sourceWidth;
+        drawing.DrawImage(image, new Rect(0, 0, width, height),
+            new Rect(0, (image.Size.Height - sourceHeight) / 2, image.Size.Width, sourceHeight),
             1, CanvasImageInterpolation.HighQualityCubic);
     }
 

@@ -1,0 +1,229 @@
+{
+  "Width": 1000,
+  "Height": 1000,
+  "CameraToBoard": [
+    0.0010194435931663885,
+    -1.7059865482843515e-05,
+    -0.5585976779853467,
+    -4.064704876932354e-06,
+    0.0012564861417792752,
+    -0.2543905565161166,
+    1.3520498749866606e-05,
+    -6.304943533769246e-05,
+    1.0
+  ],
+  "BoardSearchRegions": [
+    {
+      "X": 0.110765625,
+      "Y": 0.30884375,
+      "Width": 0.12628124999999998,
+      "Height": 0.03206250000000005
+    },
+    {
+      "X": 0.550765625,
+      "Y": 0.309046875,
+      "Width": 0.07754687500000002,
+      "Height": 0.03185937500000002
+    },
+    {
+      "X": 0.110765625,
+      "Y": 0.50884375,
+      "Width": 0.1754375,
+      "Height": 0.03921874999999997
+    },
+    {
+      "X": 0.550765625,
+      "Y": 0.50884375,
+      "Width": 0.13845312499999995,
+      "Height": 0.03921874999999997
+    },
+    {
+      "X": 0.110765625,
+      "Y": 0.70884375,
+      "Width": 0.159171875,
+      "Height": 0.032062499999999994
+    },
+    {
+      "X": 0.77350390625,
+      "Y": 0.127044921875,
+      "Width": 0.108501953125,
+      "Height": 0.035138671875
+    },
+    {
+      "X": 0.7965001220703125,
+      "Y": 0.87301806640625,
+      "Width": 0.06699975585937501,
+      "Height": 0.05896386718750002
+    }
+  ],
+  "BoardReferenceRegions": [
+    {
+      "X": 0.092,
+      "Y": 0.262,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.532,
+      "Y": 0.262,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.092,
+      "Y": 0.4620000000000001,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.532,
+      "Y": 0.4620000000000001,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.092,
+      "Y": 0.662,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.6920000000000001,
+      "Y": 0.087,
+      "Width": 0.216,
+      "Height": 0.10600000000000001
+    },
+    {
+      "X": 0.752,
+      "Y": 0.862,
+      "Width": 0.156,
+      "Height": 0.08099999999999999
+    }
+  ],
+  "BoardTriggerRegions": [
+    {
+      "X": 0.110765625,
+      "Y": 0.30884375,
+      "Width": 0.12628124999999998,
+      "Height": 0.03206250000000005
+    },
+    {
+      "X": 0.550765625,
+      "Y": 0.309046875,
+      "Width": 0.07754687500000002,
+      "Height": 0.03185937500000002
+    },
+    {
+      "X": 0.110765625,
+      "Y": 0.50884375,
+      "Width": 0.1754375,
+      "Height": 0.03921874999999997
+    },
+    {
+      "X": 0.550765625,
+      "Y": 0.50884375,
+      "Width": 0.13845312499999995,
+      "Height": 0.03921874999999997
+    },
+    {
+      "X": 0.110765625,
+      "Y": 0.70884375,
+      "Width": 0.159171875,
+      "Height": 0.032062499999999994
+    },
+    {
+      "X": 0.77350390625,
+      "Y": 0.127044921875,
+      "Width": 0.108501953125,
+      "Height": 0.035138671875
+    },
+    {
+      "X": 0.8045001220703125,
+      "Y": 0.88101806640625,
+      "Width": 0.050999755859374996,
+      "Height": 0.042963867187500004
+    }
+  ],
+  "AllowsLocalForegroundContext": true,
+  "BoardControlReferenceRegions": [
+    {
+      "X": 0.092,
+      "Y": 0.262,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.532,
+      "Y": 0.262,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.092,
+      "Y": 0.4620000000000001,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.532,
+      "Y": 0.4620000000000001,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.092,
+      "Y": 0.662,
+      "Width": 0.376,
+      "Height": 0.136
+    },
+    {
+      "X": 0.6920000000000001,
+      "Y": 0.087,
+      "Width": 0.216,
+      "Height": 0.10600000000000001
+    },
+    {
+      "X": 0.752,
+      "Y": 0.862,
+      "Width": 0.156,
+      "Height": 0.08099999999999999
+    }
+  ],
+  "BoardVectorGlyphRegions": [
+    6
+  ],
+  "BoardDisturbanceExclusionRegion": {
+    "X": 0.725,
+    "Y": 0.835,
+    "Width": 0.21,
+    "Height": 0.16500000000000004
+  },
+  "SearchPolygon": [
+    {
+      "X": 556.305252975933,
+      "Y": 208.21856429576812
+    },
+    {
+      "X": 1534.7462986494984,
+      "Y": 211.43563517136056
+    },
+    {
+      "X": 1500.4423059249025,
+      "Y": 966.9913943883901
+    },
+    {
+      "X": 568.5658525905316,
+      "Y": 954.6172369832116
+    }
+  ],
+  "cameraWidth": 1920,
+  "cameraHeight": 1080,
+  "Stride": 7680,
+  "provenance": {
+    "CameraCapturedUtc": "2026-10-26T00:54:02.754Z",
+    "CameraSource": "Recorded held UP arrow on menu page two; palm-down hand confined to the arrow approach.",
+    "ExpectedSource": "Reconstructed using the unchanged current application renderer, page two, physical board aspect 63.97093249574699 / 50.93947854076794, and the live 2686 x 2143 render target before the same 1000 x 1000 resize. Not a synchronized expected image captured with this camera frame.",
+    "CalibrationSource": "Live release-corrected-status acquisition search polygon maps to normalized board corners .005 / .995.",
+    "Failure": "Intact orange Paint thumbnail excluded by the distributed flat training grid; its camera colour was falsely classified as an independent obstruction."
+  }
+}

@@ -140,6 +140,7 @@ public sealed partial class SceneCompositor
         drawing.Clear(Color.FromArgb(255, 25, 16, 10));
         if (_duckHuntGalleryImages?.Image("target-practice-saloon-v1.png") is not { } scene) return;
         var frame = DuckHuntGalleryLayout.SceneBounds(aspect);
+        DrawGalleryCeiling(drawing, frame.Y, aspect);
         drawing.DrawImage(scene, GalleryRect(frame), new Rect(0, 0, scene.Size.Width, scene.Size.Height),
             1, CanvasImageInterpolation.HighQualityCubic);
         GalleryLampVisualFrame(_blackjackClock());
@@ -174,13 +175,19 @@ public sealed partial class SceneCompositor
         }
         DrawGalleryFlap(drawing, state.FlapAngleDegrees, aspect);
         DrawGalleryScore(drawing, state, aspect);
-        if (state.PlayVisible)
-        {
-            var bounds = GalleryRect(DuckHuntGalleryLayout.PlayBounds);
-            drawing.FillRoundedRectangle(bounds, (float)(14 / aspect), 14, Color.FromArgb(255, 164, 184, 144));
-            drawing.DrawRoundedRectangle(bounds, (float)(14 / aspect), 14, Color.FromArgb(255, 53, 70, 37), 2);
-            DrawHoldButtonCaption(drawing, "PLAY", bounds, Color.FromArgb(255, 31, 48, 27), aspect);
-        }
+    }
+
+    private void DrawGalleryCeiling(CanvasDrawingSession drawing, double marginHeight, double aspect)
+    {
+        if (marginHeight <= 0 || _duckHuntGalleryImages?.Image("gallery-golden-ceiling-v1.png") is not { } ceiling) return;
+        // Cover only the unused space above the cabinet, preserving physical
+        // proportions and the ceiling's lower edge against the ornate crown.
+        double cropAspect = aspect / marginHeight;
+        double sourceHeight = Math.Min(ceiling.Size.Height, ceiling.Size.Width / cropAspect);
+        double sourceWidth = sourceHeight * cropAspect;
+        drawing.DrawImage(ceiling, new Rect(0, 0, BoardSurfaceSize, marginHeight * BoardSurfaceSize),
+            new Rect((ceiling.Size.Width - sourceWidth) / 2, ceiling.Size.Height - sourceHeight,
+                sourceWidth, sourceHeight), 1, CanvasImageInterpolation.HighQualityCubic);
     }
 
     private void DrawGalleryBelt(CanvasDrawingSession drawing, DuckHuntGallerySnapshot state, double aspect)

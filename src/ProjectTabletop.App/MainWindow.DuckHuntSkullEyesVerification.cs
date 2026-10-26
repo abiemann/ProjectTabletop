@@ -35,6 +35,7 @@ public sealed partial class MainWindow
                 Homography.FromFourPoints([new(0, 0), new(size.Width, 0), new(size.Width, size.Height), new(0, size.Height)],
                     [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
             scene.SetBoardSetup(false);
+            now = MonotonicClock.UtcNow; // Calibration advances the real input timestamp.
             scene.ShowDuckHuntTargetPractice();
             await scene.EnsureBoardArtworkResourcesAsync(target.Device, BoardScreen.DuckHunt);
             now = MonotonicClock.UtcNow.AddSeconds(1);
@@ -43,7 +44,7 @@ public sealed partial class MainWindow
             Aim(2); Draw(); now += TimeSpan.FromMilliseconds(120); Aim(2); Draw();
             Check(EyesOff(), "An unrevealed skull glowed behind the closed backdrop.");
             now += TimeSpan.FromMilliseconds(1);
-            Check(scene.SubmitDuckHuntShot(new(.5, .46), now), "The eye fixture could not start the gallery.");
+            Check(ActivateGalleryPlay(scene), "The eye fixture could not start the gallery through drawer PLAY.");
             now += TimeSpan.FromSeconds(4);
             Draw();
             Check(scene.GalleryState.UpperPhase == DuckHuntGalleryUpperPhase.WaitingForHits, "The skulls are not exposed.");

@@ -45,6 +45,7 @@ public class DuckHuntGallerySkullTests
         game.Advance(At(8000));
         Assert.False(game.Snapshot.PlayVisible);
         Assert.False(game.Shoot(Play, At(8001)));
+        Assert.False(game.Start(At(8001)));
         Assert.Equal(1, game.Snapshot.Cycle);
         if (skullsFirst)
         {
@@ -69,7 +70,8 @@ public class DuckHuntGallerySkullTests
         Assert.False(game.Shoot(Play, At(8140)));
         game.Advance(At(40000));
         Assert.True(game.Snapshot.PlayVisible);
-        Assert.True(game.Shoot(Play, At(40010)));
+        Assert.False(game.Shoot(Play, At(40010)));
+        Assert.True(game.Start(At(40010)));
         Assert.Equal(2, game.Snapshot.Cycle);
         Assert.Empty(game.Punctures);
         Assert.Equal(0, game.Snapshot.SkullHitMask);
@@ -199,9 +201,9 @@ public class DuckHuntGallerySkullTests
     public void SkullHitsDoNotChangeTheBoardRoundEpochOrDrawerState()
     {
         var board = new BoardSession();
-        board.ShowDuckHuntTargetPractice(At(0));
-        board.SetDuckHuntReady(true, At(0));
-        Assert.True(board.TryDuckHuntShot(Play, At(100)));
+        board.ShowDuckHuntTargetPractice(At(-500));
+        board.SetDuckHuntReady(true, At(-500));
+        Assert.True(board.ActivateButton("duck-hunt-play", At(100)));
         long epoch = board.DuckHuntRoundRevision;
         Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(1400)));
         board.TickDuckHunt(At(1700));
@@ -221,7 +223,7 @@ public class DuckHuntGallerySkullTests
         var game = new DuckHuntGalleryGame();
         game.Reset(At(0));
         game.SetReady(true, At(0));
-        Assert.True(game.Shoot(Play, At(100)));
+        Assert.True(game.Start(At(100)));
         return game;
     }
 

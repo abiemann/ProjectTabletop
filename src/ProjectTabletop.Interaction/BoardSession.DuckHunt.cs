@@ -18,6 +18,7 @@ public sealed partial class BoardSession
     public static readonly BoardRect DuckHuntTargetPracticeBounds = new(.30, .40, .40, .12);
     public static readonly BoardRect DuckHuntHuntBounds = new(.30, .56, .40, .12);
     public static readonly BoardRect DuckHuntBackBounds = new(.365, .87, .155, .12);
+    public static readonly BoardRect DuckHuntPlayBounds = new(.530, .87, .155, .12);
     public void ShowDuckHunt(DateTimeOffset? now = null) =>
         Show(BoardScreen.DuckHunt, now ?? MonotonicClock.UtcNow);
     public void ShowDuckHuntTargetPractice(DateTimeOffset? now = null) =>
@@ -33,7 +34,9 @@ public sealed partial class BoardSession
         ClearBottomDrawerUi(_duckHuntDrawer);
         _duckHuntDrawer.ObservedAt = Later(_duckHuntDrawer.ObservedAt, now);
         // No old caption, click snapshot or hand selection may cross a view change.
-        BottomDrawerInputBarrier(_duckHuntDrawer, now);
+        if (view == DuckHuntView.TargetPractice)
+            SelectBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, open: true, now);
+        else BottomDrawerInputBarrier(_duckHuntDrawer, now);
     }
 
     public void TickDuckHunt(DateTimeOffset now)
@@ -55,7 +58,10 @@ public sealed partial class BoardSession
             return;
         }
         if (Screen != BoardScreen.DuckHunt || CurrentDuckHuntView != DuckHuntView.TargetPractice) return;
+        bool wasPaused = _gallery.Snapshot.Paused;
         _gallery.SetReady(ready && double.IsFinite(boardAspect) && boardAspect > 0, now);
+        if (wasPaused != _gallery.Snapshot.Paused)
+            ResetHoldCaptionEvidence(["duck-hunt-play"], now);
     }
     public double GetDuckHuntDrawerProgress(DateTimeOffset now) =>
         BottomDrawerProgress(_duckHuntDrawer, BoardScreen.DuckHunt, now);
@@ -74,15 +80,7 @@ public sealed partial class BoardSession
             return acted;
         }
         if (Screen != BoardScreen.DuckHunt || CurrentDuckHuntView != DuckHuntView.TargetPractice) return false;
-        int cycleBefore = _gallery.Snapshot.Cycle;
-        bool accepted = _gallery.Shoot(aim, shotTime, boardAspect);
-        if (_gallery.Snapshot.Cycle != cycleBefore)
-        {
-            DuckHuntRoundRevision++;
-            SelectBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, open: false,
-                Later(shotTime, _duckHuntDrawer.ObservedAt));
-        }
-        return accepted;
+        return _gallery.Shoot(aim, shotTime, boardAspect);
     }
 
     private void InitializeDuckHunt(DateTimeOffset now)
@@ -116,6 +114,9 @@ public sealed partial class BoardSession
         if (CurrentDuckHuntView != DuckHuntView.Menu)
             buttons.Add(new("duck-hunt-back", "BACK", DuckHuntBackBounds, BoardScreen.DuckHunt,
                 Enabled: _duckHuntDrawer.OpeningReady, Hold: BoardButtonHold.Once));
+        if (CurrentDuckHuntView == DuckHuntView.TargetPractice && _gallery.Snapshot.PlayVisible)
+            buttons.Add(new("duck-hunt-play", "PLAY", DuckHuntPlayBounds, BoardScreen.DuckHunt,
+                Enabled: _duckHuntDrawer.OpeningReady && !_gallery.Snapshot.Paused, Hold: BoardButtonHold.Once));
         return buttons;
     }
 
@@ -134,6 +135,13 @@ public sealed partial class BoardSession
         if (button.Id == "duck-hunt-drawer-close")
             return SelectBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, open: false, now);
         if (!DuckHuntDrawerOpen || !_duckHuntDrawer.OpeningReady) return false;
+        if (button.Id == "duck-hunt-play" && CurrentDuckHuntView == DuckHuntView.TargetPractice)
+        {
+            if (!_gallery.Start(now)) return false;
+            DuckHuntRoundRevision++;
+            SelectBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, open: false, now);
+            return true;
+        }
         if (button.Id == "duck-hunt-back" && CurrentDuckHuntView != DuckHuntView.Menu)
         {
             ShowDuckHuntView(DuckHuntView.Menu, now);

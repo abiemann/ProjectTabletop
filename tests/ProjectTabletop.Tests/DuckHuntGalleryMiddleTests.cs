@@ -119,7 +119,9 @@ public class DuckHuntGalleryMiddleTests
         Assert.Equal(31, game.Snapshot.MiddleHitMask);
         Assert.Equal(10, game.Punctures.Count);
         Assert.False(game.Shoot(Play, At(32899)));
-        Assert.True(game.Shoot(Play, At(32901)));
+        Assert.False(game.Start(At(32899)));
+        Assert.False(game.Shoot(Play, At(32901)));
+        Assert.True(game.Start(At(32901)));
         Assert.Empty(game.Punctures);
         Assert.Equal(0, game.Snapshot.MiddleHitMask);
         Assert.Equal(DuckHuntGalleryMiddlePhase.Closed, game.Snapshot.MiddlePhase);
@@ -203,7 +205,7 @@ public class DuckHuntGalleryMiddleTests
     private static DuckHuntGalleryGame Started()
     {
         var game = new DuckHuntGalleryGame(); game.Reset(At(0)); game.SetReady(true, At(0));
-        Assert.True(game.Shoot(Play, At(100)));
+        Assert.True(game.Start(At(100)));
         return game;
     }
     private static DuckHuntGalleryGame Waiting() { var game = Started(); game.Advance(At(3900)); return game; }

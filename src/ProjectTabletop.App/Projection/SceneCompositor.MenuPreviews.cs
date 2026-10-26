@@ -114,8 +114,8 @@ public sealed partial class SceneCompositor
     private static void DrawMenuThumbnail(CanvasDrawingSession ds, CanvasBitmap image, Rect bounds)
     {
         // Physical board pixels are square even when logical board units are
-        // not. Scale uniformly by physical height, and crop from the right,
-        // preserving round Earth, chips, dice, and the dragon's proportions.
+        // not. Cover the thumbnail uniformly, preserving round Earth, chips,
+        // dice, and the dragon's proportions. Narrow crops stay right-aligned.
         var transform = ds.Transform;
         double xScale = new Vector2(transform.M11, transform.M12).Length();
         double yScale = new Vector2(transform.M21, transform.M22).Length();
@@ -128,13 +128,11 @@ public sealed partial class SceneCompositor
                 1, CanvasImageInterpolation.HighQualityCubic);
             return;
         }
-        // Extremely wide boards extend only the image's quiet left background;
-        // the focal artwork retains the same physical scale and right anchor.
-        double width = bounds.Width * image.Size.Width / sourceWidth;
-        var art = new Rect(bounds.Right - width, bounds.Y, width, bounds.Height);
-        ds.DrawImage(image, new Rect(bounds.X, bounds.Y, art.X - bounds.X, bounds.Height),
-            new Rect(0, 0, 1, image.Size.Height));
-        ds.DrawImage(image, art, new Rect(0, 0, image.Size.Width, image.Size.Height),
+        // Wide cards crop vertically instead of stretching an edge column,
+        // which turns detailed scenery into horizontal streaks.
+        double sourceHeight = image.Size.Height * image.Size.Width / sourceWidth;
+        ds.DrawImage(image, bounds,
+            new Rect(0, (image.Size.Height - sourceHeight) / 2, image.Size.Width, sourceHeight),
             1, CanvasImageInterpolation.HighQualityCubic);
     }
 

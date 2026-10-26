@@ -52,14 +52,19 @@ public class DuckHuntViewsTests
         Assert.Equal(expected, board.CurrentDuckHuntView);
         Assert.Equal(epoch + 1, board.DuckHuntRoundRevision);
         Assert.True(board.Revision > revision);
-        Assert.False(board.DuckHuntDrawerOpen);
-        Assert.Equal("duck-hunt-drawer-open", Assert.Single(board.Buttons).Id);
+        bool practice = expected == DuckHuntView.TargetPractice;
+        Assert.Equal(practice, board.DuckHuntDrawerOpen);
+        string handle = practice ? "duck-hunt-drawer-close" : "duck-hunt-drawer-open";
+        Assert.Contains(board.Buttons, button => button.Id == handle);
+        if (practice)
+            Assert.All(board.Buttons.Where(button => button.Id != handle), button => Assert.False(button.Enabled));
+        else Assert.Single(board.Buttons);
         Assert.Empty(board.HoldProgress(At(2400)));
         // Frames from the old menu cannot prime the new view's controls.
-        Assert.Empty(board.ObserveHeldButtons([], At(2399), At(2450), ["duck-hunt-drawer-open"]));
+        Assert.Empty(board.ObserveHeldButtons([], At(2399), At(2450), [handle]));
         for (int ms = 2500; ms <= 3600; ms += 100)
-            Assert.Empty(board.ObserveHeldButtons(["duck-hunt-drawer-open"], At(ms), At(ms), []));
-        Assert.False(board.DuckHuntDrawerOpen);
+            Assert.Empty(board.ObserveHeldButtons([handle], At(ms), At(ms), []));
+        Assert.Equal(practice, board.DuckHuntDrawerOpen);
     }
 
     [Theory]
@@ -87,12 +92,12 @@ public class DuckHuntViewsTests
     }
 
     [Fact]
-    public void ViewChangesDiscardThePreviousRoundAndCloseTheDrawer()
+    public void ViewChangesDiscardThePreviousRoundAndOnlyPracticeOpensItsDrawer()
     {
         var board = new BoardSession();
         board.ShowDuckHuntTargetPractice(At(0));
         board.SetDuckHuntReady(true, At(100));
-        Assert.True(board.TryDuckHuntShot(new(.5, .46), At(200)));
+        Assert.True(board.ActivateButton("duck-hunt-play", At(400)));
         board.TickDuckHunt(At(11100));
         var target = DuckHuntGalleryLayout.TargetQuad(0, board.GalleryState, 1);
         Assert.True(board.TryDuckHuntShot(target.Map(.5, .5), At(11100)));
@@ -112,6 +117,7 @@ public class DuckHuntViewsTests
         Assert.False(board.ActivateButton("duck-hunt-replay", At(12010)));
         board.ShowDuckHuntTargetPractice(At(12100));
         board.SetDuckHuntReady(true, At(12200));
+        Assert.True(board.DuckHuntDrawerOpen);
         Assert.Equal(DuckHuntGalleryPhase.Ready, board.GalleryState.Phase);
         Assert.Equal(0, board.GalleryState.HitTargets);
     }
@@ -127,7 +133,7 @@ public class DuckHuntViewsTests
         if (view == DuckHuntView.TargetPractice)
         {
             board.SetDuckHuntReady(true, At(100));
-            Assert.True(board.TryDuckHuntShot(new(.5, .46), At(200)));
+            Assert.True(board.ActivateButton("duck-hunt-play", At(400)));
             board.TickDuckHunt(At(11100));
             var target = DuckHuntGalleryLayout.TargetQuad(0, board.GalleryState, 1);
             Assert.True(board.TryDuckHuntShot(target.Map(.5, .5), At(11100)));

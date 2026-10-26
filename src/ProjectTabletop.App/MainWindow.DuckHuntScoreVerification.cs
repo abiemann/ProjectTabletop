@@ -40,18 +40,15 @@ public sealed partial class MainWindow
                 Homography.FromFourPoints([new(0, 0), new(dimensions.Width, 0), new(dimensions.Width, dimensions.Height), new(0, dimensions.Height)],
                     [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
             scene.SetBoardSetup(false);
+            now = MonotonicClock.UtcNow; // Calibration advances the real input timestamp.
             scene.ShowDuckHuntTargetPractice();
             await scene.EnsureBoardArtworkResourcesAsync(target.Device, BoardScreen.DuckHunt);
             now = MonotonicClock.UtcNow.AddSeconds(1);
             scene.SetDuckHuntAudioStatus(true, "Isolated score fixture");
             Draw();
+            Check(board.DuckHuntDrawerOpen, "The ready drawer did not open automatically before PLAY.");
             now += TimeSpan.FromMilliseconds(1);
-            Check(scene.ActivateDuckHuntAt(.1, .93), "The score fixture could not open the ready drawer.");
-            now += TimeSpan.FromMilliseconds(350);
-            Draw();
-            Check(board.DuckHuntDrawerOpen, "The ready drawer did not stay open before PLAY.");
-            now += TimeSpan.FromMilliseconds(1);
-            Check(scene.SubmitDuckHuntShot(new(.5, .46), now) && !board.DuckHuntDrawerOpen,
+            Check(ActivateGalleryPlay(scene) && !board.DuckHuntDrawerOpen,
                 "PLAY did not close the drawer before showing the score.");
             now += TimeSpan.FromSeconds(4);
             byte[] zero = Draw();
@@ -262,7 +259,11 @@ public sealed partial class MainWindow
             CheckOptics(target.GetPixelBytes(), "final1100");
             await Save("1100-complete");
             now += TimeSpan.FromMilliseconds(1);
-            Check(scene.SubmitDuckHuntShot(new(.5, .46), now), "The score fixture could not replay.");
+            Check(scene.ActivateDuckHuntAt(.1, .93), "The completed score fixture could not open its replay drawer.");
+            now += TimeSpan.FromMilliseconds(350);
+            Draw();
+            now += TimeSpan.FromMilliseconds(1);
+            Check(ActivateGalleryPlay(scene), "The score fixture could not replay through drawer PLAY.");
             byte[] replayed = Draw();
             CheckScore(0);
             Check(ScoreVisualEqual(zero, replayed, score), "Replay did not restore the same clean 0000 display.");

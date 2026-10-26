@@ -30,13 +30,14 @@ public sealed partial class MainWindow
             Homography.FromFourPoints([new(0, 0), new(width, 0), new(width, height), new(0, height)],
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
         scene.SetBoardSetup(false);
+        now = MonotonicClock.UtcNow; // Calibration advances the real input timestamp.
         scene.ShowDuckHuntTargetPractice();
         await scene.EnsureBoardArtworkResourcesAsync(target.Device, BoardScreen.DuckHunt);
         now = MonotonicClock.UtcNow.AddSeconds(1);
         scene.SetDuckHuntAudioStatus(true, "Isolated burst fixture");
         Draw();
         now += TimeSpan.FromMilliseconds(1);
-        Check(scene.SubmitDuckHuntShot(new(.5, .46), now), "Could not start the two-shelf gallery.");
+        Check(ActivateGalleryPlay(scene), "The drawer PLAY button did not start the two-shelf gallery.");
         now += TimeSpan.FromSeconds(4);
         Draw();
 

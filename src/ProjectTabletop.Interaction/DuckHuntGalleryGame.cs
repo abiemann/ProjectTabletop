@@ -180,6 +180,27 @@ public sealed class DuckHuntGalleryGame
         Publish(_pausedAt ?? now);
     }
 
+    public bool Start(DateTimeOffset now)
+    {
+        if (!_ready || now < _observedAt || now < _inputNotBefore) return false;
+        Advance(now);
+        if (!_snapshot.PlayVisible) return false;
+        _punctures.Clear();
+        _hitMask = _shots = 0;
+        _cycle++;
+        _middleStartedAt = null;
+        _middleHitMask = 0;
+        _score = 0;
+        _scoreChangedAt = null;
+        _phase = DuckHuntGalleryPhase.Opening;
+        _phaseStartedAt = _inputNotBefore = _lastShotAt = now;
+        _upperPhase = DuckHuntGalleryUpperPhase.Raising;
+        _upperPhaseStartedAt = _playStartedAt = now;
+        ClearSkulls();
+        Publish(now);
+        return true;
+    }
+
     public bool Shoot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1)
     {
         if (!_ready || aim is not { } point || !double.IsFinite(point.U) || !double.IsFinite(point.V) ||
@@ -188,27 +209,7 @@ public sealed class DuckHuntGalleryGame
             shotTime < _inputNotBefore || _observedAt - shotTime > DuckHuntAimGate.Freshness) return false;
 
         Advance(shotTime > _observedAt ? shotTime : _observedAt);
-        if (_snapshot.PlayVisible)
-        {
-            if (shotTime < _phaseStartedAt || shotTime < _upperPhaseStartedAt ||
-                _middleStartedAt is { } middleStart && shotTime < middleStart + MiddleSequenceDuration) return false;
-            _lastShotAt = shotTime;
-            if (!DuckHuntGalleryLayout.PlayBounds.Contains(point.U, point.V)) return false;
-            _punctures.Clear();
-            _hitMask = _shots = 0;
-            _cycle++;
-            _middleStartedAt = null;
-            _middleHitMask = 0;
-            _score = 0;
-            _scoreChangedAt = null;
-            _phase = DuckHuntGalleryPhase.Opening;
-            _phaseStartedAt = _inputNotBefore = shotTime;
-            _upperPhase = DuckHuntGalleryUpperPhase.Raising;
-            _upperPhaseStartedAt = _playStartedAt = shotTime;
-            ClearSkulls();
-            Advance(shotTime > _observedAt ? shotTime : _observedAt);
-            return true;
-        }
+        if (_snapshot.PlayVisible) return false;
         bool paperReady = _phase == DuckHuntGalleryPhase.WaitingForHits && shotTime >= _phaseStartedAt;
         bool skullReady = _upperPhase == DuckHuntGalleryUpperPhase.WaitingForHits && shotTime >= _upperPhaseStartedAt;
         var middleAtShot = MiddleAt(shotTime);

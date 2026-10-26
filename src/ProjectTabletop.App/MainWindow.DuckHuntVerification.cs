@@ -39,25 +39,41 @@ public sealed partial class MainWindow
                 Homography.FromFourPoints([new(0, 0), new(dimensions.Width, 0), new(dimensions.Width, dimensions.Height), new(0, dimensions.Height)],
                     [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
             scene.SetBoardSetup(false);
+            now = MonotonicClock.UtcNow; // Calibration advances the real input timestamp.
             scene.ShowDuckHuntTargetPractice();
             await scene.EnsureBoardArtworkResourcesAsync(target.Device, BoardScreen.DuckHunt);
             now = MonotonicClock.UtcNow.AddSeconds(1);
             scene.SetDuckHuntAudioStatus(true, "Isolated gallery microphone");
             Draw();
             Check(scene.DuckHuntArtworkReady && scene.GalleryState is { Phase: DuckHuntGalleryPhase.Ready, Paused: false },
-                "The saloon is not ready with its closed flap and PLAY target.");
+                "The saloon is not ready with its closed flap and drawer PLAY button.");
+            Check(board.DuckHuntDrawerOpen && board.Buttons.Any(button => button.Id == "duck-hunt-play" && button.Enabled),
+                "Target Practice did not automatically open its initial PLAY drawer.");
             Check(!scene.ActivateDuckHuntAt(.5, .46) && board.Buttons.All(button => !button.Bounds.Contains(.5, .46)),
-                "A hand/laptop button can activate gallery PLAY.");
+                "An obsolete central PLAY button is still active.");
+            CheckClosedCentreBackground();
+            var ceilingHeight = DuckHuntGalleryLayout.SceneBounds(aspect).Y;
+            if (ceilingHeight > .001)
+            {
+                var ceilingSamples = (from u in new[] { .2, .5, .8 }
+                                      from v in new[] { .2, .5, .8 }
+                                      select PixelBrightness(new(u, v * ceilingHeight))).ToArray();
+                Check(ceilingSamples.Count(value => value > 35) >= 5 &&
+                    ceilingSamples.Max() - ceilingSamples.Min() > 12,
+                    "The golden ceiling is missing or flat in the space above the cabinet.");
+            }
             CheckClearOptics("closed saloon");
-            CheckLaser(new(.5, .46), "PLAY");
             await Save("closed");
             now += TimeSpan.FromMilliseconds(1);
-            Check(scene.SubmitDuckHuntShot(new(.5, .46), now), "A shot on PLAY did not open the gallery.");
+            Check(!scene.SubmitDuckHuntShot(new(.5, .46), now) && scene.GalleryState.PlayVisible,
+                "A laser shot on the old central PLAY position started the gallery.");
+            now += TimeSpan.FromMilliseconds(1);
+            Check(ActivateGalleryPlay(scene) && !board.DuckHuntDrawerOpen, "Drawer PLAY did not start the gallery and close its controls.");
             Draw();
             await Save("opening-zero");
             Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.Opening, FlapAngleDegrees: 0,
                 UpperPhase: DuckHuntGalleryUpperPhase.Raising, UpperOpenProgress: 0 },
-                "One PLAY shot did not begin both the flap and upper curtain together.");
+                "One PLAY activation did not begin both the flap and upper curtain together.");
             now += TimeSpan.FromMilliseconds(350);
             Draw();
             await Save("opening-front");
@@ -384,7 +400,12 @@ public sealed partial class MainWindow
                 MiddleTargetIndex: -1, MiddleHitMask: 31 }, "The round did not end after the middle curtain closed.");
             await Save("complete");
             now += TimeSpan.FromMilliseconds(1);
-            Check(scene.SubmitDuckHuntShot(new(.5, .46), now) && scene.GalleryPunctures.Count == 0 &&
+            Check(scene.ActivateDuckHuntAt(.1, .93), "The completed gallery did not open its replay drawer.");
+            now += TimeSpan.FromMilliseconds(350);
+            Draw();
+            await Save("complete-play-drawer");
+            now += TimeSpan.FromMilliseconds(1);
+            Check(ActivateGalleryPlay(scene) && scene.GalleryPunctures.Count == 0 &&
                 scene.GalleryState is { HitTargets: 0, HitSkulls: 0, MiddleHitMask: 0,
                     MiddlePhase: DuckHuntGalleryMiddlePhase.Closed }, "The next round retained old holes or shattered skulls.");
             now += DuckHuntGalleryGame.OpeningDuration + DuckHuntGalleryGame.RevealWaitDuration + DuckHuntGalleryGame.AdvanceDuration;
@@ -395,7 +416,8 @@ public sealed partial class MainWindow
             Draw();
             var controls = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("Gallery drawer has no caption reference.");
             Check(controls.EnabledHoldIds.Contains("duck-hunt-exit") && controls.EnabledHoldIds.Contains("duck-hunt-back") &&
-                controls.ButtonIds.All(id => id != "duck-hunt-replay"), "The gallery drawer lost EXIT/BACK or retained an obsolete round control.");
+                controls.ButtonIds.All(id => id is not ("duck-hunt-replay" or "duck-hunt-play")),
+                "The active gallery drawer lost EXIT/BACK or retained a round-start control.");
             await Save("controls");
             now += TimeSpan.FromMilliseconds(1);
             Check(board.ActivateButton("duck-hunt-back", now) && scene.CurrentDuckHuntView == DuckHuntView.Menu,
@@ -429,6 +451,24 @@ public sealed partial class MainWindow
                         if (Math.Abs(before[pixel + channel] - after[pixel + channel]) > 1) return false;
                 }
                 return true;
+            }
+            void CheckClosedCentreBackground()
+            {
+                var artwork = (BitmapAssetSet)typeof(SceneCompositor).GetField("_duckHuntGalleryImages",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scene)!;
+                var original = artwork.Image("target-practice-saloon-v1.png")!;
+                byte[] expected = original.GetPixelBytes(), actual = target.GetPixelBytes();
+                int sourceWidth = (int)original.SizeInPixels.Width, sourceHeight = (int)original.SizeInPixels.Height;
+                foreach (double u in new[] { .45, .50, .55 })
+                foreach (double v in new[] { .42, .46, .50 })
+                {
+                    var camera = CameraPoint(DuckHuntGalleryLayout.ScenePoint(u, v, aspect));
+                    int output = ((int)Math.Round(camera.Y) * dimensions.Width + (int)Math.Round(camera.X)) * 4;
+                    int source = ((int)(v * sourceHeight) * sourceWidth + (int)(u * sourceWidth)) * 4;
+                    for (int channel = 0; channel < 3; channel++)
+                        Check(Math.Abs(actual[output + channel] - expected[source + channel]) <= 12,
+                            "The old central PLAY plaque still covers the original saloon background.");
+                }
             }
             BoardRect LowerRegion()
             {
@@ -583,6 +623,12 @@ public sealed partial class MainWindow
             assertions++;
             if (!condition) throw new InvalidOperationException(message);
         }
+    }
+
+    private static bool ActivateGalleryPlay(SceneCompositor scene)
+    {
+        var bounds = BoardSession.DuckHuntPlayBounds;
+        return scene.ActivateDuckHuntAt(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
     }
 }
 #endif

@@ -24,6 +24,7 @@ public sealed partial class MainWindow
             Homography.FromFourPoints([new(0, 0), new(width, 0), new(width, height), new(0, height)],
                 [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
         scene.SetBoardSetup(false);
+        uiNow = MonotonicClock.UtcNow; // Calibration advances the real input timestamp.
         // This deliberately skewed calibration has a different physical aspect
         // from the window. Use the same paper plane that the compositor renders.
         double aspect = (double)typeof(SceneCompositor).GetMethod("PaintBoardAspect",
@@ -36,7 +37,7 @@ public sealed partial class MainWindow
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scene)!;
         var game = (DuckHuntGalleryGame)typeof(BoardSession).GetField("_gallery",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(board)!;
-        var playBounds = DuckHuntGalleryLayout.PlayBounds;
+        var playBounds = BoardSession.DuckHuntPlayBounds;
         var play = new BoardAim(playBounds.X + playBounds.Width / 2, playBounds.Y + playBounds.Height / 2);
         var context = Context();
         Check(scene.DuckHuntBoardReady && scene.GalleryState is
@@ -45,9 +46,8 @@ public sealed partial class MainWindow
         Draw();
         Check(scene.GalleryState.PlayVisible && scene.GalleryPunctures.Count == 0,
             "Aim alone started the gallery or marked the wall.");
-        Check(!scene.ActivateDuckHuntAt(play.U, play.V) &&
-            board.Buttons.All(button => !button.Bounds.Contains(play.U, play.V)),
-            "PLAY is reachable through ordinary button input.");
+        Check(board.DuckHuntDrawerOpen && board.Buttons.Any(button => button.Id == "duck-hunt-play" && button.Hold == BoardButtonHold.Once),
+            "The initial drawer does not expose standard long-press PLAY.");
         Check(!Snapshot(null, context.Epoch) && scene.GalleryState.PlayVisible,
             "A no-dot click activated PLAY.");
         Check(Snapshot(new(.05, .20), context.Epoch) && scene.GalleryState.PlayVisible,
@@ -69,10 +69,18 @@ public sealed partial class MainWindow
         Check(learned.Epoch != context.Epoch && !Snapshot(play, context.Epoch),
             "Learning reused previous click work.");
         context = learned;
-        Check(Snapshot(play, context.Epoch) && scene.GalleryState is
+        Check(Snapshot(play, context.Epoch) && scene.GalleryState.PlayVisible && scene.GalleryState.Cycle == 0,
+            "A fresh laser-and-click photo incorrectly activated the drawer PLAY button.");
+        Check(Snapshot(new(.5, .46), context.Epoch) && scene.GalleryState.PlayVisible && scene.GalleryState.Cycle == 0,
+            "A fresh laser-and-click photo activated the removed central PLAY target.");
+        // Settle the injected UI clock without a wall-clock delay. The game is
+        // separately backdated below before real camera-frame boundary checks.
+        uiNow = MonotonicClock.UtcNow.AddMilliseconds(350);
+        using (var drawing = target.CreateDrawingSession()) scene.Draw(drawing, width, height, false, false);
+        Check(ActivateGalleryPlay(scene) && scene.GalleryState is
             { Phase: DuckHuntGalleryPhase.Opening, UpperPhase: DuckHuntGalleryUpperPhase.Raising,
                 Cycle: 1, HitTargets: 0, SkullHitMask: 0 },
-            "A fresh click photo on PLAY did not start both shelves together.");
+            "The regular drawer PLAY button did not start both shelves together.");
         Check(!board.DuckHuntDrawerOpen, "Starting the gallery left its drawer open.");
         var roundContext = Context();
         Check(roundContext.Epoch != context.Epoch && !Snapshot(play, context.Epoch),
@@ -83,7 +91,7 @@ public sealed partial class MainWindow
         var began = MonotonicClock.UtcNow.AddSeconds(-10);
         game.Reset(began);
         game.SetReady(true, began);
-        Check(game.Shoot(play, began, aspect), "Could not prepare the paper-target fixture.");
+        Check(game.Start(began), "Could not prepare the paper-target fixture.");
         Draw();
         context = Context();
         Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.WaitingForHits,
@@ -163,7 +171,7 @@ public sealed partial class MainWindow
         var boundaryBegan = lowerMissAt - TimeSpan.FromSeconds(4);
         game.Reset(boundaryBegan);
         game.SetReady(true, boundaryBegan);
-        Check(game.Shoot(play, boundaryBegan, aspect), "Could not prepare the middle photo-boundary fixture.");
+        Check(game.Start(boundaryBegan), "Could not prepare the middle photo-boundary fixture.");
         game.Advance(lowerMissAt - TimeSpan.FromMilliseconds(1));
         game.Shoot(DuckHuntGalleryLayout.ScenePoint(.5, .19, aspect), lowerMissAt - TimeSpan.FromMilliseconds(1), aspect);
         game.Shoot(DuckHuntGalleryLayout.ScenePoint(.5, .78, aspect), lowerMissAt, aspect);

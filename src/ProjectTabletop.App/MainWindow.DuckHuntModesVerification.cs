@@ -1,6 +1,7 @@
 #if DEBUG
 using System.Reflection;
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Text;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
@@ -71,10 +72,11 @@ public sealed partial class MainWindow
             Check(scene.DuckHuntBoardReady && scene.GetDuckHuntInputContext() is not null,
                 "Target Practice did not create calibrated shot input.");
             scene.SetDuckHuntAudioStatus(true, "Isolated microphone fixture");
+            now += TimeSpan.FromMilliseconds(350);
             Draw();
             await Save("target-practice");
-            Check(scene.GalleryState.Phase == DuckHuntGalleryPhase.Ready && scene.DuckHuntInputReady,
-                "Target Practice did not wait for a shot on PLAY.");
+            Check(scene.GalleryState.Phase == DuckHuntGalleryPhase.Ready && scene.DuckHuntInputReady && board.DuckHuntDrawerOpen,
+                "Target Practice did not open its drawer and wait for a hold on PLAY.");
             var practiceInput = scene.GetDuckHuntInputContext()!;
             var oldPoint = new BoardAim(.21, .36);
             var newPoint = new BoardAim(.27, .42);
@@ -83,13 +85,39 @@ public sealed partial class MainWindow
             var click = LaterThan(before);
             var frame = LaterThan(click);
             Check(scene.SubmitDuckHuntSnapshot(newPoint, frame, click, LaterThan(frame), practiceInput.Epoch) &&
-                scene.DuckHuntMeasurement.HasCompletedPair, "Target Practice did not accept its isolated coordinate measurement.");
+                scene.DuckHuntMeasurement.HasCompletedPair && scene.GalleryState.PlayVisible,
+                "Target Practice did not accept its isolated coordinate measurement without starting a round.");
+            CheckBackLayout();
+            var back = board.Buttons.Single(button => button.Id == "duck-hunt-back");
+            var play = board.Buttons.Single(button => button.Id == "duck-hunt-play");
+            Check(play.Label == "PLAY" && play.Hold == back.Hold && play.Enabled &&
+                play.Bounds.Y == back.Bounds.Y && play.Bounds.Width == back.Bounds.Width && play.Bounds.Height == back.Bounds.Height &&
+                Math.Abs(play.Bounds.X - (back.Bounds.X + back.Bounds.Width) - .01) < 1e-6,
+                "PLAY does not match BACK's standard size, capitalization, hold policy and regular gap.");
+            var playContext = scene.GetHoldButtonContext(now)!;
+            var playCaption = playContext.ExpectedScene.BoardTriggerRegions![playContext.ButtonIds.ToList().IndexOf("duck-hunt-play")];
+            var backCaption = playContext.ExpectedScene.BoardTriggerRegions![playContext.ButtonIds.ToList().IndexOf("duck-hunt-back")];
+            using var captionFormat = (CanvasTextFormat)typeof(SceneCompositor).GetMethod("HoldButtonCaptionFormat",
+                BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null)!;
+            Check(captionFormat.FontFamily == "Segoe UI" && captionFormat.FontWeight.Weight == 600 && captionFormat.FontSize == 28,
+                "PLAY no longer uses the shared Segoe UI Semibold long-press caption style.");
+            // Tight ink bounds legitimately differ between PLAY and BACK; the
+            // common type size is fixed above, while these bounds follow glyphs.
+            Check(Math.Abs(playCaption.Height - backCaption.Height) < Math.Max(playCaption.Height, backCaption.Height) * .15 &&
+                play.Bounds.Contains(playCaption.X, playCaption.Y) &&
+                play.Bounds.Contains(playCaption.X + playCaption.Width, playCaption.Y + playCaption.Height) &&
+                playCaption.Width < play.Bounds.Width * .9 && playCaption.Height < play.Bounds.Height * .8,
+                "PLAY's caption does not have the regular-sized, tight lettering trigger.");
+            await HoldControl("duck-hunt-play", DuckHuntView.TargetPractice, "target-practice-started", checkReadinessReset: true);
+            Check(scene.GalleryState.Cycle == 1 && !scene.GalleryState.PlayVisible && !board.DuckHuntDrawerOpen,
+                "A held PLAY did not start the round and close the drawer.");
 
             now += TimeSpan.FromMilliseconds(1);
             Check(scene.ActivateDuckHuntAt(.10, .93), "Target Practice's BACK fixture could not open the drawer.");
             now += TimeSpan.FromMilliseconds(300);
             Draw();
             CheckBackLayout();
+            Check(board.Buttons.All(button => button.Id != "duck-hunt-play"), "PLAY remains available during an active round.");
             await Save("target-practice-controls");
             await HoldControl("duck-hunt-back", DuckHuntView.Menu, "target-practice-back");
             CheckIdleInput("reopened welcome");
@@ -136,7 +164,8 @@ public sealed partial class MainWindow
             Check(board.ActivateButton("duck-hunt-exit", now) && board.Screen == BoardScreen.Menu && board.MenuScrolled,
                 "EXIT did not return to the main menu's preserved second page.");
             results.Add(new { dimensions.Name, Width = dimensions.Width, Height = dimensions.Height,
-                CaptionHolds = 4, HuntWaitsForLaserStart = true, BackReturnsToWelcome = true, ExitReturnsToPageTwo = true });
+                CaptionHolds = 5, PracticeWaitsForCaptionHold = true, HuntWaitsForLaserStart = true,
+                BackReturnsToWelcome = true, ExitReturnsToPageTwo = true });
 
             void CheckBackLayout()
             {
@@ -184,10 +213,21 @@ public sealed partial class MainWindow
                     $"The {stage} START target can be activated by a hand or laptop tap.");
             }
 
-            async Task HoldControl(string id, DuckHuntView expected, string? captureName = null)
+            async Task HoldControl(string id, DuckHuntView expected, string? captureName = null, bool checkReadinessReset = false)
             {
                 var presence = new HandAcquisitionPresenceTracker();
                 for (int i = 0; i < 6; i++) Check(Feed(false).Count == 0, "An intact caption activated.");
+                if (checkReadinessReset)
+                {
+                    for (int i = 0; i < 5; i++) Check(Feed(true).Count == 0, "PLAY activated before a full hold.");
+                    scene.SetDuckHuntAudioStatus(false, "Isolated readiness loss");
+                    Check(!ActivateGalleryPlay(scene) && scene.GalleryState.PlayVisible,
+                        "PLAY started without a microphone before the next render.");
+                    scene.SetDuckHuntAudioStatus(true, "Isolated microphone fixture");
+                    for (int i = 0; i < 12; i++) Check(Feed(true).Count == 0,
+                        "A partial PLAY hold survived readiness loss and re-enable without a clear caption.");
+                    for (int i = 0; i < 6; i++) Check(Feed(false).Count == 0, "Clearing PLAY unexpectedly activated it.");
+                }
                 bool activated = false;
                 for (int i = 0; i < 20 && !activated; i++)
                 {

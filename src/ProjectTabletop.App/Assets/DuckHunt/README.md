@@ -33,6 +33,15 @@ Targets and controls are supplied by the application, not baked into the image.
 Its full prompt and hash are in
 [target-practice-saloon-prompts.txt](target-practice-saloon-prompts.txt).
 
+`gallery-golden-ceiling-v1.png` is an original opaque 2160 × 728 RGB panorama
+generated with the built-in image tool on 2026-10-25. Its embossed gold ceiling
+and walnut beams extend the saloon above the cabinet on taller boards. The
+renderer fills only the unused top margin with a uniformly scaled, bottom-anchored
+crop. The original cabinet, target coordinates and controls remain unchanged;
+wide boards without a top margin do not draw the ceiling. The image is cached
+with the gallery artwork and is not native 4K or artificially upscaled. See
+[gallery-golden-ceiling-prompts.txt](gallery-golden-ceiling-prompts.txt).
+
 `gallery-steampunk-target.png` is an original 1177 × 1337 RGBA target assembly
 generated with the built-in image tool on 2026-10-24. Its round, visibly fibrous
 ivory paper has two printed charcoal rings and a central plus. An aged brass and

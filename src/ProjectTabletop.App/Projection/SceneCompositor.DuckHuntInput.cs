@@ -84,6 +84,9 @@ public sealed partial class SceneCompositor
             if (_duckHuntLearningActive == active) return;
             _duckHuntLearningActive = active;
             RefreshDuckHuntInputHint(MonotonicClock.UtcNow);
+            if (_boardSession.Screen == BoardScreen.DuckHunt &&
+                _boardSession.CurrentDuckHuntView == DuckHuntView.TargetPractice)
+                UpdateDuckHuntRound(_blackjackClock());
         }
     }
 
@@ -138,6 +141,7 @@ public sealed partial class SceneCompositor
         {
             var now = MonotonicClock.UtcNow;
             SyncDuckHuntInput(now);
+            bool readinessChanged = _duckHuntAudioReady != ready;
             if (_duckHuntAudioReady && !ready)
             {
                 _duckHuntMeasurement.Reset(now);
@@ -151,6 +155,11 @@ public sealed partial class SceneCompositor
                 status?.StartsWith("Waiting", StringComparison.OrdinalIgnoreCase) == true ? "Waiting for camera and board setup" :
                 "Microphone unavailable · choose one in the main app";
             RefreshDuckHuntInputHint(now);
+            // PLAY is an ordinary caption hold. Cancel its readiness immediately,
+            // before another camera worker can finish a press between renders.
+            if (readinessChanged && _boardSession.Screen == BoardScreen.DuckHunt &&
+                _boardSession.CurrentDuckHuntView == DuckHuntView.TargetPractice)
+                UpdateDuckHuntRound(_blackjackClock());
         }
     }
 

@@ -6,7 +6,6 @@ public class DuckHuntGalleryScoreTests
 {
     private static readonly DateTimeOffset Origin = new(2026, 10, 25, 12, 0, 0, TimeSpan.Zero);
     private static DateTimeOffset At(double ms) => Origin.AddMilliseconds(ms);
-    private static readonly BoardAim Play = new(.5, .46);
 
     [Fact]
     public void MeasuredPrintedRingsDefineInclusiveScoringBoundariesWithoutChangingPhysicalHits()
@@ -170,7 +169,7 @@ public class DuckHuntGalleryScoreTests
         var finished = game.Snapshot;
         game.Advance(At(90000));
         Assert.Equal(finished, game.Snapshot);
-        Assert.True(game.Shoot(Play, At(90001)));
+        Assert.True(game.Start(At(90001)));
         Assert.Equal(0, game.Snapshot.Score);
         Assert.Equal(0, game.Snapshot.ScoreAnimationSeconds);
     }
@@ -179,10 +178,9 @@ public class DuckHuntGalleryScoreTests
     public void StartingAndReplayingCloseTheDrawerAndResetTheRoundScore()
     {
         var board = new BoardSession();
-        board.ShowDuckHuntTargetPractice(At(0)); board.SetDuckHuntReady(true, At(0));
-        Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(10)));
+        board.ShowDuckHuntTargetPractice(At(-500)); board.SetDuckHuntReady(true, At(-500));
         Assert.True(board.DuckHuntDrawerOpen);
-        Assert.True(board.TryDuckHuntShot(Play, At(100)));
+        Assert.True(board.ActivateButton("duck-hunt-play", At(100)));
         Assert.False(board.DuckHuntDrawerOpen);
         Assert.Equal(0, board.GalleryState.Score);
         board.TickDuckHunt(At(3900));
@@ -195,7 +193,7 @@ public class DuckHuntGalleryScoreTests
         Assert.Equal(100, board.GalleryState.Score);
         Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(33001)));
         Assert.True(board.DuckHuntDrawerOpen);
-        Assert.True(board.TryDuckHuntShot(Play, At(33400)));
+        Assert.True(board.ActivateButton("duck-hunt-play", At(33400)));
         Assert.False(board.DuckHuntDrawerOpen);
         Assert.Equal(0, board.GalleryState.Score);
     }
@@ -203,7 +201,7 @@ public class DuckHuntGalleryScoreTests
     private static DuckHuntGalleryGame Waiting()
     {
         var game = new DuckHuntGalleryGame(); game.Reset(At(0)); game.SetReady(true, At(0));
-        Assert.True(game.Shoot(Play, At(100))); game.Advance(At(3900)); return game;
+        Assert.True(game.Start(At(100))); game.Advance(At(3900)); return game;
     }
     private static DuckHuntGalleryGame Middle()
     {

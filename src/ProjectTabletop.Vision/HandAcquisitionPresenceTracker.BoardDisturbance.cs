@@ -14,6 +14,7 @@ public sealed partial class HandAcquisitionPresenceTracker
         _outsideControlAreas = null;
         _outsideControlQueue = null;
         _outsideControlFitMask = null;
+        ResetOutsideControlColorRefinement();
     }
 
     private void ConfigureOutsideControlDisturbance(HandAcquisitionSceneImage scene)
@@ -55,18 +56,13 @@ public sealed partial class HandAcquisitionPresenceTracker
         // Fit that wider palette separately, from a bounded, distributed set
         // of the samples already read. Keep both caption masks unchanged.
         _outsideControlFitMask = new bool[_mask.Length];
-        int spacing = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(_outsideControlMask.Count(value => value) / 2048.0)));
+        int spacing = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(_outsideControlMask.Count(value => value) / (double)OutsideControlFitBudget)));
         for (int index = 0; index < _mask.Length; index++)
         {
             if (!_outsideControlMask[index] || index % _columns % spacing != 0 || index / _columns % spacing != 0) continue;
-            var alternatives = _edgeColors[index]!;
-            bool flat = true;
-            for (int colorIndex = 0; colorIndex < alternatives.Length && flat; colorIndex += 3)
-                for (int channel = 0; channel < 3; channel++)
-                    if (Math.Abs(alternatives[colorIndex + channel] - _expected![index * 3 + channel]) > 32)
-                    { flat = false; break; }
-            _outsideControlFitMask[index] = flat;
+            _outsideControlFitMask[index] = OutsideControlFlatReference(index);
         }
+        ConfigureOutsideControlColorRefinement();
     }
 
     // The caption pass samples only its controls and reference plates. Read the
@@ -86,10 +82,10 @@ public sealed partial class HandAcquisitionPresenceTracker
         double threshold, HandAcquisitionHint? illuminatedHint)
     {
         if (_outsideControlMask is null || fit is null || colorOffsets is null) return (false, 0);
-        bool[] fitAllowed = _outsideControlFitMask!;
+        bool[] fitAllowed = _outsideControlFrameFitMask!;
+        Array.Copy(_outsideControlFitMask!, fitAllowed, fitAllowed.Length);
         if (illuminatedHint is not null)
         {
-            fitAllowed = (bool[])fitAllowed.Clone();
             for (int index = 0; index < fitAllowed.Length; index++)
                 if (fitAllowed[index] && Distance(_locations[index], illuminatedHint.IlluminationCenter) <
                     illuminatedHint.IlluminationRadiusPixels * 1.28) fitAllowed[index] = false;
@@ -107,14 +103,7 @@ public sealed partial class HandAcquisitionPresenceTracker
             if (!_outsideControlMask[index] || illuminatedHint is not null &&
                 Distance(_locations[index], illuminatedHint.IlluminationCenter) < illuminatedHint.IlluminationRadiusPixels * 1.28) continue;
             eligibleArea += _outsideControlAreas![index];
-            colorOffsets.TryGetValue(ColorKey(reference, index), out var offset);
-            double error = Error(fit.Coefficients, reference, current, index, offset);
-            if (error > threshold && _edgeColors?[index] is { } alternatives)
-            {
-                error = EdgeError(fit.Coefficients, alternatives, current, index, colorOffsets, error, threshold);
-                if (error > threshold)
-                    error = BoardColorMixtureError(fit.Coefficients, alternatives, current, index, colorOffsets, error, threshold);
-            }
+            double error = OutsideControlError(reference, current, index, fit, colorOffsets, threshold);
             if (error <= threshold) continue;
             residual[index] = true;
             foregroundArea += _outsideControlAreas![index];
@@ -123,13 +112,37 @@ public sealed partial class HandAcquisitionPresenceTracker
         // Broad disagreement is an uncertain optical model, not a permanent
         // obstruction. Tiny noise and thin raster-edge residuals cannot veto.
         if (fraction >= .35 || foregroundArea < .0012) return (false, fraction);
+        Array.Clear(_outsideControlRefinementRegion!);
+        if (!FindOutsideControlObstruction(collectRegions: true)) return (false, fraction);
+        return (RefineOutsideControlObstruction(reference, current, illuminatedHint), fraction);
+    }
+
+    private double OutsideControlError(double[] reference, double[] current, int index,
+        PhotometricFit fit, Dictionary<int, double[]> offsets, double threshold)
+    {
+        offsets.TryGetValue(ColorKey(reference, index), out var offset);
+        double error = Error(fit.Coefficients, reference, current, index, offset);
+        if (error > threshold && _edgeColors?[index] is { } alternatives)
+        {
+            error = EdgeError(fit.Coefficients, alternatives, current, index, offsets, error, threshold);
+            if (error > threshold)
+                error = BoardColorMixtureError(fit.Coefficients, alternatives, current, index, offsets, error, threshold);
+        }
+        return error;
+    }
+
+    private bool FindOutsideControlObstruction(bool collectRegions)
+    {
+        bool[] residual = _outsideControlResidual!, visited = _outsideControlVisited!;
+        Array.Clear(visited);
+        bool found = false;
         int[] queue = _outsideControlQueue!;
         for (int seed = 0; seed < residual.Length; seed++)
         {
-            if (!residual[seed]) continue;
+            if (!residual[seed] || visited[seed]) continue;
             int head = 0, tail = 1, minX = seed % _columns, maxX = minX,
                 minY = seed / _columns, maxY = minY;
-            queue[0] = seed; residual[seed] = false;
+            queue[0] = seed; visited[seed] = true;
             double area = 0;
             while (head < tail)
             {
@@ -141,15 +154,24 @@ public sealed partial class HandAcquisitionPresenceTracker
                 for (int dx = -1; dx <= 1; dx++)
                 {
                     int nx = x + dx, ny = y + dy, neighbor = ny * _columns + nx;
-                    if (nx < 0 || nx >= _columns || ny < 0 || ny >= _rows || !residual[neighbor]) continue;
-                    residual[neighbor] = false; queue[tail++] = neighbor;
+                    if (nx < 0 || nx >= _columns || ny < 0 || ny >= _rows || !residual[neighbor] || visited[neighbor]) continue;
+                    visited[neighbor] = true; queue[tail++] = neighbor;
                 }
             }
-            if (area >= .0012 && tail >= 12 &&
+            // A long border can fill a one-row/column box completely. Require
+            // thickness in both dimensions before treating it as an obstruction.
+            if (area >= .0012 && tail >= 12 && maxX > minX && maxY > minY &&
                 tail >= (maxX - minX + 1) * (maxY - minY + 1) * .30)
-                return (true, fraction);
+            {
+                if (!collectRegions) return true;
+                found = true;
+                int padX = Math.Max(4, (maxX - minX + 2) / 2), padY = Math.Max(4, (maxY - minY + 2) / 2);
+                for (int y = Math.Max(0, minY - padY); y <= Math.Min(_rows - 1, maxY + padY); y++)
+                for (int x = Math.Max(0, minX - padX); x <= Math.Min(_columns - 1, maxX + padX); x++)
+                    _outsideControlRefinementRegion![y * _columns + x] = true;
+            }
         }
-        return (false, fraction);
+        return found;
     }
 
     private double BoardColorMixtureError(double[][] coefficients, double[] colors, double[] current, int index,

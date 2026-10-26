@@ -5,7 +5,7 @@
   "height": 512,
   "logicalWidth": 720,
   "logicalHeight": 160,
-  "framing": "Scale uniformly by destination height; align the right edge, crop the left or extend quiet left background; never stretch.",
+  "framing": "Cover the destination uniformly in physical pixels. Crop from the left when height sets the scale; crop vertically about the centre when width sets the scale. Never stretch an edge column.",
   "crownDeed": {
     "composition": "Close-up of the native lamplit city, property boulevard and silver pieces.",
     "boardRaster": 2400,

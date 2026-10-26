@@ -85,7 +85,6 @@ public static partial class DuckHuntGalleryLayout
         SourceRect(64, 490, 113, 93),
         SourceRect(997, 490, 114, 93)
     });
-    public static readonly BoardRect PlayBounds = new(.39, .40, .22, .12);
     public static readonly BoardRect FlapSceneBounds = new(.124, .577, .748, .129);
     public static readonly BoardRect UpperPanelSceneBounds = new(.114, .172, .762, .170);
     public const double BeltBackV = .708, BeltFrontV = .795;
