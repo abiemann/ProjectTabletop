@@ -3,6 +3,8 @@ namespace ProjectTabletop.Interaction;
 /// <summary>Small, microphone-specific ranges learned from clicks; contains no audio samples.</summary>
 public sealed record AudioClickProfile
 {
+    private const double MinimumAmplitudeFactor = .75;
+
     public int Version { get; init; } = 1;
     public double TrainingNoiseRms { get; init; }
     public double MinimumPeak { get; init; }
@@ -24,9 +26,11 @@ public sealed record AudioClickProfile
             throw new ArgumentException("The learned click profile is invalid or unsupported.");
     }
 
+    // Aiming the same click device changes its level at the microphone. Allow a
+    // modest drop without relaxing the sound's duration, frequency or upper bounds.
     public bool Matches(AudioClickFeatures features) =>
-        Within(features.Peak, MinimumPeak, MaximumPeak) &&
-        Within(features.Rms, MinimumRms, MaximumRms) &&
+        Within(features.Peak, MinimumPeak * MinimumAmplitudeFactor, MaximumPeak) &&
+        Within(features.Rms, MinimumRms * MinimumAmplitudeFactor, MaximumRms) &&
         Within(features.DurationMs, MinimumDurationMs, MaximumDurationMs) &&
         Within(features.HighFrequencyRatio, MinimumHighFrequencyRatio, MaximumHighFrequencyRatio);
 

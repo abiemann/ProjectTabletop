@@ -1,7 +1,10 @@
 namespace ProjectTabletop.Interaction;
 
 public readonly record struct AudioClickDetectionDiagnostics(long CompletedTransients, long TimedOutCandidates,
-    long RejectedByProfile, AudioClickTransient? LastCompletedTransient, AudioClickTransient? LastTimedOutCandidate);
+    long RejectedByProfile, AudioClickTransient? LastCompletedTransient, AudioClickTransient? LastTimedOutCandidate)
+{
+    public double LastTimedOutSoundDurationMs { get; init; }
+}
 
 /// <summary>
 /// Detects short, abrupt microphone transients. No samples are retained, and a loud
@@ -22,6 +25,8 @@ public sealed class AudioClickDetector
     private readonly bool _learning;
     private AudioClickProfile? _profile;
     private long _completedTransients, _timedOutCandidates, _rejectedByProfile;
+    private long _candidateElapsedFrames;
+    private double _lastTimedOutSoundDurationMs;
     private AudioClickTransient? _lastCompletedTransient, _lastTimedOutCandidate;
     private DateTimeOffset _windowStart, _lastFrameEnd, _candidateAt, _lastClickAt;
     private bool _candidate, _armed;
@@ -33,7 +38,10 @@ public sealed class AudioClickDetector
     /// <summary>The completed transient, including one rejected by a learned profile. Cleared each Process call.</summary>
     public AudioClickTransient? LastTransient { get; private set; }
     public AudioClickDetectionDiagnostics Analysis => new(_completedTransients, _timedOutCandidates,
-        _rejectedByProfile, _lastCompletedTransient, _lastTimedOutCandidate);
+        _rejectedByProfile, _lastCompletedTransient, _lastTimedOutCandidate)
+    {
+        LastTimedOutSoundDurationMs = _lastTimedOutSoundDurationMs
+    };
 
     public AudioClickDetector() { }
     internal AudioClickDetector(bool learning) => _learning = learning;
@@ -59,6 +67,8 @@ public sealed class AudioClickDetector
         Diagnostics = default;
         LastTransient = null;
         _completedTransients = _timedOutCandidates = _rejectedByProfile = 0;
+        _candidateElapsedFrames = 0;
+        _lastTimedOutSoundDurationMs = 0;
         _lastCompletedTransient = _lastTimedOutCandidate = null;
     }
 
@@ -143,6 +153,7 @@ public sealed class AudioClickDetector
             {
                 _candidateRms = Math.Max(_candidateRms, rms);
                 double age = (at - _candidateAt).TotalSeconds;
+                _candidateElapsedFrames += sampleCount / _channels;
                 // A sharp click can leave a much quieter room/microphone tail above
                 // ambient. For learning and trained playback, a sustained relative
                 // fall from a clearly dominant peak can end the click promptly.
@@ -152,20 +163,35 @@ public sealed class AudioClickDetector
                     _candidateRms >= Math.Max(.004, _noiseRms * 8) &&
                     peak <= _candidatePeak * .2 && rms <= _candidateRms * .18;
                 _candidateFallSeconds = quiet || relativeFall ? _candidateFallSeconds + seconds : 0;
-                if (!quiet && !relativeFall) AccumulateCandidate(peak, energy, highEnergy, sampleCount, age + seconds);
-                if (age > .12)
+                // AudioGraph delivery times jitter independently of the PCM clock.
+                // Measure learned sound length from every elapsed sample frame,
+                // including brief falls inside a sound, while retaining the original
+                // host onset and wall-clock deadline for fresh camera matching.
+                if (!quiet && !relativeFall) AccumulateCandidate(peak, energy, highEnergy, sampleCount,
+                    adapted ? (double)_candidateElapsedFrames / _sampleRate : age + seconds);
+                // Trained clicks can use the full 120 ms sound window and still
+                // need 10 ms of quiet/fall to confirm the end. The grace belongs
+                // only to confirmation; a longer sound core remains invalid.
+                // Remove sub-microsecond duration roundoff at the boundary;
+                // never truncate a longer sound into the accepted duration range.
+                double soundDurationMs = Math.Round(_candidateDuration * 1000, 3);
+                bool expired = adapted
+                    ? soundDurationMs > 120 || Math.Round((age + seconds) * 1000, 4) > 135
+                    : age > .12;
+                if (expired)
                 {
                     // Speech, music and a sustained loud onset do not become a shot.
                     _timedOutCandidates++;
                     // This is the observed age when analysis stopped, not a claim
                     // that the sound ended here. Only numerical summaries survive.
                     _lastTimedOutCandidate = new(_candidateAt, CandidateFeatures((age + seconds) * 1000));
+                    _lastTimedOutSoundDurationMs = soundDurationMs;
                     _candidate = false;
                 }
                 else if ((adapted ? _candidateFallSeconds : _quietSeconds) >= .01 &&
                     rms < Math.Max(adapted ? .001 : .008, _candidateRms * .3))
                 {
-                    var features = CandidateFeatures(Math.Min(120, _candidateDuration * 1000));
+                    var features = CandidateFeatures(adapted ? soundDurationMs : Math.Min(120, _candidateDuration * 1000));
                     LastTransient = new(_candidateAt, features);
                     _lastCompletedTransient = LastTransient;
                     _completedTransients++;
@@ -183,6 +209,7 @@ public sealed class AudioClickDetector
                 _candidate = true;
                 _armed = false;
                 _candidateAt = at;
+                _candidateElapsedFrames = sampleCount / _channels;
                 _candidateRms = rms;
                 _candidateFallSeconds = 0;
                 _candidatePeak = _candidateEnergy = _candidateHighEnergy = _candidateFrames = _candidateDuration = 0;

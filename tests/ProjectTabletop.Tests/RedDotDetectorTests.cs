@@ -245,6 +245,59 @@ public class RedDotDetectorTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void UnvalidatedWhiteSpeckCannotPromoteTintedArtwork(bool magenta)
+    {
+        var frame = new Frame(110, 115, 120);
+        frame.Disc(320, 240, 3, magenta ? (byte)228 : (byte)80,
+            magenta ? (byte)175 : (byte)100, magenta ? (byte)197 : (byte)200);
+        if (magenta) frame.Pixel(318, 240, 228, 175, 200);
+        // Two clipped pixels are below the validated core minimum. They must not
+        // waive either magenta signal coherence or the warm-component hue check.
+        frame.Pixel(320, 240, 255, 244, 255);
+        frame.Pixel(321, 240, 255, 244, 255);
+        Assert.Equal(0, frame.Detect(new()).CandidateCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CoherentLaserStillWorksWhenItsWhiteCentreIsOnlyTwoPixels(bool magenta)
+    {
+        var frame = new Frame(110, 115, 120);
+        frame.Disc(320, 240, 3, magenta ? (byte)241 : (byte)20,
+            magenta ? (byte)180 : (byte)25, magenta ? (byte)210 : (byte)190);
+        frame.Pixel(320, 240, 255, 244, 255);
+        frame.Pixel(321, 240, 255, 244, 255);
+        Assert.True(frame.Detect(new()).Detected);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PinkHighlightCannotBypassWeakFringeChecksAsAWhiteCore(bool oneWhitePixel)
+    {
+        var frame = new Frame(132, 100, 110);
+        frame.Disc(320, 240, 4, 170, 122, 150);
+        frame.Disc(320, 240, 1, 255, 230, 255);
+        if (oneWhitePixel) frame.Pixel(320, 240, 255, 244, 255);
+        Assert.Equal(0, frame.Detect(new()).CandidateCount);
+    }
+
+    [Fact]
+    public void PinkCentreWithCoherentLaserFringeStillUsesColourDetection()
+    {
+        var frame = new Frame(132, 100, 110);
+        frame.Disc(320, 240, 4, 241, 180, 210);
+        frame.Disc(320, 240, 1, 255, 230, 255);
+        var result = frame.Detect(new());
+        Assert.True(result.Detected);
+        Assert.Equal(320, result.CameraPosition!.Value.X, 5);
+        Assert.Equal(240, result.CameraPosition.Value.Y, 5);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void RedOrMagentaDotOnBrownPhotographicArtworkStillTracks(bool magenta)
     {
         var frame = new Frame(74, 104, 172);

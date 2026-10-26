@@ -48,6 +48,10 @@ internal sealed class MicrophoneClickListener : IAsyncDisposable
     {
         get { lock (_analysisGate) return _detector.Diagnostics; }
     }
+    public AudioClickDetectionDiagnostics Analysis
+    {
+        get { lock (_analysisGate) return _detector.Analysis; }
+    }
 
     public AudioClickLearningSnapshot LearningSnapshot
     {

@@ -12,10 +12,22 @@ public sealed class RedDotGalleryCameraTests
     [InlineData("gallery-clear-pure-warm-speck.bgra.gz")]
     [InlineData("gallery-laser-on-skull.bgra.gz")]
     [InlineData("gallery-split-motion-streak.bgra.gz")]
-    public void RecordedGallerySeparatesLaserFromWarmWoodAndGold(string file)
+    public void RecordedGallerySeparatesLaserFromWarmWoodAndGold(string file) =>
+        VerifyCapture(file, "gallery-red-dot.json");
+
+    [Theory]
+    [InlineData("gallery-score-fringe-0021.bgra.gz", "gallery-score-fringe.json")]
+    [InlineData("gallery-score-fringe-0034.bgra.gz", "gallery-score-fringe.json")]
+    [InlineData("duck-faint-magenta-laser.bgra.gz", "duck-faint-magenta-laser.json")]
+    [InlineData("gallery-conveyor-trim-0000.bgra.gz", "gallery-pink-highlight.json")]
+    [InlineData("gallery-mirror-glint-0028.bgra.gz", "gallery-pink-highlight.json")]
+    public void RecordedScoreFragmentsAreRejectedWhileFaintLaserRemainsVisible(string file, string metadata) =>
+        VerifyCapture(file, metadata);
+
+    private static void VerifyCapture(string file, string metadata)
     {
         string directory = Path.Combine(AppContext.BaseDirectory, "Fixtures");
-        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "gallery-red-dot.json")));
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, metadata)));
         var root = json.RootElement;
         var fixture = root.GetProperty("fixtures").EnumerateArray()
             .Single(item => item.GetProperty("file").GetString() == file);

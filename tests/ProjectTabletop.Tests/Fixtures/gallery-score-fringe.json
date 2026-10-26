@@ -1,0 +1,43 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "stride": 7680,
+  "map": [
+    0.0010242365619473333,
+    -1.7222203992743523e-05,
+    -0.5633779749368848,
+    -4.26258380079489e-06,
+    0.0012595374918661871,
+    -0.25845938785431843,
+    1.3268462995309772e-05,
+    -6.322416701927074e-05,
+    1
+  ],
+  "mapDescription": "Exact active camera-to-board homography recorded with these camera frames; pixels are unmodified.",
+  "fixtures": [
+    {
+      "name": "Score glyph fringe frame 21",
+      "file": "gallery-score-fringe-0021.bgra.gz",
+      "source": "artifacts/gallery-eyes-recovery-20261025/live-final/camera-0021.png",
+      "sha256": "43c8cdaa8f3f69229ba72466a62fc9e0e8bc0a9e195e312816a6b6efff605676",
+      "expectedCandidateCount": 0,
+      "baselineFalseCameraPosition": [
+        991.2037037037037,
+        855.520061728395
+      ],
+      "visualLabel": "Clear score lettering; no laser at the former score-fringe candidate. Original full camera frame, unmodified BGRA pixels."
+    },
+    {
+      "name": "Score glyph fringe frame 34",
+      "file": "gallery-score-fringe-0034.bgra.gz",
+      "source": "artifacts/gallery-eyes-recovery-20261025/live-final/camera-0034.png",
+      "sha256": "0fa630e2279ff2e2bb2d056026a2759298333809f42049842ccc445d561c373d",
+      "expectedCandidateCount": 0,
+      "baselineFalseCameraPosition": [
+        1084.9803921568628,
+        850.3692810457517
+      ],
+      "visualLabel": "Clear score lettering; no laser at the former score-fringe candidate. Original full camera frame, unmodified BGRA pixels."
+    }
+  ]
+}

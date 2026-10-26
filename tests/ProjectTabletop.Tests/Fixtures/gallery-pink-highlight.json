@@ -1,0 +1,35 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "stride": 7680,
+  "map": [
+    0.0010242365619473333,
+    -1.7222203992743523e-05,
+    -0.5633779749368848,
+    -4.26258380079489e-06,
+    0.0012595374918661871,
+    -0.25845938785431843,
+    1.3268462995309772e-05,
+    -6.322416701927074e-05,
+    1
+  ],
+  "mapDescription": "Exact active camera-to-board homography recorded with these full camera frames; pixels are unmodified.",
+  "fixtures": [
+    {
+      "name": "conveyor-trim",
+      "file": "gallery-conveyor-trim-0000.bgra.gz",
+      "source": "artifacts/gallery-last-target-20261026/live/camera-0000.png",
+      "sha256": "a05d42b29bfa12f9eabb5a1eaeb66f28e88647c8a07abfef3ff9ce782f706e32",
+      "expectedCandidateCount": 0,
+      "visualLabel": "Finished gallery, all curtains closed, score1100, no red laser. False candidate is pink projected decoration, original pixels unmodified."
+    },
+    {
+      "name": "mirror-glint",
+      "file": "gallery-mirror-glint-0028.bgra.gz",
+      "source": "artifacts/gallery-last-target-20261026/live/camera-0028.png",
+      "sha256": "01f340410ae47377fe88e00ad694322086a63a601db6d9d4b992db123effd430",
+      "expectedCandidateCount": 0,
+      "visualLabel": "Finished gallery, all curtains closed, score1100, no red laser. False candidate is pink projected decoration, original pixels unmodified."
+    }
+  ]
+}

@@ -314,7 +314,7 @@ public sealed partial class MainWindow
             microphone = new { _duckHuntMicrophone.IsRunning, _duckHuntMicrophone.DeviceName,
                 _duckHuntMicrophone.DeviceId, selectedDeviceId = _duckHuntSelectedMicrophoneId,
                 available = _duckHuntMicrophones, settingsError = _duckHuntMicrophoneSettingsError,
-                _duckHuntMicrophone.Status, _duckHuntMicrophone.Diagnostics,
+                _duckHuntMicrophone.Status, _duckHuntMicrophone.Diagnostics, _duckHuntMicrophone.Analysis,
                 detectedClicks = Interlocked.Read(ref _duckHuntDetectedClicks),
                 busyClicks = Interlocked.Read(ref _duckHuntBusyClicks),
                 lastClickAt = lastClickTicks == 0 ? (DateTimeOffset?)null : new DateTimeOffset(lastClickTicks, TimeSpan.Zero) }

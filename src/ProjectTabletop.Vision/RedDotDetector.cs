@@ -119,9 +119,13 @@ public sealed class RedDotDetector
             }
 
             if (acceptedCore) continue;
-            // Dim tinted photo edges need a coherent bright colour signal. A single
-            // bright fringe pixel must not promote the surrounding photographic patch.
-            if (clippedPixels == 0 && (signalPixels < 2 || signalPixels * (kind == 1 ? 5 : 3) < colourPixels)) continue;
+            // Only a validated core above can bypass colour coherence. A few clipped
+            // pixels in projected lettering are not a core and must not promote the
+            // surrounding tinted edge into a laser candidate.
+            // A partial white centre supports a slightly weaker magenta fringe,
+            // but still needs coherent colour across at least a quarter of it.
+            int signalScale = kind == 1 ? 5 : clippedPixels > 0 ? 4 : 3;
+            if (signalPixels < 2 || signalPixels * signalScale < colourPixels) continue;
             int boxWidth = maxX - minX + 1, boxHeight = maxY - minY + 1;
             double fill = tail / (double)(boxWidth * boxHeight);
             if (touchesBoundary || seedPixels < 4 || tail > Math.Max(16, _boardArea * .0007) ||
@@ -152,8 +156,7 @@ public sealed class RedDotDetector
             // the surrounding red dominance. Check the whole component rather than
             // tightening seed colours, which would split wood texture into tiny dots.
             // Clipped centres and blue-biased magenta evidence keep their own checks.
-            if (kind == 1 && clippedPixels == 0 &&
-                (greenBlue * 10 > weight || localRed < surroundingRed)) continue;
+            if (kind == 1 && (greenBlue * 10 > weight || localRed < surroundingRed)) continue;
             var camera = new PixelPoint(weightedX / weight, weightedY / weight);
             var board = Map(camera.X, camera.Y);
             if (board.X is < 0 or > 1 || board.Y is < 0 or > 1 ||
@@ -179,6 +182,7 @@ public sealed class RedDotDetector
             if ((_mask[y * _width + x] & ClippedCore) == 0) continue;
             int head = 0, tail = 1, minX = x, maxX = x, minY = y, maxY = y;
             double sumX = 0, sumY = 0;
+            int neutralCorePixels = 0;
             bool touchesBoundary = false;
             _queue[0] = y * _width + x;
             _mask[_queue[0]] &= ColourMask;
@@ -186,6 +190,9 @@ public sealed class RedDotDetector
             {
                 int pixel = _queue[head++], py = pixel / _width, px = pixel - py * _width;
                 sumX += px; sumY += py;
+                int source = py * stride + px * 4;
+                if (Math.Min(bgra[source + 2], bgra[source]) - bgra[source + 1] < 16)
+                    neutralCorePixels++;
                 minX = Math.Min(minX, px); maxX = Math.Max(maxX, px);
                 minY = Math.Min(minY, py); maxY = Math.Max(maxY, py);
                 touchesBoundary |= px <= _first[py] || px >= _last[py] - 1 || py <= _top || py >= _bottom - 1;
@@ -203,7 +210,10 @@ public sealed class RedDotDetector
             double fill = tail / (double)(boxWidth * boxHeight);
             // Allow a bounded motion streak. Its exposure-average position remains the
             // core centroid; a broad white patch or isolated hot pixel is not a dot.
-            if (touchesBoundary || tail < 4 || tail > Math.Max(16, _boardArea * .0007) || fill < .1 ||
+            // A white core also needs two pixels outside the magenta colour gate.
+            // Entirely pink projected highlights must earn the colour checks instead.
+            if (touchesBoundary || tail < 4 || neutralCorePixels < 2 ||
+                tail > Math.Max(16, _boardArea * .0007) || fill < .1 ||
                 boxWidth > _coreProbeDistance * 2.5 || boxHeight > _coreProbeDistance * 2.5 ||
                 Math.Min(boxWidth, boxHeight) > _coreProbeDistance) continue;
             int colourSupport = 0;

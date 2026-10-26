@@ -354,6 +354,22 @@ public sealed class AudioClickTrainerTests
         return stream;
     }
 
+    [Theory]
+    [InlineData(.115)]
+    [InlineData(.120)]
+    public void LearningAndValidationBothAllowQuietConfirmationAfterTheSoundWindow(double duration)
+    {
+        var stream = new TrainingStream();
+        stream.Quiet(3.1);
+        for (int i = 0; i < 9; i++) stream.Click(duration: duration);
+        stream.Quiet(3.1);
+        Assert.True(stream.Trainer.Snapshot.CanSave, $"{stream.Trainer.Snapshot}; {stream.Trainer.Diagnostics}");
+        Assert.Equal(6, stream.Trainer.Snapshot.CollectedClicks);
+        Assert.Equal(3, stream.Trainer.Snapshot.ValidatedClicks);
+        Assert.Equal(0, stream.Trainer.Diagnostics.Detection.TimedOutCandidates);
+        Assert.InRange(stream.Trainer.Profile!.MaximumDurationMs, duration * 1000, 120);
+    }
+
     private abstract class PcmStream(double background)
     {
         private static readonly DateTimeOffset Origin = new(2026, 10, 22, 0, 0, 0, TimeSpan.Zero);
