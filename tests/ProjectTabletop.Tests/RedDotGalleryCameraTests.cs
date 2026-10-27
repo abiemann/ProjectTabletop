@@ -24,6 +24,13 @@ public sealed class RedDotGalleryCameraTests
     public void RecordedScoreFragmentsAreRejectedWhileFaintLaserRemainsVisible(string file, string metadata) =>
         VerifyCapture(file, metadata);
 
+    [Theory]
+    [InlineData("gallery-thin-trim-0805.bgra.gz")]
+    [InlineData("gallery-thin-trim-0807.bgra.gz")]
+    [InlineData("gallery-thin-trim-0898.bgra.gz")]
+    public void RecordedThinBrassGlintDoesNotCompeteWithTheLaser(string file) =>
+        VerifyCapture(file, "gallery-thin-trim.json");
+
     private static void VerifyCapture(string file, string metadata)
     {
         string directory = Path.Combine(AppContext.BaseDirectory, "Fixtures");

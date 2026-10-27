@@ -5,21 +5,23 @@ namespace ProjectTabletop.Tests;
 public sealed class AudioClickTrainerTests
 {
     [Fact]
-    public void TrainingRequiresSixClicksThreeHeldOutAndQuietBeforeExposingProfile()
+    public void TrainingRequiresTenClicksFivePromptedHeldOutAndQuietBeforeExposingProfile()
     {
         var stream = new TrainingStream();
         Assert.Null(stream.Trainer.Profile);
         stream.Quiet(3.1);
         Assert.Equal(AudioClickLearningStage.LearningClicks, stream.Trainer.Snapshot.Stage);
-        for (int i = 0; i < 5; i++) stream.Click();
-        Assert.Equal(5, stream.Trainer.Snapshot.CollectedClicks);
+        for (int i = 0; i < AudioClickTrainer.RequiredClicks - 1; i++) stream.Click();
+        Assert.Equal(9, stream.Trainer.Snapshot.CollectedClicks);
         Assert.Null(stream.Trainer.Profile);
         stream.Click();
         Assert.Equal(AudioClickLearningStage.ValidationClicks, stream.Trainer.Snapshot.Stage);
-        for (int i = 0; i < 2; i++) stream.Click();
-        Assert.Equal(2, stream.Trainer.Snapshot.ValidatedClicks);
+        Assert.False(stream.Trainer.Snapshot.Collecting);
+        for (int i = 0; i < AudioClickTrainer.RequiredValidation - 1; i++) ValidateClick(stream);
+        Assert.Equal(4, stream.Trainer.Snapshot.ValidatedClicks);
+        Assert.Equal(4, stream.Trainer.Snapshot.CompletedValidationAttempts);
         Assert.False(stream.Trainer.Snapshot.CanSave);
-        stream.Click();
+        ValidateClick(stream);
         Assert.Equal(AudioClickLearningStage.QuietValidation, stream.Trainer.Snapshot.Stage);
         Assert.Null(stream.Trainer.Profile);
         stream.Quiet(3.1);
@@ -27,6 +29,7 @@ public sealed class AudioClickTrainerTests
         Assert.Equal("physical-microphone-id", stream.Trainer.DeviceId);
         Assert.Equal(AudioClickLearningStage.Complete, stream.Trainer.Snapshot.Stage);
         stream.Trainer.Profile!.Validate();
+        Assert.Equal(2, stream.Trainer.Profile.Version);
     }
 
     [Fact]
@@ -62,7 +65,7 @@ public sealed class AudioClickTrainerTests
     {
         var stream = new TrainingStream();
         stream.Quiet(3.1);
-        for (int i = 0; i < 9; i++) stream.SoftLeadingClick();
+        LearnAndValidate(stream, stream.SoftLeadingClick);
         stream.Quiet(3.1);
         Assert.True(stream.Trainer.Snapshot.CanSave);
         Assert.InRange(stream.Trainer.Profile!.MinimumDurationMs, 9, 11);
@@ -79,7 +82,7 @@ public sealed class AudioClickTrainerTests
     {
         var stream = new TrainingStream();
         stream.Quiet(3.1);
-        for (int i = 0; i < 9; i++) stream.DecayingClick();
+        LearnAndValidate(stream, stream.DecayingClick);
         stream.Quiet(3.1);
         Assert.True(stream.Trainer.Snapshot.CanSave);
         Assert.Equal(0, stream.Trainer.Diagnostics.Detection.TimedOutCandidates);
@@ -130,7 +133,7 @@ public sealed class AudioClickTrainerTests
     public void QuietCheckRejectsAFalsePositiveAndNeverMakesProfileSaveable()
     {
         var stream = TrainingToValidation();
-        for (int i = 0; i < 3; i++) stream.Click();
+        for (int i = 0; i < AudioClickTrainer.RequiredValidation; i++) ValidateClick(stream);
         Assert.Equal(AudioClickLearningStage.QuietValidation, stream.Trainer.Snapshot.Stage);
         stream.Click();
         Assert.Equal(AudioClickLearningStage.Failed, stream.Trainer.Snapshot.Stage);
@@ -151,11 +154,13 @@ public sealed class AudioClickTrainerTests
         Assert.Null(stream.Trainer.Profile);
 
         stream = TrainingToValidation();
-        stream.Click();
+        ValidateClick(stream);
         Assert.Equal(1, stream.Trainer.Snapshot.ValidatedClicks);
-        for (int i = 0; i < 3; i++) stream.Click(frequency: 180);
+        for (int i = 1; i < AudioClickTrainer.RequiredValidation; i++) ValidateClick(stream, frequency: 180);
         Assert.Equal(AudioClickLearningStage.Failed, stream.Trainer.Snapshot.Stage);
-        Assert.Equal(0, stream.Trainer.Snapshot.ValidatedClicks);
+        Assert.Equal(1, stream.Trainer.Snapshot.ValidatedClicks);
+        Assert.Equal(5, stream.Trainer.Snapshot.CompletedValidationAttempts);
+        Assert.True(stream.Trainer.Snapshot.CanRetryValidation);
         Assert.Null(stream.Trainer.Profile);
     }
 
@@ -220,7 +225,7 @@ public sealed class AudioClickTrainerTests
     {
         var stream = new TrainingStream(background: .004);
         stream.Quiet(3.1);
-        for (int i = 0; i < 9; i++) stream.Click(amplitude: .07);
+        LearnAndValidate(stream, () => stream.Click(amplitude: .07));
         stream.Quiet(3.1);
         Assert.True(stream.Trainer.Snapshot.CanSave);
         Assert.InRange(stream.Trainer.Profile!.TrainingNoiseRms, .002, .004);
@@ -230,9 +235,8 @@ public sealed class AudioClickTrainerTests
     public void QuietCheckWaitsForSoundWhichStartsAtTheEndOfItsWindow()
     {
         var stream = TrainingToValidation();
-        stream.Click();
-        stream.Click();
-        stream.Click(pause: .015);
+        for (int i = 0; i < AudioClickTrainer.RequiredValidation - 1; i++) ValidateClick(stream);
+        ValidateClick(stream, pause: .015);
         Assert.Equal(AudioClickLearningStage.QuietValidation, stream.Trainer.Snapshot.Stage);
         stream.Quiet(2.98);
         stream.Sound(.02, .04, 5000);
@@ -254,6 +258,23 @@ public sealed class AudioClickTrainerTests
             _ = stream.Trainer.Diagnostics;
         }
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+    }
+
+    [Fact]
+    public void WaitingWithinAGreenTestAllocatesNoSteadyStateMemory()
+    {
+        var stream = TrainingToValidation();
+        WaitForGreen(stream);
+        _ = stream.Trainer.Snapshot;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 200; i++)
+        {
+            stream.Quiet(.005);
+            _ = stream.Trainer.Snapshot;
+            _ = stream.Trainer.Diagnostics;
+        }
+        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+        Assert.Equal(0, stream.Trainer.Snapshot.CompletedValidationAttempts);
     }
 
     [Fact]
@@ -303,44 +324,215 @@ public sealed class AudioClickTrainerTests
     }
 
     [Fact]
-    public void WeakerFollowUpsBetweenValidationClicksDoNotEraseRecognizedProgress()
+    public void RejectedAttemptCannotBeHiddenByRepeatingUntilAClickMatches()
     {
         var stream = new TrainingStream();
         stream.Quiet(3.1);
-        for (int i = 0; i < 6; i++) stream.Click(amplitude: .8);
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < AudioClickTrainer.RequiredClicks; i++) stream.Click(amplitude: .8);
+        ValidateClick(stream, amplitude: .8, frequency: 180);
+        Assert.Equal(1, stream.Trainer.Snapshot.CompletedValidationAttempts);
+        Assert.Equal(0, stream.Trainer.Snapshot.ValidatedClicks);
+        // A second click during red must not replace the first test's failed result.
+        stream.Click(amplitude: .8);
+        Assert.Equal(1, stream.Trainer.Snapshot.CompletedValidationAttempts);
+        Assert.Equal(0, stream.Trainer.Snapshot.ValidatedClicks);
+        for (int i = 1; i < AudioClickTrainer.RequiredValidation; i++) ValidateClick(stream, amplitude: .8);
+        Assert.Equal(AudioClickLearningStage.Failed, stream.Trainer.Snapshot.Stage);
+        Assert.Equal(4, stream.Trainer.Snapshot.ValidatedClicks);
+        Assert.Equal(1, stream.Trainer.Diagnostics.ValidationRejected);
+        Assert.False(stream.Trainer.Snapshot.CanSave);
+    }
+
+    [Fact]
+    public void QuietIncidentalSoundsCannotStealAPromptedClickWindow()
+    {
+        var stream = new TrainingStream();
+        stream.Quiet(3.1);
+        for (int i = 0; i < AudioClickTrainer.RequiredClicks; i++) stream.Click(amplitude: .8);
+        for (int i = 0; i < AudioClickTrainer.RequiredValidation; i++)
         {
+            WaitForGreen(stream);
             stream.Click(amplitude: .1);
-            Assert.Equal(i, stream.Trainer.Snapshot.ValidatedClicks);
+            Assert.Equal(i, stream.Trainer.Snapshot.CompletedValidationAttempts);
             stream.Click(amplitude: .8);
+            Assert.Equal(i + 1, stream.Trainer.Snapshot.CompletedValidationAttempts);
             Assert.Equal(i + 1, stream.Trainer.Snapshot.ValidatedClicks);
-            if (i < 2)
-            {
-                string feedback = stream.Trainer.Snapshot.Message;
-                stream.Click(amplitude: .1);
-                Assert.Equal(feedback, stream.Trainer.Snapshot.Message);
-                Assert.Equal(i + 1, stream.Trainer.Snapshot.ValidatedClicks);
-            }
         }
         stream.Quiet(3.1);
         Assert.True(stream.Trainer.Snapshot.CanSave);
-        Assert.Equal(5, stream.Trainer.Diagnostics.ValidationRejected);
+        Assert.Equal(0, stream.Trainer.Diagnostics.ValidationRejected);
+    }
 
-        // A sound with sufficient loudness but the wrong frequency still invalidates the attempt.
-        stream = TrainingToValidation();
-        stream.Click();
-        stream.Click(frequency: 180);
+    [Fact]
+    public void WindowWithOnlyQuietIncidentalSoundsStillCountsAsAMissedTest()
+    {
+        var stream = new TrainingStream();
+        stream.Quiet(3.1);
+        for (int i = 0; i < AudioClickTrainer.RequiredClicks; i++) stream.Click(amplitude: .8);
+        WaitForGreen(stream);
+        stream.Click(amplitude: .1);
+        stream.Sound(.2, .1, 180);
+        stream.Quiet(.35);
+        Assert.Equal(0, stream.Trainer.Snapshot.CompletedValidationAttempts);
+        stream.Quiet(2.3);
+        Assert.Equal(1, stream.Trainer.Snapshot.CompletedValidationAttempts);
         Assert.Equal(0, stream.Trainer.Snapshot.ValidatedClicks);
-        stream.Click(frequency: 180);
-        stream.Click(frequency: 180);
+        Assert.Equal(1, stream.Trainer.Diagnostics.ValidationRejected);
+        Assert.False(stream.Trainer.Snapshot.CanSave);
+    }
+
+    [Fact]
+    public void MissingOnsetsConsumeFivePromptedAttemptsInsteadOfWaitingForever()
+    {
+        var stream = TrainingToValidation();
+        for (int i = 0; i < AudioClickTrainer.RequiredValidation; i++)
+        {
+            WaitForGreen(stream);
+            Assert.Equal(i + 1, stream.Trainer.Snapshot.ValidationAttempt);
+            stream.Quiet(3.16);
+            Assert.Equal(i + 1, stream.Trainer.Snapshot.CompletedValidationAttempts);
+            Assert.Equal(0, stream.Trainer.Snapshot.ValidatedClicks);
+        }
         Assert.Equal(AudioClickLearningStage.Failed, stream.Trainer.Snapshot.Stage);
+        Assert.Contains("0/5", stream.Trainer.Snapshot.Message);
+        Assert.Contains("No click", stream.Trainer.Snapshot.Message);
+        Assert.True(stream.Trainer.Snapshot.CanRetryValidation);
+        Assert.False(stream.Trainer.Snapshot.CanSave);
+        Assert.Null(stream.Trainer.Profile);
+    }
+
+    [Fact]
+    public void TimeoutConsumesOneTestAndPreservesItsFailureThroughLaterSuccesses()
+    {
+        var stream = TrainingToValidation();
+        WaitForGreen(stream);
+        stream.Sound(.2, .04, 5000);
+        stream.Quiet(.35);
+        Assert.Equal(1, stream.Trainer.Diagnostics.Detection.TimedOutCandidates);
+        Assert.Equal(1, stream.Trainer.Snapshot.CompletedValidationAttempts);
+        Assert.Equal(0, stream.Trainer.Snapshot.ValidatedClicks);
+        for (int i = 1; i < AudioClickTrainer.RequiredValidation; i++) ValidateClick(stream);
+        Assert.Equal(AudioClickLearningStage.Failed, stream.Trainer.Snapshot.Stage);
+        Assert.Equal(4, stream.Trainer.Snapshot.ValidatedClicks);
+        Assert.Contains("lasted too long", stream.Trainer.Snapshot.Message);
+        Assert.Equal(1, stream.Trainer.Diagnostics.ValidationRejected);
+    }
+
+    [Fact]
+    public void EarlierTimeoutCannotBeHiddenByALaterClickInTheSameAudioPacket()
+    {
+        var stream = TrainingToValidation();
+        WaitForGreen(stream);
+        stream.Sound(.12, .04, 5000);
+        stream.TimeoutThenClickPacket();
+        Assert.Equal(1, stream.Trainer.Diagnostics.Detection.TimedOutCandidates);
+        Assert.Equal(AudioClickTrainer.RequiredClicks + 1, stream.Trainer.Diagnostics.Detection.CompletedTransients);
+        Assert.Equal(1, stream.Trainer.Snapshot.CompletedValidationAttempts);
+        Assert.Equal(0, stream.Trainer.Snapshot.ValidatedClicks);
+        Assert.Contains("lasted too long", stream.Trainer.Snapshot.Message);
+    }
+
+    [Fact]
+    public void ValidationRetryReusesExamplesButRequiresFiveNewTestsAndQuiet()
+    {
+        var stream = TrainingToValidation();
+        Assert.False(stream.Trainer.RetryValidation());
+        for (int i = 0; i < AudioClickTrainer.RequiredValidation; i++) ValidateClick(stream, frequency: 180);
+        Assert.True(stream.Trainer.RetryValidation());
+        Assert.Equal(AudioClickTrainer.RequiredClicks, stream.Trainer.Snapshot.CollectedClicks);
+        Assert.Equal(0, stream.Trainer.Snapshot.CompletedValidationAttempts);
+        Assert.Equal(0, stream.Trainer.Snapshot.ValidatedClicks);
+        Assert.Null(stream.Trainer.Profile);
+        for (int i = 0; i < AudioClickTrainer.RequiredValidation; i++) ValidateClick(stream);
+        Assert.Null(stream.Trainer.Profile);
+        stream.Quiet(3.1);
+        Assert.True(stream.Trainer.Snapshot.CanSave);
+        Assert.False(stream.Trainer.RetryValidation());
+        stream.Trainer.Cancel();
+        Assert.Null(stream.Trainer.Profile);
+        Assert.False(stream.Trainer.RetryValidation());
+    }
+
+    [Theory]
+    [InlineData(2.995, true)]
+    [InlineData(3.000, false)]
+    public void ValidationUsesOnsetDeadlineAndLetsAnOnTimeClickFinish(double onsetSeconds, bool accepted)
+    {
+        var stream = TrainingToValidation();
+        WaitForGreen(stream);
+        stream.Quiet(onsetSeconds);
+        stream.Click(pause: .2);
+        Assert.Equal(1, stream.Trainer.Snapshot.CompletedValidationAttempts);
+        Assert.Equal(accepted ? 1 : 0, stream.Trainer.Snapshot.ValidatedClicks);
+        Assert.False(stream.Trainer.Snapshot.CanSave);
+    }
+
+    [Fact]
+    public void ClickBeginningDuringRedCannotBecomeANewGreenTest()
+    {
+        var stream = TrainingToValidation();
+        // The last learning click already used some of the first red interval.
+        while (stream.Trainer.Snapshot.Progress0To1 < .99) stream.Quiet(.005);
+        stream.Click(duration: .02, pause: .02);
+        Assert.True(stream.Trainer.Snapshot.Collecting);
+        Assert.Equal(0, stream.Trainer.Snapshot.CompletedValidationAttempts);
+        stream.Quiet(3.2);
+        Assert.Equal(1, stream.Trainer.Snapshot.CompletedValidationAttempts);
+        Assert.Equal(0, stream.Trainer.Snapshot.ValidatedClicks);
+    }
+
+    [Fact]
+    public void TrainingAllowsNaturalLevelVariationAndUsesTheMajorityInsteadOfTheFirstClick()
+    {
+        var stream = new TrainingStream();
+        stream.Quiet(3.1);
+        double[] amplitudes = [.025, .06, .05, .1, .08, .06, .1, .08, .07, .19];
+        for (int i = 0; i < amplitudes.Length; i++)
+        {
+            stream.Click(amplitude: amplitudes[i]);
+            Assert.Equal(i + 1, stream.Trainer.Snapshot.CollectedClicks);
+        }
+        Assert.Equal(0, stream.Trainer.Diagnostics.InconsistentRejected);
+        foreach (double amplitude in new[] { .1, .04, .08, .12, .06 }) ValidateClick(stream, amplitude: amplitude);
+        stream.Quiet(3.1);
+        Assert.True(stream.Trainer.Snapshot.CanSave);
+        Assert.True(stream.Trainer.Profile!.Matches(new(.1, .07, 20, .6)));
+        Assert.InRange(stream.Trainer.Profile.MaximumPeak, .25, .27);
+    }
+
+    [Fact]
+    public void SeveralConsistentExamplesStillRejectAnUnrelatedClunk()
+    {
+        var stream = new TrainingStream();
+        stream.Quiet(3.1);
+        stream.Click(amplitude: .025);
+        stream.Click(amplitude: .06);
+        stream.Click(amplitude: .05);
+        stream.Click(amplitude: .08, frequency: 180);
+        Assert.Equal(3, stream.Trainer.Snapshot.CollectedClicks);
+        Assert.Equal(1, stream.Trainer.Diagnostics.InconsistentRejected);
+    }
+
+    [Fact]
+    public void QuieterMechanicalTailCannotBroadenTrainingEvenInAQuietRoom()
+    {
+        var stream = new TrainingStream(background: .0001);
+        stream.Quiet(3.1);
+        foreach (double amplitude in new[] { .24, .26, .23 }) stream.Click(amplitude: amplitude, duration: .1);
+        // The real capture's mechanical tail had about 27% of the weaker click's
+        // peak and RMS and similar high-frequency content. Its shorter duration
+        // alone must not let it become one of the ten intended examples.
+        stream.Click(amplitude: .064, duration: .045);
+        Assert.Equal(3, stream.Trainer.Snapshot.CollectedClicks);
+        Assert.Equal(1, stream.Trainer.Diagnostics.InconsistentRejected);
+        Assert.Equal(0, stream.Trainer.Diagnostics.WeakRejected);
     }
 
     private static TrainingStream TrainingToValidation()
     {
         var stream = new TrainingStream();
         stream.Quiet(3.1);
-        for (int i = 0; i < 6; i++) stream.Click();
+        for (int i = 0; i < AudioClickTrainer.RequiredClicks; i++) stream.Click();
         Assert.Equal(AudioClickLearningStage.ValidationClicks, stream.Trainer.Snapshot.Stage);
         return stream;
     }
@@ -348,7 +540,7 @@ public sealed class AudioClickTrainerTests
     private static TrainingStream CompleteTraining()
     {
         var stream = TrainingToValidation();
-        for (int i = 0; i < 3; i++) stream.Click();
+        for (int i = 0; i < AudioClickTrainer.RequiredValidation; i++) ValidateClick(stream);
         stream.Quiet(3.1);
         Assert.True(stream.Trainer.Snapshot.CanSave);
         return stream;
@@ -361,13 +553,37 @@ public sealed class AudioClickTrainerTests
     {
         var stream = new TrainingStream();
         stream.Quiet(3.1);
-        for (int i = 0; i < 9; i++) stream.Click(duration: duration);
+        LearnAndValidate(stream, () => stream.Click(duration: duration));
         stream.Quiet(3.1);
         Assert.True(stream.Trainer.Snapshot.CanSave, $"{stream.Trainer.Snapshot}; {stream.Trainer.Diagnostics}");
-        Assert.Equal(6, stream.Trainer.Snapshot.CollectedClicks);
-        Assert.Equal(3, stream.Trainer.Snapshot.ValidatedClicks);
+        Assert.Equal(AudioClickTrainer.RequiredClicks, stream.Trainer.Snapshot.CollectedClicks);
+        Assert.Equal(AudioClickTrainer.RequiredValidation, stream.Trainer.Snapshot.ValidatedClicks);
         Assert.Equal(0, stream.Trainer.Diagnostics.Detection.TimedOutCandidates);
-        Assert.InRange(stream.Trainer.Profile!.MaximumDurationMs, duration * 1000, 120);
+        Assert.InRange(stream.Trainer.Profile!.MaximumDurationMs, duration * 1000, AudioClickProfile.MaximumLearnedDurationMs);
+    }
+
+    private static void LearnAndValidate(TrainingStream stream, Action click)
+    {
+        for (int i = 0; i < AudioClickTrainer.RequiredClicks; i++) click();
+        for (int i = 0; i < AudioClickTrainer.RequiredValidation; i++)
+        {
+            WaitForGreen(stream);
+            click();
+        }
+    }
+
+    private static void ValidateClick(TrainingStream stream, double amplitude = .04, double frequency = 5000,
+        double duration = .02, double pause = .35)
+    {
+        WaitForGreen(stream);
+        stream.Click(amplitude, frequency, duration, pause);
+    }
+
+    private static void WaitForGreen(TrainingStream stream)
+    {
+        for (int i = 0; i < 300 && !stream.Trainer.Snapshot.Collecting; i++) stream.Quiet(.005);
+        Assert.Equal(AudioClickLearningStage.ValidationClicks, stream.Trainer.Snapshot.Stage);
+        Assert.True(stream.Trainer.Snapshot.Collecting, stream.Trainer.Snapshot.ToString());
     }
 
     private abstract class PcmStream(double background)
@@ -394,6 +610,20 @@ public sealed class AudioClickTrainerTests
             Sound(.01, .8, 5000);
             for (int i = 0; i < 40; i++) Sound(.005, .08 * Math.Exp(-i * .005 / .5), 5000);
             Quiet(.4);
+        }
+        public void TimeoutThenClickPacket()
+        {
+            var packet = new float[4800];
+            for (int i = 0; i < packet.Length; i++)
+            {
+                double offset = (double)i / 48000;
+                double t = (double)(_frame + i) / 48000;
+                double amplitude = offset < .005 || offset is >= .070 and < .090 ? .04 : 0;
+                packet[i] = (float)(background * Math.Sin(2 * Math.PI * 270 * t) +
+                    amplitude * Math.Sin(2 * Math.PI * 5000 * t));
+            }
+            Process(packet, Now);
+            _frame += packet.Length;
         }
         public void Sound(double seconds, double amplitude, double frequency)
         {

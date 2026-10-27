@@ -51,6 +51,20 @@ public sealed class ClickSoundProfileSettingsTests : IDisposable
     }
 
     [Fact]
+    public void NewLearningRoundTripsAlongsideUnchangedLegacyProfiles()
+    {
+        var current = Profile with { Version = 2, MaximumDurationMs = 125 };
+        ClickSoundProfileSettingsStore.Save(SettingsPath, "legacy-mic", Profile);
+        ClickSoundProfileSettingsStore.Save(SettingsPath, DeviceId, current);
+        var loaded = ClickSoundProfileSettingsStore.Read(SettingsPath);
+        Assert.Equal(Profile, loaded["legacy-mic"]);
+        Assert.Equal(current, loaded[DeviceId]);
+        Assert.Throws<InvalidDataException>(() => ClickSoundProfileSettingsStore.Save(SettingsPath,
+            DeviceId, current with { MaximumDurationMs = 130 }));
+        Assert.Equal(current, ClickSoundProfileSettingsStore.Read(SettingsPath)[DeviceId]);
+    }
+
+    [Fact]
     public void ConcurrentSavesDoNotLoseOtherMicrophones()
     {
         Parallel.For(0, 8, index => ClickSoundProfileSettingsStore.Save(SettingsPath, "endpoint-" + index, Profile));
@@ -110,7 +124,7 @@ public sealed class ClickSoundProfileSettingsTests : IDisposable
     }
 
     [Theory]
-    [InlineData("Version", "2")]
+    [InlineData("Version", "3")]
     [InlineData("TrainingNoiseRms", "-0.01")]
     [InlineData("TrainingNoiseRms", "0.2")]
     [InlineData("TrainingNoiseRms", "1e400")]
@@ -142,7 +156,7 @@ public sealed class ClickSoundProfileSettingsTests : IDisposable
             Profile with { MaximumPeak = double.PositiveInfinity },
             Profile with { MaximumDurationMs = 121 },
             Profile with { MinimumRms = .5, MaximumRms = .4 },
-            Profile with { Version = 2 }
+            Profile with { Version = 3 }
         ];
         foreach (var profile in invalid)
         {

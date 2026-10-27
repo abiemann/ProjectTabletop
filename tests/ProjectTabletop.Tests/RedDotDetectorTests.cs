@@ -145,6 +145,23 @@ public class RedDotDetectorTests
         Assert.Equal(2, found.CandidateCount);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ThinWhiteLaserCoreStillQualifiesThroughCoherentColour(bool vertical)
+    {
+        var frame = new Frame(110, 115, 120);
+        frame.Disc(320, 240, 4, 241, 180, 210);
+        for (int offset = -2; offset <= 2; offset++)
+            frame.Pixel(320 + (vertical ? 0 : offset), 240 + (vertical ? offset : 0), 255, 244, 255);
+
+        var result = frame.Detect(new());
+        Assert.True(result.Detected);
+        Assert.Equal(1, result.CandidateCount);
+        Assert.Equal(320, result.CameraPosition!.Value.X, 5);
+        Assert.Equal(240, result.CameraPosition.Value.Y, 5);
+    }
+
     [Fact]
     public void ClippedGlareWithOnlyDimFringeCannotSeedADot()
     {

@@ -23,6 +23,7 @@ public sealed class AudioClickDetector
     private double _candidatePeak, _candidateEnergy, _candidateHighEnergy, _candidateFrames, _candidateDuration;
     private readonly double[] _previousSamples = new double[32], _highPassSamples = new double[32];
     private readonly bool _learning;
+    private readonly AudioClickTrace _trace = new();
     private AudioClickProfile? _profile;
     private long _completedTransients, _timedOutCandidates, _rejectedByProfile;
     private long _candidateElapsedFrames;
@@ -46,6 +47,10 @@ public sealed class AudioClickDetector
     public AudioClickDetector() { }
     internal AudioClickDetector(bool learning) => _learning = learning;
 
+    public bool TraceEnabled => _trace.Enabled;
+    public void SetTraceEnabled(bool enabled) => _trace.SetEnabled(enabled);
+    public AudioClickTraceSample[] CopyTrace() => _trace.CopySamples();
+
     public void SetProfile(AudioClickProfile? profile)
     {
         profile?.Validate();
@@ -55,6 +60,7 @@ public sealed class AudioClickDetector
 
     public void Reset()
     {
+        _trace.Clear();
         _sampleRate = _channels = _windowFrames = _frames = 0;
         _energy = _peak = _elapsed = _noiseRms = _noisePeak = _previousPeak = 0;
         _candidateRms = _quietSeconds = _candidateFallSeconds = 0;
@@ -169,14 +175,20 @@ public sealed class AudioClickDetector
                 // host onset and wall-clock deadline for fresh camera matching.
                 if (!quiet && !relativeFall) AccumulateCandidate(peak, energy, highEnergy, sampleCount,
                     adapted ? (double)_candidateElapsedFrames / _sampleRate : age + seconds);
-                // Trained clicks can use the full 120 ms sound window and still
-                // need 10 ms of quiet/fall to confirm the end. The grace belongs
-                // only to confirmation; a longer sound core remains invalid.
+                // New learning can include one additional 5 ms window for a
+                // strongly peaked click, followed by a real 10 ms quiet/fall.
+                // Existing profiles retain their 120 ms bound. Neither path
+                // waits past the original 135 ms confirmation deadline.
                 // Remove sub-microsecond duration roundoff at the boundary;
                 // never truncate a longer sound into the accepted duration range.
                 double soundDurationMs = Math.Round(_candidateDuration * 1000, 3);
+                double maximumDurationMs = _learning || _profile?.Version == 2
+                    ? AudioClickProfile.MaximumLearnedDurationMs : AudioClickProfile.LegacyMaximumDurationMs;
                 bool expired = adapted
-                    ? soundDurationMs > 120 || Math.Round((age + seconds) * 1000, 4) > 135
+                    ? soundDurationMs > maximumDurationMs ||
+                      (soundDurationMs > AudioClickProfile.LegacyMaximumDurationMs &&
+                       !AudioClickProfile.IsExtendedImpulse(CandidateFeatures(soundDurationMs))) ||
+                      Math.Round((age + seconds) * 1000, 4) > 135
                     : age > .12;
                 if (expired)
                 {
@@ -231,6 +243,7 @@ public sealed class AudioClickDetector
         }
         _previousPeak = peak;
         Diagnostics = new Levels(peak, rms, _noiseRms, threshold, !warming, _candidate);
+        _trace.Add(at, peak, rms, _candidate);
         return click;
     }
 

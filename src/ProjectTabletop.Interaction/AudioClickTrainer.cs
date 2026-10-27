@@ -6,21 +6,31 @@ public enum AudioClickLearningStage
 }
 
 public readonly record struct AudioClickLearningSnapshot(AudioClickLearningStage Stage, string Message,
-    int CollectedClicks, int ValidatedClicks, double Level, double Noise, bool CanSave, double Progress0To1);
+    int CollectedClicks, int ValidatedClicks, double Level, double Noise, bool CanSave, double Progress0To1)
+{
+    public int RequiredClicks => AudioClickTrainer.RequiredClicks;
+    public int RequiredValidation => AudioClickTrainer.RequiredValidation;
+    public int CompletedValidationAttempts { get; init; }
+    public int ValidationAttempt { get; init; }
+    public bool Collecting { get; init; }
+    public bool CanRetryValidation { get; init; }
+}
 
 public readonly record struct AudioClickTrainingDiagnostics(AudioClickDetectionDiagnostics Detection,
     long WeakRejected, long ClippedRejected, long InconsistentRejected, long ValidationRejected,
     AudioClickTransient? LastAcceptedExample);
 
 /// <summary>
-/// Guided, device-specific click learning. Keeps only six numerical feature sets,
+/// Guided, device-specific click learning. Keeps only ten numerical feature sets,
 /// never PCM. The host serializes Process and controls, and cancels on device changes.
 /// Held-out clicks and a quiet negative check are required before Profile is exposed.
 /// </summary>
 public sealed class AudioClickTrainer
 {
-    private const int RequiredClicks = 6, RequiredValidation = 3;
+    public const int RequiredClicks = 10, RequiredValidation = 5;
     private const double QuietSeconds = 3;
+    private const double ValidationReadySeconds = 1, ValidationClickSeconds = 3, ValidationConfirmationSeconds = .15;
+    private static readonly string[] AimDirections = ["upper left", "upper right", "centre", "lower left", "lower right"];
     private readonly AudioClickDetector _detector = new(learning: true);
     private readonly AudioClickFeatures[] _clicks = new AudioClickFeatures[RequiredClicks];
     private AudioClickLearningStage _stage;
@@ -34,8 +44,16 @@ public sealed class AudioClickTrainer
     private AudioClickTransient? _lastAcceptedExample;
     private AudioClickDetectionDiagnostics _stoppedDetection;
     private bool _hasStoppedDiagnostics;
+    private int _validationAttempts;
+    private long _observedTimeouts;
+    private bool _validationCollecting, _canRetryValidation;
+    private DateTimeOffset _validationWindowStart;
+    private string _lastValidationFailure = "";
 
     public string? DeviceId { get; private set; }
+    public bool TraceEnabled => _detector.TraceEnabled;
+    public void SetTraceEnabled(bool enabled) => _detector.SetTraceEnabled(enabled);
+    public AudioClickTraceSample[] CopyTrace() => _detector.CopyTrace();
     public AudioClickProfile? Profile => _stage == AudioClickLearningStage.Complete ? _profile : null;
     public AudioClickTrainingDiagnostics Diagnostics => new(
         _hasStoppedDiagnostics ? _stoppedDetection : _detector.Analysis,
@@ -46,10 +64,18 @@ public sealed class AudioClickTrainer
         {
             AudioClickLearningStage.QuietBaseline or AudioClickLearningStage.QuietValidation => Math.Clamp(_stageSeconds / QuietSeconds, 0, 1),
             AudioClickLearningStage.LearningClicks => (double)_collected / RequiredClicks,
-            AudioClickLearningStage.ValidationClicks => (double)_validated / RequiredValidation,
+            AudioClickLearningStage.ValidationClicks => Math.Clamp(_stageSeconds /
+                (_validationCollecting ? ValidationClickSeconds : ValidationReadySeconds), 0, 1),
             AudioClickLearningStage.Complete => 1,
             _ => 0
-        });
+        })
+    {
+        CompletedValidationAttempts = _validationAttempts,
+        ValidationAttempt = Math.Min(_validationAttempts + 1, RequiredValidation),
+        Collecting = _stage == AudioClickLearningStage.LearningClicks ||
+            _stage == AudioClickLearningStage.ValidationClicks && _validationCollecting && _stageSeconds < ValidationClickSeconds,
+        CanRetryValidation = _stage == AudioClickLearningStage.Failed && _canRetryValidation
+    };
 
     public void Start(string actualDeviceId)
     {
@@ -66,6 +92,11 @@ public sealed class AudioClickTrainer
         _lastAcceptedExample = null;
         _stoppedDetection = default;
         _hasStoppedDiagnostics = false;
+        _validationAttempts = 0;
+        _observedTimeouts = 0;
+        _validationCollecting = _canRetryValidation = false;
+        _validationWindowStart = default;
+        _lastValidationFailure = "";
         SetStage(AudioClickLearningStage.QuietBaseline, "Keep quiet while the room noise is measured.");
     }
 
@@ -73,10 +104,23 @@ public sealed class AudioClickTrainer
     {
         StopAnalysis();
         _profile = null;
+        _canRetryValidation = false;
         SetStage(AudioClickLearningStage.Cancelled, "Click learning cancelled. Your saved sound is unchanged.");
     }
 
     public void DeviceUnavailable() => Fail("Microphone changed or disconnected. Reconnect it and choose Retry.");
+
+    public bool RetryValidation()
+    {
+        if (!_canRetryValidation || _stage != AudioClickLearningStage.Failed || _profile is null) return false;
+        _detector.Reset();
+        _hasStoppedDiagnostics = false;
+        _stoppedDetection = default;
+        _observedTimeouts = 0;
+        _lastFrameEnd = default;
+        BeginValidation();
+        return true;
+    }
 
     public void Process(ReadOnlySpan<float> samples, int sampleRate, int channels, DateTimeOffset frameStartUtc)
     {
@@ -99,6 +143,9 @@ public sealed class AudioClickTrainer
         _detector.Process(samples, sampleRate, channels, frameStartUtc);
         var levels = _detector.Diagnostics;
         var transient = _detector.LastTransient;
+        var analysis = _detector.Analysis;
+        AudioClickTransient? timeout = analysis.TimedOutCandidates > _observedTimeouts ? analysis.LastTimedOutCandidate : null;
+        _observedTimeouts = analysis.TimedOutCandidates;
 
         switch (_stage)
         {
@@ -116,38 +163,17 @@ public sealed class AudioClickTrainer
                 }
                 else _stageSeconds += seconds;
                 if (_stageSeconds >= QuietSeconds && levels.Ready)
-                    SetStage(AudioClickLearningStage.LearningClicks, "Make six clear clicks, one at a time, with a short pause between them.");
+                    SetStage(AudioClickLearningStage.LearningClicks, LearningInstruction());
                 break;
 
             case AudioClickLearningStage.LearningClicks:
                 if (transient is { } learning) Collect(learning);
+                else if (timeout is not null)
+                    _message = "That sound lasted too long to recognize. Pause, then try the same click again.";
                 break;
 
             case AudioClickLearningStage.ValidationClicks:
-                if (transient is { } validation)
-                {
-                    if (_profile!.Matches(validation.Features))
-                    {
-                        _validated++;
-                        _rejected = 0;
-                        _message = "Click recognized. Repeat the same sound with a short pause.";
-                        if (_validated == RequiredValidation)
-                            SetStage(AudioClickLearningStage.QuietValidation, "Now keep quiet for three seconds to check for accidental shots.");
-                    }
-                    else
-                    {
-                        _validationRejected++;
-                        // The permissive capture pass also hears small follow-up sounds.
-                        // Runtime rejects these below both learned loudness bounds, so
-                        // they must not undo a correctly recognized validation click.
-                        if (validation.Features.Peak < _profile.MinimumPeak &&
-                            validation.Features.Rms < _profile.MinimumRms) break;
-                        _validated = 0;
-                        _message = "That sound did not match. Try three more clicks from the same position.";
-                        if (++_rejected >= 3)
-                            Fail("The clicks are not consistent enough. Keep the same position and choose Retry.");
-                    }
-                }
+                ProcessValidation(seconds, transient, timeout);
                 break;
 
             case AudioClickLearningStage.QuietValidation:
@@ -184,10 +210,10 @@ public sealed class AudioClickTrainer
             if (features.Peak >= .999) _meaningfulFeedbackThrough = _lastFrameEnd.AddSeconds(1.5);
             return;
         }
-        if (_collected > 0 && !Consistent(_clicks[0], features))
+        if (_collected > 0 && !ConsistentWithExamples(features))
         {
             _inconsistentRejected++;
-            _message = "Use the same click sound and position. That different sound was ignored.";
+            _message = "That sound was different from the collected clicks. Use the same click device while aiming naturally.";
             _meaningfulFeedbackThrough = _lastFrameEnd.AddSeconds(1.5);
             if (++_rejected >= 3)
                 Fail("The clicks vary too much. Choose one clear click sound and Retry.");
@@ -196,12 +222,92 @@ public sealed class AudioClickTrainer
         _clicks[_collected++] = features;
         _lastAcceptedExample = transient;
         _rejected = 0;
-        _message = "Click captured. Repeat the same sound with a short pause.";
+        _message = "Click captured. " + LearningInstruction();
         _meaningfulFeedbackThrough = _lastFrameEnd.AddSeconds(1.5);
         if (_collected != RequiredClicks) return;
         _profile = BuildProfile();
         _profile.Validate();
-        SetStage(AudioClickLearningStage.ValidationClicks, "Make three more clicks to test the learned sound.");
+        BeginValidation();
+    }
+
+    private string LearningInstruction() => $"Aim toward the {AimDirections[Math.Min(_collected / 2, AimDirections.Length - 1)]}. " +
+        "Make one click at a time, pausing briefly. Use your normal playing position and vary your aim as prompted.";
+
+    private void BeginValidation()
+    {
+        _validated = _validationAttempts = 0;
+        _validationCollecting = _canRetryValidation = false;
+        _lastValidationFailure = "";
+        SetStage(AudioClickLearningStage.ValidationClicks,
+            $"Learning captured. Wait for green, then make exactly one click per test. There are {RequiredValidation} tests.");
+    }
+
+    private void ProcessValidation(double seconds, AudioClickTransient? transient, AudioClickTransient? timeout)
+    {
+        _stageSeconds += seconds;
+        if (!_validationCollecting)
+        {
+            if (_stageSeconds < ValidationReadySeconds) return;
+            _validationCollecting = true;
+            _stageSeconds = 0;
+            _validationWindowStart = _lastFrameEnd;
+            _message = $"Aim toward the {AimDirections[_validationAttempts]}. Make ONE click now, then wait for the next green prompt.";
+            return;
+        }
+
+        // Each prompted attempt has one result. A later recognized sound must not
+        // conceal an earlier miss, timeout or mismatched sound in the same test.
+        // Small room sounds below both runtime loudness floors are not the
+        // prompted click. They cannot consume the window, nor count as success;
+        // a window containing only those sounds still expires as a missed test.
+        AudioClickTransient? qualified = transient is { } detected && InWindow(detected.At) &&
+            !_profile!.IsBelowBothMinimumLevels(detected.Features) ? detected : null;
+        AudioClickTransient? expired = timeout is { } timedOut && InWindow(timedOut.At) &&
+            !_profile!.IsBelowBothMinimumLevels(timedOut.Features) ? timedOut : null;
+        // A permitted larger PCM packet can contain a timeout and a later
+        // completed sound. Preserve the first eligible event in capture order.
+        if (expired is { } failure && (qualified is null || failure.At <= qualified.Value.At))
+            FinishValidationAttempt(false, "The sound lasted too long to recognize as a click.");
+        else if (qualified is { } sample)
+        {
+            bool matched = _profile!.Matches(sample.Features);
+            FinishValidationAttempt(matched, matched ? "Click recognized." : "The sound did not match the learned click.");
+        }
+        else if (_stageSeconds >= ValidationClickSeconds + ValidationConfirmationSeconds)
+            FinishValidationAttempt(false, "No click was recognized during the green prompt.");
+
+        bool InWindow(DateTimeOffset onset)
+        {
+            // A PCM boundary converted through seconds can differ by one 100 ns
+            // tick. Ignore only sub-microsecond conversion roundoff at the prompt.
+            double elapsedMs = Math.Round((onset - _validationWindowStart).TotalMilliseconds, 3);
+            return elapsedMs >= 0 && elapsedMs < ValidationClickSeconds * 1000;
+        }
+    }
+
+    private void FinishValidationAttempt(bool matched, string reason)
+    {
+        _validationAttempts++;
+        if (matched) _validated++;
+        else
+        {
+            _validationRejected++;
+            _lastValidationFailure = reason;
+        }
+        _validationCollecting = false;
+        if (_validationAttempts < RequiredValidation)
+            SetStage(AudioClickLearningStage.ValidationClicks,
+                $"Test {_validationAttempts}: {reason} {_validated}/{_validationAttempts} recognized. Wait for green before clicking again.");
+        else if (_validated == RequiredValidation)
+            SetStage(AudioClickLearningStage.QuietValidation, "All five test clicks recognized. Now keep quiet for three seconds.");
+        else
+        {
+            StopAnalysis();
+            _canRetryValidation = true;
+            SetStage(AudioClickLearningStage.Failed,
+                $"{_validated}/{RequiredValidation} test clicks recognized. {_lastValidationFailure} " +
+                "Retry the five tests, or Cancel and start learning again if misses continue. Your saved profile is unchanged.");
+        }
     }
 
     private AudioClickProfile BuildProfile()
@@ -216,26 +322,39 @@ public sealed class AudioClickTrainer
             high[i] = _clicks[i].HighFrequencyRatio;
         }
         peak.Sort(); rms.Sort(); duration.Sort(); high.Sort();
-        double middlePeak = (peak[2] + peak[3]) / 2, middleRms = (rms[2] + rms[3]) / 2;
-        double middleDuration = (duration[2] + duration[3]) / 2, middleHigh = (high[2] + high[3]) / 2;
+        double middlePeak = Median(peak), middleRms = Median(rms);
+        double middleDuration = Median(duration), middleHigh = Median(high);
         return new AudioClickProfile
         {
+            Version = 2,
             TrainingNoiseRms = _noise,
             MinimumPeak = Math.Max(.004, Math.Min(peak[0] * .7, middlePeak * .5)),
-            MaximumPeak = Math.Min(1, Math.Max(peak[5] * 1.35, middlePeak * 1.8)),
+            MaximumPeak = Math.Min(1, Math.Max(peak[^1] * 1.35, middlePeak * 1.8)),
             MinimumRms = Math.Max(.001, Math.Min(rms[0] * .7, middleRms * .5)),
-            MaximumRms = Math.Min(1, Math.Max(rms[5] * 1.35, middleRms * 1.8)),
+            MaximumRms = Math.Min(1, Math.Max(rms[^1] * 1.35, middleRms * 1.8)),
             MinimumDurationMs = Math.Max(1, Math.Min(duration[0] - 5, middleDuration * .5)),
-            MaximumDurationMs = Math.Min(120, Math.Max(duration[5] + 10, middleDuration * 1.8)),
+            MaximumDurationMs = Math.Min(AudioClickProfile.MaximumLearnedDurationMs, Math.Max(duration[^1] + 10, middleDuration * 1.8)),
             MinimumHighFrequencyRatio = Math.Max(0, Math.Min(high[0] - .08, middleHigh - .12)),
-            MaximumHighFrequencyRatio = Math.Min(1, Math.Max(high[5] + .08, middleHigh + .12))
+            MaximumHighFrequencyRatio = Math.Min(1, Math.Max(high[^1] + .08, middleHigh + .12))
         };
+    }
+
+    private static double Median(ReadOnlySpan<double> sorted) =>
+        (sorted[(sorted.Length - 1) / 2] + sorted[sorted.Length / 2]) / 2;
+
+    private bool ConsistentWithExamples(AudioClickFeatures next)
+    {
+        int matches = 0;
+        for (int i = 0; i < _collected; i++) if (Consistent(_clicks[i], next)) matches++;
+        // A majority prevents an unusual first sample or progressive drift from
+        // defining the whole profile. Level variation is expected as aim changes.
+        return matches > _collected / 2;
     }
 
     private static bool Consistent(AudioClickFeatures first, AudioClickFeatures next) =>
         next.Peak / first.Peak is >= .35 and <= 2.8 &&
         next.Rms / first.Rms is >= .35 and <= 2.8 &&
-        Math.Abs(next.DurationMs - first.DurationMs) <= Math.Max(10, first.DurationMs * .9) &&
+        Math.Abs(next.DurationMs - first.DurationMs) <= Math.Max(15, Math.Max(first.DurationMs, next.DurationMs) * .65) &&
         Math.Abs(next.HighFrequencyRatio - first.HighFrequencyRatio) <= .22;
 
     private void SetStage(AudioClickLearningStage stage, string message)
@@ -249,6 +368,7 @@ public sealed class AudioClickTrainer
     {
         StopAnalysis();
         _profile = null;
+        _canRetryValidation = false;
         SetStage(AudioClickLearningStage.Failed, message);
     }
 

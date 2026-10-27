@@ -29,6 +29,7 @@
     <None Update="Fixtures/gallery-red-dot.json;Fixtures/gallery-*.bgra.gz" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/gallery-score-fringe.json;Fixtures/duck-faint-magenta-laser.json;Fixtures/duck-faint-magenta-laser.bgra.gz" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/gallery-pink-highlight.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures/gallery-thin-trim.json" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="..\..\src\ProjectTabletop.App\ExclusiveProcessLease.cs" Link="App\ExclusiveProcessLease.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\BoardImageDirectories.cs" Link="App\BoardImageDirectories.cs" />
     <Compile Include="..\..\src\ProjectTabletop.App\Projection\WaterGarden\WaterFountainFluid.cs" Link="App\WaterFountainFluid.cs" />

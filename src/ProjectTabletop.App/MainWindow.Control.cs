@@ -451,6 +451,15 @@ public sealed partial class MainWindow
                 return DuckHuntInputStatus();
             case "get_duck_hunt":
                 return DuckHuntInputStatus();
+            case "get_duck_hunt_audio_trace":
+                bool? audioTraceEnabled = null;
+                if (parameters.TryGetProperty("enabled", out var audioTraceValue))
+                {
+                    if (audioTraceValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                        throw new ArgumentException("Provide enabled as a JSON boolean when specified.");
+                    audioTraceEnabled = audioTraceValue.GetBoolean();
+                }
+                return _duckHuntMicrophone.ReadAudioTrace(audioTraceEnabled);
             case "get_strykers_run":
                 return StrykersRunControlState();
             case "strykers_run_action":

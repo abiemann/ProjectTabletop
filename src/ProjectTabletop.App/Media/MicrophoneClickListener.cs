@@ -12,6 +12,7 @@ using WinRT;
 namespace ProjectTabletop.App.Media;
 
 internal sealed record MicrophoneInput(string Id, string Name, bool IsDefault);
+internal sealed record MicrophoneAudioTrace(bool Enabled, bool Learning, int Capacity, AudioClickTraceSample[] Windows);
 
 /// <summary>
 /// Microphone-to-analysis graph only: no speaker output and no recordings. Start on
@@ -51,6 +52,22 @@ internal sealed class MicrophoneClickListener : IAsyncDisposable
     public AudioClickDetectionDiagnostics Analysis
     {
         get { lock (_analysisGate) return _detector.Analysis; }
+    }
+
+    // Explicit diagnostics only: no copies are made by normal status/UI polling.
+    // Toggling both detectors keeps capture available across learning transitions.
+    public MicrophoneAudioTrace ReadAudioTrace(bool? enabled = null)
+    {
+        lock (_analysisGate)
+        {
+            if (enabled is { } capture)
+            {
+                _detector.SetTraceEnabled(capture);
+                _trainer.SetTraceEnabled(capture);
+            }
+            return new(_learning ? _trainer.TraceEnabled : _detector.TraceEnabled, _learning,
+                AudioClickTrace.Capacity, _learning ? _trainer.CopyTrace() : _detector.CopyTrace());
+        }
     }
 
     public AudioClickLearningSnapshot LearningSnapshot
@@ -100,6 +117,12 @@ internal sealed class MicrophoneClickListener : IAsyncDisposable
             _trainer.Cancel();
             _detector.Reset();
         }
+    }
+
+    public bool RetryLearningValidation()
+    {
+        lock (_analysisGate)
+            return _learning && _running && IsReceivingAudio && _trainer.RetryValidation();
     }
 
     public static async Task<IReadOnlyList<MicrophoneInput>> GetInputsAsync()

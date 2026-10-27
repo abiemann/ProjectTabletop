@@ -1,0 +1,54 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "stride": 7680,
+  "map": [
+    0.0010227849490278844,
+    -1.718712633370854e-05,
+    -0.5615502722504266,
+    -4.1965208813181034e-06,
+    0.0012598950793355106,
+    -0.2554063060099862,
+    1.3787169809209783e-05,
+    -6.291823236788272e-05,
+    1
+  ],
+  "fixtures": [
+    {
+      "file": "gallery-thin-trim-0805.bgra.gz",
+      "sourceFrame": "camera-0805.png",
+      "sha256Bgra": "6b4454911e010fbba9fe0ff6e22270830b9bce215ad21e96b1f6ef28c4d7abfc",
+      "expectedCandidateCount": 1,
+      "expectedCameraPosition": {
+        "x": 1041.75,
+        "y": 576.75
+      },
+      "originalCandidateCount": 2,
+      "note": "One visible laser, plus a one-pixel-high white glint on brass trim below the conveyor. Expected position is the independently measured centroid of the visible laser core. Full recorded pixels are preserved without masking, cropping or recolouring."
+    },
+    {
+      "file": "gallery-thin-trim-0807.bgra.gz",
+      "sourceFrame": "camera-0807.png",
+      "sha256Bgra": "ab4541f2ff7eebf83663ef83d94ab88a3791633d73fdf55897ba024ccea28aa2",
+      "expectedCandidateCount": 1,
+      "expectedCameraPosition": {
+        "x": 1029.8695652173913,
+        "y": 619.5652173913044
+      },
+      "originalCandidateCount": 2,
+      "note": "One visible laser, plus a one-pixel-high white glint on brass trim below the conveyor. Expected position is the independently measured centroid of the visible laser core. Full recorded pixels are preserved without masking, cropping or recolouring."
+    },
+    {
+      "file": "gallery-thin-trim-0898.bgra.gz",
+      "sourceFrame": "camera-0898.png",
+      "sha256Bgra": "2b291859b5230f17f58592e22fbc448f5bcb3c793ca43baa2de900fd6b16d558",
+      "expectedCandidateCount": 1,
+      "expectedCameraPosition": {
+        "x": 1039.6129032258063,
+        "y": 585.7096774193549
+      },
+      "originalCandidateCount": 2,
+      "note": "One visible laser, plus a one-pixel-high white glint on brass trim below the conveyor. Expected position is the independently measured centroid of the visible laser core. Full recorded pixels are preserved without masking, cropping or recolouring."
+    }
+  ]
+}

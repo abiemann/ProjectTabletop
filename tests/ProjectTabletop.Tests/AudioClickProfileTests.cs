@@ -15,7 +15,7 @@ public sealed class AudioClickProfileTests
     public void RejectsUnsupportedMalformedAndNonfiniteProfiles()
     {
         AudioClickProfile[] invalid = [
-            Valid with { Version = 2 }, Valid with { TrainingNoiseRms = double.NaN },
+            Valid with { Version = 3 }, Valid with { TrainingNoiseRms = double.NaN },
             Valid with { TrainingNoiseRms = .16 }, Valid with { MinimumPeak = 0 },
             Valid with { MaximumPeak = 1.01 }, Valid with { MinimumRms = .3 },
             Valid with { MaximumRms = double.PositiveInfinity }, Valid with { MinimumDurationMs = 0 },
@@ -41,6 +41,22 @@ public sealed class AudioClickProfileTests
         Assert.False(profile.Matches(good with { DurationMs = 100 }));
         Assert.False(profile.Matches(good with { HighFrequencyRatio = .9 }));
         Assert.False(profile.Matches(good with { Rms = double.NaN }));
+    }
+
+    [Fact]
+    public void NewProfileAllowsOnlyAnImpulsiveExtraWindowAndPreservesEveryOtherBound()
+    {
+        var profile = CapturedProfile with { Version = 2, MaximumDurationMs = 125 };
+        profile.Validate();
+        var click = new AudioClickFeatures(.6, .08, 125, .62);
+        Assert.True(profile.Matches(click));
+        Assert.False(CapturedProfile.Matches(click));
+        Assert.False(profile.Matches(click with { DurationMs = 125.001 }));
+        Assert.False(profile.Matches(click with { HighFrequencyRatio = .3 }));
+        Assert.False(profile.Matches(click with { Peak = .05, Rms = .008 }));
+        Assert.False(profile.Matches(click with { Peak = .25, Rms = .1 }));
+        Assert.Throws<ArgumentException>((profile with { MaximumDurationMs = 125.001 }).Validate);
+        Assert.Throws<ArgumentException>((profile with { Version = 1 }).Validate);
     }
 
     private static AudioClickProfile CapturedProfile => new()

@@ -4,6 +4,8 @@ namespace ProjectTabletop.Interaction;
 public sealed record AudioClickProfile
 {
     private const double MinimumAmplitudeFactor = .75;
+    public const double LegacyMaximumDurationMs = 120;
+    public const double MaximumLearnedDurationMs = 125;
 
     public int Version { get; init; } = 1;
     public double TrainingNoiseRms { get; init; }
@@ -18,10 +20,11 @@ public sealed record AudioClickProfile
 
     public void Validate()
     {
-        if (Version != 1 || !double.IsFinite(TrainingNoiseRms) || TrainingNoiseRms is < 0 or > .15 ||
+        if (Version is not (1 or 2) || !double.IsFinite(TrainingNoiseRms) || TrainingNoiseRms is < 0 or > .15 ||
             !Range(MinimumPeak, MaximumPeak, double.Epsilon, 1) ||
             !Range(MinimumRms, MaximumRms, double.Epsilon, 1) ||
-            !Range(MinimumDurationMs, MaximumDurationMs, 1, 120) ||
+            !Range(MinimumDurationMs, MaximumDurationMs, 1,
+                Version == 2 ? MaximumLearnedDurationMs : LegacyMaximumDurationMs) ||
             !Range(MinimumHighFrequencyRatio, MaximumHighFrequencyRatio, 0, 1))
             throw new ArgumentException("The learned click profile is invalid or unsupported.");
     }
@@ -32,7 +35,19 @@ public sealed record AudioClickProfile
         Within(features.Peak, MinimumPeak * MinimumAmplitudeFactor, MaximumPeak) &&
         Within(features.Rms, MinimumRms * MinimumAmplitudeFactor, MaximumRms) &&
         Within(features.DurationMs, MinimumDurationMs, MaximumDurationMs) &&
-        Within(features.HighFrequencyRatio, MinimumHighFrequencyRatio, MaximumHighFrequencyRatio);
+        Within(features.HighFrequencyRatio, MinimumHighFrequencyRatio, MaximumHighFrequencyRatio) &&
+        (features.DurationMs <= LegacyMaximumDurationMs || IsExtendedImpulse(features));
+
+    internal bool IsBelowBothMinimumLevels(AudioClickFeatures features) =>
+        features.Peak < MinimumPeak * MinimumAmplitudeFactor &&
+        features.Rms < MinimumRms * MinimumAmplitudeFactor;
+
+    // Only newly trained profiles can include the extra 5 ms window. A strongly
+    // peaked waveform distinguishes that narrow allowance from sustained sound.
+    // The detector still requires a real decay and its original 135 ms deadline.
+    internal static bool IsExtendedImpulse(AudioClickFeatures features) =>
+        double.IsFinite(features.Peak) && double.IsFinite(features.Rms) &&
+        features.Rms > 0 && features.Peak >= features.Rms * 3;
 
     private static bool Range(double minimum, double maximum, double lower, double upper) =>
         double.IsFinite(minimum) && double.IsFinite(maximum) && minimum >= lower && maximum <= upper && minimum <= maximum;

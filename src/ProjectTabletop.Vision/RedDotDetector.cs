@@ -212,7 +212,10 @@ public sealed class RedDotDetector
             // core centroid; a broad white patch or isolated hot pixel is not a dot.
             // A white core also needs two pixels outside the magenta colour gate.
             // Entirely pink projected highlights must earn the colour checks instead.
-            if (touchesBoundary || tail < 4 || neutralCorePixels < 2 ||
+            // A one-pixel-wide trim highlight can borrow red support from nearby
+            // wood. It is not a resolved white core; a genuine thin laser can
+            // still qualify through its coherent coloured fringe below.
+            if (touchesBoundary || tail < 4 || neutralCorePixels < 2 || boxWidth < 2 || boxHeight < 2 ||
                 tail > Math.Max(16, _boardArea * .0007) || fill < .1 ||
                 boxWidth > _coreProbeDistance * 2.5 || boxHeight > _coreProbeDistance * 2.5 ||
                 Math.Min(boxWidth, boxHeight) > _coreProbeDistance) continue;

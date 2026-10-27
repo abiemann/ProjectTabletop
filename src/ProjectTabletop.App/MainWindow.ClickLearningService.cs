@@ -56,6 +56,13 @@ public sealed partial class MainWindow
     private async Task StartClickLearningAsync()
     {
         if (_closing || _clickLearningStarting) return;
+        if (_clickLearningRequested && _duckHuntMicrophone.LearningSnapshot.CanRetryValidation &&
+            _duckHuntMicrophone.RetryLearningValidation())
+        {
+            _clickLearningNotice = _clickLearningFailure = null;
+            UpdateClickLearningUi();
+            return;
+        }
         long generation = ++_clickLearningGeneration;
         _clickLearningRequested = true;
         _clickLearningStarting = true;
@@ -146,8 +153,10 @@ public sealed partial class MainWindow
             failed ? "Please try again" : snapshot.Stage switch
             {
                 AudioClickLearningStage.QuietBaseline => "WAIT · DON'T CLICK YET",
-                AudioClickLearningStage.LearningClicks => $"CLICK NOW · {snapshot.CollectedClicks}/6",
-                AudioClickLearningStage.ValidationClicks => $"CLICK NOW · TEST {snapshot.ValidatedClicks}/3",
+                AudioClickLearningStage.LearningClicks => $"CLICK NOW · {snapshot.CollectedClicks}/{snapshot.RequiredClicks}",
+                AudioClickLearningStage.ValidationClicks => snapshot.Collecting
+                    ? $"CLICK ONCE · TEST {snapshot.ValidationAttempt}/{snapshot.RequiredValidation}"
+                    : $"WAIT · TEST {snapshot.ValidationAttempt}/{snapshot.RequiredValidation}",
                 AudioClickLearningStage.QuietValidation => "STOP CLICKING · QUIET CHECK",
                 AudioClickLearningStage.Complete => "Checks passed",
                 _ => "Click learning"
@@ -164,8 +173,8 @@ public sealed partial class MainWindow
             canSave: _clickLearningRequested && !_clickLearningStarting && snapshot.CanSave &&
                 _duckHuntMicrophone.IsReceivingAudio,
             retry: _clickLearningRequested && failed, microphoneName: microphone,
-            collecting: _clickLearningRequested && !_clickLearningStarting && !failed && snapshot.Stage is
-                AudioClickLearningStage.LearningClicks or AudioClickLearningStage.ValidationClicks or AudioClickLearningStage.Complete);
+            collecting: _clickLearningRequested && !_clickLearningStarting && !failed && snapshot.Collecting);
+        RetryClickLearningButton.Content = snapshot.CanRetryValidation ? "Retry test clicks" : "Retry learning";
     }
 
     private object ClickLearningStatus() => new
