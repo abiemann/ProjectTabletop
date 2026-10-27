@@ -1,0 +1,25 @@
+Lower cover Native American and peace-pipe ornament
+Created: 2026-10-26
+Tool: built-in image generation tool
+Style reference: gallery-upper-caravan.png
+Asset: gallery-lower-peace-pipe.png
+Native output: 2172 x 724, RGBA PNG
+SHA256: a1a92e7526226ff534bdce223afd3adb9029c60ef40ae94117ce31991f798f78
+
+Generation prompt:
+Use case: historical-scene.
+Create a NEW transparent ornamental frieze for the BOTTOM parchment cover of the same luxurious nineteenth-century saloon shooting gallery. The attached image is a STYLE REFERENCE ONLY for warm sepia engraving, fine crosshatching and balanced symmetrical composition; do not reuse the wagons or the sheriff star.
+Subject: two dignified Native American adults, one on each side, in calm inward-facing three-quarter profile, long braided hair, natural human anatomy, finely engraved leather garments with restrained woven/beaded trim. Frame them with elegantly curved leaf and feather ornament. At the exact center place one clearly recognizable long-stem peace pipe with a carved stone bowl, beautifully engraved wood and subtle decorative binding. Arrange the people and pipe as a graceful symmetrical antique ornamental composition, with the right-side figure and foliage visually mirrored on the left. No aggression or caricature.
+Style: exceptionally detailed mature copperplate / banknote engraving in dark warm umber and muted antique copper-gold, matching the attached approved artwork. Natural faces, delicate hair strands, credible hands if visible, fine etched texture. Make this feel printed into warm cream parchment, but DO NOT include the parchment.
+Layout: shallow wide frieze, visible design around 6:1 width-to-height, centered in a wide canvas with clear transparent space surrounding every side. Highest available native detail, crisp enough for a 4K projector. Keep all silhouettes contained and balanced. No text, no symbols unrelated to the subjects.
+Transparency is critical: output RGBA PNG with actual transparent exterior, every intended background pixel alpha exactly 0; also clear enclosed negative-space openings. No background speckles, no almost-transparent noise, no fringe colours, no matte, no checkerboard, no rectangular plaque, no exterior shadow, no haze. Preserve clean antialiasing only immediately next to physical engraving edges. No red/magenta accents or bright white highlights. Only the artwork itself, with transparent negative space.
+
+The user explicitly approved scripted removal of exactly 2,315 nearly invisible
+stray pixels: 2,275 alpha-1 and 40 alpha-2 pixels more than seven pixels from
+alpha >= 8 artwork. Only those alpha values changed to zero; every RGB value
+and every other alpha value was preserved.
+Validation confirmed RGBA, zero-alpha exterior corners, no remaining stray
+low-alpha pixels, and nonzero bounds (7,95)-(2170,591). The renderer uses that
+2163 x 496 crop, preserves its proportions, and caches it onto the lower flap.
+The plain wooden reverse remains separate. No resampling or recolouring was
+baked into this PNG.

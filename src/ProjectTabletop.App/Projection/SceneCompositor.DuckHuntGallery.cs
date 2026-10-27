@@ -37,7 +37,8 @@ public sealed partial class SceneCompositor
     private void PrepareDuckHuntGalleryResources(CanvasDevice device)
     {
         if (_galleryTargetBase is not null || _duckHuntGalleryImages?.Image("target-practice-saloon-v1.png") is not { } scene ||
-            _duckHuntGalleryImages.Image("gallery-steampunk-target.png") is not { } assembly) return;
+            _duckHuntGalleryImages.Image("gallery-steampunk-target.png") is not { } assembly ||
+            _duckHuntGalleryImages.Image("gallery-lower-peace-pipe.png") is not { } peacePipe) return;
         // Trace the actual wooden cornice and projecting capitals in the
         // 1672×941 cabinet. Its first rows also contain an old ceiling; keeping
         // those pixels would leave a straight pasted joint through the gold.
@@ -62,18 +63,13 @@ public sealed partial class SceneCompositor
         var flap = DuckHuntGalleryLayout.FlapSceneBounds;
         int width = (int)Math.Ceiling(flap.Width * scene.Size.Width);
         int height = (int)Math.Ceiling(flap.Height * scene.Size.Height);
-        _galleryFlapFront = new CanvasRenderTarget(device, width, height, 96);
-        using (var draw = _galleryFlapFront.CreateDrawingSession())
-        {
-            draw.DrawImage(scene, new Rect(0, 0, width, height),
-                new Rect(flap.X * scene.Size.Width, flap.Y * scene.Size.Height,
-                    flap.Width * scene.Size.Width, flap.Height * scene.Size.Height));
-        }
+        _galleryFlapFront = CreateGalleryCover(device, scene, flap, peacePipe,
+            new Rect(7, 95, 2163, 496));
         _galleryFlapBack = new CanvasRenderTarget(device, width, height, 96);
         using (var draw = _galleryFlapBack.CreateDrawingSession())
         {
             // The underside is wood from this same cabinet, with slim structural
-            // rails. The original beige face remains the closed front surface.
+            // rails. The decorated beige face remains the closed front surface.
             draw.DrawImage(scene, new Rect(0, 0, width, height),
                 new Rect(170, 815, 1300, 92), .92f, CanvasImageInterpolation.HighQualityCubic);
             draw.DrawRectangle(new Rect(7, 5, width - 14, height - 10), Color.FromArgb(220, 40, 25, 14), 9);
@@ -136,6 +132,7 @@ public sealed partial class SceneCompositor
         PrepareGallerySkulls(device);
         PrepareGalleryMiddle(device);
         PrepareGalleryScore(device);
+        PrepareGalleryMessages(device);
     }
 
     private void DisposeDuckHuntGalleryResources()
@@ -144,6 +141,7 @@ public sealed partial class SceneCompositor
         DisposeGallerySkulls();
         DisposeGalleryMiddle();
         DisposeGalleryScore();
+        DisposeGalleryMessages();
         _galleryFlapEffect?.Dispose();
         if (_galleryTargetEffects is not null) foreach (var effect in _galleryTargetEffects) effect?.Dispose();
         if (_galleryTargets is not null) foreach (var target in _galleryTargets) target?.Dispose();
@@ -187,6 +185,7 @@ public sealed partial class SceneCompositor
         DrawGalleryCandles(drawing, aspect);
         DrawGalleryUpperStage(drawing, state, aspect);
         DrawGalleryMiddleStage(drawing, state, aspect);
+        DrawGalleryMessages(drawing, state, aspect);
         if (state.FlapAngleDegrees > .001)
         {
             var aperture = GallerySceneRect(DuckHuntGalleryLayout.FlapSceneBounds, aspect);
@@ -388,9 +387,10 @@ public sealed partial class SceneCompositor
         if (Math.Abs(edgeY - top) > .0003)
         {
             bool reverse = edgeY < top;
-            _galleryFlapEffect.Source = reverse ? _galleryFlapBack : _galleryFlapFront;
+            var face = reverse ? _galleryFlapBack : _galleryFlapFront;
+            _galleryFlapEffect.Source = face;
             _galleryFlapEffect.TransformMatrix = GalleryProjectiveMatrix(quad,
-                (float)_galleryFlapFront.Size.Width, (float)_galleryFlapFront.Size.Height);
+                (float)face.Size.Width, (float)face.Size.Height);
             drawing.DrawImage(_galleryFlapEffect);
             // The narrow edge follows the actual moving plane, never a rectangle
             // around its animation bounds.

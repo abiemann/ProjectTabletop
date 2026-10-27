@@ -4,7 +4,7 @@ ProjectTabletop's original material is governed by the [project license](LICENSE
 The commercial-use restriction in that license does not replace or restrict the
 separate licenses for third-party material.
 
-The sections below cover bundled Globe imagery and adapted GPU rendering code.
+The sections below cover bundled fonts, Globe imagery and adapted GPU rendering code.
 Windows release packages also contain `ThirdPartyNotices/` and
 `dependency-notices.json`, generated from the exact published NuGet dependencies,
 their embedded license files, and reviewed upstream notice texts in
@@ -12,6 +12,14 @@ their embedded license files, and reviewed upstream notice texts in
 Visual C++ runtimes, Windows App SDK components, OpenCvSharp's native dependencies,
 and the MCP helper's dependencies. The hand models retain their licenses beside
 the models. Preserve all applicable licenses and attributions when redistributing.
+
+## Rye typeface
+
+Target Practice bundles the unmodified Rye Regular typeface for its Western-style
+middle-cover messages. Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com),
+with Reserved Font Name "Rye". Licensed under the SIL Open Font License, Version 1.1.
+The complete license is distributed beside the font in `Assets/Fonts/Rye-OFL.txt`.
+Source: [Google Fonts Rye](https://github.com/google/fonts/tree/main/ofl/rye).
 
 ## NASA Blue Marble imagery
 

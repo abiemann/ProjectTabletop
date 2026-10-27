@@ -32,27 +32,10 @@ public sealed partial class SceneCompositor
         if (_gallerySkullSprite is not null || _duckHuntGalleryImages?.Image("gallery-crystal-skull.png") is not { } skull ||
             _duckHuntGalleryImages.Image("target-practice-saloon-v1.png") is not { } scene ||
             _duckHuntGalleryImages.Image("gallery-upper-caravan.png") is not { } caravan) return;
-        var panel = DuckHuntGalleryLayout.UpperPanelSceneBounds;
         // Include a seven-pixel transparent safety band around the approved
         // engraving. Its wide canvas contains intentionally empty space above.
-        var source = new Rect(5, 179, 2088, 370);
-        double panelAspect = (panel.Width * scene.Size.Width) / (panel.Height * scene.Size.Height);
-        // Composite once at the engraving's native resolution. The entire painted
-        // cover then travels as one cached image with the existing curtain.
-        int width = (int)Math.Ceiling(Math.Max(panel.Width * scene.Size.Width,
-            Math.Max(source.Width / .90, source.Height * panelAspect / .88)));
-        int height = (int)Math.Ceiling(width / panelAspect);
-        _galleryUpperCurtain = new CanvasRenderTarget(device, width, height, 96);
-        using (var draw = _galleryUpperCurtain.CreateDrawingSession())
-        {
-            draw.DrawImage(scene, new Rect(0, 0, width, height),
-                new Rect(panel.X * scene.Size.Width, panel.Y * scene.Size.Height, panel.Width * scene.Size.Width, panel.Height * scene.Size.Height),
-                1, CanvasImageInterpolation.HighQualityCubic);
-            double scale = Math.Min(width * .90 / source.Width, height * .88 / source.Height);
-            double artWidth = source.Width * scale, artHeight = source.Height * scale;
-            draw.DrawImage(caravan, new Rect((width - artWidth) / 2, height * .53 - artHeight / 2, artWidth, artHeight),
-                source, 1, CanvasImageInterpolation.HighQualityCubic);
-        }
+        _galleryUpperCurtain = CreateGalleryCover(device, scene, DuckHuntGalleryLayout.UpperPanelSceneBounds,
+            caravan, new Rect(5, 179, 2088, 370), centerV: .53);
         using (var arch = new CanvasPathBuilder(device))
         {
             arch.BeginFigure(new(192, 322));

@@ -1,6 +1,7 @@
 #if DEBUG
 using System.Reflection;
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Text;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
@@ -19,6 +20,8 @@ public sealed partial class MainWindow
         int assertions = 0;
         var images = new List<string>();
         var results = new List<object>();
+        using var westernFonts = new CanvasFontSet(SceneCompositor.GalleryMessageFontUri);
+        Check(westernFonts.Fonts.Count > 0, "The bundled Western display font could not be loaded.");
         foreach (var dimensions in new[]
         {
             (Name: "landscape", Width: 1920, Height: 1080),
@@ -49,6 +52,8 @@ public sealed partial class MainWindow
                 "The saloon is not ready with its closed flap and drawer PLAY button.");
             Check(board.DuckHuntDrawerOpen && board.Buttons.Any(button => button.Id == "duck-hunt-play" && button.Enabled),
                 "Target Practice did not automatically open its initial PLAY drawer.");
+            Check(SceneCompositor.GalleryMiddleMessage(scene.GalleryState) == "PRESS PLAY",
+                "The initial middle cover did not invite the player to begin.");
             Check(!scene.ActivateDuckHuntAt(.5, .46) && board.Buttons.All(button => !button.Bounds.Contains(.5, .46)),
                 "An obsolete central PLAY button is still active.");
             CheckClosedCentreBackground();
@@ -73,6 +78,11 @@ public sealed partial class MainWindow
             byte[] openingZero = Draw();
             Check(RegionEqual(closedUpper, openingZero, UpperRegion()),
                 "The decorated top cover flashed or changed before its opening motion began.");
+            Check(RegionEqual(closedUpper, openingZero, LowerCoverRegion()),
+                "The decorated lower cover flashed or changed before its opening motion began.");
+            Check(SceneCompositor.GalleryMiddleMessage(scene.GalleryState) is null &&
+                !RegionEqual(closedUpper, openingZero, MiddleMessageRegion()),
+                "The middle cover's visible PRESS PLAY lettering did not clear when the round started.");
             await Save("opening-zero");
             Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.Opening, FlapAngleDegrees: 0,
                 UpperPhase: DuckHuntGalleryUpperPhase.Raising, UpperOpenProgress: 0 },
@@ -313,6 +323,8 @@ public sealed partial class MainWindow
             byte[] closedMiddle = Draw();
             Check(RegionEqual(closedUpper, closedMiddle, UpperRegion()),
                 "The top cover decoration did not return intact when lowered.");
+            Check(RegionEqual(closedUpper, closedMiddle, LowerCoverRegion()),
+                "The lower cover decoration did not return intact after the conveyor cycle.");
             Check(scene.GalleryState is { PlayVisible: false, UpperPhase: DuckHuntGalleryUpperPhase.Closed,
                 Phase: DuckHuntGalleryPhase.Ready, MiddlePhase: DuckHuntGalleryMiddlePhase.Raising },
                 "The middle curtain did not start only after the two original rows closed.");
@@ -354,6 +366,8 @@ public sealed partial class MainWindow
                 Check(scene.GalleryState.MiddlePhase == DuckHuntGalleryMiddlePhase.WaitingForHit &&
                     facePose.YawDegrees == 0 && Math.Abs(facePose.BaseContact.U - .5) < 1e-8 &&
                     PixelLight(aim), "The middle paper did not stop fully facing the player at the stage centre.");
+                Check(SceneCompositor.GalleryMiddleMessage(scene.GalleryState) is null,
+                    "A menu message covered the active middle target challenge.");
                 Check(!scene.SubmitDuckHuntShot(null, now) && scene.GalleryPunctures.Count == 7 + index,
                     "A missing dot punctured a middle target.");
                 Check(scene.SubmitDuckHuntShot(aim, now) && scene.GalleryPunctures.Count == 8 + index &&
@@ -401,9 +415,12 @@ public sealed partial class MainWindow
                 "The middle curtain did not lower after exactly five targets.");
             await Save("middle-curtain-lowering");
             now = middleStartedAt + DuckHuntGalleryGame.MiddleSequenceDuration;
-            Draw();
+            byte[] completed = Draw();
             Check(scene.GalleryState is { PlayVisible: true, MiddlePhase: DuckHuntGalleryMiddlePhase.Complete,
                 MiddleTargetIndex: -1, MiddleHitMask: 31 }, "The round did not end after the middle curtain closed.");
+            Check(SceneCompositor.GalleryMiddleMessage(scene.GalleryState) == "GAME OVER" &&
+                !RegionEqual(closedUpper, completed, MiddleMessageRegion()),
+                "The closed middle cover did not replace its initial prompt with GAME OVER.");
             await Save("complete");
             now += TimeSpan.FromMilliseconds(1);
             Check(scene.ActivateDuckHuntAt(.1, .93), "The completed gallery did not open its replay drawer.");
@@ -466,7 +483,9 @@ public sealed partial class MainWindow
                 byte[] expected = original.GetPixelBytes(), actual = target.GetPixelBytes();
                 int sourceWidth = (int)original.SizeInPixels.Width, sourceHeight = (int)original.SizeInPixels.Height;
                 foreach (double u in new[] { .45, .50, .55 })
-                foreach (double v in new[] { .42, .46, .50 })
+                // Sample above and below the Western prompt, where the removed
+                // central green PLAY plaque used to cover the original paper.
+                foreach (double v in new[] { .415, .510 })
                 {
                     var camera = CameraPoint(DuckHuntGalleryLayout.ScenePoint(u, v, aspect));
                     int output = ((int)Math.Round(camera.Y) * dimensions.Width + (int)Math.Round(camera.X)) * 4;
@@ -486,6 +505,8 @@ public sealed partial class MainWindow
                 return new(top.U, top.V, bottom.U - top.U, bottomV - top.V);
             }
             BoardRect UpperRegion() => DuckHuntGalleryLayout.SceneRect(new(.16, .185, .67, .145), aspect);
+            BoardRect LowerCoverRegion() => DuckHuntGalleryLayout.SceneRect(new(.14, .59, .72, .10), aspect);
+            BoardRect MiddleMessageRegion() => DuckHuntGalleryLayout.SceneRect(new(.18, .40, .64, .12), aspect);
             object RegionDifference(byte[] before, byte[] after, BoardRect region)
             {
                 var top = CameraPoint(new(region.X, region.Y));
