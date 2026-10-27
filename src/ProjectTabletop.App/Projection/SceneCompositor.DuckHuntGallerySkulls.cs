@@ -30,13 +30,29 @@ public sealed partial class SceneCompositor
     private void PrepareGallerySkulls(CanvasDevice device)
     {
         if (_gallerySkullSprite is not null || _duckHuntGalleryImages?.Image("gallery-crystal-skull.png") is not { } skull ||
-            _duckHuntGalleryImages.Image("target-practice-saloon-v1.png") is not { } scene) return;
+            _duckHuntGalleryImages.Image("target-practice-saloon-v1.png") is not { } scene ||
+            _duckHuntGalleryImages.Image("gallery-upper-caravan.png") is not { } caravan) return;
         var panel = DuckHuntGalleryLayout.UpperPanelSceneBounds;
-        int width = (int)Math.Ceiling(panel.Width * scene.Size.Width), height = (int)Math.Ceiling(panel.Height * scene.Size.Height);
+        // Include a seven-pixel transparent safety band around the approved
+        // engraving. Its wide canvas contains intentionally empty space above.
+        var source = new Rect(5, 179, 2088, 370);
+        double panelAspect = (panel.Width * scene.Size.Width) / (panel.Height * scene.Size.Height);
+        // Composite once at the engraving's native resolution. The entire painted
+        // cover then travels as one cached image with the existing curtain.
+        int width = (int)Math.Ceiling(Math.Max(panel.Width * scene.Size.Width,
+            Math.Max(source.Width / .90, source.Height * panelAspect / .88)));
+        int height = (int)Math.Ceiling(width / panelAspect);
         _galleryUpperCurtain = new CanvasRenderTarget(device, width, height, 96);
         using (var draw = _galleryUpperCurtain.CreateDrawingSession())
+        {
             draw.DrawImage(scene, new Rect(0, 0, width, height),
-                new Rect(panel.X * scene.Size.Width, panel.Y * scene.Size.Height, panel.Width * scene.Size.Width, panel.Height * scene.Size.Height));
+                new Rect(panel.X * scene.Size.Width, panel.Y * scene.Size.Height, panel.Width * scene.Size.Width, panel.Height * scene.Size.Height),
+                1, CanvasImageInterpolation.HighQualityCubic);
+            double scale = Math.Min(width * .90 / source.Width, height * .88 / source.Height);
+            double artWidth = source.Width * scale, artHeight = source.Height * scale;
+            draw.DrawImage(caravan, new Rect((width - artWidth) / 2, height * .53 - artHeight / 2, artWidth, artHeight),
+                source, 1, CanvasImageInterpolation.HighQualityCubic);
+        }
         using (var arch = new CanvasPathBuilder(device))
         {
             arch.BeginFigure(new(192, 322));
@@ -131,7 +147,7 @@ public sealed partial class SceneCompositor
     private void DrawGalleryUpperStage(CanvasDrawingSession drawing, DuckHuntGallerySnapshot state, double aspect)
     {
         GalleryEyeVisualFrame(_blackjackClock());
-        if (!state.UpperTargetsVisible || _galleryUpperArchSource is null || _galleryUpperCurtain is null || _gallerySkullSprite is null) return;
+        if (_galleryUpperArchSource is null || _galleryUpperCurtain is null || _gallerySkullSprite is null) return;
         if (_galleryUpperArch is null || _galleryUpperArchAspect != aspect)
         {
             _galleryUpperArch?.Dispose();
@@ -141,18 +157,18 @@ public sealed partial class SceneCompositor
                 Matrix3x2.CreateTranslation((float)frame.X * BoardSurfaceSize, (float)frame.Y * BoardSurfaceSize));
             _galleryUpperArchAspect = aspect;
         }
-        PrepareGalleryShardMotion(state.Cycle);
+        if (state.UpperTargetsVisible) PrepareGalleryShardMotion(state.Cycle);
         var panel = GallerySceneRect(DuckHuntGalleryLayout.UpperPanelSceneBounds, aspect);
         double leftLight = GalleryLampLight(GalleryLampSeconds, left: true), rightLight = GalleryLampLight(GalleryLampSeconds, left: false);
         using (drawing.CreateLayer(1, _galleryUpperArch))
         {
-            if (_galleryUpperRecess is { } recess)
+            if (state.UpperTargetsVisible && _galleryUpperRecess is { } recess)
             {
                 recess.StartPoint = new((float)panel.X, (float)panel.Y);
                 recess.EndPoint = new((float)panel.X, (float)panel.Bottom);
                 drawing.FillRectangle(panel, recess);
             }
-            for (int index = 0; index < DuckHuntGalleryGame.SkullCount; index++)
+            for (int index = 0; state.UpperTargetsVisible && index < DuckHuntGalleryGame.SkullCount; index++)
             {
                 var pose = DuckHuntGalleryLayout.SkullPose(index, aspect);
                 if ((state.SkullHitMask & (1 << index)) == 0)

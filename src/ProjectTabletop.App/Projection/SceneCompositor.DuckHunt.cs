@@ -27,6 +27,7 @@ public sealed partial class SceneCompositor
             _duckHuntGalleryImages.Image("gallery-steampunk-target.png") is not null &&
             _duckHuntGalleryImages.Image("gallery-paper-puncture.png") is not null &&
             _duckHuntGalleryImages.Image("gallery-crystal-skull.png") is not null &&
+            _duckHuntGalleryImages.Image("gallery-upper-caravan.png") is not null &&
             _duckHuntGalleryImages.Image("gallery-unlit-lamps.png") is not null &&
             _duckHuntGalleryImages.Image("gallery-candle-flames.png") is not null);
     private string? DuckHuntArtworkError => _duckHuntImages?.Error ??
@@ -68,7 +69,7 @@ public sealed partial class SceneCompositor
             _duckHuntGalleryPublished = false;
             _duckHuntGalleryImages = new(device, Path.Combine(AppContext.BaseDirectory, "Assets", "DuckHunt"),
                 ["target-practice-saloon-v1.png", "gallery-golden-ceiling-v3.png", "gallery-steampunk-target.png", "gallery-paper-puncture.png",
-                    "gallery-crystal-skull.png", "gallery-unlit-lamps.png", "gallery-candle-flames.png"]);
+                    "gallery-crystal-skull.png", "gallery-upper-caravan.png", "gallery-unlit-lamps.png", "gallery-candle-flames.png"]);
         }
         return _duckHuntGalleryImages;
     }

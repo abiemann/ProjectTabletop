@@ -1,0 +1,25 @@
+Upper curtain covered-wagon ornament
+Created: 2026-10-26
+Tool: built-in image generation tool
+Asset: gallery-upper-caravan.png
+Native output: 2098 x 749, RGBA PNG
+SHA256: 6660fa73f7fe025e2e589a5726164200b8dcbfa5838feddf66ee6a34a0df0047
+
+Original generation prompt:
+Use case: historical-scene. Asset type: original transparent ornamental frieze for the upper parchment roller cover of a luxurious 1880s New York cowboy saloon shooting gallery. Create ONE exceptionally detailed, mature antique copperplate engraving in warm dark umber and muted antique-gold lines. Composition: very wide shallow horizontal design, perfectly bilateral mirror symmetry about the vertical centerline. On the RIGHT, a recognizable Western covered-wagon caravan: one handsome canvas-covered wooden wagon with large spoked wheels, a team of horses and a small cowboy driver, with a smaller trailing covered wagon. Mirror the entire caravan EXACTLY on the LEFT, horses facing inward toward the central emblem. In the CENTER, a refined five-point Western sheriff star, with a modest symmetrical fan of decorative old brass cartridges and delicate acanthus/rope scrollwork joining the two caravans. Natural horse anatomy, credible harnesses, beautiful fine wheel spokes, engraved canvas folds and hand-etched crosshatching. Elegant premium nineteenth-century banknote / saloon wall engraving, ornamental rather than cartoonish. No lettering. The complete visible frieze should be about 7:1 in width to height, arranged as a shallow band centered in a wide landscape canvas, with clear transparent breathing room. Request very high native resolution, ideally 4096 pixels wide, crisp detail for a 4K projector. The image consists ONLY of the engraving marks and their natural silhouettes: genuine RGBA PNG with every intended exterior background pixel alpha=0, including enclosed wheel/harness cutouts. No solid rectangular plaque, parchment sheet, scenery backdrop, cast shadow, haze, speckles, white fill, glow or simulated checkerboard. Clean antialiased edges immediately adjacent to the ink. Use restrained brown/umber/copper tones, no red or magenta accents and no bright white specular points. The existing warm cream parchment will show through all unprinted areas.
+
+The user approved the original artwork. A subsequent image-tool transparency
+cleanup attempt was not selected because it altered the design and retained
+stray background pixels.
+
+Unselected image-tool cleanup prompt:
+Cleanup transparency only on this approved artwork. Preserve the exact two mirrored covered-wagon caravans, central sheriff star and cartridge/acanthus ornament, every shape, placement, proportion, shading and fine engraving. Do not redesign. Keep the 2098x749 canvas and the visible art at the same size and position. Remove every isolated nearly invisible background speck and edge contamination outside the physical artwork: all intended exterior pixels and enclosed negative-space cutouts must have alpha exactly 0. Keep smooth antialiasing only immediately adjacent to physical edges. Remove red/yellow fringe contamination from otherwise brown outlines. No background, no haze, no cast shadow, no checkerboard, no matte. Deliver genuinely transparent RGBA PNG.
+
+With the user's explicit permission, scripted cleanup changed only 4,437
+alpha-1/alpha-2 pixels more than seven pixels away from alpha >= 8 artwork
+to alpha 0. Every RGB value and all other alpha values were preserved.
+Validation confirmed real RGBA transparency, zero-alpha exterior corners,
+zero remaining stray low-alpha pixels, and nonzero bounds (5,179)-(2093,549).
+The renderer uses that 2088 x 370 crop, preserving its aspect ratio, and
+composites it once into the upper curtain cache. No image resampling or
+recolouring was baked into this asset.

@@ -64,18 +64,22 @@ public sealed partial class MainWindow
             }
             CheckClearOptics("closed saloon");
             await Save("closed");
+            byte[] closedUpper = target.GetPixelBytes();
             now += TimeSpan.FromMilliseconds(1);
             Check(!scene.SubmitDuckHuntShot(new(.5, .46), now) && scene.GalleryState.PlayVisible,
                 "A laser shot on the old central PLAY position started the gallery.");
             now += TimeSpan.FromMilliseconds(1);
             Check(ActivateGalleryPlay(scene) && !board.DuckHuntDrawerOpen, "Drawer PLAY did not start the gallery and close its controls.");
-            Draw();
+            byte[] openingZero = Draw();
+            Check(RegionEqual(closedUpper, openingZero, UpperRegion()),
+                "The decorated top cover flashed or changed before its opening motion began.");
             await Save("opening-zero");
             Check(scene.GalleryState is { Phase: DuckHuntGalleryPhase.Opening, FlapAngleDegrees: 0,
                 UpperPhase: DuckHuntGalleryUpperPhase.Raising, UpperOpenProgress: 0 },
                 "One PLAY activation did not begin both the flap and upper curtain together.");
             now += TimeSpan.FromMilliseconds(350);
             Draw();
+            CheckClearOptics("raising decorated top cover");
             await Save("opening-front");
             now += TimeSpan.FromMilliseconds(450);
             Draw();
@@ -307,6 +311,8 @@ public sealed partial class MainWindow
                 DuckHuntGalleryGame.UpperLowerDuration;
             now = middleStartedAt;
             byte[] closedMiddle = Draw();
+            Check(RegionEqual(closedUpper, closedMiddle, UpperRegion()),
+                "The top cover decoration did not return intact when lowered.");
             Check(scene.GalleryState is { PlayVisible: false, UpperPhase: DuckHuntGalleryUpperPhase.Closed,
                 Phase: DuckHuntGalleryPhase.Ready, MiddlePhase: DuckHuntGalleryMiddlePhase.Raising },
                 "The middle curtain did not start only after the two original rows closed.");
@@ -479,6 +485,7 @@ public sealed partial class MainWindow
                 double bottomV = Math.Min(bottom.V, SceneCompositor.GalleryScoreBounds(aspect).Y);
                 return new(top.U, top.V, bottom.U - top.U, bottomV - top.V);
             }
+            BoardRect UpperRegion() => DuckHuntGalleryLayout.SceneRect(new(.16, .185, .67, .145), aspect);
             object RegionDifference(byte[] before, byte[] after, BoardRect region)
             {
                 var top = CameraPoint(new(region.X, region.Y));
