@@ -13,8 +13,8 @@ public sealed partial class SceneCompositor
     // file:// is supported by Win2D for unpackaged desktop apps; ms-appx://
     // requires package identity and cannot locate this bundled font here.
     internal static readonly Uri GalleryMessageFontUri =
-        new(Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "Rye-Regular.ttf"));
-    internal static readonly string GalleryMessageFontFamily = GalleryMessageFontUri.AbsoluteUri + "#Rye";
+        new(Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "Smokum-Regular.ttf"));
+    internal static readonly string GalleryMessageFontFamily = GalleryMessageFontUri.AbsoluteUri + "#Smokum";
     private CanvasGeometry? _galleryPressPlayLetters, _galleryGameOverLetters;
     private Rect _galleryPressPlayInk, _galleryGameOverInk;
 
@@ -76,7 +76,6 @@ public sealed partial class SceneCompositor
             {
                 drawing.Transform = Matrix3x2.CreateScale(scaleX, scale) *
                     Matrix3x2.CreateTranslation(x, y) * previous;
-                drawing.DrawGeometry(letters, Color.FromArgb(255, 143, 106, 61), 3);
                 drawing.FillGeometry(letters, Color.FromArgb(255, 63, 43, 28));
             }
             finally { drawing.Transform = previous; }

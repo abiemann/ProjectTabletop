@@ -4,7 +4,7 @@ Tool: built-in image generation tool
 Style reference: gallery-upper-caravan.png
 Asset: gallery-lower-peace-pipe.png
 Native output: 2172 x 724, RGBA PNG
-SHA256: a1a92e7526226ff534bdce223afd3adb9029c60ef40ae94117ce31991f798f78
+Current SHA256: 9a3cb4c36f6daa76e1d8ffdcff2e5b0da2bbdfb7b593eb9780dc66b58fb7d7fb
 
 Generation prompt:
 Use case: historical-scene.
@@ -14,12 +14,27 @@ Style: exceptionally detailed mature copperplate / banknote engraving in dark wa
 Layout: shallow wide frieze, visible design around 6:1 width-to-height, centered in a wide canvas with clear transparent space surrounding every side. Highest available native detail, crisp enough for a 4K projector. Keep all silhouettes contained and balanced. No text, no symbols unrelated to the subjects.
 Transparency is critical: output RGBA PNG with actual transparent exterior, every intended background pixel alpha exactly 0; also clear enclosed negative-space openings. No background speckles, no almost-transparent noise, no fringe colours, no matte, no checkerboard, no rectangular plaque, no exterior shadow, no haze. Preserve clean antialiasing only immediately next to physical engraving edges. No red/magenta accents or bright white highlights. Only the artwork itself, with transparent negative space.
 
-The user explicitly approved scripted removal of exactly 2,315 nearly invisible
+Original version: the user explicitly approved scripted removal of exactly 2,315 nearly invisible
 stray pixels: 2,275 alpha-1 and 40 alpha-2 pixels more than seven pixels from
 alpha >= 8 artwork. Only those alpha values changed to zero; every RGB value
 and every other alpha value was preserved.
 Validation confirmed RGBA, zero-alpha exterior corners, no remaining stray
-low-alpha pixels, and nonzero bounds (7,95)-(2170,591). The renderer uses that
-2163 x 496 crop, preserves its proportions, and caches it onto the lower flap.
-The plain wooden reverse remains separate. No resampling or recolouring was
-baked into this PNG.
+low-alpha pixels, and nonzero bounds (7,95)-(2170,591). The original version used
+that 2163 x 496 crop, preserving its proportions on the cached lower flap.
+Its plain wooden reverse remained separate. No resampling or recolouring was
+baked into the original PNG.
+
+Palette refinement, 2026-10-26 (built-in image tool):
+Use case: style-transfer edit.
+Image 1 is the EDIT TARGET: the transparent lower-cover ornament with two Native American adults, foliage and a central peace pipe.
+Image 2 is the COLOUR AND STYLE REFERENCE: the approved mirrored cowboy caravan engraving.
+Edit image 1 to match image 2 so these look like a matched pair engraved by the same artist on two shelves of a luxury saloon. Preserve the existing subjects, faces, positions, peace pipe, foliage, mirrored balance and overall silhouette of image 1. Change the palette and rendering only: remove the orange/copper cast; match the caravan's muted neutral warm umber, deep chocolate engraved shadows, soft pale parchment/ivory highlights and restrained antique gold midtones. Closely match its fine etched crosshatching, subtle raised engraving relief, tonal range and contrast. The faces and feathers should not be bright orange, glossy copper, or metallic gold. Preserve detailed crisp linework suitable for a 4K projector. No additional subjects, no wording, no frame.
+Produce only the revised lower ornament, wide shallow composition with all artwork inside the canvas. Keep a genuinely transparent background with alpha exactly zero throughout exterior and internal negative-space cutouts. Absolutely no checkerboard, matte, parchment, shadow, halo, detached speckles or near-transparent background noise. Clean antialiased edges immediately adjoining artwork only.
+
+The selected revision keeps the same 2172 x 724 RGBA canvas. With explicit user
+authorization, scripted cleanup cleared exactly 2,033 detached faint pixels:
+1,937 alpha-1, 94 alpha-2 and 2 alpha-3, all farther than seven pixels from
+alpha >= 8 artwork. Every RGB value and all other alpha values were preserved.
+Validation confirmed alpha-zero exterior corners and no remaining detached
+low-alpha pixels. Current nonzero bounds: (7,94)-(2164,594). The renderer uses
+this 2157 x 500 crop without baking resampling into the PNG.

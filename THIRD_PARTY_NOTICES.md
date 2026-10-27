@@ -13,13 +13,13 @@ Visual C++ runtimes, Windows App SDK components, OpenCvSharp's native dependenci
 and the MCP helper's dependencies. The hand models retain their licenses beside
 the models. Preserve all applicable licenses and attributions when redistributing.
 
-## Rye typeface
+## Smokum typeface
 
-Target Practice bundles the unmodified Rye Regular typeface for its Western-style
-middle-cover messages. Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com),
-with Reserved Font Name "Rye". Licensed under the SIL Open Font License, Version 1.1.
-The complete license is distributed beside the font in `Assets/Fonts/Rye-OFL.txt`.
-Source: [Google Fonts Rye](https://github.com/google/fonts/tree/main/ofl/rye).
+Target Practice bundles the unmodified Smokum Regular typeface for its Western-style
+middle-cover messages. Copyright (c) 2011 by Brian J. Bonislawsky DBA Astigmatic
+(AOETI). All rights reserved. Licensed under the Apache License, Version 2.0.
+The complete license is distributed beside the font in `Assets/Fonts/Smokum-LICENSE.txt`.
+Source: [Google Fonts Smokum](https://github.com/google/fonts/tree/main/apache/smokum).
 
 ## NASA Blue Marble imagery
 

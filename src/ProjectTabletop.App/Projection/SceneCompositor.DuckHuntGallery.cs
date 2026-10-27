@@ -64,7 +64,7 @@ public sealed partial class SceneCompositor
         int width = (int)Math.Ceiling(flap.Width * scene.Size.Width);
         int height = (int)Math.Ceiling(flap.Height * scene.Size.Height);
         _galleryFlapFront = CreateGalleryCover(device, scene, flap, peacePipe,
-            new Rect(7, 95, 2163, 496));
+            new Rect(7, 94, 2157, 500));
         _galleryFlapBack = new CanvasRenderTarget(device, width, height, 96);
         using (var draw = _galleryFlapBack.CreateDrawingSession())
         {
@@ -388,10 +388,29 @@ public sealed partial class SceneCompositor
         {
             bool reverse = edgeY < top;
             var face = reverse ? _galleryFlapBack : _galleryFlapFront;
-            _galleryFlapEffect.Source = face;
-            _galleryFlapEffect.TransformMatrix = GalleryProjectiveMatrix(quad,
-                (float)face.Size.Width, (float)face.Size.Height);
-            drawing.DrawImage(_galleryFlapEffect);
+            if (Math.Abs(degrees) < .001)
+            {
+                // Match the curtain's high-quality minification while this plane
+                // is flat; the 3D effect's cubic filter aliases fine engraving.
+                drawing.DrawImage(face, GalleryRect(quad.Bounds),
+                    new Rect(0, 0, face.Size.Width, face.Size.Height), 1,
+                    CanvasImageInterpolation.HighQualityCubic);
+            }
+            else
+            {
+                var previous = drawing.Transform;
+                _galleryFlapEffect.Source = face;
+                // Resolve the moving plane at the board raster's pixel density,
+                // rather than rasterizing at 1000 logical units then enlarging it.
+                _galleryFlapEffect.TransformMatrix = GalleryProjectiveMatrix(quad,
+                    (float)face.Size.Width, (float)face.Size.Height) * new Matrix4x4(previous);
+                try
+                {
+                    drawing.Transform = Matrix3x2.Identity;
+                    drawing.DrawImage(_galleryFlapEffect);
+                }
+                finally { drawing.Transform = previous; }
+            }
             // The narrow edge follows the actual moving plane, never a rectangle
             // around its animation bounds.
             var a = quad.BottomLeft; var b = quad.BottomRight;

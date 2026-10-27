@@ -121,14 +121,17 @@ measured placement details.
 `gallery-upper-caravan.png` supplies the mirrored covered wagons, Western star
 and cartridge ornament on the upper curtain. `gallery-lower-peace-pipe.png`
 supplies the inward-facing Native American figures and central peace pipe on
-the lower hinged cover. Both are original, transparent built-in image-tool
+the lower hinged cover, revised to match the caravan's muted umber and cream
+engraving palette. Both are original, transparent built-in image-tool
 artwork. Their prompts, dimensions, hashes and approved alpha-only cleanup
 are recorded in their corresponding `*-prompts.txt` files.
 
 The shared cover compositor caches each engraving over its original beige
 surface, preserving natural proportions and the lower opening's taller layout.
+Both closed covers use high-quality image sampling; the rotating lower flap
+resolves at the board's output resolution to preserve the engraving's fine detail.
 Decoration follows the moving front; the lower flap's wooden reverse is separate.
 
-The middle cover uses the bundled [Rye font](../Fonts/README.md) for PRESS PLAY
+The middle cover uses the lighter, unoutlined [Smokum font](../Fonts/README.md) for PRESS PLAY
 before a round and GAME OVER with a smaller replay prompt after completion.
 These vector messages are hidden during play; the moving-target stage remains.
