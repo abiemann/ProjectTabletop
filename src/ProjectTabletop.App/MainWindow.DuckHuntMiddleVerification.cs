@@ -41,6 +41,8 @@ public sealed partial class MainWindow
 
         var origin = now;
         bool shot = false;
+        DateTimeOffset? firstHitAt = null;
+        bool hitTurnedAway = false;
         var transitions = new List<object>();
         var observed = new HashSet<DuckHuntGalleryMiddlePhase>();
         var previous = DuckHuntGalleryMiddlePhase.Closed;
@@ -70,9 +72,23 @@ public sealed partial class MainWindow
                     scene.GalleryPunctures[0].TargetIndex == DuckHuntGalleryGame.MiddlePunctureOffset,
                     "The preview shot did not puncture its moving-stage paper.");
                 shot = true;
+                firstHitAt = now;
             }
             Draw();
             var state = scene.GalleryState;
+            if (firstHitAt is { } hitAt && state.MiddleTargetIndex == 0)
+            {
+                if (now < hitAt + DuckHuntGalleryGame.MiddleHitLingerDuration)
+                    Check(state.MiddlePhase == DuckHuntGalleryMiddlePhase.WaitingForHit,
+                        "The preview target turned away before its half-second hit linger.");
+                else if (!hitTurnedAway)
+                {
+                    Check(state.MiddlePhase == DuckHuntGalleryMiddlePhase.TurningAway &&
+                        now - hitAt - DuckHuntGalleryGame.MiddleHitLingerDuration < TimeSpan.FromSeconds(1d / fps),
+                        "The preview target did not begin turning at its half-second hit deadline.");
+                    hitTurnedAway = true;
+                }
+            }
             observed.Add(state.MiddlePhase);
             if (state.MiddlePhase != previous)
             {
@@ -89,13 +105,14 @@ public sealed partial class MainWindow
             }
             await target.SaveAsync(Path.Combine(directory, $"frame-{frame:D4}.jpg"), CanvasBitmapFileFormat.Jpeg);
         }
-        Check(shot && observed.Contains(DuckHuntGalleryMiddlePhase.Raising) &&
+        Check(shot && hitTurnedAway && observed.Contains(DuckHuntGalleryMiddlePhase.Raising) &&
             observed.Contains(DuckHuntGalleryMiddlePhase.Entering) &&
             observed.Contains(DuckHuntGalleryMiddlePhase.TurningToFace) &&
             observed.Contains(DuckHuntGalleryMiddlePhase.WaitingForHit) &&
             observed.Contains(DuckHuntGalleryMiddlePhase.TurningAway) &&
-            observed.Contains(DuckHuntGalleryMiddlePhase.Leaving) && scene.GalleryState.MiddleTargetIndex == 1,
-            "The continuous preview did not include the full first target cycle and second arrival.");
+            observed.Contains(DuckHuntGalleryMiddlePhase.Leaving) &&
+            scene.GalleryState is { MiddleTargetIndex: 1, MiddlePhase: DuckHuntGalleryMiddlePhase.WaitingForHit },
+            "The continuous preview did not shorten the hit target while preserving the unhit second target's facing window.");
         return new { Ok = true, Assertions = assertions, OpticalChecks = opticalChecks, Directory = directory,
             Width = width, Height = height, Fps = fps, Frames = frames, Transitions = transitions,
             TimingScope = "Native compositor frames at a synthetic 60 Hz clock; not live projector pacing." };

@@ -186,10 +186,10 @@ public sealed partial class MainWindow
             var middleStartedAt = lowerFinishedAt > upperFinishedAt ? lowerFinishedAt : upperFinishedAt;
             BoardAim[] middlePoints = [outside, annulus, centre, innerLine, outerLine];
             int[] middleScores = [800, 850, 950, 1050, 1100];
+            var enteredAt = middleStartedAt + DuckHuntGalleryGame.MiddleRaiseDuration;
             for (int index = 0; index < middlePoints.Length; index++)
             {
-                var facingAt = middleStartedAt + DuckHuntGalleryGame.MiddleRaiseDuration +
-                    DuckHuntGalleryGame.MiddleTargetDuration * index + DuckHuntGalleryGame.MiddleEnterDuration + DuckHuntGalleryGame.MiddleTurnDuration;
+                var facingAt = enteredAt + DuckHuntGalleryGame.MiddleEnterDuration + DuckHuntGalleryGame.MiddleTurnDuration;
                 now = facingAt;
                 Draw();
                 var quad = DuckHuntGalleryLayout.MiddleTargetQuad(scene.GalleryState, aspect);
@@ -242,7 +242,6 @@ public sealed partial class MainWindow
                     Check(ScoreVisualEqual(paused, held, score), "The paused score pixels changed despite a frozen game and reel state.");
                     scene.SetDuckHuntAudioStatus(true, "Isolated score resume");
                     Draw();
-                    middleStartedAt += TimeSpan.FromSeconds(2);
                     facingAt += TimeSpan.FromSeconds(2);
                     Check(scene.GalleryState.ScoreAnimationSeconds == frozen.ScoreAnimationSeconds,
                         "Resuming skipped part of the score flip.");
@@ -250,8 +249,10 @@ public sealed partial class MainWindow
                 now = facingAt + TimeSpan.FromSeconds(1.2);
                 Draw();
                 CheckScore(middleScores[index]);
+                enteredAt = facingAt + DuckHuntGalleryGame.MiddleHitLingerDuration +
+                    DuckHuntGalleryGame.MiddleTurnDuration + DuckHuntGalleryGame.MiddleLeaveDuration;
             }
-            now = middleStartedAt + DuckHuntGalleryGame.MiddleSequenceDuration + TimeSpan.FromSeconds(1);
+            now = enteredAt + DuckHuntGalleryGame.MiddleLowerDuration + TimeSpan.FromSeconds(1);
             byte[] complete = Draw();
             Check(scene.GalleryState.PlayVisible, "The score fixture did not finish the middle challenge.");
             CheckScore(1100);

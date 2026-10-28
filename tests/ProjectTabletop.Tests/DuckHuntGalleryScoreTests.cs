@@ -54,7 +54,7 @@ public class DuckHuntGalleryScoreTests
     [InlineData(1, 100)]
     [InlineData(1.8, 50)]
     [InlineData(2.4, 0)]
-    public void MiddlePaperAlsoScoresOnlyItsFirstHitAndKeepsTheFullExposure(double aspect, int points)
+    public void MiddlePaperScoresOnlyItsFirstHitAndTurnsAfterTheHitLinger(double aspect, int points)
     {
         var game = Middle();
         game.Advance(At(8800));
@@ -68,9 +68,9 @@ public class DuckHuntGalleryScoreTests
         Assert.Equal(1, game.Snapshot.MiddleHitMask);
         Assert.Equal(2, game.Punctures.Count);
         Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
-        game.Advance(At(11799));
+        game.Advance(At(9309));
         Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
-        game.Advance(At(11800));
+        game.Advance(At(9310));
         Assert.Equal(DuckHuntGalleryMiddlePhase.TurningAway, game.Snapshot.MiddlePhase);
     }
 
@@ -129,10 +129,10 @@ public class DuckHuntGalleryScoreTests
         Assert.Equal(.1, game.Snapshot.ScoreAnimationSeconds, 10);
         game.Advance(At(13950));
         Assert.Equal(.15, game.Snapshot.ScoreAnimationSeconds, 10);
-        game.Advance(At(15000));
+        game.Advance(At(16100));
         Assert.Equal(1, game.Snapshot.ScoreAnimationSeconds);
         var settled = game.Snapshot;
-        game.Advance(At(15100));
+        game.Advance(At(16200));
         Assert.Equal(settled, game.Snapshot);
     }
 
@@ -154,7 +154,7 @@ public class DuckHuntGalleryScoreTests
         }
         for (int i = 0; i < 5; i++)
         {
-            double face = 9940 + i * 4800;
+            double face = 9940 + i * 2301;
             game.Advance(At(face));
             var point = DuckHuntGalleryLayout.MiddleTargetQuad(game.Snapshot).Map(center.U, center.V);
             Assert.True(game.Shoot(point, At(face + 1)));

@@ -62,7 +62,9 @@ the surrounding band, or zero outside the outer ring. The source PNG is unchange
 
 The middle-row challenge reuses this assembly and puncture artwork. Its holder
 travels along the shelf; the paper and retaining ring turn around the vertical
-stem while the circular pedestal remains supported. The rising middle backdrop
+stem while the circular pedestal remains supported. The paper turns away at the
+earlier of its three-second facing limit or half a second after its first hit;
+repeat hits do not extend that delay. The rising middle backdrop
 is a cached crop of the original saloon panel, clipped inside its ornate frame.
 
 With the user's approval, an alpha-only cleanup removed 486 isolated alpha-1

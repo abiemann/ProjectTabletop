@@ -70,6 +70,7 @@ public sealed class DuckHuntGalleryGame
     public static readonly TimeSpan MiddleEnterDuration = TimeSpan.FromSeconds(.65);
     public static readonly TimeSpan MiddleTurnDuration = TimeSpan.FromSeconds(.25);
     public static readonly TimeSpan MiddleFaceDuration = TimeSpan.FromSeconds(3);
+    public static readonly TimeSpan MiddleHitLingerDuration = TimeSpan.FromSeconds(.5);
     public static readonly TimeSpan MiddleLeaveDuration = TimeSpan.FromSeconds(.65);
     public static readonly TimeSpan MiddleLowerDuration = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan MiddleTargetDuration = MiddleEnterDuration + MiddleTurnDuration +
@@ -88,6 +89,7 @@ public sealed class DuckHuntGalleryGame
     private int _hitMask, _shots, _cycle;
     private int _skullHitMask;
     private int _middleHitMask;
+    private readonly TimeSpan?[] _middleHitElapsed = new TimeSpan?[MiddleTargetCount];
     private int _score;
     private double _skull0HitSeconds = -1, _skull1HitSeconds = -1, _skull2HitSeconds = -1,
         _skull3HitSeconds = -1, _skull4HitSeconds = -1;
@@ -112,6 +114,7 @@ public sealed class DuckHuntGalleryGame
         _upperPhase = DuckHuntGalleryUpperPhase.Closed;
         _middleStartedAt = null;
         _middleHitMask = 0;
+        Array.Clear(_middleHitElapsed);
         _score = 0;
         _scoreChangedAt = null;
         ClearSkulls();
@@ -190,6 +193,7 @@ public sealed class DuckHuntGalleryGame
         _cycle++;
         _middleStartedAt = null;
         _middleHitMask = 0;
+        Array.Clear(_middleHitElapsed);
         _score = 0;
         _scoreChangedAt = null;
         _phase = DuckHuntGalleryPhase.Opening;
@@ -268,7 +272,12 @@ public sealed class DuckHuntGalleryGame
             {
                 _punctures.Add(new(MiddlePunctureOffset + middleAtShot.Index, local.U, local.V, shotTime));
                 if ((_middleHitMask & (1 << middleAtShot.Index)) == 0)
+                {
                     AddScore(DuckHuntGalleryLayout.PaperScore(local), shotTime);
+                    // Store active-round time so readiness pauses also freeze
+                    // the half-second puncture display before turning away.
+                    _middleHitElapsed[middleAtShot.Index] = shotTime - _middleStartedAt!.Value;
+                }
                 _middleHitMask |= 1 << middleAtShot.Index;
                 hit = true;
             }
@@ -373,27 +382,38 @@ public sealed class DuckHuntGalleryGame
         if (elapsed < MiddleRaiseDuration)
             return (DuckHuntGalleryMiddlePhase.Raising, Smooth(elapsed / MiddleRaiseDuration), -1, 0);
         elapsed -= MiddleRaiseDuration;
-        int index = (int)(elapsed.Ticks / MiddleTargetDuration.Ticks);
-        if (index >= MiddleTargetCount)
+        TimeSpan targetStarted = MiddleRaiseDuration;
+        for (int index = 0; index < MiddleTargetCount; index++)
         {
-            elapsed -= MiddleTargetDuration * MiddleTargetCount;
-            return elapsed < MiddleLowerDuration
-                ? (DuckHuntGalleryMiddlePhase.Lowering, 1 - Smooth(elapsed / MiddleLowerDuration), -1, 0)
-                : (DuckHuntGalleryMiddlePhase.Complete, 0, -1, 0);
+            var faceDuration = MiddleFaceDuration;
+            if (_middleHitElapsed[index] is { } hitAt)
+            {
+                var hitDeadline = hitAt + MiddleHitLingerDuration - targetStarted - MiddleEnterDuration - MiddleTurnDuration;
+                if (hitDeadline < faceDuration) faceDuration = hitDeadline;
+            }
+            var duration = MiddleTargetDuration - MiddleFaceDuration + faceDuration;
+            if (elapsed >= duration)
+            {
+                elapsed -= duration;
+                targetStarted += duration;
+                continue;
+            }
+            if (elapsed < MiddleEnterDuration)
+                return (DuckHuntGalleryMiddlePhase.Entering, 1, index, elapsed / MiddleEnterDuration);
+            elapsed -= MiddleEnterDuration;
+            if (elapsed < MiddleTurnDuration)
+                return (DuckHuntGalleryMiddlePhase.TurningToFace, 1, index, elapsed / MiddleTurnDuration);
+            elapsed -= MiddleTurnDuration;
+            if (elapsed < faceDuration)
+                return (DuckHuntGalleryMiddlePhase.WaitingForHit, 1, index, 0);
+            elapsed -= faceDuration;
+            if (elapsed < MiddleTurnDuration)
+                return (DuckHuntGalleryMiddlePhase.TurningAway, 1, index, elapsed / MiddleTurnDuration);
+            elapsed -= MiddleTurnDuration;
+            return (DuckHuntGalleryMiddlePhase.Leaving, 1, index, elapsed / MiddleLeaveDuration);
         }
-        elapsed -= MiddleTargetDuration * index;
-        if (elapsed < MiddleEnterDuration)
-            return (DuckHuntGalleryMiddlePhase.Entering, 1, index, elapsed / MiddleEnterDuration);
-        elapsed -= MiddleEnterDuration;
-        if (elapsed < MiddleTurnDuration)
-            return (DuckHuntGalleryMiddlePhase.TurningToFace, 1, index, elapsed / MiddleTurnDuration);
-        elapsed -= MiddleTurnDuration;
-        if (elapsed < MiddleFaceDuration)
-            return (DuckHuntGalleryMiddlePhase.WaitingForHit, 1, index, 0);
-        elapsed -= MiddleFaceDuration;
-        if (elapsed < MiddleTurnDuration)
-            return (DuckHuntGalleryMiddlePhase.TurningAway, 1, index, elapsed / MiddleTurnDuration);
-        elapsed -= MiddleTurnDuration;
-        return (DuckHuntGalleryMiddlePhase.Leaving, 1, index, elapsed / MiddleLeaveDuration);
+        return elapsed < MiddleLowerDuration
+            ? (DuckHuntGalleryMiddlePhase.Lowering, 1 - Smooth(elapsed / MiddleLowerDuration), -1, 0)
+            : (DuckHuntGalleryMiddlePhase.Complete, 0, -1, 0);
     }
 }

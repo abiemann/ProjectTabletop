@@ -79,7 +79,7 @@ public class DuckHuntGalleryMiddleTests
     }
 
     [Fact]
-    public void FiveSequentialTargetsEnterTurnWaitExactlyThreeSecondsAndLeaveBeforeReplay()
+    public void FiveUnhitTargetsEnterTurnWaitExactlyThreeSecondsAndLeaveBeforeReplay()
     {
         var game = Middle();
         Assert.Equal(DuckHuntGalleryMiddlePhase.Raising, game.Snapshot.MiddlePhase);
@@ -96,10 +96,6 @@ public class DuckHuntGalleryMiddleTests
             game.Advance(At(entered + 900));
             Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
             Assert.Equal(0, DuckHuntGalleryLayout.MiddleTargetPose(game.Snapshot).YawDegrees);
-            Assert.True(game.Shoot(MiddlePaper(game), At(entered + 950)));
-            Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
-            Assert.True(game.Shoot(MiddlePaper(game), At(entered + 1000)));
-            Assert.Equal(5 + i, game.Punctures[^1].TargetIndex);
             game.Advance(At(entered + 3899));
             Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
             game.Advance(At(entered + 3900));
@@ -116,8 +112,8 @@ public class DuckHuntGalleryMiddleTests
         game.Advance(At(32900));
         Assert.Equal(DuckHuntGalleryMiddlePhase.Complete, game.Snapshot.MiddlePhase);
         Assert.True(game.Snapshot.PlayVisible);
-        Assert.Equal(31, game.Snapshot.MiddleHitMask);
-        Assert.Equal(10, game.Punctures.Count);
+        Assert.Equal(0, game.Snapshot.MiddleHitMask);
+        Assert.Empty(game.Punctures);
         Assert.False(game.Shoot(Play, At(32899)));
         Assert.False(game.Start(At(32899)));
         Assert.False(game.Shoot(Play, At(32901)));
@@ -125,6 +121,91 @@ public class DuckHuntGalleryMiddleTests
         Assert.Empty(game.Punctures);
         Assert.Equal(0, game.Snapshot.MiddleHitMask);
         Assert.Equal(DuckHuntGalleryMiddlePhase.Closed, game.Snapshot.MiddlePhase);
+    }
+
+    [Fact]
+    public void FirstHitTurnsEachTargetAfterHalfASecondAndRepeatedHitsDoNotExtendIt()
+    {
+        var game = Middle();
+        for (int i = 0; i < 5; i++)
+        {
+            double entered = 7900 + i * 2350;
+            game.Advance(At(entered + 900));
+            Assert.Equal(i, game.Snapshot.MiddleTargetIndex);
+            var paper = MiddlePaper(game);
+            Assert.True(game.Shoot(paper, At(entered + 950)));
+            Assert.True(game.Shoot(paper, At(entered + 1300)));
+            Assert.Equal(5 + i, game.Punctures[^1].TargetIndex);
+            game.Advance(At(entered + 1449));
+            Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
+            game.Advance(At(entered + 1450));
+            Assert.Equal(DuckHuntGalleryMiddlePhase.TurningAway, game.Snapshot.MiddlePhase);
+            Assert.False(game.Shoot(paper, At(entered + 1450)));
+            game.Advance(At(entered + 1700));
+            Assert.Equal(DuckHuntGalleryMiddlePhase.Leaving, game.Snapshot.MiddlePhase);
+        }
+        game.Advance(At(19650));
+        Assert.Equal(DuckHuntGalleryMiddlePhase.Lowering, game.Snapshot.MiddlePhase);
+        game.Advance(At(20650));
+        Assert.True(game.Snapshot.PlayVisible);
+        Assert.Equal(31, game.Snapshot.MiddleHitMask);
+        Assert.Equal(10, game.Punctures.Count);
+        Assert.Equal(500, game.Snapshot.Score);
+        Assert.True(game.Start(At(20651)));
+        Assert.Empty(game.Punctures);
+        Assert.Equal(0, game.Snapshot.MiddleHitMask);
+        // A fresh cycle has no inherited hit deadline.
+        game.Advance(At(24451));
+        Assert.False(game.Shoot(Scene(.5, .78), At(24551)));
+        Assert.False(game.Shoot(Scene(.5, .18), At(24561)));
+        game.Advance(At(32350));
+        Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
+        game.Advance(At(32351));
+        Assert.Equal(DuckHuntGalleryMiddlePhase.TurningAway, game.Snapshot.MiddlePhase);
+    }
+
+    [Theory]
+    [InlineData(11350)]
+    [InlineData(11799)]
+    public void LateFirstHitNeverExtendsTheOriginalThreeSecondDeadline(int shotAt)
+    {
+        var game = Middle(); game.Advance(At(8800));
+        var paper = MiddlePaper(game);
+        Assert.True(game.Shoot(paper, At(shotAt)));
+        game.Advance(At(11799));
+        Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
+        game.Advance(At(11800));
+        Assert.Equal(DuckHuntGalleryMiddlePhase.TurningAway, game.Snapshot.MiddlePhase);
+    }
+
+    [Fact]
+    public void HitLingerUsesCameraTimeAndFreezesAcrossReadinessPauses()
+    {
+        var game = Middle(); game.Advance(At(8800));
+        var paper = MiddlePaper(game);
+        game.Advance(At(9000));
+        Assert.True(game.Shoot(paper, At(8900)));
+        game.SetReady(false, At(9100));
+        var paused = game.Snapshot;
+        game.Advance(At(14100));
+        Assert.Equal(paused, game.Snapshot);
+        game.SetReady(true, At(14100));
+        game.Advance(At(14399));
+        Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
+        game.Advance(At(14400));
+        Assert.Equal(DuckHuntGalleryMiddlePhase.TurningAway, game.Snapshot.MiddlePhase);
+        // A delayed camera result from just before the new deadline still hits
+        // the old target, but cannot reset its first-hit timer.
+        Assert.True(game.Shoot(paper, At(14399)));
+        Assert.Equal(DuckHuntGalleryMiddlePhase.TurningAway, game.Snapshot.MiddlePhase);
+        Assert.False(game.Shoot(paper, At(14400)));
+        game.Advance(At(16200));
+        Assert.Equal(1, game.Snapshot.MiddleTargetIndex);
+        Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
+        game.Advance(At(19199));
+        Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
+        game.Advance(At(19200));
+        Assert.Equal(DuckHuntGalleryMiddlePhase.TurningAway, game.Snapshot.MiddlePhase);
     }
 
     [Fact]
