@@ -246,15 +246,20 @@ public sealed partial class MainWindow
                 var before = _scene.GalleryState;
                 int puncturesBefore = _scene.GalleryPunctures.Count;
                 var flightBefore = _scene.HuntFlightState;
+                var clayBefore = _scene.ClayState;
                 bool accepted = _scene.SubmitDuckHuntSnapshot(dot.Detected
                         ? new BoardAim(dot.BoardX!.Value, dot.BoardY!.Value) : null,
                     frame.Timestamp, at, confirmedAt, context.Epoch);
                 var after = _scene.GalleryState;
                 var flightAfter = _scene.HuntFlightState;
+                var clayAfter = _scene.ClayState;
                 string acceptedOutcome = _scene.CurrentDuckHuntView == DuckHuntView.Hunt
                     ? flightAfter.Score > flightBefore.Score ? "Bird hit" :
                         flightBefore.StartVisible && !flightAfter.StartVisible ? "Hunt started" :
                         flightAfter.Shots > flightBefore.Shots ? "Shot missed" : "No active target hit"
+                    : _scene.CurrentDuckHuntView == DuckHuntView.ClayPigeon
+                    ? clayAfter.Score > clayBefore.Score ? "Clay hit" :
+                        clayAfter.Shots > clayBefore.Shots ? "Shot missed" : "No active target hit"
                     : after.Cycle > before.Cycle ? "Gallery started" :
                         after.SkullHitMask != before.SkullHitMask ? "Crystal skull hit" :
                         _scene.GalleryPunctures.Count > puncturesBefore ? "Paper target hit" :
@@ -301,6 +306,7 @@ public sealed partial class MainWindow
             gallery = _scene.GalleryState,
             punctures = _scene.GalleryPunctures.ToArray(),
             hunt = _scene.HuntFlightState,
+            clay = _scene.ClayState,
             measurement = _scene.DuckHuntMeasurement,
             inputContext = _scene.GetDuckHuntInputContext(),
             ready,

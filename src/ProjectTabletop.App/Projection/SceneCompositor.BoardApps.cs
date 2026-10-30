@@ -239,7 +239,8 @@ public sealed partial class SceneCompositor
             football ? FootballVisualRevision() : 0,
             strykersRun ? StrykersRunVisualRevision() : 0,
             duckHunt ? _boardSession.CurrentDuckHuntView == DuckHuntView.Hunt
-                ? _boardSession.HuntFlightState.Revision : (_boardSession.GalleryState.Revision << 8) |
+                ? _boardSession.HuntFlightState.Revision : _boardSession.CurrentDuckHuntView == DuckHuntView.ClayPigeon
+                    ? _boardSession.ClayState.Revision : (_boardSession.GalleryState.Revision << 8) |
                     (uint)GalleryVisualFrame(blackjackNow) : 0,
             duckHunt ? DuckHuntInputVisualRevision : 0,
             duckHunt ? _boardSession.Revision : 0, duckHunt ? DuckHuntDrawerVisualFrame(blackjackNow) : 0,

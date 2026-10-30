@@ -22,8 +22,10 @@ public class DuckHuntViewsTests
         Assert.Equal(DuckHuntView.Menu, board.CurrentDuckHuntView);
         var practice = Assert.Single(board.Buttons, b => b.Id == "duck-hunt-target-practice");
         var hunt = Assert.Single(board.Buttons, b => b.Id == "duck-hunt-hunt");
+        var clay = Assert.Single(board.Buttons, b => b.Id == "duck-hunt-clay-pigeon");
         Assert.Equal("TARGET PRACTICE", practice.Label);
         Assert.Equal("HUNT", hunt.Label);
+        Assert.Equal("CLAY PIGEON", clay.Label);
         Assert.Equal(BoardButtonHold.Once, practice.Hold);
         Assert.Equal(BoardButtonHold.Once, hunt.Hold);
         Assert.Equal(practice.Bounds.Width, hunt.Bounds.Width);
@@ -31,11 +33,16 @@ public class DuckHuntViewsTests
         Assert.Equal(.5, practice.Bounds.X + practice.Bounds.Width / 2);
         Assert.Equal(.5, hunt.Bounds.X + hunt.Bounds.Width / 2);
         Assert.True(practice.Bounds.Y + practice.Bounds.Height < hunt.Bounds.Y);
+        Assert.Equal(hunt.Bounds.Width, clay.Bounds.Width);
+        Assert.Equal(hunt.Bounds.Height, clay.Bounds.Height);
+        Assert.Equal(.5, clay.Bounds.X + clay.Bounds.Width / 2);
+        Assert.True(hunt.Bounds.Y + hunt.Bounds.Height < clay.Bounds.Y);
     }
 
     [Theory]
     [InlineData("duck-hunt-target-practice", DuckHuntView.TargetPractice)]
     [InlineData("duck-hunt-hunt", DuckHuntView.Hunt)]
+    [InlineData("duck-hunt-clay-pigeon", DuckHuntView.ClayPigeon)]
     public void ModeChoiceNeedsFreshClearCaptionThenAFullHold(string id, DuckHuntView expected)
     {
         var board = new BoardSession();
@@ -125,11 +132,17 @@ public class DuckHuntViewsTests
     [Theory]
     [InlineData(DuckHuntView.Hunt)]
     [InlineData(DuckHuntView.TargetPractice)]
+    [InlineData(DuckHuntView.ClayPigeon)]
     public void BackReturnsToWelcomeAndClearsTheRound(DuckHuntView view)
     {
         var board = new BoardSession();
         board.ShowDuckHunt(At(0));
-        board.ActivateButton(view == DuckHuntView.Hunt ? "duck-hunt-hunt" : "duck-hunt-target-practice", At(10));
+        board.ActivateButton(view switch
+        {
+            DuckHuntView.Hunt => "duck-hunt-hunt",
+            DuckHuntView.ClayPigeon => "duck-hunt-clay-pigeon",
+            _ => "duck-hunt-target-practice"
+        }, At(10));
         if (view == DuckHuntView.TargetPractice)
         {
             board.SetDuckHuntReady(true, At(100));
@@ -157,7 +170,7 @@ public class DuckHuntViewsTests
         Assert.Equal(DuckHuntGalleryPhase.Ready, board.GalleryState.Phase);
         Assert.Equal(0, board.GalleryState.HitTargets);
         Assert.Empty(board.GalleryPunctures);
-        Assert.Equal(["duck-hunt-target-practice", "duck-hunt-hunt", "duck-hunt-drawer-open"],
+        Assert.Equal(["duck-hunt-target-practice", "duck-hunt-hunt", "duck-hunt-clay-pigeon", "duck-hunt-drawer-open"],
             board.Buttons.Select(button => button.Id));
         Assert.False(board.ActivateButton("duck-hunt-back", At(openAt + 500)));
     }

@@ -335,12 +335,19 @@ public sealed partial class SceneCompositor : IDisposable
             _boardCalibrationSpot = -1;
             _boardSpotPresentation = null;
             _setupFlairCorners = null;
+            // Calibration replaces the game render, so pause its clock here
+            // instead of waiting for a frame or microphone callback.
+            if (enabled) _boardSession.SetDuckHuntReady(false, _blackjackClock());
         }
     }
 
     internal void SetCameraCheckRequired(bool required)
     {
-        lock (_gate) _cameraCheckRequired = required;
+        lock (_gate)
+        {
+            _cameraCheckRequired = required;
+            if (required) _boardSession.SetDuckHuntReady(false, _blackjackClock());
+        }
     }
 
     /// <summary>Full-black projector output for an ambient camera reference frame.</summary>

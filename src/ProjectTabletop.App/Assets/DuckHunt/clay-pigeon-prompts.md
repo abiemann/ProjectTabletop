@@ -1,0 +1,11 @@
+# Clay Pigeon artwork prompts
+
+Generated with the built-in image_gen tool on 2026-10-29.
+
+## Valley
+
+Use case: photorealistic-natural. Asset type: premium landscape game background, 16:9 widescreen, request native 3840x2160 detail. Input image is STYLE reference only, existing Hunt field. Create a NEW scene from a much higher grassy overlook, looking out across a gorgeous lush green valley with layered conifer woodland, meadows, a distant winding stream, wooded ridges and blue mountains receding in atmospheric perspective. Viewpoint is at standing height on a hillside above the valley. Lower half contains richly detailed green landscape and a narrow foreground meadow lip at bottom. Upper half is spacious blue summer sky with beautifully lit natural cumulus clouds, open center to track flying targets. A few pine branches at outer edges only. Match the reference's realistic warm natural sunlight and mature high quality photographic texture. Wide cinematic depth, tack-sharp near trees and grasses with natural distance haze. No people, no birds, no clay discs, no targets, no UI, no text, no logos, no borders. This is a fresh elevated valley scene, not a recolor of the field. Preserve natural scale; avoid oversaturated fantasy, painterly smears, and large dark side areas.
+
+## Clay target
+
+Use case: product-mockup. Asset type: isolated photorealistic game sprite for a flying sporting clay target. One single real clay pigeon target, shallow round ridged ceramic saucer, clean ivory-white chalky painted upper face with concentric molded rings, a small low center crown, dark charcoal brown thin rim and visible dark underside at front. Three-quarter elevated view: width roughly twice its visible height. Symmetrical round disc seen in perspective, horizontal long axis, no banking baked in. Fine ceramic grain, tiny realistic wear, natural warm daylight from upper left, crisp detailed material suitable for scaling down into flight. Center the entire disc with generous transparent margin, no cropping. Genuine RGBA transparent background, alpha zero outside object, no external shadow, no floor, no backdrop, no checkerboard in pixels, no text/logos, no red/orange markings, no alien spacecraft styling, no extra objects. High quality photographic 1024x1024 rendering.

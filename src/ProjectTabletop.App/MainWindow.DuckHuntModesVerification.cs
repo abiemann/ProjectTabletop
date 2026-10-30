@@ -54,12 +54,12 @@ public sealed partial class MainWindow
             Check(scene.CurrentDuckHuntView == DuckHuntView.Menu && !scene.HandDetectionRequired,
                 "The launcher did not open the welcome screen without the hand model.");
             CheckIdleInput("welcome");
-            var choices = board.Buttons.Where(button => button.Id is "duck-hunt-target-practice" or "duck-hunt-hunt").ToArray();
-            Check(choices.Length == 2 && choices[0].Bounds.Width == choices[1].Bounds.Width &&
-                choices[0].Bounds.Height == choices[1].Bounds.Height && choices.All(button => button.Hold == BoardButtonHold.Once),
-                "The two mode choices do not share one button size and caption-hold policy.");
+            var choices = board.Buttons.Where(button => button.Id is "duck-hunt-target-practice" or "duck-hunt-hunt" or "duck-hunt-clay-pigeon").ToArray();
+            Check(choices.Length == 3 && choices.All(button => button.Bounds.Width == choices[0].Bounds.Width &&
+                button.Bounds.Height == choices[0].Bounds.Height && button.Hold == BoardButtonHold.Once),
+                "The three mode choices do not share one button size and caption-hold policy.");
             var menuContext = scene.GetHoldButtonContext(now) ?? throw new InvalidOperationException("The mode menu has no caption reference.");
-            Check(menuContext.ButtonIds.Contains("duck-hunt-target-practice") && menuContext.ButtonIds.Contains("duck-hunt-hunt"),
+            Check(choices.All(button => menuContext.ButtonIds.Contains(button.Id)),
                 "A mode button is absent from the projected caption reference.");
             foreach (var button in choices)
             {
@@ -125,8 +125,8 @@ public sealed partial class MainWindow
             CheckIdleInput("reopened welcome");
             Check(!board.DuckHuntDrawerOpen &&
                 board.Buttons.Select(button => button.Id).SequenceEqual(
-                    ["duck-hunt-target-practice", "duck-hunt-hunt", "duck-hunt-drawer-open"]),
-                "Target Practice BACK did not restore both welcome choices with its drawer closed.");
+                    ["duck-hunt-target-practice", "duck-hunt-hunt", "duck-hunt-clay-pigeon", "duck-hunt-drawer-open"]),
+                "Target Practice BACK did not restore all three welcome choices with its drawer closed.");
             Check(!scene.SubmitDuckHuntSnapshot(newPoint, LaterThan(frame), click, MonotonicClock.UtcNow, practiceInput.Epoch),
                 "A previous practice shot crossed the welcome screen boundary.");
             await HoldControl("duck-hunt-hunt", DuckHuntView.Hunt);
@@ -152,8 +152,29 @@ public sealed partial class MainWindow
             CheckIdleInput("welcome after Hunt BACK");
             Check(!board.DuckHuntDrawerOpen &&
                 board.Buttons.Select(button => button.Id).SequenceEqual(
-                    ["duck-hunt-target-practice", "duck-hunt-hunt", "duck-hunt-drawer-open"]),
+                    ["duck-hunt-target-practice", "duck-hunt-hunt", "duck-hunt-clay-pigeon", "duck-hunt-drawer-open"]),
                 "HUNT BACK did not restore the welcome choices with its drawer closed.");
+            await HoldControl("duck-hunt-clay-pigeon", DuckHuntView.ClayPigeon);
+            Check(scene.DuckHuntBoardReady && scene.DuckHuntInputReady && scene.GetDuckHuntInputContext() is not null &&
+                board.ClayState.Phase == DuckHuntClayPhase.Playing && !board.ClayState.Paused,
+                "CLAY PIGEON did not automatically start with calibrated camera and microphone input.");
+            Check(board.Buttons.Select(button => button.Id).SequenceEqual(["duck-hunt-drawer-open"]),
+                "CLAY PIGEON exposes a START control or an early replay button.");
+            now += DuckHuntClayGame.LaunchDelay + DuckHuntClayGame.SecondClayDelay + TimeSpan.FromSeconds(.5);
+            byte[] valley = Draw();
+            Check(!field.AsSpan().SequenceEqual(valley) && board.ClayTargets.Count(clay => clay.Visible) == 2,
+                "CLAY PIGEON did not render its separate valley with the first automatic pair.");
+            await Save("clay-pigeon");
+            now += TimeSpan.FromMilliseconds(1);
+            Check(scene.ActivateDuckHuntAt(.10, .93), "CLAY PIGEON's BACK fixture could not open the drawer.");
+            now += TimeSpan.FromMilliseconds(300);
+            Draw();
+            CheckBackLayout();
+            await HoldControl("duck-hunt-back", DuckHuntView.Menu, "clay-pigeon-back");
+            CheckIdleInput("welcome after Clay Pigeon BACK");
+            Check(board.ClayState is { Phase: DuckHuntClayPhase.Ready, Score: 0, PairsLaunched: 0, Shots: 0 } &&
+                board.ClayTargets.All(clay => !clay.Visible),
+                "CLAY PIGEON BACK retained clays, score or the active pair sequence.");
             now += TimeSpan.FromMilliseconds(1);
             Check(scene.ActivateDuckHuntAt(.50, .62), "HUNT could not be reopened after BACK.");
             await scene.EnsureBoardArtworkResourcesAsync(target.Device, BoardScreen.DuckHunt);
@@ -166,7 +187,7 @@ public sealed partial class MainWindow
             Check(board.ActivateButton("duck-hunt-exit", now) && board.Screen == BoardScreen.Menu && board.MenuScrolled,
                 "EXIT did not return to the main menu's preserved second page.");
             results.Add(new { dimensions.Name, Width = dimensions.Width, Height = dimensions.Height,
-                CaptionHolds = 5, PracticeWaitsForCaptionHold = true, HuntWaitsForLaserStart = true,
+                CaptionHolds = 7, PracticeWaitsForCaptionHold = true, HuntWaitsForLaserStart = true, ClayStartsAutomatically = true,
                 BackReturnsToWelcome = true, ExitReturnsToPageTwo = true });
 
             void CheckBackLayout()

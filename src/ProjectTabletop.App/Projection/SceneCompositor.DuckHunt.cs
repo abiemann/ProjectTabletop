@@ -12,15 +12,20 @@ public sealed partial class SceneCompositor
     private BitmapAssetSet? _duckHuntImages;
     private BitmapAssetSet? _duckHuntFieldImages;
     private BitmapAssetSet? _duckHuntGalleryImages;
+    private BitmapAssetSet? _duckHuntClayImages;
     private bool _duckHuntArtworkPublished;
     private bool _duckHuntFieldPublished;
     private bool _duckHuntGalleryPublished;
+    private bool _duckHuntClayPublished;
     internal bool DuckHuntArtworkReady => _duckHuntArtworkPublished &&
         _duckHuntImages?.Image("arcade-welcome-v1.png") is not null &&
         (_boardSession.Screen != BoardScreen.DuckHunt || _boardSession.CurrentDuckHuntView != DuckHuntView.Hunt ||
             _duckHuntFieldPublished && _duckHuntFieldImages?.Image("hunt-field-v1.png") is not null &&
             _duckHuntFieldImages.Image("flying-mallard-body.png") is not null &&
             _duckHuntFieldImages.Image("flying-mallard-wing.png") is not null) &&
+        (_boardSession.Screen != BoardScreen.DuckHunt || _boardSession.CurrentDuckHuntView != DuckHuntView.ClayPigeon ||
+            _duckHuntClayPublished && _duckHuntClayImages?.Image("clay-valley-v1.png") is not null &&
+            _duckHuntClayImages.Image("clay-pigeon-v1.png") is not null) &&
         (_boardSession.Screen != BoardScreen.DuckHunt || _boardSession.CurrentDuckHuntView != DuckHuntView.TargetPractice ||
             _duckHuntGalleryPublished && _duckHuntGalleryImages?.Image("target-practice-saloon-v1.png") is not null &&
             _duckHuntGalleryImages.Image("gallery-golden-ceiling-v3.png") is not null &&
@@ -36,7 +41,9 @@ public sealed partial class SceneCompositor
         (_boardSession.CurrentDuckHuntView == DuckHuntView.Hunt
             ? _duckHuntFieldImages?.Error ?? _duckHuntFieldImages?.Errors.Values.FirstOrDefault() :
          _boardSession.CurrentDuckHuntView == DuckHuntView.TargetPractice
-            ? _duckHuntGalleryImages?.Error ?? _duckHuntGalleryImages?.Errors.Values.FirstOrDefault() : null);
+            ? _duckHuntGalleryImages?.Error ?? _duckHuntGalleryImages?.Errors.Values.FirstOrDefault() :
+         _boardSession.CurrentDuckHuntView == DuckHuntView.ClayPigeon
+            ? _duckHuntClayImages?.Error ?? _duckHuntClayImages?.Errors.Values.FirstOrDefault() : null);
 
     private BitmapAssetSet GetDuckHuntImages(CanvasDevice device)
     {
@@ -76,11 +83,25 @@ public sealed partial class SceneCompositor
         return _duckHuntGalleryImages;
     }
 
+    private BitmapAssetSet GetDuckHuntClayImages(CanvasDevice device)
+    {
+        if (_duckHuntClayImages is null || _duckHuntClayImages.Device != device)
+        {
+            _duckHuntClayImages?.Dispose();
+            DisposeDuckHuntClayResources();
+            _duckHuntClayPublished = false;
+            _duckHuntClayImages = new(device, Path.Combine(AppContext.BaseDirectory, "Assets", "DuckHunt"),
+                ["clay-valley-v1.png", "clay-pigeon-v1.png"]);
+        }
+        return _duckHuntClayImages;
+    }
+
     internal async Task EnsureDuckHuntResourcesAsync(CanvasDevice device)
     {
         BitmapAssetSet images;
         BitmapAssetSet? field;
         BitmapAssetSet? gallery;
+        BitmapAssetSet? clay;
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -89,9 +110,11 @@ public sealed partial class SceneCompositor
                 ? GetDuckHuntFieldImages(device) : null;
             gallery = _boardSession.Screen == BoardScreen.DuckHunt && _boardSession.CurrentDuckHuntView == DuckHuntView.TargetPractice
                 ? GetDuckHuntGalleryImages(device) : null;
+            clay = _boardSession.Screen == BoardScreen.DuckHunt && _boardSession.CurrentDuckHuntView == DuckHuntView.ClayPigeon
+                ? GetDuckHuntClayImages(device) : null;
         }
         await Task.WhenAll(images.EnsureLoadedAsync(), field?.EnsureLoadedAsync() ?? Task.CompletedTask,
-            gallery?.EnsureLoadedAsync() ?? Task.CompletedTask).ConfigureAwait(false);
+            gallery?.EnsureLoadedAsync() ?? Task.CompletedTask, clay?.EnsureLoadedAsync() ?? Task.CompletedTask).ConfigureAwait(false);
         lock (_gate)
             if (!_disposed && ReferenceEquals(images, _duckHuntImages)) PrepareDuckHuntResources(device);
     }
@@ -130,6 +153,17 @@ public sealed partial class SceneCompositor
                 InvalidateBoardArtworkSurface();
             }
         }
+        if (_boardSession.Screen == BoardScreen.DuckHunt && _boardSession.CurrentDuckHuntView == DuckHuntView.ClayPigeon)
+        {
+            var clay = GetDuckHuntClayImages(device);
+            if (!clay.IsLoaded) return false;
+            if (!_duckHuntClayPublished)
+            {
+                PrepareDuckHuntClayResources(device);
+                _duckHuntClayPublished = true;
+                InvalidateBoardArtworkSurface();
+            }
+        }
         return DuckHuntArtworkReady;
     }
 
@@ -138,6 +172,7 @@ public sealed partial class SceneCompositor
         DisposeDuckHuntGalleryResources();
         DisposeDuckHuntWelcomeTitle();
         DisposeDuckHuntFlightResources();
+        DisposeDuckHuntClayResources();
         _duckHuntImages?.Dispose();
         _duckHuntImages = null;
         _duckHuntFieldImages?.Dispose();
@@ -146,6 +181,9 @@ public sealed partial class SceneCompositor
         _duckHuntGalleryImages?.Dispose();
         _duckHuntGalleryImages = null;
         _duckHuntGalleryPublished = false;
+        _duckHuntClayImages?.Dispose();
+        _duckHuntClayImages = null;
+        _duckHuntClayPublished = false;
         _duckHuntArtworkPublished = false;
     }
     public DuckHuntGallerySnapshot GalleryState { get { lock (_gate) return _boardSession.GalleryState; } }
@@ -154,6 +192,7 @@ public sealed partial class SceneCompositor
         get { lock (_gate) return _boardSession.GalleryPunctures.ToArray(); }
     }
     public DuckHuntFlightSnapshot HuntFlightState { get { lock (_gate) return _boardSession.HuntFlightState; } }
+    public DuckHuntClaySnapshot ClayState { get { lock (_gate) return _boardSession.ClayState; } }
     public DuckHuntView CurrentDuckHuntView { get { lock (_gate) return _boardSession.CurrentDuckHuntView; } }
 
     public void ShowDuckHunt()
@@ -192,6 +231,17 @@ public sealed partial class SceneCompositor
     public bool SubmitDuckHuntShot(BoardAim? aim, DateTimeOffset shotTime)
     {
         lock (_gate) return _boardSession.TryDuckHuntShot(aim, shotTime, PaintBoardAspect());
+    }
+
+    public void ShowDuckHuntClayPigeon()
+    {
+        lock (_gate)
+        {
+            CancelBoardReveal();
+            _blackOutput = false;
+            _boardSession.ShowDuckHuntClayPigeon(_blackjackClock());
+            SyncPhotoCopySession();
+        }
     }
 
     public bool ActivateDuckHuntAt(double u, double v)

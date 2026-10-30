@@ -6,6 +6,34 @@
 
 Both files are 1672 × 941 pixels. The prompts requested native 3840 × 2160, but the tool returned these smaller images; they are not native 4K and have not been artificially upscaled. The renderer crops to the physical board aspect instead of stretching the scene and caches each decoded image per graphics device. The field is loaded when Hunt is first opened. Full generation prompts and tool provenance are in [background-prompts.txt](background-prompts.txt).
 
+## Clay Pigeon valley and target
+
+`clay-valley-v1.png` and `clay-pigeon-v1.png` were generated with the built-in
+image tool on 2026-10-29. The valley uses the Hunt field as a style reference,
+with a higher grassy overlook, layered conifer forests, distant mountains,
+a winding stream and open sky. The target is a photographed-style ivory
+ceramic disc with concentric molded rings and a dark rim. Neither contains UI.
+
+The valley is native 1672 × 941 RGB; the requested 3840 × 2160 was not returned.
+It has not been artificially upscaled. The disc is 1254 × 1254 RGBA, with
+visible alpha bounds `(56, 372)–(1199, 957)`. Authorized alpha-only cleanup
+removed 4,757 stray pixels with alpha at most 6, outside a two-pixel guard
+around the meaningful silhouette. Every RGB value and the antialiased edges
+were preserved; exterior and corner alpha are zero. Prompts are in
+[clay-pigeon-prompts.md](clay-pigeon-prompts.md).
+
+Both assets load only when Clay Pigeon is entered and are cached per graphics
+device. The scene uses the shared aspect-preserving scenery crop with a four
+percent inset to exclude tiny sunlight holes at the far-left tree that could
+resemble laser dots. The original asset pixels remain unchanged. Banking,
+perspective shrink and eighteen textured ceramic fragments are animated by
+the renderer; the shared physical ellipse supplies shot geometry.
+
+SHA-256:
+
+- Valley: `ca49be1704dcb821da9c245085217d392ae40ad200c0ecd93cee4d6e808ae9c4`
+- Disc: `c4a3d363939401641be3a686ef25d85d45282feebbd05a6160474e38d3440744`
+
 ## Flying mallard
 
 `flying-mallard-body.png` (1983 × 793) and `flying-mallard-wing.png` (1024 × 1536)

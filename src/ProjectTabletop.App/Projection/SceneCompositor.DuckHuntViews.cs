@@ -14,26 +14,31 @@ public sealed partial class SceneCompositor
     private Rect _duckHuntWelcomeTitleBounds;
 
     private static bool IsDuckHuntModeButton(BoardButton button) =>
-        button.Id is "duck-hunt-target-practice" or "duck-hunt-hunt";
+        button.Id is "duck-hunt-target-practice" or "duck-hunt-hunt" or "duck-hunt-clay-pigeon";
 
     private void DrawDuckHuntSceneView(CanvasDrawingSession drawing, DateTimeOffset now)
     {
         bool menu = _boardSession.CurrentDuckHuntView == DuckHuntView.Menu;
+        bool clay = _boardSession.CurrentDuckHuntView == DuckHuntView.ClayPigeon;
         drawing.Clear(Color.FromArgb(255, 88, 151, 195));
-        string file = menu ? "arcade-welcome-v1.png" : "hunt-field-v1.png";
-        var images = menu ? _duckHuntImages : _duckHuntFieldImages;
+        string file = menu ? "arcade-welcome-v1.png" : clay ? "clay-valley-v1.png" : "hunt-field-v1.png";
+        var images = menu ? _duckHuntImages : clay ? _duckHuntClayImages : _duckHuntFieldImages;
         if (images?.Image(file) is { } image)
-            DrawDuckHuntScenery(drawing, image, PaintBoardAspect());
+            // Tiny backlit holes in the valley's far-left tree look like laser
+            // cores at 4K. A natural centred crop excludes those source pixels;
+            // the original photograph and the shared detector remain untouched.
+            DrawDuckHuntScenery(drawing, image, PaintBoardAspect(), clay ? .04 : 0);
         if (menu) DrawDuckHuntWelcomeTitle(drawing, PaintBoardAspect());
+        else if (clay) DrawDuckHuntClay(drawing, _boardSession.ClayState, PaintBoardAspect());
         else DrawDuckHuntFlight(drawing, _boardSession.HuntFlightState, PaintBoardAspect());
         DrawDuckHuntControls(drawing, now);
     }
 
-    private static void DrawDuckHuntScenery(CanvasDrawingSession drawing, CanvasBitmap image, double aspect)
+    private static void DrawDuckHuntScenery(CanvasDrawingSession drawing, CanvasBitmap image, double aspect, double inset = 0)
     {
         // Crop rather than stretch: trees, clouds and the distant field retain
         // their physical proportions on either orientation of the tabletop.
-        double width = image.Size.Width, height = image.Size.Height;
+        double width = image.Size.Width * (1 - 2 * inset), height = image.Size.Height * (1 - 2 * inset);
         if (width / height > aspect) width = height * aspect;
         else height = width / aspect;
         var source = new Rect((image.Size.Width - width) / 2, (image.Size.Height - height) / 2,

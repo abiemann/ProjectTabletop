@@ -68,12 +68,12 @@ public sealed partial class SceneCompositor
         get { lock (_gate) return SyncDuckHuntInput(MonotonicClock.UtcNow) is not null; }
     }
 
-    // Both play modes listen for shots. Their microphone lifetime follows
+    // All play modes listen for shots. Their microphone lifetime follows
     // calibration, independent of the click trainer's temporary shot pause.
     public bool DuckHuntBoardReady
     {
         get { lock (_gate) return _boardSession.Screen == BoardScreen.DuckHunt &&
-            _boardSession.CurrentDuckHuntView is DuckHuntView.TargetPractice or DuckHuntView.Hunt &&
+            _boardSession.CurrentDuckHuntView is DuckHuntView.TargetPractice or DuckHuntView.Hunt or DuckHuntView.ClayPigeon &&
             MappedBoardInputReady && !_cameraCheckRequired; }
     }
 
@@ -85,7 +85,7 @@ public sealed partial class SceneCompositor
             _duckHuntLearningActive = active;
             RefreshDuckHuntInputHint(MonotonicClock.UtcNow);
             if (_boardSession.Screen == BoardScreen.DuckHunt &&
-                _boardSession.CurrentDuckHuntView == DuckHuntView.TargetPractice)
+                _boardSession.CurrentDuckHuntView != DuckHuntView.Menu)
                 UpdateDuckHuntRound(_blackjackClock());
         }
     }
@@ -124,9 +124,11 @@ public sealed partial class SceneCompositor
                 (!DuckHuntArtworkReady || _boardSession.GalleryState.Paused)) return false;
             if (_boardSession.CurrentDuckHuntView == DuckHuntView.Hunt &&
                 (!DuckHuntArtworkReady || _boardSession.HuntFlightState.Paused)) return false;
+            if (_boardSession.CurrentDuckHuntView == DuckHuntView.ClayPigeon &&
+                (!DuckHuntArtworkReady || _boardSession.ClayState.Paused)) return false;
             // The current photo decides the hit at its own timestamp, even if
             // rendering has already advanced. Each valid shot replaces the
-            // measurement for diagnostics. Both modes use the same fresh-photo
+            // measurement for diagnostics. All modes use the same fresh-photo
             // gate; gallery punctures are attached to the paper that was hit.
             if (!_duckHuntMeasurement.Capture(aim, frameTimestamp, clickOnset, confirmedAt, now)) return false;
             _boardSession.TryDuckHuntShot(aim, frameTimestamp, PaintBoardAspect());
@@ -155,10 +157,10 @@ public sealed partial class SceneCompositor
                 status?.StartsWith("Waiting", StringComparison.OrdinalIgnoreCase) == true ? "Waiting for camera and board setup" :
                 "Microphone unavailable · choose one in the main app";
             RefreshDuckHuntInputHint(now);
-            // PLAY is an ordinary caption hold. Cancel its readiness immediately,
-            // before another camera worker can finish a press between renders.
+            // Cancel readiness immediately, before another camera worker can finish
+            // a PLAY press or submit a shot between renders.
             if (readinessChanged && _boardSession.Screen == BoardScreen.DuckHunt &&
-                _boardSession.CurrentDuckHuntView == DuckHuntView.TargetPractice)
+                _boardSession.CurrentDuckHuntView != DuckHuntView.Menu)
                 UpdateDuckHuntRound(_blackjackClock());
         }
     }
@@ -185,7 +187,7 @@ public sealed partial class SceneCompositor
     private DuckHuntInputContext? SyncDuckHuntInput(DateTimeOffset now)
     {
         bool active = _boardSession.Screen == BoardScreen.DuckHunt &&
-            _boardSession.CurrentDuckHuntView is DuckHuntView.TargetPractice or DuckHuntView.Hunt && MappedBoardInputReady &&
+            _boardSession.CurrentDuckHuntView is DuckHuntView.TargetPractice or DuckHuntView.Hunt or DuckHuntView.ClayPigeon && MappedBoardInputReady &&
             !_cameraCheckRequired && !_duckHuntLearningActive;
         var key = new DuckHuntInputKey(_boardSession.NavigationRevision, _boardSession.DuckHuntRoundRevision, _boardCameraMap,
             _boardSurfaceMap, _handVisualResetThrough, active);
