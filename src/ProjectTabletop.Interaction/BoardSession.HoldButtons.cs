@@ -49,11 +49,17 @@ public sealed partial class BoardSession
     /// A fresh frame may veto individual captions through <paramref name="blockedIds"/>;
     /// this discards their progress and clear readiness without marking them clear or
     /// releasing a spent physical place. Other captions retain their evidence.
+    /// A subset in <paramref name="recoverableBlockedIds"/> may instead keep previously
+    /// verified clear readiness when independent board activity interrupts a hold.
+    /// Such a block still discards all progress, cannot supply a clear observation,
+    /// and requires a full new hold after the activity ends. Reach and appearance
+    /// vetoes should keep the default, non-recoverable behavior.
     /// Returns the buttons activated by this frame.
     /// </summary>
     public IReadOnlyList<string> ObserveHeldButtons(IReadOnlyCollection<string> heldIds,
         DateTimeOffset frameTime, DateTimeOffset now, IReadOnlyCollection<string>? clearedIds = null,
-        IReadOnlyCollection<string>? blockedIds = null)
+        IReadOnlyCollection<string>? blockedIds = null,
+        IReadOnlyCollection<string>? recoverableBlockedIds = null)
     {
         ArgumentNullException.ThrowIfNull(heldIds);
         TickControlVisibility(now);
@@ -69,13 +75,23 @@ public sealed partial class BoardSession
             var blocked = Buttons.Where(button => button.IsHold && button.Enabled &&
                     blockedIds.Contains(button.Id) && HoldCaptionFrameIsCurrent(button.Id, frameTime))
                 .Select(button => button.Id).ToArray();
-            if (blocked.Length != 0) ResetHoldCaptionEvidence(blocked, frameTime);
+            if (blocked.Length != 0)
+            {
+                if (recoverableBlockedIds is not { Count: > 0 }) ResetHoldCaptionEvidence(blocked, frameTime);
+                else
+                {
+                    foreach (string id in blocked) _holds.Remove(id);
+                    var hardBlocked = blocked.Where(id => !recoverableBlockedIds.Contains(id)).ToArray();
+                    if (hardBlocked.Length != 0) ResetHoldCaptionEvidence(hardBlocked, frameTime);
+                }
+            }
         }
         // This frame cannot prove that a newly re-enabled appearance was clear
         // when the phase changes below. Production also filters clearedIds by
         // the enabled controls in its captured rendered-reference context.
         var clearEligible = strictCaptions
-            ? Buttons.Where(button => button.IsHold && button.Enabled && HoldCaptionFrameIsCurrent(button.Id, frameTime))
+            ? Buttons.Where(button => button.IsHold && button.Enabled && blockedIds?.Contains(button.Id) != true &&
+                    HoldCaptionFrameIsCurrent(button.Id, frameTime))
                 .Select(button => button.Id).ToHashSet()
             : null;
         // Like any camera frame, hold evidence advances timed presentations.

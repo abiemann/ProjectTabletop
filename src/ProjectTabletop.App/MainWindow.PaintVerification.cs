@@ -687,8 +687,11 @@ public sealed partial class MainWindow
             Draw(controls);
             now += TimeSpan.FromSeconds(1);
             var context = controls.GetHandAcquisitionContext(now);
+            var holdContext = controls.GetHoldButtonContext(now);
+            string[] expectedIds = ["paint-drawer-close", "menu", "paint-reset", "paint-save"];
             Require(context is { IlluminatedHint: null } &&
-                    controls.GetHoldButtonContext(now) is { ButtonIds.Count: 3 } &&
+                    holdContext is not null && holdContext.ButtonIds.Count == expectedIds.Length &&
+                    holdContext.ButtonIds.ToHashSet().SetEquals(expectedIds) &&
                     controls.CurrentBoardButtons.All(button => button.IsHold),
                 "Paint's drawer must use caption holds without navigation spotlights.");
         }

@@ -65,11 +65,22 @@ public sealed partial class SceneCompositor
                     (pattern.CaptionHoldEvidence || pattern.CaptionReflectanceChanged)) == true)
                 return EnabledHoldIds.ToArray();
             if (ExpectedScene.BoardDisturbanceExclusionRegion is null || result is null) return [];
-            bool elsewhere = result.OutsideControlDisturbance || result.TextPatterns?.Any(pattern =>
-                pattern.CaptionHoldEvidence && pattern.ControlRegion >= 0 && pattern.ControlRegion < ButtonIds.Count &&
-                ButtonIds[pattern.ControlRegion] is not ("menu-scroll-down" or "menu-scroll-up")) == true;
+            bool elsewhere = result.OutsideControlDisturbance || HasNonPagingCaptionHold(result);
             return elsewhere ? ButtonIds.Where(id => id is "menu-scroll-down" or "menu-scroll-up").ToArray() : [];
         }
+
+        // Independent activity may be a brief optical mismatch in menu art.
+        // It still cancels progress immediately, but need not erase an already
+        // verified clear arrow. Reaching onto another caption stays a hard veto.
+        public IReadOnlyList<string> RecoverableBlockedButtons(HandAcquisitionPresenceResult? result) =>
+            ExpectedScene.BoardDisturbanceExclusionRegion is not null && result?.OutsideControlDisturbance == true &&
+                !HasNonPagingCaptionHold(result)
+                ? ButtonIds.Where(id => id is "menu-scroll-down" or "menu-scroll-up").ToArray() : [];
+
+        private bool HasNonPagingCaptionHold(HandAcquisitionPresenceResult result) =>
+            result.TextPatterns?.Any(pattern =>
+                pattern.CaptionHoldEvidence && pattern.ControlRegion >= 0 && pattern.ControlRegion < ButtonIds.Count &&
+                ButtonIds[pattern.ControlRegion] is not ("menu-scroll-down" or "menu-scroll-up")) == true;
     }
 
     public HoldButtonContext? GetHoldButtonContext(DateTimeOffset frameTime)
@@ -143,7 +154,8 @@ public sealed partial class SceneCompositor
     /// <summary>Applies one camera frame's hold evidence; returns the buttons it activated.</summary>
     public IReadOnlyList<string> ObserveHoldButtons(HoldButtonContext? context, IReadOnlyList<string> heldIds,
         DateTimeOffset frameTime, IReadOnlyCollection<string>? clearedIds = null,
-        IReadOnlyCollection<string>? blockedIds = null)
+        IReadOnlyCollection<string>? blockedIds = null,
+        IReadOnlyCollection<string>? recoverableBlockedIds = null)
     {
         lock (_gate)
         {
@@ -154,10 +166,14 @@ public sealed partial class SceneCompositor
                 context is null || !IsCurrentHoldContext(context) ||
                 !AcquisitionBoardReady || HasBoardControlDrawerAnimation()) return [];
             if (HoldButtonsBlockedByBoardActivity(HoldClock()))
+            {
                 blockedIds = _boardSession.Buttons.Where(button => button.IsHold).Select(button => button.Id)
                     .Concat(blockedIds ?? []).Distinct().ToArray();
+                recoverableBlockedIds = null;
+            }
             SyncGlobeSaveState();
-            var activated = _boardSession.ObserveHeldButtons(heldIds, frameTime, HoldClock(), clearedIds, blockedIds);
+            var activated = _boardSession.ObserveHeldButtons(heldIds, frameTime, HoldClock(), clearedIds, blockedIds,
+                recoverableBlockedIds);
             if (activated.Count > 0)
             {
                 if (context.ButtonIds.Contains("paint-drawer-close") || context.ButtonIds.Contains("paint-drawer-open"))

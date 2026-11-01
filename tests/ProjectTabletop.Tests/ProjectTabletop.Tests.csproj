@@ -26,6 +26,7 @@
     <Using Include="Xunit" />
     <None Update="Fixtures/menu-down-border.json;Fixtures/menu-down-border-*.bgra.gz" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/menu-up-palette.json;Fixtures/menu-up-palette-*.bgra.gz" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures/menu-restart-artwork.json;Fixtures/menu-restart-artwork-*.bgra.gz" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/gallery-red-dot.json;Fixtures/gallery-*.bgra.gz" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/gallery-score-fringe.json;Fixtures/duck-faint-magenta-laser.json;Fixtures/duck-faint-magenta-laser.bgra.gz" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/gallery-pink-highlight.json" CopyToOutputDirectory="PreserveNewest" />

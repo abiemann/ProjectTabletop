@@ -91,10 +91,12 @@ public sealed partial class MainWindow
         var board = _scene.CurrentBoardScreen;
         _scene.ObserveHoldControlExposure(context, query.Presence, frame.Timestamp);
         var blocked = context?.BlockedButtons(query.Presence) ?? [];
-        var activations = _scene.ObserveHoldButtons(context, query.Held, frame.Timestamp, query.Cleared, blocked);
+        var recoverableBlocked = context?.RecoverableBlockedButtons(query.Presence) ?? [];
+        var activations = _scene.ObserveHoldButtons(context, query.Held, frame.Timestamp, query.Cleared, blocked,
+            recoverableBlocked);
         _lastHoldButtonDetection = new { frameTime = frame.Timestamp,
             board = board.ToString(), context = context is not null, held = query.Held,
-            cleared = query.Cleared, blocked, revision = context?.Revision,
+            cleared = query.Cleared, blocked, recoverableBlocked, revision = context?.Revision,
             buttonIds = context?.ButtonIds, enabledHoldIds = context?.EnabledHoldIds,
             ageMilliseconds = (MonotonicClock.UtcNow - frame.Timestamp).TotalMilliseconds,
             reason = query.Presence?.Reason, baselineReady = query.Presence?.BaselineReady,

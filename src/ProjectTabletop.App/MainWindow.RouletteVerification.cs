@@ -308,7 +308,8 @@ public sealed partial class MainWindow
             onlyPagingArrowUsesCaptionHold = true, oneSecondHoldRequired = true, intactChevronCancels = true,
             freshClearRequired = true, pinchAndIndexSeparationRejected = true, continuedSeparationCannotReverse = true,
             outsideCaptionAndGapDisturbancesCancelPaging = true, stationaryOutsideDisturbanceKeepsPagingBlocked = true,
-            outsideDisturbanceRequiresFreshArrowRelease = true,
+            otherCaptionDisturbanceRequiresFreshArrowRelease = true,
+            independentOutsideDisturbanceRecoversWithFullNewHold = true,
             thumbnailCompletionRefreshesHoldReference = true,
             staleGesturesRejected = true, scrollDurationMilliseconds = BoardSession.MenuScrollDuration.TotalMilliseconds,
             fixedHeadingAndFooter = true, movingInputAndAcquisitionSuppressed = true,
@@ -381,10 +382,10 @@ public sealed partial class MainWindow
 
             CheckOutsideDisturbance(context.ExpectedScene.BoardTriggerRegions[0], backgroundOnly: false);
             // A hand in the gap between card columns must also veto paging,
-            // even though no other caption is corrupted.
-            CheckOutsideDisturbance(new(.485, .26, .03, .50), backgroundOnly: true);
+            // even though no other caption is corrupted. Removing it permits
+            // a full new hold without lifting the already verified arrow hand.
+            DateTimeOffset? firstHeld = CheckOutsideDisturbance(new(.485, .26, .03, .50), backgroundOnly: true);
 
-            DateTimeOffset? firstHeld = null;
             for (int frame = 0; frame < 18; frame++)
             {
                 var result = Feed(occupied);
@@ -401,7 +402,7 @@ public sealed partial class MainWindow
             }
             throw new InvalidOperationException("A full native chevron hold failed to page: " + id + ".");
 
-            void CheckOutsideDisturbance(HandTrackingBounds bounds, bool backgroundOnly)
+            DateTimeOffset? CheckOutsideDisturbance(HandTrackingBounds bounds, bool backgroundOnly)
             {
                 for (int frame = 0; frame < 5; frame++) Feed(empty);
                 for (int frame = 0; frame < 4; frame++) Feed(occupied);
@@ -420,22 +421,39 @@ public sealed partial class MainWindow
                 {
                     var result = Feed(both);
                     Check(result.Activated.Count == 0 && result.Blocked && scene.CurrentHoldProgress.Count == 0 &&
-                            !board.MenuScrolling && (!backgroundOnly || lastOutsideDisturbance),
+                            !board.MenuScrolling && result.Recoverable == backgroundOnly &&
+                            (!backgroundOnly || lastOutsideDisturbance),
                         "An outside disturbance failed to cancel or keep the arrow disengaged: " + id + ".");
+                }
+                if (backgroundOnly)
+                {
+                    DateTimeOffset? resumed = null;
+                    for (int frame = 0; frame < 6; frame++)
+                    {
+                        var result = Feed(occupied);
+                        if (result.Held) resumed ??= fixture.Now;
+                        Check(result.Activated.Count == 0 && !result.Blocked && !board.MenuScrolling,
+                            "An independent disturbance retained a veto or restored old elapsed hold time: " + id + ".");
+                    }
+                    Check(resumed is not null && scene.CurrentHoldProgress.Any(progress => progress.ButtonId == id),
+                        "Removing independent activity failed to rearm the still-held verified arrow: " + id + ".");
+                    return resumed;
                 }
                 for (int frame = 0; frame < 14; frame++)
                     Check(Feed(occupied).Activated.Count == 0 && scene.CurrentHoldProgress.Count == 0 && !board.MenuScrolling,
-                        "Removing the outside disturbance resumed a still-covered arrow without fresh release: " + id + ".");
+                        "Removing another caption's reach veto resumed a still-covered arrow without fresh release: " + id + ".");
                 for (int frame = 0; frame < 5; frame++) Feed(empty);
+                return null;
             }
 
-            (bool Held, IReadOnlyList<string> Activated, bool Blocked) Feed(byte[] pixels)
+            (bool Held, IReadOnlyList<string> Activated, bool Blocked, bool Recoverable) Feed(byte[] pixels)
             {
                 fixture.Now += TimeSpan.FromMilliseconds(100);
                 var presence = tracker.Update(fixture.Width, fixture.Height, fixture.Width * 4, pixels,
                     context.SearchPolygon, context.ExpectedScene, fixture.Now, fixture.Now);
                 var held = context.HeldButtons(presence);
                 var blocked = context.BlockedButtons(presence);
+                var recoverable = context.RecoverableBlockedButtons(presence);
                 lastOutsideDisturbance = presence.OutsideControlDisturbance;
                 bool corrupted = presence.TextPatterns?.SingleOrDefault(pattern => pattern.ControlRegion == index) is
                     { ShapeCorrupted: true, LabelIntact: false, ConfirmationFrames: >= 1 };
@@ -443,7 +461,7 @@ public sealed partial class MainWindow
                 Check(!held.Contains(id) || corrupted && !ReferenceEquals(pixels, empty),
                     "Unbroken native chevron pixels counted as a hold: " + id + ".");
                 return (held.Contains(id), scene.ObserveHoldButtons(context, held, fixture.Now,
-                    context.ClearedButtons(presence), blocked), blocked.Contains(id));
+                    context.ClearedButtons(presence), blocked, recoverable), blocked.Contains(id), recoverable.Contains(id));
             }
         }
 

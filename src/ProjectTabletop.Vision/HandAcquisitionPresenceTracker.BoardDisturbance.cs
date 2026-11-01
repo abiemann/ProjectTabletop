@@ -144,24 +144,39 @@ public sealed partial class HandAcquisitionPresenceTracker
                 minY = seed / _columns, maxY = minY;
             queue[0] = seed; visited[seed] = true;
             double area = 0;
+            int interiorCells = 0;
             while (head < tail)
             {
                 int index = queue[head++], x = index % _columns, y = index / _columns;
                 area += _outsideControlAreas![index];
                 minX = Math.Min(minX, x); maxX = Math.Max(maxX, x);
                 minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
+                int occupiedNeighbors = 0;
                 for (int dy = -1; dy <= 1; dy++)
                 for (int dx = -1; dx <= 1; dx++)
                 {
+                    if (dx == 0 && dy == 0) continue;
                     int nx = x + dx, ny = y + dy, neighbor = ny * _columns + nx;
-                    if (nx < 0 || nx >= _columns || ny < 0 || ny >= _rows || !residual[neighbor] || visited[neighbor]) continue;
+                    if (nx < 0 || nx >= _columns || ny < 0 || ny >= _rows || !residual[neighbor]) continue;
+                    occupiedNeighbors++;
+                    if (visited[neighbor]) continue;
                     visited[neighbor] = true; queue[tail++] = neighbor;
                 }
+                if (occupiedNeighbors == 8) interiorCells++;
             }
-            // A long border can fill a one-row/column box completely. Require
-            // thickness in both dimensions before treating it as an obstruction.
-            if (area >= .0012 && tail >= 12 && maxX > minX && maxY > minY &&
-                tail >= (maxX - minX + 1) * (maxY - minY + 1) * .30)
+            // A shifted or blurred border can span several rows as it bends,
+            // while remaining only one or two samples thick. Bounding-box
+            // thickness alone wrongly classifies that as a hand. Require a
+            // genuine interior: at least three samples surrounded on all sides.
+            // A long narrow reach must also fill most of its bounds; scattered
+            // bands through thumbnail texture are not a coherent arm silhouette.
+            // Compact fingers may retain gaps where projected detail survives.
+            // This needs no extra frame delay or allocations and still admits
+            // compact fingers and narrow reaches through the gaps.
+            int width = maxX - minX + 1, height = maxY - minY + 1;
+            double minimumDensity = Math.Min(width, height) * 2 < Math.Max(width, height) ? .50 : .30;
+            if (area >= .0012 && tail >= 12 && interiorCells >= 3 &&
+                tail >= width * height * minimumDensity)
             {
                 if (!collectRegions) return true;
                 found = true;
