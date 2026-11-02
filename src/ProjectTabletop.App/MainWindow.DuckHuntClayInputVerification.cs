@@ -82,6 +82,9 @@ public sealed partial class MainWindow
         Check(ShotAtClay(1, learned.Epoch) && scene.ClayState.Score == 2,
             "The second clay could not be hit after input resumed.");
 
+        await CheckProjectionTiming(false);
+        await CheckProjectionTiming(true);
+
         // Move the bounded game clock to its final round without waiting a
         // minute. The live photo gate itself retains the host's real clock.
         var began = MonotonicClock.UtcNow - DuckHuntClayGame.RoundDuration - TimeSpan.FromSeconds(1);
@@ -126,7 +129,46 @@ public sealed partial class MainWindow
             scene.GetDuckHuntInputContext() is null && !Snapshot(new(.5, .5), recovered.Epoch),
             "Board calibration allowed a clay shot or continued the round.");
         return new { Ok = true, Assertions = assertions, RealClockSnapshotGate = true,
-            AutomaticStart = true, PhotoTimeMovingHits = 2, ReplayInvalidatesEpoch = true };
+            AutomaticStart = true, PhotoTimeMovingHits = 2, ReplayInvalidatesEpoch = true,
+            MeasuredProjectionDelay = true, DelayedAdjacentPhoto = true };
+
+        async Task CheckProjectionTiming(bool ambiguous)
+        {
+            scene.ClearDuckHuntInput();
+            var began = MonotonicClock.UtcNow.AddSeconds(-1);
+            game.Reset(began);
+            game.SetReady(true, began);
+            Draw();
+            var input = Context();
+            await Task.Delay(250);
+            var confirmed = MonotonicClock.UtcNow;
+            var click = confirmed - TimeSpan.FromMilliseconds(125);
+            var photo = confirmed - TimeSpan.FromMilliseconds(100);
+            var latest = ambiguous ? photo + TimeSpan.FromMilliseconds(25) : photo;
+            var delay = TimeSpan.FromMilliseconds(85);
+            var photographed = new DuckHuntClayGame();
+            photographed.Reset(began);
+            photographed.SetReady(true, began);
+            photographed.Advance(photo - delay);
+            var targetPose = photographed.Targets[0];
+            var aim = new BoardAim(targetPose.U, targetPose.V);
+            uiNow = confirmed;
+            game.Advance(confirmed);
+            Check(!DuckHuntClayLayout.ContainsClay(aim, game.Targets[0], aspect),
+                "Delayed-photo fixture did not separate the visible clay from its current pose.");
+            if (ambiguous) scene.PublishDuckHuntDot(aim, photo, input.Epoch);
+            Check(scene.SubmitDuckHuntSnapshot(ambiguous ? null : aim, latest, click, confirmed,
+                    input.Epoch, ambiguous, out var selected, delay) &&
+                selected is { } shot && shot.ClickedAt == photo && scene.ClayState.Score == 1,
+                "Measured delay rejected a fresh photo or used the ambiguous photo's later pose.");
+            var hit = game.Targets[0];
+            Check(hit.Hit && Math.Abs(hit.U - targetPose.U) < 1e-10 && Math.Abs(hit.V - targetPose.V) < 1e-10 &&
+                hit.HitElapsed < .15,
+                "A delayed shot moved the impact or skipped the beginning of its shatter effect.");
+            Check(!scene.SubmitDuckHuntSnapshot(aim, latest, click, confirmed,
+                    input.Epoch, false, out _, delay) && scene.ClayState.Score == 1,
+                "Projection timing allowed a click to score twice.");
+        }
 
         void PrepareMovingPair()
         {

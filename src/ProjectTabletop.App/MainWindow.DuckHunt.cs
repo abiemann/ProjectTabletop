@@ -32,7 +32,8 @@ public sealed partial class MainWindow
     private sealed record DuckHuntClickSnapshot(DateTimeOffset OnsetAt, DateTimeOffset ConfirmedAt,
         DateTimeOffset? FrameTimestamp, RedDotDetectionResult? Dot, string Outcome,
         double DetectionMilliseconds, double TotalMilliseconds, long Generation,
-        DateTimeOffset? SelectedFrameTimestamp, BoardAim? SelectedAim, bool UsedPriorObservation);
+        DateTimeOffset? SelectedFrameTimestamp, BoardAim? SelectedAim, bool UsedPriorObservation,
+        double ProjectionDelayMilliseconds, DateTimeOffset? SelectedSceneTimestamp);
 
     private void InitializeDuckHunt()
     {
@@ -215,6 +216,11 @@ public sealed partial class MainWindow
         Interlocked.Exchange(ref _duckHuntLastClickUtcTicks, at.UtcTicks);
         long generation = Interlocked.Read(ref _duckHuntGeneration);
         long audioGeneration = Interlocked.Read(ref _duckHuntAudioGeneration);
+        // Freeze the measured optical delay for this click. Frame timestamps keep
+        // their original freshness meaning; only the target's projected pose is
+        // shifted. Using the selected photo's post-copy time also supports the
+        // adjacent-photo fallback, with the small CPU-copy offset left unchanged.
+        var projectionDelay = TimeSpan.FromTicks(Volatile.Read(ref _projectionSceneDelayTicks));
         using var frameLease = AcquireLatestCameraFrame();
         // Read after acquiring: a camera frame may arrive during the slot lookup.
         DateTimeOffset confirmedAt = MonotonicClock.UtcNow;
@@ -250,7 +256,7 @@ public sealed partial class MainWindow
                 var clayBefore = _scene.ClayState;
                 bool accepted = _scene.SubmitDuckHuntSnapshot(dot.Detected
                         ? new BoardAim(dot.BoardX!.Value, dot.BoardY!.Value) : null,
-                    frame.Timestamp, at, confirmedAt, context.Epoch, dot.Ambiguous, out var selected);
+                    frame.Timestamp, at, confirmedAt, context.Epoch, dot.Ambiguous, out var selected, projectionDelay);
                 var after = _scene.GalleryState;
                 var flightAfter = _scene.HuntFlightState;
                 var clayAfter = _scene.ClayState;
@@ -294,7 +300,8 @@ public sealed partial class MainWindow
             DuckHuntShot? selected = null) =>
             Volatile.Write(ref _duckHuntClickSnapshot, new(at, confirmedAt, frameTimestamp, dot, outcome,
                 elapsed, (MonotonicClock.UtcNow - confirmedAt).TotalMilliseconds, generation,
-                selected?.ClickedAt, selected?.Aim, selected.HasValue && selected.Value.ClickedAt != frameTimestamp));
+                selected?.ClickedAt, selected?.Aim, selected.HasValue && selected.Value.ClickedAt != frameTimestamp,
+                projectionDelay.TotalMilliseconds, selected is { } shot ? shot.ClickedAt - projectionDelay : null));
     }
 
     private object DuckHuntInputStatus()

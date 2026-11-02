@@ -90,18 +90,19 @@ public sealed partial class BoardSession
     public double GetDuckHuntDrawerProgress(DateTimeOffset now) =>
         BottomDrawerProgress(_duckHuntDrawer, BoardScreen.DuckHunt, now);
 
-    public bool TryDuckHuntShot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1)
+    public bool TryDuckHuntShot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1,
+        DateTimeOffset? sceneTime = null)
     {
         if (Screen == BoardScreen.DuckHunt && CurrentDuckHuntView == DuckHuntView.ClayPigeon)
         {
             bool wasFinished = _clay.Snapshot.RoundFinished;
-            bool hit = _clay.Shoot(aim, shotTime, boardAspect);
+            bool hit = _clay.Shoot(aim, shotTime, boardAspect, sceneTime);
             FinishDuckHuntClay(wasFinished, Later(shotTime, _duckHuntDrawer.ObservedAt));
             return hit;
         }
         if (Screen == BoardScreen.DuckHunt && CurrentDuckHuntView == DuckHuntView.Hunt)
         {
-            bool acted = _huntFlight.Shoot(aim, shotTime, boardAspect);
+            bool acted = _huntFlight.Shoot(aim, shotTime, boardAspect, sceneTime);
             if (acted && _huntFlight.Snapshot.Phase == DuckHuntFlightPhase.Launching)
             {
                 DuckHuntRoundRevision++;
@@ -111,7 +112,7 @@ public sealed partial class BoardSession
             return acted;
         }
         if (Screen != BoardScreen.DuckHunt || CurrentDuckHuntView != DuckHuntView.TargetPractice) return false;
-        return _gallery.Shoot(aim, shotTime, boardAspect);
+        return _gallery.Shoot(aim, shotTime, boardAspect, sceneTime);
     }
 
     private void InitializeDuckHunt(DateTimeOffset now)

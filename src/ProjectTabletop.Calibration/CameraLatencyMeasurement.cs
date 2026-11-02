@@ -64,6 +64,27 @@ public sealed class CameraLatencyMeasurement
     }
 
     /// <summary>
+    /// Median projector-draw-to-camera-arrival delay from at least three distinct
+    /// registration dots. This optical scene estimate includes projector delay
+    /// and is independent of the allowance used to display camera-only latency.
+    /// </summary>
+    public double? TotalMedianMilliseconds
+    {
+        get
+        {
+            if (_observations.Count < 3) return null;
+            Span<double> ordered = stackalloc double[_observations.Count];
+            for (int i = 0; i < ordered.Length; i++)
+                ordered[i] = (_observations[i].ArrivedAt - _observations[i].ShownAt).TotalMilliseconds;
+            ordered.Sort();
+            int middle = ordered.Length / 2;
+            return ordered.Length % 2 == 0
+                ? (ordered[middle - 1] + ordered[middle]) / 2
+                : ordered[middle];
+        }
+    }
+
+    /// <summary>
     /// A conservative age for projected artwork that could already be visible in
     /// a camera frame. Three raw dot observations establish the shortest total
     /// delivery delay; two camera periods allow for exposure and detection timing.

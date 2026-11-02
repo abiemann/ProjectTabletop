@@ -233,6 +233,57 @@ public class CameraLatencyTests
         Assert.True(measurement.ProjectionReferenceMinimumAge(60) > TimeSpan.Zero);
     }
 
+    [Fact]
+    public void TotalMedianRequiresThreeDistinctValidObservationsAndUsesRawDelay()
+    {
+        var measurement = new CameraLatencyMeasurement();
+        Assert.Null(measurement.TotalMedianMilliseconds);
+        Assert.True(measurement.Record(0, Start, Start.AddMilliseconds(100)));
+        Assert.True(measurement.Record(1, Start, Start.AddMilliseconds(80)));
+        Assert.False(measurement.Record(1, Start, Start.AddMilliseconds(200)));
+        Assert.False(measurement.Record(2, Start, Start.AddMilliseconds(-1)));
+        Assert.False(measurement.Record(2, Start, Start.AddMilliseconds(2001)));
+        Assert.Null(measurement.TotalMedianMilliseconds);
+        Assert.True(measurement.Record(2, Start, Start.AddMilliseconds(90)));
+        Assert.Equal(90, measurement.TotalMedianMilliseconds);
+        Assert.True(measurement.Record(3, Start, Start.AddMilliseconds(110)));
+        Assert.Equal(95, measurement.TotalMedianMilliseconds);
+        Assert.True(measurement.Record(4, Start, Start.AddMilliseconds(85)));
+        Assert.Equal(90, measurement.TotalMedianMilliseconds);
+        Assert.Equal([0, 1, 2, 3, 4], measurement.Samples.Select(sample => sample.SpotIndex));
+    }
+
+    [Fact]
+    public void TotalMedianIsIndependentOfProjectorAllowanceEvenWhenCameraSamplesAreExcluded()
+    {
+        var measurement = new CameraLatencyMeasurement { ProjectorMilliseconds = 500 };
+        Assert.False(measurement.Record(0, Start, Start.AddMilliseconds(100)));
+        Assert.False(measurement.Record(1, Start, Start.AddMilliseconds(80)));
+        Assert.False(measurement.Record(2, Start, Start.AddMilliseconds(90)));
+        Assert.Empty(measurement.Samples);
+        foreach (double allowance in new[] { 0d, 17, 90, 2000 })
+        {
+            measurement.ProjectorMilliseconds = allowance;
+            Assert.Equal(90, measurement.TotalMedianMilliseconds);
+        }
+    }
+
+    [Fact]
+    public void ResetRemovesTotalMedianUntilThreeNewObservations()
+    {
+        var measurement = new CameraLatencyMeasurement();
+        for (int i = 0; i < 3; i++)
+            Assert.True(measurement.Record(i, Start, Start.AddMilliseconds(100 + i)));
+        Assert.Equal(101, measurement.TotalMedianMilliseconds);
+        measurement.Reset();
+        Assert.Null(measurement.TotalMedianMilliseconds);
+        Assert.True(measurement.Record(0, Start, Start.AddMilliseconds(50)));
+        Assert.True(measurement.Record(1, Start, Start.AddMilliseconds(55)));
+        Assert.Null(measurement.TotalMedianMilliseconds);
+        Assert.True(measurement.Record(2, Start, Start.AddMilliseconds(60)));
+        Assert.Equal(55, measurement.TotalMedianMilliseconds);
+    }
+
     [Theory]
     [InlineData(60, 66.6666667)]
     [InlineData(30, 33.3333333)]

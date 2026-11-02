@@ -46,7 +46,8 @@ public readonly record struct DuckHuntGallerySnapshot(DuckHuntGalleryPhase Phase
 }
 
 /// <summary>Independent paper and skull rows lead into a timed middle gallery.
-/// Validated camera timestamps decide hits, including near exposure deadlines.</summary>
+/// The projected scene time decides exposure deadlines; validated camera time
+/// governs fresh input, scoring and newly started effects.</summary>
 public sealed class DuckHuntGalleryGame
 {
     public const int TargetCount = 5;
@@ -205,18 +206,21 @@ public sealed class DuckHuntGalleryGame
         return true;
     }
 
-    public bool Shoot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1)
+    public bool Shoot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1,
+        DateTimeOffset? sceneTime = null)
     {
+        var poseTime = sceneTime ?? shotTime;
         if (!_ready || aim is not { } point || !double.IsFinite(point.U) || !double.IsFinite(point.V) ||
             point.U is < 0 or > 1 || point.V is < 0 or > 1 ||
             !double.IsFinite(boardAspect) || boardAspect <= 0 || shotTime <= _lastShotAt ||
-            shotTime < _inputNotBefore || _observedAt - shotTime > DuckHuntAimGate.Freshness) return false;
+            shotTime < _inputNotBefore || poseTime > shotTime || poseTime < _inputNotBefore ||
+            _observedAt - shotTime > DuckHuntAimGate.Freshness) return false;
 
         Advance(shotTime > _observedAt ? shotTime : _observedAt);
         if (_snapshot.PlayVisible) return false;
-        bool paperReady = _phase == DuckHuntGalleryPhase.WaitingForHits && shotTime >= _phaseStartedAt;
-        bool skullReady = _upperPhase == DuckHuntGalleryUpperPhase.WaitingForHits && shotTime >= _upperPhaseStartedAt;
-        var middleAtShot = MiddleAt(shotTime);
+        bool paperReady = _phase == DuckHuntGalleryPhase.WaitingForHits && poseTime >= _phaseStartedAt;
+        bool skullReady = _upperPhase == DuckHuntGalleryUpperPhase.WaitingForHits && poseTime >= _upperPhaseStartedAt;
+        var middleAtShot = MiddleAt(poseTime);
         bool middleReady = middleAtShot.Phase == DuckHuntGalleryMiddlePhase.WaitingForHit;
         if (!paperReady && !skullReady && !middleReady) return false;
         _lastShotAt = shotTime;

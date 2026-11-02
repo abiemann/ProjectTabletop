@@ -17,6 +17,7 @@ public sealed class AudioClickDetector
     internal const double WindowMilliseconds = 5;
     private const double WindowSeconds = WindowMilliseconds / 1000;
     private const double WarmupSeconds = .6;
+    private const double ShortFallObservationSeconds = .015;
     private int _sampleRate, _channels, _windowFrames, _frames;
     private double _energy, _peak, _elapsed, _noiseRms, _noisePeak, _previousPeak;
     private double _candidateRms, _quietSeconds, _candidateFallSeconds;
@@ -28,6 +29,8 @@ public sealed class AudioClickDetector
     private AudioClickProfile? _profile;
     private long _completedTransients, _timedOutCandidates, _rejectedByProfile;
     private long _candidateElapsedFrames;
+    private long _shortFallObservationUntilFrames;
+    private bool _shortFallObservationUsed;
     private double _lastTimedOutSoundDurationMs;
     private AudioClickTransient? _lastCompletedTransient, _lastTimedOutCandidate;
     private DateTimeOffset _windowStart, _lastFrameEnd, _candidateAt, _lastClickAt;
@@ -75,6 +78,8 @@ public sealed class AudioClickDetector
         LastTransient = null;
         _completedTransients = _timedOutCandidates = _rejectedByProfile = 0;
         _candidateElapsedFrames = 0;
+        _shortFallObservationUntilFrames = 0;
+        _shortFallObservationUsed = false;
         _lastTimedOutSoundDurationMs = 0;
         _lastCompletedTransient = _lastTimedOutCandidate = null;
     }
@@ -174,8 +179,14 @@ public sealed class AudioClickDetector
                 // Measure learned sound length from every elapsed sample frame,
                 // including brief falls inside a sound, while retaining the original
                 // host onset and wall-clock deadline for fresh camera matching.
-                if (!quiet && !relativeFall) AccumulateCandidate(peak, energy, highEnergy, sampleCount,
-                    adapted ? (double)_candidateElapsedFrames / _sampleRate : age + seconds);
+                if (!quiet && !relativeFall)
+                {
+                    // A prompt rebound ends the one-use observation grace. Any
+                    // remaining sound is still governed by the normal deadline.
+                    _shortFallObservationUntilFrames = 0;
+                    AccumulateCandidate(peak, energy, highEnergy, sampleCount,
+                        adapted ? (double)_candidateElapsedFrames / _sampleRate : age + seconds);
+                }
                 // New learning can include one additional 5 ms window for a
                 // strongly peaked click, followed by a real 10 ms quiet/fall.
                 // Existing profiles retain their 120 ms bound. Neither path
@@ -205,23 +216,39 @@ public sealed class AudioClickDetector
                     rms < Math.Max(adapted ? .001 : .008, _candidateRms * .3))
                 {
                     var features = CandidateFeatures(adapted ? soundDurationMs : Math.Min(120, _candidateDuration * 1000));
-                    LastTransient = new(_candidateAt, features);
-                    _lastCompletedTransient = LastTransient;
-                    _completedTransients++;
-                    completed = true;
                     bool accepted = _profile is null || _profile.Matches(features);
-                    if (accepted) click = _candidateAt;
-                    else _rejectedByProfile++;
-                    // A quiet mechanical precursor can finish just before the actual
-                    // click. It must not spend the real click's refractory period.
-                    // Only a transient below BOTH learned level floors can rearm
-                    // here; the next onset still needs its sharp rise, decay and
-                    // complete profile match. Accepted clicks and loud rejections
-                    // keep their original echo protection. An earlier real click's
-                    // cooldown already elapsed before this candidate could start.
-                    if (!accepted && _profile!.IsBelowBothMinimumLevels(features)) _armed = true;
-                    else _lastClickAt = _candidateAt;
-                    _candidate = false;
+                    if (!accepted && !quiet && !_shortFallObservationUsed &&
+                        AudioClickProfile.IsExtendedImpulse(features) &&
+                        features.DurationMs < _profile!.MinimumDurationMs &&
+                        _profile.Matches(features with { DurationMs = _profile.MinimumDurationMs }))
+                    {
+                        // A two-window notch in a real click's decaying tail can
+                        // look like its end. Observe at most three more windows
+                        // only when duration is the sole mismatch. Never pad the
+                        // measured duration or relax any learned feature bound.
+                        _shortFallObservationUsed = true;
+                        _shortFallObservationUntilFrames = _candidateElapsedFrames +
+                            (long)Math.Round(_sampleRate * ShortFallObservationSeconds);
+                    }
+                    if (accepted || quiet || _candidateElapsedFrames >= _shortFallObservationUntilFrames)
+                    {
+                        LastTransient = new(_candidateAt, features);
+                        _lastCompletedTransient = LastTransient;
+                        _completedTransients++;
+                        completed = true;
+                        if (accepted) click = _candidateAt;
+                        else _rejectedByProfile++;
+                        // A quiet mechanical precursor can finish just before the actual
+                        // click. It must not spend the real click's refractory period.
+                        // Only a transient below BOTH learned level floors can rearm
+                        // here; the next onset still needs its sharp rise, decay and
+                        // complete profile match. Accepted clicks and loud rejections
+                        // keep their original echo protection. An earlier real click's
+                        // cooldown already elapsed before this candidate could start.
+                        if (!accepted && _profile!.IsBelowBothMinimumLevels(features)) _armed = true;
+                        else _lastClickAt = _candidateAt;
+                        _candidate = false;
+                    }
                 }
             }
             else if (_armed && peak >= threshold && peak > _previousPeak * 1.8 &&
@@ -231,6 +258,8 @@ public sealed class AudioClickDetector
                 _armed = false;
                 _candidateAt = at;
                 _candidateElapsedFrames = sampleCount / _channels;
+                _shortFallObservationUntilFrames = 0;
+                _shortFallObservationUsed = false;
                 _candidateRms = rms;
                 _candidateFallSeconds = 0;
                 _candidatePeak = _candidateEnergy = _candidateHighEnergy = _candidateFrames = _candidateDuration = 0;

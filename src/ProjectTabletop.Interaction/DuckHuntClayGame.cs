@@ -29,6 +29,7 @@ public sealed class DuckHuntClayGame
 
     private readonly DuckHuntClayTarget[] _targets = new DuckHuntClayTarget[TargetsPerRound];
     private readonly double[] _hitSeconds = new double[TargetsPerRound];
+    private readonly double[] _hitPoseSeconds = new double[TargetsPerRound];
     private readonly IReadOnlyList<DuckHuntClayTarget> _readOnlyTargets;
     private DateTimeOffset _observedAt, _inputNotBefore, _roundStartedAt;
     private DateTimeOffset _lastShotAt = DateTimeOffset.MinValue;
@@ -90,19 +91,23 @@ public sealed class DuckHuntClayGame
         Publish(_pausedAt ?? now);
     }
 
-    /// <summary>The trained-audio/camera gate has already checked clock ordering.
-    /// Test only identities that had launched when this photograph was captured.</summary>
-    public bool Shoot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1)
+    /// <summary>The camera clock governs freshness and once-only input. An optional
+    /// projection timestamp identifies the scene actually visible in that photo;
+    /// the shatter effect starts at acceptance, not at the older rendered pose.</summary>
+    public bool Shoot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1,
+        DateTimeOffset? sceneTime = null)
     {
+        var poseTime = sceneTime ?? shotTime;
         if (!_ready || aim is not { } point ||
             !double.IsFinite(point.U) || !double.IsFinite(point.V) ||
             point.U is < 0 or > 1 || point.V is < 0 or > 1 ||
             !double.IsFinite(boardAspect) || boardAspect <= 0 ||
             shotTime <= _lastShotAt || shotTime < _inputNotBefore ||
+            poseTime > shotTime || poseTime < _inputNotBefore ||
             _observedAt - shotTime > DuckHuntAimGate.Freshness) return false;
 
         Advance(shotTime > _observedAt ? shotTime : _observedAt);
-        double seconds = (shotTime - _roundStartedAt).TotalSeconds;
+        double seconds = (poseTime - _roundStartedAt).TotalSeconds;
         if (_phase == DuckHuntClayPhase.Ready || seconds < LaunchDelay.TotalSeconds ||
             seconds >= RoundDuration.TotalSeconds) return false;
         _lastShotAt = shotTime;
@@ -115,7 +120,8 @@ public sealed class DuckHuntClayGame
             if (!double.IsNaN(_hitSeconds[id])) continue;
             var target = FlyingPoseAt(id, seconds);
             if (!DuckHuntClayLayout.ContainsClay(point, target, boardAspect)) continue;
-            _hitSeconds[id] = seconds;
+            _hitPoseSeconds[id] = seconds;
+            _hitSeconds[id] = (shotTime - _roundStartedAt).TotalSeconds;
             _score++;
             hit = true;
             break;
@@ -155,7 +161,7 @@ public sealed class DuckHuntClayGame
         for (int id = 0; id < TargetsPerRound; id++)
         {
             bool hit = !double.IsNaN(_hitSeconds[id]);
-            var target = FlyingPoseAt(id, hit ? _hitSeconds[id] : seconds);
+            var target = FlyingPoseAt(id, hit ? _hitPoseSeconds[id] : seconds);
             if (hit)
             {
                 double elapsed = Math.Clamp(seconds - _hitSeconds[id], 0, HitDuration.TotalSeconds);

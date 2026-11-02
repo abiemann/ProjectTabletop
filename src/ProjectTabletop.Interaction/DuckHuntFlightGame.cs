@@ -11,7 +11,8 @@ public readonly record struct DuckHuntFlightSnapshot(DuckHuntFlightPhase Phase, 
 }
 
 /// <summary>Ten sequential flights, started only by a valid click photo on START.
-/// Shots use the pose present at the photo timestamp, not the later render tick.</summary>
+/// Shots use the projected pose present in the photo, not the later render tick.
+/// The camera timestamp still governs fresh input and the hit animation clock.</summary>
 public sealed class DuckHuntFlightGame(Random? random = null)
 {
     public const int BirdsPerRound = 10;
@@ -22,7 +23,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
     private readonly Random _random = random ?? Random.Shared;
     private DateTimeOffset _observedAt, _inputNotBefore, _phaseStartedAt, _birdStartedAt;
     private DateTimeOffset _lastShotAt = DateTimeOffset.MinValue;
-    private DateTimeOffset? _pausedAt = DateTimeOffset.MinValue, _hitAt;
+    private DateTimeOffset? _pausedAt = DateTimeOffset.MinValue, _hitAt, _hitPoseAt;
     private bool _ready, _hasBird;
     private int _score, _birdsLaunched, _shots, _direction = 1;
     private double _startU = .5, _exitMargin = .115;
@@ -38,7 +39,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
         _observedAt = _inputNotBefore = _phaseStartedAt = now;
         _lastShotAt = DateTimeOffset.MinValue;
         _pausedAt = now;
-        _hitAt = null;
+        _hitAt = _hitPoseAt = null;
         _ready = _hasBird = false;
         _score = _birdsLaunched = _shots = 0;
         _flightDuration = FlightDuration;
@@ -57,6 +58,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
             _phaseStartedAt += pause;
             if (_hasBird) _birdStartedAt += pause;
             if (_hitAt.HasValue) _hitAt += pause;
+            if (_hitPoseAt.HasValue) _hitPoseAt += pause;
             _pausedAt = null;
             _inputNotBefore = now;
         }
@@ -104,28 +106,32 @@ public sealed class DuckHuntFlightGame(Random? random = null)
 
     /// <summary>The existing trained-audio/camera gate is the caller. START is
     /// deliberately absent from BoardButton, hand holds and ordinary tap routes.</summary>
-    public bool Shoot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1)
+    public bool Shoot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1,
+        DateTimeOffset? sceneTime = null)
     {
+        var poseTime = sceneTime ?? shotTime;
         if (!_ready || aim is not { } point ||
             !double.IsFinite(point.U) || !double.IsFinite(point.V) ||
             point.U is < 0 or > 1 || point.V is < 0 or > 1 ||
             !double.IsFinite(boardAspect) || boardAspect <= 0 ||
             shotTime <= _lastShotAt || shotTime < _inputNotBefore ||
+            poseTime > shotTime || poseTime < _inputNotBefore ||
             _observedAt - shotTime > DuckHuntAimGate.Freshness) return false;
 
         Advance(shotTime > _observedAt ? shotTime : _observedAt);
 
         // Retain the escaped bird through the inter-bird gap, so confirmation
         // just after escape can still hit what the camera actually photographed.
-        if (_hasBird && !_hitAt.HasValue && shotTime >= _birdStartedAt &&
-            shotTime < _birdStartedAt + _flightDuration)
+        if (_hasBird && !_hitAt.HasValue && poseTime >= _birdStartedAt &&
+            poseTime < _birdStartedAt + _flightDuration)
         {
             _lastShotAt = shotTime;
             _shots++;
-            bool hit = DuckHuntFlightLayout.ContainsBird(point, FlyingPoseAt(shotTime), boardAspect);
+            bool hit = DuckHuntFlightLayout.ContainsBird(point, FlyingPoseAt(poseTime), boardAspect);
             if (hit)
             {
                 _score++;
+                _hitPoseAt = poseTime;
                 _hitAt = _phaseStartedAt = shotTime;
                 _phase = DuckHuntFlightPhase.Hit;
             }
@@ -134,14 +140,14 @@ public sealed class DuckHuntFlightGame(Random? random = null)
         }
 
         if (_phase is not (DuckHuntFlightPhase.Ready or DuckHuntFlightPhase.Finished) ||
-            shotTime < _phaseStartedAt) return false;
+            poseTime < _phaseStartedAt) return false;
         _lastShotAt = shotTime;
         if (!DuckHuntFlightLayout.StartBounds.Contains(point.U, point.V)) return false;
         _score = _birdsLaunched = _shots = 0;
         _flightDuration = FlightDuration;
         _exitMargin = DuckHuntFlightLayout.SpriteBounds(_snapshot with { Scale = 1 }, boardAspect).Width / 2 + .005;
         _hasBird = false;
-        _hitAt = null;
+        _hitAt = _hitPoseAt = null;
         _phase = DuckHuntFlightPhase.Launching;
         _phaseStartedAt = _inputNotBefore = shotTime;
         Advance(shotTime > _observedAt ? shotTime : _observedAt);
@@ -160,7 +166,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
             FlightDuration.Ticks / Math.Pow(1.1, _birdsLaunched - 1)));
         _birdStartedAt = _phaseStartedAt = now;
         _hasBird = true;
-        _hitAt = null;
+        _hitAt = _hitPoseAt = null;
         _phase = DuckHuntFlightPhase.Flying;
     }
 
@@ -176,7 +182,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
 
     private void Publish(DateTimeOffset now)
     {
-        var pose = _hasBird ? FlyingPoseAt(_hitAt ?? now) :
+        var pose = _hasBird ? FlyingPoseAt(_hitPoseAt ?? now) :
             new DuckHuntFlightSnapshot(_phase, _score, _birdsLaunched, _shots,
                 .5, .72, 1, 0, 1, false, _snapshot.Revision);
         bool visible = _phase == DuckHuntFlightPhase.Flying ||

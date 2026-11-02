@@ -117,11 +117,13 @@ public sealed partial class SceneCompositor
 
     public bool SubmitDuckHuntSnapshot(BoardAim? aim, DateTimeOffset frameTimestamp,
         DateTimeOffset clickOnset, DateTimeOffset confirmedAt, long epoch, bool ambiguous,
-        out DuckHuntShot? selected)
+        out DuckHuntShot? selected, TimeSpan projectionDelay = default)
     {
         lock (_gate)
         {
             selected = null;
+            if (projectionDelay < TimeSpan.Zero ||
+                projectionDelay.TotalMilliseconds > CameraLatencyMeasurement.MaximumTotalMilliseconds) return false;
             var now = MonotonicClock.UtcNow;
             var context = SyncDuckHuntInput(now);
             if (context is null || context.Epoch != epoch || !_duckHuntAudioReady) return false;
@@ -132,11 +134,14 @@ public sealed partial class SceneCompositor
                 (!DuckHuntArtworkReady || _boardSession.HuntFlightState.Paused)) return false;
             if (_boardSession.CurrentDuckHuntView == DuckHuntView.ClayPigeon &&
                 (!DuckHuntArtworkReady || _boardSession.ClayState.Paused)) return false;
-            // Resolve ambiguity before consuming the click. The selected photo
-            // decides the hit at its own historical target pose in every mode.
+            // Keep host delivery time for freshness and click ordering. Projected
+            // targets in that photo are older by the delay measured during scan.
+            // Resolve ambiguity first, so a preceding photo retains its own time.
             if (!_duckHuntMeasurement.Capture(aim, frameTimestamp, clickOnset, confirmedAt, now,
                     ambiguous, out selected)) return false;
-            _boardSession.TryDuckHuntShot(selected!.Value.Aim, selected.Value.ClickedAt, PaintBoardAspect());
+            var shot = selected!.Value;
+            _boardSession.TryDuckHuntShot(shot.Aim, shot.ClickedAt, PaintBoardAspect(),
+                shot.ClickedAt - projectionDelay);
             _duckHuntInputVisualRevision++;
             return true;
         }

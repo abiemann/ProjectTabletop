@@ -10,6 +10,7 @@ public sealed partial class MainWindow
     private bool _measuringCameraLatency, _cameraLatencyCompleted;
     // Published on the UI thread; detector workers must not enumerate the mutable scan.
     private long _projectionReferenceMinimumAgeTicks;
+    private long _projectionSceneDelayTicks;
 
     private void ProjectorLatency_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
@@ -29,6 +30,7 @@ public sealed partial class MainWindow
         _camera.CaptureEveryFrame = false;
         _cameraLatency.Reset();
         Volatile.Write(ref _projectionReferenceMinimumAgeTicks, 0);
+        Volatile.Write(ref _projectionSceneDelayTicks, 0);
         _latencyObservedSpots.Clear();
         _measuringCameraLatency = _cameraLatencyCompleted = false;
         if (!_closing)
@@ -39,6 +41,7 @@ public sealed partial class MainWindow
     {
         _cameraLatency.Reset();
         Volatile.Write(ref _projectionReferenceMinimumAgeTicks, 0);
+        Volatile.Write(ref _projectionSceneDelayTicks, 0);
         _latencyObservedSpots.Clear();
         _cameraLatencyCompleted = false;
         _measuringCameraLatency = true;
@@ -53,6 +56,8 @@ public sealed partial class MainWindow
         _cameraLatencyCompleted = true;
         Volatile.Write(ref _projectionReferenceMinimumAgeTicks,
             _cameraLatency.ProjectionReferenceMinimumAge(_camera.NegotiatedFormat?.FramesPerSecond ?? 0).Ticks);
+        Volatile.Write(ref _projectionSceneDelayTicks,
+            TimeSpan.FromMilliseconds(_cameraLatency.TotalMedianMilliseconds ?? 0).Ticks);
         UpdateCameraLatencyStatus();
     }
 
@@ -82,6 +87,9 @@ public sealed partial class MainWindow
         minimumMilliseconds = _cameraLatency.MinimumMilliseconds,
         maximumMilliseconds = _cameraLatency.MaximumMilliseconds,
         projectorMilliseconds = _cameraLatency.ProjectorMilliseconds,
+        totalEstimatedMilliseconds = _cameraLatency.TotalMedianMilliseconds,
+        projectionSceneDelayMilliseconds = TimeSpan.FromTicks(
+            Volatile.Read(ref _projectionSceneDelayTicks)).TotalMilliseconds,
         projectionReferenceMinimumAgeMilliseconds = TimeSpan.FromTicks(
             Volatile.Read(ref _projectionReferenceMinimumAgeTicks)).TotalMilliseconds,
         samples = _cameraLatency.Samples,
