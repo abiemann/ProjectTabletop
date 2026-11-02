@@ -1,0 +1,63 @@
+{
+  "description": "Six isolated user-requested mechanical click examples, captured 2026-11-01 with Amazon USB Streaming Mic. Includes leading mechanism and natural tail; the rest of the room recording is not included.",
+  "sampleRate": 48000,
+  "channels": 1,
+  "format": "little-endian float32 PCM, gzip",
+  "normalization": "FFmpeg stereo-to-mono equal-power mix divided by sqrt(2) to reproduce the app channel-average level; verified against simultaneous app RMS/peak telemetry.",
+  "profile": {
+    "Version": 2,
+    "TrainingNoiseRms": 0.0027049959972244952,
+    "MinimumPeak": 0.322108256816864,
+    "MaximumPeak": 1,
+    "MinimumRms": 0.0422035350304387,
+    "MaximumRms": 0.1713615829596438,
+    "MinimumDurationMs": 37.5,
+    "MaximumDurationMs": 125,
+    "MinimumHighFrequencyRatio": 0.4745169725593068,
+    "MaximumHighFrequencyRatio": 0.7145169725593068
+  },
+  "clips": [
+    {
+      "file": "click-precursor-1.f32.gz",
+      "sourceStartSeconds": 68.225,
+      "sourceEndSeconds": 68.775,
+      "expectedClickSeconds": 0.15,
+      "sha256": "59d82c6cb2f5d19ea9c12f644ce3360efc9f4d17100171dcca444ae580a25290"
+    },
+    {
+      "file": "click-precursor-2.f32.gz",
+      "sourceStartSeconds": 70.42,
+      "sourceEndSeconds": 70.97,
+      "expectedClickSeconds": 0.15,
+      "sha256": "59a93a0d1b80941d80542d9b3e9d94aca9efe37ced19d6f8f3562bb7263ed892"
+    },
+    {
+      "file": "click-precursor-3.f32.gz",
+      "sourceStartSeconds": 73.14,
+      "sourceEndSeconds": 73.69,
+      "expectedClickSeconds": 0.15,
+      "sha256": "11de440b1dae86217f656dc54b2921aed12f4f9c30ea5d263fa3d50f81b0fc8a"
+    },
+    {
+      "file": "click-precursor-4.f32.gz",
+      "sourceStartSeconds": 75.905,
+      "sourceEndSeconds": 76.455,
+      "expectedClickSeconds": 0.15,
+      "sha256": "47792ce018eed5e1b6b019b07d86e0e57e7112fbffab9c156879f285078391f8"
+    },
+    {
+      "file": "click-precursor-5.f32.gz",
+      "sourceStartSeconds": 77.875,
+      "sourceEndSeconds": 78.425,
+      "expectedClickSeconds": 0.15,
+      "sha256": "aac1a89fa423b5c7b25c7d32d072dbb9c5a4739d01776f99c97e9409c4c87cdb"
+    },
+    {
+      "file": "click-precursor-6.f32.gz",
+      "sourceStartSeconds": 79.835,
+      "sourceEndSeconds": 80.385,
+      "expectedClickSeconds": 0.15,
+      "sha256": "a286e6c574ea4745b8db37bc7972204b7addeac53883ed4275068116d57c9d4e"
+    }
+  ]
+}

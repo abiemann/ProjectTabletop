@@ -86,6 +86,26 @@ public class DuckHuntFlightTests
         Assert.Equal(1, game.Snapshot.Score);
     }
 
+    [Fact]
+    public void AmbiguousPhotoFallbackHitsAndFreezesTheSelectedEarlierFlightPose()
+    {
+        var game = Started();
+        var tracker = new DuckHuntMeasurementTracker();
+        game.Advance(At(2650));
+        var photographed = game.Snapshot;
+        tracker.Observe(BodyCentre(photographed), At(2650), At(2655));
+        game.Advance(At(2690));
+        Assert.NotEqual(photographed.U, game.Snapshot.U);
+        Assert.True(tracker.Capture(null, At(2675), At(2620), At(2680), At(2690), true, out var shot));
+        Assert.True(game.Shoot(shot!.Value.Aim, shot.Value.ClickedAt));
+        Assert.Equal(photographed.U, game.Snapshot.U);
+        Assert.Equal(photographed.V, game.Snapshot.V);
+        Assert.Equal(photographed.FlapPhase, game.Snapshot.FlapPhase);
+        Assert.Equal(1, game.Snapshot.Score);
+        Assert.Equal(1, game.Snapshot.Shots);
+        Assert.False(tracker.Capture(null, At(2675), At(2620), At(2680), At(2690), true, out _));
+    }
+
     [Theory]
     [InlineData(0, 1)]
     [InlineData(2, 1.8)]
@@ -148,7 +168,7 @@ public class DuckHuntFlightTests
                 launch += 2000 + DuckHuntFlightGame.HitDuration.TotalMilliseconds +
                     DuckHuntFlightGame.BetweenBirdsDuration.TotalMilliseconds;
             }
-            else launch += DuckHuntFlightGame.FlightDuration.TotalMilliseconds +
+            else launch += DurationForBird(bird).TotalMilliseconds +
                 DuckHuntFlightGame.BetweenBirdsDuration.TotalMilliseconds;
         }
         game.Advance(At(launch));
@@ -162,6 +182,72 @@ public class DuckHuntFlightTests
         Assert.Equal(0, game.Snapshot.BirdsLaunched);
         Assert.Equal(DuckHuntFlightPhase.Launching, game.Snapshot.Phase);
     }
+
+    [Fact]
+    public void EachSuccessiveBirdFliesTenPercentFasterAndReplayRestoresInitialSpeed()
+    {
+        var game = Started();
+        var launch = At(650);
+        double previousSpeed = 0;
+        for (int bird = 1; bird <= 10; bird++)
+        {
+            var duration = DurationForBird(bird);
+            game.Advance(launch);
+            Assert.Equal(bird, game.Snapshot.BirdsLaunched);
+            var start = game.Snapshot;
+            game.Advance(launch.AddMilliseconds(200));
+            double speed = (start.V - game.Snapshot.V) / .2;
+            if (bird > 1) Assert.Equal(1.1, speed / previousSpeed, 6);
+            previousSpeed = speed;
+            game.Advance(launch + duration - TimeSpan.FromTicks(1));
+            Assert.Equal(DuckHuntFlightPhase.Flying, game.Snapshot.Phase);
+            game.Advance(launch + duration);
+            Assert.Equal(DuckHuntFlightPhase.BetweenBirds, game.Snapshot.Phase);
+            launch += duration + DuckHuntFlightGame.BetweenBirdsDuration;
+        }
+        game.Advance(launch);
+        Assert.True(game.Snapshot.RoundFinished);
+        Assert.Equal(0, game.Snapshot.Score);
+        Assert.True(game.Shoot(new(.5, .5), launch.AddTicks(1)));
+        launch += TimeSpan.FromTicks(1) + DuckHuntFlightGame.LaunchDelay;
+        game.Advance(launch.AddSeconds(3));
+        Assert.Equal(1, game.Snapshot.BirdsLaunched);
+        Assert.Equal(.455, game.Snapshot.V, 10);
+        game.Reset(launch.AddSeconds(4));
+        game.SetReady(true, launch.AddSeconds(4));
+        Assert.True(game.Shoot(new(.5, .5), launch.AddSeconds(4).AddTicks(1)));
+        game.Advance(launch.AddSeconds(7).AddTicks(1) + DuckHuntFlightGame.LaunchDelay);
+        Assert.Equal(1, game.Snapshot.BirdsLaunched);
+        Assert.Equal(.455, game.Snapshot.V, 10);
+    }
+
+    [Fact]
+    public void FasterLastBirdStillUsesItsPhotographedPoseAfterEscape()
+    {
+        var game = Started();
+        var launch = At(650);
+        for (int bird = 1; bird < 10; bird++)
+            launch += DurationForBird(bird) + DuckHuntFlightGame.BetweenBirdsDuration;
+        var escape = launch + DurationForBird(10);
+        var photoTime = escape.AddMilliseconds(-120);
+        game.Advance(photoTime);
+        var photographed = game.Snapshot;
+        Assert.Equal(10, photographed.BirdsLaunched);
+        var bounds = DuckHuntFlightLayout.SpriteBounds(photographed, 1);
+        var aim = new BoardAim(.998, bounds.Y + bounds.Height *
+            (DuckHuntFlightLayout.BodyArtworkBounds.Y + DuckHuntFlightLayout.BodyArtworkBounds.Height * .61));
+        Assert.True(DuckHuntFlightLayout.ContainsBird(aim, photographed, 1));
+        game.Advance(escape.AddMilliseconds(10));
+        Assert.Equal(DuckHuntFlightPhase.BetweenBirds, game.Snapshot.Phase);
+        Assert.True(game.Shoot(aim, photoTime));
+        Assert.Equal(photographed.U, game.Snapshot.U);
+        Assert.Equal(photographed.V, game.Snapshot.V);
+        Assert.Equal(photographed.FlapPhase, game.Snapshot.FlapPhase);
+        Assert.Equal(1, game.Snapshot.Score);
+    }
+
+    private static TimeSpan DurationForBird(int number) =>
+        TimeSpan.FromTicks((long)Math.Round(TimeSpan.FromSeconds(6).Ticks / Math.Pow(1.1, number - 1)));
 
     [Fact]
     public void SparseTicksStopAfterExactlyTenEscapesAndStaleAimCannotScoreOrRestart()

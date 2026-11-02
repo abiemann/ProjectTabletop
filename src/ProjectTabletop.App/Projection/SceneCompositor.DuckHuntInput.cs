@@ -112,10 +112,16 @@ public sealed partial class SceneCompositor
     }
 
     public bool SubmitDuckHuntSnapshot(BoardAim? aim, DateTimeOffset frameTimestamp,
-        DateTimeOffset clickOnset, DateTimeOffset confirmedAt, long epoch)
+        DateTimeOffset clickOnset, DateTimeOffset confirmedAt, long epoch) =>
+        SubmitDuckHuntSnapshot(aim, frameTimestamp, clickOnset, confirmedAt, epoch, false, out _);
+
+    public bool SubmitDuckHuntSnapshot(BoardAim? aim, DateTimeOffset frameTimestamp,
+        DateTimeOffset clickOnset, DateTimeOffset confirmedAt, long epoch, bool ambiguous,
+        out DuckHuntShot? selected)
     {
         lock (_gate)
         {
+            selected = null;
             var now = MonotonicClock.UtcNow;
             var context = SyncDuckHuntInput(now);
             if (context is null || context.Epoch != epoch || !_duckHuntAudioReady) return false;
@@ -126,12 +132,11 @@ public sealed partial class SceneCompositor
                 (!DuckHuntArtworkReady || _boardSession.HuntFlightState.Paused)) return false;
             if (_boardSession.CurrentDuckHuntView == DuckHuntView.ClayPigeon &&
                 (!DuckHuntArtworkReady || _boardSession.ClayState.Paused)) return false;
-            // The current photo decides the hit at its own timestamp, even if
-            // rendering has already advanced. Each valid shot replaces the
-            // measurement for diagnostics. All modes use the same fresh-photo
-            // gate; gallery punctures are attached to the paper that was hit.
-            if (!_duckHuntMeasurement.Capture(aim, frameTimestamp, clickOnset, confirmedAt, now)) return false;
-            _boardSession.TryDuckHuntShot(aim, frameTimestamp, PaintBoardAspect());
+            // Resolve ambiguity before consuming the click. The selected photo
+            // decides the hit at its own historical target pose in every mode.
+            if (!_duckHuntMeasurement.Capture(aim, frameTimestamp, clickOnset, confirmedAt, now,
+                    ambiguous, out selected)) return false;
+            _boardSession.TryDuckHuntShot(selected!.Value.Aim, selected.Value.ClickedAt, PaintBoardAspect());
             _duckHuntInputVisualRevision++;
             return true;
         }

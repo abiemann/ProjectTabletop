@@ -26,6 +26,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
     private bool _ready, _hasBird;
     private int _score, _birdsLaunched, _shots, _direction = 1;
     private double _startU = .5, _exitMargin = .115;
+    private TimeSpan _flightDuration = FlightDuration;
     private DuckHuntFlightPhase _phase = DuckHuntFlightPhase.Ready;
     private DuckHuntFlightSnapshot _snapshot = new(DuckHuntFlightPhase.Ready, 0, 0, 0,
         .5, .72, 1, 0, 1, false, 0, Paused: true);
@@ -40,6 +41,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
         _hitAt = null;
         _ready = _hasBird = false;
         _score = _birdsLaunched = _shots = 0;
+        _flightDuration = FlightDuration;
         _phase = DuckHuntFlightPhase.Ready;
         Publish(now);
     }
@@ -74,7 +76,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
                 TimeSpan duration = _phase switch
                 {
                     DuckHuntFlightPhase.Launching => LaunchDelay,
-                    DuckHuntFlightPhase.Flying => FlightDuration,
+                    DuckHuntFlightPhase.Flying => _flightDuration,
                     DuckHuntFlightPhase.Hit => HitDuration,
                     DuckHuntFlightPhase.BetweenBirds => BetweenBirdsDuration,
                     _ => TimeSpan.MaxValue
@@ -116,7 +118,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
         // Retain the escaped bird through the inter-bird gap, so confirmation
         // just after escape can still hit what the camera actually photographed.
         if (_hasBird && !_hitAt.HasValue && shotTime >= _birdStartedAt &&
-            shotTime < _birdStartedAt + FlightDuration)
+            shotTime < _birdStartedAt + _flightDuration)
         {
             _lastShotAt = shotTime;
             _shots++;
@@ -136,6 +138,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
         _lastShotAt = shotTime;
         if (!DuckHuntFlightLayout.StartBounds.Contains(point.U, point.V)) return false;
         _score = _birdsLaunched = _shots = 0;
+        _flightDuration = FlightDuration;
         _exitMargin = DuckHuntFlightLayout.SpriteBounds(_snapshot with { Scale = 1 }, boardAspect).Width / 2 + .005;
         _hasBird = false;
         _hitAt = null;
@@ -151,6 +154,10 @@ public sealed class DuckHuntFlightGame(Random? random = null)
         _startU = side switch { 0 => .15, 1 => .5, _ => .85 };
         _direction = side == 0 ? 1 : side == 2 ? -1 : (_random.Next(2) == 0 ? -1 : 1);
         _birdsLaunched++;
+        // Each successive bird flies the same path 10% faster. Calculate once
+        // per launch, and share the duration between rendering and shot history.
+        _flightDuration = TimeSpan.FromTicks((long)Math.Round(
+            FlightDuration.Ticks / Math.Pow(1.1, _birdsLaunched - 1)));
         _birdStartedAt = _phaseStartedAt = now;
         _hasBird = true;
         _hitAt = null;
@@ -159,8 +166,8 @@ public sealed class DuckHuntFlightGame(Random? random = null)
 
     private DuckHuntFlightSnapshot FlyingPoseAt(DateTimeOffset now)
     {
-        double elapsed = Math.Clamp((now - _birdStartedAt).TotalSeconds, 0, FlightDuration.TotalSeconds);
-        double progress = elapsed / FlightDuration.TotalSeconds;
+        double elapsed = Math.Clamp((now - _birdStartedAt).TotalSeconds, 0, _flightDuration.TotalSeconds);
+        double progress = elapsed / _flightDuration.TotalSeconds;
         double endU = _direction > 0 ? 1 + _exitMargin : -_exitMargin;
         return new(DuckHuntFlightPhase.Flying, _score, _birdsLaunched, _shots,
             _startU + (endU - _startU) * progress, .72 - .53 * progress,

@@ -74,8 +74,8 @@ public sealed class RedDotDetector
             byte kind = (byte)(_mask[y * width + x] & ColourMask);
             if (kind is 0 or 3 or 4) continue;
             int head = 0, tail = 1, minX = x, maxX = x, minY = y, maxY = y;
-            double weightedX = 0, weightedY = 0, weight = 0, redExcess = 0, greenBlue = 0;
-            int signalPixels = 0, clippedPixels = 0;
+            double weightedX = 0, weightedY = 0, weight = 0, redExcess = 0, greenBlue = 0, otherSum = 0;
+            int signalPixels = 0, clippedPixels = 0, neutralPixels = 0;
             int peakRedGreen = 0, magentaPixels = 0, colourPixels = 0, seedPixels = 0;
             bool touchesBoundary = false, acceptedCore = false;
             _queue[0] = y * width + x;
@@ -89,13 +89,18 @@ public sealed class RedDotDetector
                 int source = py * stride + px * 4;
                 int excess = bgra[source + 2] - bgra[source + 1];
                 bool core = bgra[source + 2] >= 245 && bgra[source + 1] >= 220 && bgra[source] >= 245;
-                if (core) clippedPixels++;
+                if (core)
+                {
+                    clippedPixels++;
+                    if (Math.Min(bgra[source + 2], bgra[source]) - bgra[source + 1] < 16) neutralPixels++;
+                }
                 if (!core)
                 {
                     if (kind == 1 ? bgra[source + 2] - Math.Max(bgra[source], bgra[source + 1]) >= 90 :
                         bgra[source + 2] >= 175 && bgra[source] >= 200 && excess >= 24) signalPixels++;
                     colourPixels++;
                     greenBlue += bgra[source + 1] - bgra[source];
+                    otherSum += Math.Max(bgra[source], bgra[source + 1]);
                     if (bgra[source + 2] >= 100) seedPixels++;
                     weightedX += px * excess; weightedY += py * excess; weight += excess;
                     peakRedGreen = Math.Max(peakRedGreen, excess);
@@ -151,12 +156,19 @@ public sealed class RedDotDetector
             bool strongRed = localRed >= 35;
             if (!strongRed && (magentaPixels * 2 < colourPixels || peakRedGreen < 24 || localRedGreen < 8 ||
                 peakRedGreen - surroundingRedGreen < 14)) continue;
+            // A blue-biased white highlight can have the same red/green peak as a
+            // faint laser. Require red light beyond the local photograph's colour
+            // relationship, rather than increasing the absolute brightness threshold.
+            if (kind == 2 && !strongRed &&
+                !IndependentRedSignal(bgra, stride, minX, minY, maxX, maxY, tail, neutralPixels > 0)) continue;
             // Warm photographic highlights can form compact red seeds too. Without
-            // a clipped centre, require a coherent near-red hue and at least twice
-            // the surrounding red dominance. Check the whole component rather than
+            // a clipped centre, require a coherent near-red hue and 2.6 times
+            // the surrounding red dominance. A highly saturated red source keeps
+            // the original two-times threshold so a dim laser on brown stays visible.
+            // Check the whole component rather than
             // tightening seed colours, which would split wood texture into tiny dots.
             // Clipped centres and blue-biased magenta evidence keep their own checks.
-            if (kind == 1 && (greenBlue * 10 > weight || localRed < surroundingRed)) continue;
+            if (kind == 1 && (greenBlue * 10 > weight || localRed < surroundingRed * (redExcess >= otherSum * 2 ? 1 : 1.6))) continue;
             var camera = new PixelPoint(weightedX / weight, weightedY / weight);
             var board = Map(camera.X, camera.Y);
             if (board.X is < 0 or > 1 || board.Y is < 0 or > 1 ||
@@ -167,6 +179,63 @@ public sealed class RedDotDetector
                 Math.Clamp(.35 + .45 * contrast + .2 * Math.Min(1, fill / .6), 0, 1), 1);
         }
         return candidates == 1 ? selected : new(null, null, null, 0, candidates);
+    }
+
+    // Compare a weak magenta component with a small local model of projected
+    // colour. The fit predicts red from green/blue; an added red source must exceed
+    // the photograph's residual variation. Covariance sums avoid scratch buffers,
+    // and the ridge keeps flat or correlated backgrounds well conditioned.
+    private bool IndependentRedSignal(byte[] bgra, int stride, int minX, int minY, int maxX, int maxY,
+        int componentPixels, bool neutralCentre)
+    {
+        int margin = Math.Max(6, (int)Math.Round(_coreProbeDistance * .4));
+        int left = Math.Max(0, minX - margin), right = Math.Min(_width - 1, maxX + margin);
+        int top = Math.Max(_top, minY - margin), bottom = Math.Min(_bottom - 1, maxY + margin);
+        double rSum = 0, gSum = 0, bSum = 0, rr = 0, gg = 0, bb = 0, rg = 0, rb = 0, gb = 0;
+        int count = 0;
+        for (int y = top; y <= bottom; y++)
+        for (int x = Math.Max(_first[y], left); x <= Math.Min(_last[y] - 1, right); x++)
+        {
+            if (x >= minX - 2 && x <= maxX + 2 && y >= minY - 2 && y <= maxY + 2) continue;
+            int source = y * stride + x * 4;
+            int r = bgra[source + 2], g = bgra[source + 1], b = bgra[source];
+            // A second independent source must not become the first dot's
+            // background. Exclude strong colour/core evidence from the fit.
+            if (IsStrongRed(r, g, b) || r >= 245 && g >= 220 && b >= 245 ||
+                r >= 175 && b >= 200 && r - g >= 24) continue;
+            count++;
+            rSum += r; gSum += g; bSum += b;
+            rr += r * r; gg += g * g; bb += b * b;
+            rg += r * g; rb += r * b; gb += g * b;
+        }
+        // A strongly coloured surrounding may leave too little independent
+        // context after source exclusion. Keep the existing optical gates in
+        // that case; absent fit evidence must not erase an otherwise valid dot.
+        if (count < 16) return true;
+        double mr = rSum / count, mg = gSum / count, mb = bSum / count;
+        rr -= rSum * mr; gg -= gSum * mg; bb -= bSum * mb;
+        rg -= rSum * mg; rb -= rSum * mb; gb -= gSum * mb;
+        double ga = gg + count * 4, ba = bb + count * 4;
+        double determinant = ga * ba - gb * gb;
+        double greenSlope = (rg * ba - rb * gb) / determinant;
+        double blueSlope = (rb * ga - rg * gb) / determinant;
+        double squaredError = rr + greenSlope * greenSlope * gg + blueSlope * blueSlope * bb +
+            2 * greenSlope * blueSlope * gb - 2 * greenSlope * rg - 2 * blueSlope * rb;
+        double rms = Math.Sqrt(Math.Max(0, squaredError / count));
+        double residual = 0;
+        int colourPixels = 0;
+        for (int i = 0; i < componentPixels; i++)
+        {
+            int pixel = _queue[i], y = pixel / _width, x = pixel - y * _width;
+            int source = y * stride + x * 4;
+            int r = bgra[source + 2], g = bgra[source + 1], b = bgra[source];
+            if (r < 100 || r - g < 16 || b - g < 18 || r < b * .72) continue;
+            residual += r - (mr + greenSlope * (g - mg) + blueSlope * (b - mb));
+            colourPixels++;
+        }
+        // A neutral centre is independent evidence, allowing a little more noise
+        // around a faint fringe without promoting purely tinted cloud highlights.
+        return colourPixels > 0 && residual / colourPixels >= (neutralCentre ? 4 : 5) * Math.Max(1, rms);
     }
 
     private int FindCores(byte[] bgra, int stride, out RedDotDetectionResult selected)

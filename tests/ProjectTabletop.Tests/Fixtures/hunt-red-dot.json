@@ -1,0 +1,61 @@
+{
+  "description": "Recorded November 1 HUNT camera frames. The user confirmed the laser was off for the two clear frames. Positive frames contain a visible bright laser on START or a moving bird, alongside scenery/lettering/feather candidates that previously rejected the shot. Full original camera pixels, no crop or resampling.",
+  "width": 1920,
+  "height": 1080,
+  "stride": 7680,
+  "map": [
+    0.0010343641675468118,
+    -1.7356875399381847e-05,
+    -0.575441527242238,
+    -3.053061758318516e-06,
+    0.0012723581781346003,
+    -0.26265915901386755,
+    1.5423835383052736e-05,
+    -6.3124490545495e-05,
+    1
+  ],
+  "fixtures": [
+    {
+      "file": "hunt-clear-clouds.bgra.gz",
+      "sourceFrame": "camera-20261101-224608-113-1920x1080-6429d0f42a8e40ac8f515cde60eb8b21.png",
+      "sha256Bgra": "beb5510e0f44a2eb3a2fec6870680f164ae9cbd6210a4d7bd083295fd06f63b3",
+      "expectedCandidateCount": 0
+    },
+    {
+      "file": "hunt-clear-start-lettering.bgra.gz",
+      "sourceFrame": "camera-20261101-224608-440-1920x1080-d53b61dcbfcb4c888ccd2b5ad287af82.png",
+      "sha256Bgra": "8eb0913fd5bd2ddc2d71404e6ca4a12ec44aea2e64bfb6c0a4e6d423c7fe263f",
+      "expectedCandidateCount": 0
+    },
+    {
+      "file": "hunt-start-laser.bgra.gz",
+      "sourceFrame": "camera-20261101-224320-136-1920x1080-0307d7bf8ed94f35b3ee0060063e114b.png",
+      "sha256Bgra": "d9486776ae156ee8fd543c360dccf378b2bdcd7e89ae8bb385610f88842b2787",
+      "expectedCandidateCount": 1,
+      "expectedCameraPosition": {
+        "x": 1053.84375,
+        "y": 620.34375
+      }
+    },
+    {
+      "file": "hunt-bird-laser-cloud-edge.bgra.gz",
+      "sourceFrame": "camera-20261101-224340-255-1920x1080-d2fd91e527b8469ba9f47b9cd1de7eb2.png",
+      "sha256Bgra": "34c41ab6ee653fbe338a9daf2c08d9ec42bfe9ba31457535d28bbf1495081ed6",
+      "expectedCandidateCount": 1,
+      "expectedCameraPosition": {
+        "x": 1182.8,
+        "y": 686.16
+      }
+    },
+    {
+      "file": "hunt-bird-laser-red-feather.bgra.gz",
+      "sourceFrame": "camera-20261101-224346-704-1920x1080-86ca1d7f06b64e01838cceedc4241b87.png",
+      "sha256Bgra": "fa3f142a91e6c822ad27c6ac4b05d922e9a10c0d7f7801fcdc394c05e70d402d",
+      "expectedCandidateCount": 1,
+      "expectedCameraPosition": {
+        "x": 783.9285714285714,
+        "y": 600.7142857142857
+      }
+    }
+  ]
+}

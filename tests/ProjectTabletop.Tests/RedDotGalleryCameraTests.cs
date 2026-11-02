@@ -31,6 +31,15 @@ public sealed class RedDotGalleryCameraTests
     public void RecordedThinBrassGlintDoesNotCompeteWithTheLaser(string file) =>
         VerifyCapture(file, "gallery-thin-trim.json");
 
+    [Theory]
+    [InlineData("hunt-clear-clouds.bgra.gz")]
+    [InlineData("hunt-clear-start-lettering.bgra.gz")]
+    [InlineData("hunt-start-laser.bgra.gz")]
+    [InlineData("hunt-bird-laser-cloud-edge.bgra.gz")]
+    [InlineData("hunt-bird-laser-red-feather.bgra.gz")]
+    public void RecordedHuntSeparatesRealLaserFromSceneryAndStartText(string file) =>
+        VerifyCapture(file, "hunt-red-dot.json");
+
     private static void VerifyCapture(string file, string metadata)
     {
         string directory = Path.Combine(AppContext.BaseDirectory, "Fixtures");

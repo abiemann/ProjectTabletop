@@ -259,6 +259,81 @@ public class RedDotDetectorTests
         Assert.True(frame.Detect(new()).Detected);
     }
 
+    [Fact]
+    public void SmallReddishFeatherHighlightDoesNotCompeteWithAClippedLaser()
+    {
+        // A photographed flying-duck feather had almost the same red hue as its
+        // surrounding plumage. Brightening that hue alone must not add a second aim.
+        var frame = new Frame(65, 75, 125);
+        frame.Disc(380, 240, 2, 55, 60, 165);
+        Assert.Equal(0, frame.Detect(new()).CandidateCount);
+
+        frame.Disc(260, 240, 4, 241, 180, 210);
+        frame.Disc(260, 240, 2, 255, 244, 255);
+        var found = frame.Detect(new());
+        Assert.Equal(1, found.CandidateCount);
+        Assert.Equal(260, found.CameraPosition!.Value.X, 5);
+
+        // A second independent red source is still ambiguous in the same scene.
+        frame.Disc(380, 240, 2, 20, 25, 190);
+        Assert.Equal(2, frame.Detect(new()).CandidateCount);
+    }
+
+    [Fact]
+    public void ModeratePureRedLaserRemainsVisibleOnBrownArtwork()
+    {
+        var frame = new Frame(74, 104, 172);
+        frame.Disc(320, 240, 3, 30, 40, 190);
+        Assert.True(frame.Detect(new()).Detected);
+    }
+
+    [Theory]
+    [InlineData(11, false)]
+    [InlineData(15, false)]
+    [InlineData(11, true)]
+    [InlineData(15, true)]
+    public void FaintMagentaDotAndNearbyIndependentDotRemainAmbiguous(int separation, bool clipped)
+    {
+        var frame = new Frame(208, 154, 166);
+        frame.Disc(320, 240, 3, 216, 160, 178);
+        frame.Disc(320, 240, 2, 214, 156, 183);
+        frame.Disc(320 + separation, 240, 3, 241, 180, 210);
+        if (clipped) frame.Disc(320 + separation, 240, 1, 255, 244, 255);
+        Assert.Equal(2, frame.Detect(new()).CandidateCount);
+    }
+
+    [Fact]
+    public void FaintMagentaDotRemainsVisibleOnTexturedTintedArtwork()
+    {
+        var frame = new Frame(208, 154, 166);
+        for (int y = 210; y <= 270; y++)
+        for (int x = 290; x <= 350; x++)
+        {
+            int shade = (x * 17 + y * 23) % 25 - 12;
+            int grain = (x * 7 + y * 11) % 3 - 1;
+            frame.Pixel(x, y, (byte)(208 + shade), (byte)(154 + shade), (byte)(166 + shade + grain));
+        }
+        frame.Disc(320, 240, 3, 216, 160, 178);
+        frame.Disc(320, 240, 2, 214, 156, 183);
+        var found = frame.Detect(new());
+        Assert.True(found.Detected);
+        Assert.Equal(320, found.CameraPosition!.Value.X, 5);
+    }
+
+    [Fact]
+    public void IsolatedRedSourceRemainsVisibleBesideStronglyTintedArtwork()
+    {
+        var frame = new Frame(241, 180, 210);
+        // The neutral gap separates the added source from a broad projected
+        // magenta surface. That surface must not erase the independent dot.
+        frame.Disc(320, 240, 5, 100, 100, 100);
+        frame.Disc(320, 240, 3, 241, 180, 245);
+        var found = frame.Detect(new());
+        Assert.True(found.Detected);
+        Assert.Equal(1, found.CandidateCount);
+        Assert.Equal(320, found.CameraPosition!.Value.X, 5);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

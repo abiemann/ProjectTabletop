@@ -14,7 +14,8 @@ public readonly record struct AudioClickDetectionDiagnostics(long CompletedTrans
 /// </summary>
 public sealed class AudioClickDetector
 {
-    private const double WindowSeconds = .005;
+    internal const double WindowMilliseconds = 5;
+    private const double WindowSeconds = WindowMilliseconds / 1000;
     private const double WarmupSeconds = .6;
     private int _sampleRate, _channels, _windowFrames, _frames;
     private double _energy, _peak, _elapsed, _noiseRms, _noisePeak, _previousPeak;
@@ -208,10 +209,18 @@ public sealed class AudioClickDetector
                     _lastCompletedTransient = LastTransient;
                     _completedTransients++;
                     completed = true;
-                    if (_profile is null || _profile.Matches(features)) click = _candidateAt;
+                    bool accepted = _profile is null || _profile.Matches(features);
+                    if (accepted) click = _candidateAt;
                     else _rejectedByProfile++;
-                    // Even a rejected transient must rearm, avoiding its echo becoming another candidate.
-                    _lastClickAt = _candidateAt;
+                    // A quiet mechanical precursor can finish just before the actual
+                    // click. It must not spend the real click's refractory period.
+                    // Only a transient below BOTH learned level floors can rearm
+                    // here; the next onset still needs its sharp rise, decay and
+                    // complete profile match. Accepted clicks and loud rejections
+                    // keep their original echo protection. An earlier real click's
+                    // cooldown already elapsed before this candidate could start.
+                    if (!accepted && _profile!.IsBelowBothMinimumLevels(features)) _armed = true;
+                    else _lastClickAt = _candidateAt;
                     _candidate = false;
                 }
             }

@@ -91,6 +91,10 @@ public sealed partial class MainWindow
         Check(Snapshot(new(frozen.U, frozen.V), context.Epoch) && scene.HuntFlightState.Score == 1,
             "A second click scored the frozen bird twice.");
 
+        await CheckConfirmationPhoto(ambiguous: true);
+        await CheckConfirmationPhoto(ambiguous: false);
+        context = Context();
+
         uiNow = MonotonicClock.UtcNow;
         scene.ShowDuckHunt();
         Check(!scene.DuckHuntBoardReady && scene.GetDuckHuntInputContext() is null &&
@@ -105,7 +109,67 @@ public sealed partial class MainWindow
         scene.SetBoardSetup(true);
         Check(!scene.DuckHuntBoardReady && !Snapshot(start, reopened.Epoch),
             "Calibration allowed a HUNT shot.");
-        return new { Ok = true, Assertions = assertions, RealClockSnapshotGate = true };
+        return new { Ok = true, Assertions = assertions, RealClockSnapshotGate = true,
+            AdjacentPhotoFallback = true, SelectedHistoricalPose = true, MissingDotNeverBorrowsAim = true,
+            Scope = "Production scene/tracker/game path; camera acquisition, audio callback and MainWindow reporting are not invoked." };
+
+        async Task CheckConfirmationPhoto(bool ambiguous)
+        {
+            scene.ClearDuckHuntInput();
+            var began = MonotonicClock.UtcNow.AddSeconds(-2);
+            game.Reset(began);
+            game.SetReady(true, began);
+            Check(game.Shoot(start, began, width / (double)height),
+                "Could not prepare the adjacent-photo flight fixture.");
+            Draw();
+            var input = Context();
+            // Place both images inside a real, already elapsed click interval.
+            // Using fixed past offsets keeps scheduler jitter out of the 50 ms
+            // predecessor limit while still exercising the production host clock.
+            await Task.Delay(60);
+            var confirmed = MonotonicClock.UtcNow;
+            var onset = confirmed - TimeSpan.FromMilliseconds(40);
+            var previousPhoto = confirmed - TimeSpan.FromMilliseconds(25);
+            var currentPhoto = confirmed - TimeSpan.FromMilliseconds(5);
+            game.Advance(previousPhoto);
+            var photographed = game.Snapshot;
+            var bounds = DuckHuntFlightLayout.SpriteBounds(photographed, width / (double)height);
+            double bodyU = photographed.Direction > 0 ? DuckHuntFlightLayout.BodyCenterU : 1 - DuckHuntFlightLayout.BodyCenterU;
+            var aim = new BoardAim(bounds.X + bodyU * bounds.Width,
+                bounds.Y + DuckHuntFlightLayout.BodyCenterV * bounds.Height);
+            scene.PublishDuckHuntDot(aim, previousPhoto, input.Epoch);
+            uiNow = currentPhoto;
+            game.Advance(currentPhoto);
+            Check(game.Snapshot.U != photographed.U && game.Snapshot.FlapPhase != photographed.FlapPhase,
+                "The adjacent-photo fixture did not advance the bird after its earlier image.");
+
+            bool accepted = scene.SubmitDuckHuntSnapshot(null, currentPhoto, onset, confirmed,
+                input.Epoch, ambiguous, out var selected);
+            if (ambiguous)
+            {
+                Check(accepted && selected is { } shot && shot.Aim == aim && shot.ClickedAt == previousPhoto,
+                    "The ambiguous confirmation photo did not select its immediate post-click predecessor.");
+                var hit = scene.HuntFlightState;
+                Check(hit is { Phase: DuckHuntFlightPhase.Hit, Score: 1, Shots: 1 } &&
+                    hit.U == photographed.U && hit.V == photographed.V && hit.FlapPhase == photographed.FlapPhase,
+                    "The recovered shot used a later bird pose or dispatched more than one hit.");
+                var measured = scene.DuckHuntMeasurement;
+                Check(measured.NewDetectedXY == aim && measured.NewFrameTimestamp == previousPhoto && measured.ClickOnset == onset,
+                    "Shot diagnostics did not retain the selected photo's coordinates and timestamp.");
+                Check(!scene.SubmitDuckHuntSnapshot(null, currentPhoto, onset, confirmed,
+                        input.Epoch, true, out var duplicate) && duplicate is null &&
+                    scene.HuntFlightState is { Score: 1, Shots: 1 },
+                    "The same ambiguous click dispatched a second recovered shot.");
+            }
+            else
+            {
+                Check(!accepted && selected is null && scene.HuntFlightState is { Score: 0, Shots: 0 },
+                    "A clear no-dot photo borrowed the preceding aim.");
+                Check(!scene.SubmitDuckHuntSnapshot(aim, currentPhoto, onset, confirmed,
+                        input.Epoch, false, out _) && scene.HuntFlightState is { Score: 0, Shots: 0 },
+                    "A rejected no-dot click could be retried with a different photo result.");
+            }
+        }
 
         SceneCompositor.DuckHuntInputContext Context() => scene.GetDuckHuntInputContext() ??
             throw new InvalidOperationException("HUNT has no calibrated shot context.");

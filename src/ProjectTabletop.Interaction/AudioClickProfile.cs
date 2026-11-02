@@ -4,6 +4,7 @@ namespace ProjectTabletop.Interaction;
 public sealed record AudioClickProfile
 {
     private const double MinimumAmplitudeFactor = .75;
+    private const double MaximumImpulseRmsFactor = 1.10;
     public const double LegacyMaximumDurationMs = 120;
     public const double MaximumLearnedDurationMs = 125;
 
@@ -30,13 +31,28 @@ public sealed record AudioClickProfile
     }
 
     // Aiming the same click device changes its level at the microphone. Allow a
-    // modest drop without relaxing the sound's duration, frequency or upper bounds.
+    // modest drop and a small RMS increase for sharply peaked impulses, without
+    // relaxing the peak ceiling or frequency signature. A strongly peaked click
+    // may measure one analysis window shorter than the learned duration floor.
     public bool Matches(AudioClickFeatures features) =>
         Within(features.Peak, MinimumPeak * MinimumAmplitudeFactor, MaximumPeak) &&
-        Within(features.Rms, MinimumRms * MinimumAmplitudeFactor, MaximumRms) &&
-        Within(features.DurationMs, MinimumDurationMs, MaximumDurationMs) &&
+        MatchesRms(features) &&
+        Within(features.DurationMs, IsExtendedImpulse(features)
+            ? Math.Max(1, MinimumDurationMs - AudioClickDetector.WindowMilliseconds)
+            : MinimumDurationMs, MaximumDurationMs) &&
         Within(features.HighFrequencyRatio, MinimumHighFrequencyRatio, MaximumHighFrequencyRatio) &&
         (features.DurationMs <= LegacyMaximumDurationMs || IsExtendedImpulse(features));
+
+    private bool MatchesRms(AudioClickFeatures features)
+    {
+        // The training envelope already includes headroom. Live aimed clicks can
+        // still exceed its RMS ceiling slightly while retaining their short,
+        // strongly peaked waveform. Keep this bounded to 10%; sustained sounds
+        // retain the original ceiling, and every other learned feature must match.
+        double maximum = features.Rms > MaximumRms && IsExtendedImpulse(features)
+            ? Math.Min(1, MaximumRms * MaximumImpulseRmsFactor) : MaximumRms;
+        return Within(features.Rms, MinimumRms * MinimumAmplitudeFactor, maximum);
+    }
 
     internal bool IsBelowBothMinimumLevels(AudioClickFeatures features) =>
         features.Peak < MinimumPeak * MinimumAmplitudeFactor &&

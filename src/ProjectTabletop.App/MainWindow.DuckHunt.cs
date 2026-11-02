@@ -31,7 +31,8 @@ public sealed partial class MainWindow
         double Milliseconds, long Generation);
     private sealed record DuckHuntClickSnapshot(DateTimeOffset OnsetAt, DateTimeOffset ConfirmedAt,
         DateTimeOffset? FrameTimestamp, RedDotDetectionResult? Dot, string Outcome,
-        double DetectionMilliseconds, double TotalMilliseconds, long Generation);
+        double DetectionMilliseconds, double TotalMilliseconds, long Generation,
+        DateTimeOffset? SelectedFrameTimestamp, BoardAim? SelectedAim, bool UsedPriorObservation);
 
     private void InitializeDuckHunt()
     {
@@ -249,7 +250,7 @@ public sealed partial class MainWindow
                 var clayBefore = _scene.ClayState;
                 bool accepted = _scene.SubmitDuckHuntSnapshot(dot.Detected
                         ? new BoardAim(dot.BoardX!.Value, dot.BoardY!.Value) : null,
-                    frame.Timestamp, at, confirmedAt, context.Epoch);
+                    frame.Timestamp, at, confirmedAt, context.Epoch, dot.Ambiguous, out var selected);
                 var after = _scene.GalleryState;
                 var flightAfter = _scene.HuntFlightState;
                 var clayAfter = _scene.ClayState;
@@ -270,7 +271,7 @@ public sealed partial class MainWindow
                         after.Shots > before.Shots ? "Shot missed" : "No active target hit";
                 Report(accepted ? acceptedOutcome : dot.Detected ? "Snapshot rejected by current board" :
                     dot.Ambiguous ? "Ambiguous red dots" : "No red dot",
-                    frame.Timestamp, dot, elapsed);
+                    frame.Timestamp, dot, elapsed, selected);
             }
             catch (Exception error)
             {
@@ -289,9 +290,11 @@ public sealed partial class MainWindow
                 now - at <= DuckHuntAimGate.Freshness && now - frame.Timestamp <= DuckHuntAimGate.Freshness &&
                 frame.Timestamp.UtcTicks >= Interlocked.Read(ref _cameraInputNotBeforeTicks);
         }
-        void Report(string outcome, DateTimeOffset? frameTimestamp, RedDotDetectionResult? dot, double elapsed) =>
+        void Report(string outcome, DateTimeOffset? frameTimestamp, RedDotDetectionResult? dot, double elapsed,
+            DuckHuntShot? selected = null) =>
             Volatile.Write(ref _duckHuntClickSnapshot, new(at, confirmedAt, frameTimestamp, dot, outcome,
-                elapsed, (MonotonicClock.UtcNow - confirmedAt).TotalMilliseconds, generation));
+                elapsed, (MonotonicClock.UtcNow - confirmedAt).TotalMilliseconds, generation,
+                selected?.ClickedAt, selected?.Aim, selected.HasValue && selected.Value.ClickedAt != frameTimestamp));
     }
 
     private object DuckHuntInputStatus()

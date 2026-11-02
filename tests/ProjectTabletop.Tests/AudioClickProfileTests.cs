@@ -93,7 +93,7 @@ public sealed class AudioClickProfileTests
         Assert.False(profile.Matches(click with { Rms = profile.MinimumRms * .74 }));
         Assert.False(profile.Matches(click with { Peak = profile.MaximumPeak + .001 }));
         Assert.False(profile.Matches(click with { Rms = profile.MaximumRms + .001 }));
-        Assert.False(profile.Matches(click with { DurationMs = profile.MinimumDurationMs - .001 }));
+        Assert.False(profile.Matches(click with { DurationMs = profile.MinimumDurationMs - 5.001 }));
         Assert.False(profile.Matches(click with { DurationMs = profile.MaximumDurationMs + .001 }));
         Assert.False(profile.Matches(click with { HighFrequencyRatio = profile.MinimumHighFrequencyRatio - .001 }));
         Assert.False(profile.Matches(click with { HighFrequencyRatio = profile.MaximumHighFrequencyRatio + .001 }));
