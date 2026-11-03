@@ -126,8 +126,8 @@ public sealed partial class MainWindow
     {
         if (SelectedDisplay is null) throw new InvalidOperationException("Select an output display first.");
         var profile = EnteredProjectionProfile();
-        if (parameters.TryGetProperty("projectorLatencyMilliseconds", out var latency))
-            profile = profile with { ProjectorLatencyMilliseconds = latency.GetDouble() };
+        if (parameters.TryGetProperty("projectorLatencyMilliseconds", out _))
+            throw new ArgumentException("Projector allowance is calculated automatically from the selected display's refresh rate.");
         if (parameters.TryGetProperty("lensHeightCentimeters", out var height))
             profile = profile with { LensHeightCentimeters = height.ValueKind == JsonValueKind.Null ? null : height.GetDouble() };
         if (parameters.TryGetProperty("throwRatio", out var ratio))
@@ -136,10 +136,8 @@ public sealed partial class MainWindow
             profile = profile with { MeasuredBoardShortSideCentimeters = shortSide.ValueKind == JsonValueKind.Null ? null : shortSide.GetDouble() };
         if (parameters.TryGetProperty("measuredBoardLongSideCentimeters", out var longSide))
             profile = profile with { MeasuredBoardLongSideCentimeters = longSide.ValueKind == JsonValueKind.Null ? null : longSide.GetDouble() };
-        if (!profile.IsValid) throw new ArgumentException("Invalid height, throw ratio, board dimensions, or projector latency. The short side cannot exceed the long side; latency must be 0–2000 ms.");
+        if (!profile.IsValid) throw new ArgumentException("Invalid height, throw ratio, or board dimensions. The short side cannot exceed the long side.");
         _loadingProjectionProfile = true;
-        ProjectorLatencyNumberBox.Value = profile.ProjectorLatencyMilliseconds;
-        _cameraLatency.ProjectorMilliseconds = profile.ProjectorLatencyMilliseconds;
         ProjectorLensHeightNumberBox.Value = profile.LensHeightCentimeters ?? double.NaN;
         ProjectorThrowRatioNumberBox.Value = profile.ThrowRatio ?? double.NaN;
         MeasuredBoardShortSideNumberBox.Value = profile.MeasuredBoardShortSideCentimeters ?? double.NaN;
@@ -150,7 +148,7 @@ public sealed partial class MainWindow
         UpdateCameraLatencyStatus();
         ProjectorSize_ValueChanged(ProjectorLensHeightNumberBox, null!);
         return new { profile.LensHeightCentimeters, profile.ThrowRatio,
-            profile.ProjectorLatencyMilliseconds,
+            projectorFrameMilliseconds = _projectorFrameMilliseconds,
             profile.MeasuredBoardShortSideCentimeters, profile.MeasuredBoardLongSideCentimeters,
             boardSizeEstimate = CurrentBoardSizeEstimate(), opticalBoardSizeEstimate = CurrentOpticalBoardSizeEstimate(),
             estimateSource = BoardSizeSource };
@@ -163,7 +161,6 @@ public sealed partial class MainWindow
         MeasuredBoardShortSideCentimeters = OptionalNumber(MeasuredBoardShortSideNumberBox.Value),
         MeasuredBoardLongSideCentimeters = OptionalNumber(MeasuredBoardLongSideNumberBox.Value),
         EnableDisplayAudio = _displayAudioRequested,
-        ProjectorLatencyMilliseconds = _cameraLatency.ProjectorMilliseconds,
         BoardFacingDegrees = _boardFacingDegrees,
         LastAlignment = _cameraAlignment
     };
@@ -240,8 +237,6 @@ public sealed partial class MainWindow
             profile = _sessionProjectionProfiles.GetValueOrDefault(key) ??
                 _projectionSetup.Profiles.GetValueOrDefault(key) ?? profile;
         _loadingProjectionProfile = true;
-        ProjectorLatencyNumberBox.Value = profile.ProjectorLatencyMilliseconds;
-        _cameraLatency.ProjectorMilliseconds = profile.ProjectorLatencyMilliseconds;
         ResetCameraLatency();
         ProjectorLensHeightNumberBox.Value = profile.LensHeightCentimeters ?? double.NaN;
         ProjectorThrowRatioNumberBox.Value = profile.ThrowRatio ?? double.NaN;
@@ -275,14 +270,15 @@ public sealed partial class MainWindow
     private void UpdateBoardSizeEstimate()
     {
         if (!_projectionSetupInitialized) return;
-        // A Windows resolution/rotation change can leave layout bounds unchanged.
+        // A Windows resolution/rotation/refresh change can leave layout bounds unchanged.
         long now = Environment.TickCount64;
         if (now - _lastProjectionModeCheck > 3000 && SelectedDisplay is { } selected)
         {
             _lastProjectionModeCheck = now;
             var area = Microsoft.UI.Windowing.DisplayArea.GetFromDisplayId(selected.DisplayId);
             var currentMode = area is not null ? DisplayModeInfo.ForArea(area) : null;
-            if (ProjectionModeChanged(selected.PhysicalMode, currentMode))
+            if (area is null || area.DisplayId.Value != selected.DisplayId.Value ||
+                ProjectionModeChanged(selected.PhysicalMode, currentMode))
             {
                 RefreshDisplays();
                 return;
@@ -290,7 +286,7 @@ public sealed partial class MainWindow
         }
         var mode = SelectedDisplay?.PhysicalMode;
         ProjectionPropertiesText.Text = mode is null ? "Output properties unavailable. Refresh displays." :
-            $"{mode.FriendlyName ?? "Output display"} · {mode.Width} × {mode.Height} · {mode.RefreshHertz} Hz · " +
+            $"{mode.FriendlyName ?? "Output display"} · {mode.Width} × {mode.Height} · {mode.RefreshHertz:0.##} Hz · " +
             $"{AspectLabel(mode.Width, mode.Height)}";
         var profile = EnteredProjectionProfile();
         var image = profile.ImageSize(mode, out string status);
@@ -330,9 +326,20 @@ public sealed partial class MainWindow
 
     private static bool ProjectionModeChanged(DisplayModeInfo? previous, DisplayModeInfo? current) =>
         current is not null && (previous is null || current.Width != previous.Width || current.Height != previous.Height ||
+            ProjectionRefreshChanged(previous, current) ||
             current.RotationDegrees is not null && previous.RotationDegrees is not null && current.RotationDegrees != previous.RotationDegrees ||
             current.MonitorDevicePath is not null && previous.MonitorDevicePath is not null &&
                 !string.Equals(current.MonitorDevicePath, previous.MonitorDevicePath, StringComparison.OrdinalIgnoreCase) ||
             current.PreferredPixelWidth is not null && previous.PreferredPixelWidth is not null && current.PreferredPixelWidth != previous.PreferredPixelWidth ||
             current.PreferredPixelHeight is not null && previous.PreferredPixelHeight is not null && current.PreferredPixelHeight != previous.PreferredPixelHeight);
+
+    private static bool ProjectionRefreshChanged(DisplayModeInfo previous, DisplayModeInfo current)
+    {
+        // Temporary metadata loss must not reset a working board. Integer GDI
+        // readings can describe the same 59.94 Hz connection as either 59 or 60.
+        if (CameraLatencyMeasurement.ProjectorFrameMilliseconds(current.RefreshHertz) is null) return false;
+        if (CameraLatencyMeasurement.ProjectorFrameMilliseconds(previous.RefreshHertz) is null) return true;
+        double tolerance = current.HasPreciseRefreshRate ? .001 : 1;
+        return Math.Abs(current.RefreshHertz - previous.RefreshHertz) > tolerance;
+    }
 }

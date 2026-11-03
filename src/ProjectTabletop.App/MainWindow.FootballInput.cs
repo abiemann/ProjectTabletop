@@ -548,7 +548,7 @@ public sealed partial class MainWindow
                 : _scene.CurrentBoardScreen == BoardScreen.Football && _scene.FootballState.Phase == FootballPhase.Finished
                     ? "Match finished. Tracking resumes with the next match."
                 : _footballFingerInputs[player] ? _footballInputReasons[player]
-                : profiles?.ForPlayer(player) is null ? "Choose Marker setup to learn and check your marker."
+                : profiles?.ForPlayer(player) is null ? "Choose Marker Learning to learn and check your marker."
                 : _footballInputReasons[player]);
             FootballInputStatusText.Text = Describe(0) + "\n" + Describe(1) +
                 (FootballMarkerSettingsError is null ? "" : "\n" + FootballMarkerSettingsError);

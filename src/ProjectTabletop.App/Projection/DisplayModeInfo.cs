@@ -7,8 +7,10 @@ namespace ProjectTabletop.App.Projection;
 /// Reads the Windows display mode in physical pixels. DisplayArea bounds are retained
 /// separately because AppWindow placement and Win2D canvas sizes use layout units.
 /// </summary>
-internal sealed record DisplayModeInfo(string DeviceName, int Width, int Height, int RefreshHertz)
+internal sealed record DisplayModeInfo(string DeviceName, int Width, int Height, double RefreshHertz)
 {
+    // Active rational rate, rather than DEVMODE's integer fallback.
+    public bool HasPreciseRefreshRate { get; init; }
     /// <summary>The selected monitor's Windows/EDID name, when the driver supplies it.</summary>
     public string? FriendlyName { get; init; }
 
@@ -46,9 +48,12 @@ internal sealed record DisplayModeInfo(string DeviceName, int Width, int Height,
         var mode = new DevMode { Size = (ushort)Marshal.SizeOf<DevMode>() };
         if (!EnumDisplaySettings(info.DeviceName, CurrentSettings, ref mode)) return null;
         var metadata = NativeDisplayMetadata.ForSource(info.DeviceName);
+        // DEVMODE uses 0/1 for a default refresh rate, not a usable measurement.
+        double refreshHertz = metadata?.ActiveRefreshHertz ?? (mode.RefreshHertz > 1 ? mode.RefreshHertz : 0);
         return mode.Width > 0 && mode.Height > 0
-            ? new DisplayModeInfo(info.DeviceName, (int)mode.Width, (int)mode.Height, (int)mode.RefreshHertz)
+            ? new DisplayModeInfo(info.DeviceName, (int)mode.Width, (int)mode.Height, refreshHertz)
             {
+                HasPreciseRefreshRate = metadata?.ActiveRefreshHertz is not null,
                 FriendlyName = metadata?.FriendlyName,
                 MonitorDevicePath = metadata?.MonitorDevicePath,
                 PreferredPixelWidth = metadata?.PreferredPixelWidth,

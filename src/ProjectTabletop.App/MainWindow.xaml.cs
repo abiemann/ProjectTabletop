@@ -126,7 +126,7 @@ public sealed partial class MainWindow : Window
         public int Height => Bounds.Height;
         public override string ToString() =>
             $"{PhysicalMode?.FriendlyName ?? $"Display {Number}"}: " + (PhysicalMode is { } mode
-                ? $"{mode.Width} × {mode.Height} @ {mode.RefreshHertz} Hz physical"
+                ? $"{mode.Width} × {mode.Height} @ {mode.RefreshHertz:0.##} Hz physical"
                 : "physical mode unavailable") +
             $" ({Width} × {Height} desktop)" +
             (IsPrimary ? " (primary)" : " (secondary)");
@@ -166,7 +166,10 @@ public sealed partial class MainWindow : Window
             "Select a separate projector display. Use Windows Extend mode, then refresh displays.");
         var area = DisplayArea.GetFromDisplayId(selected.DisplayId);
         if (area is null || area.DisplayId.Value != selected.DisplayId.Value)
+        {
+            RefreshDisplays();
             throw new InvalidOperationException("The selected projector is no longer connected. Refresh displays and select it again.");
+        }
         var current = new DisplayChoice(area, selected.Number);
         if (current.Width <= 0 || current.Height <= 0)
             throw new InvalidOperationException("The projector reports an empty display area. Check its connection, use Windows Extend mode, then refresh displays.");
@@ -174,7 +177,8 @@ public sealed partial class MainWindow : Window
         if (controls is null || controls.DisplayId.Value == current.DisplayId.Value)
             throw new InvalidOperationException("Choose a projector display separate from the laptop controls. Output was not opened over the controls.");
         if (current.Bounds.X != selected.Bounds.X || current.Bounds.Y != selected.Bounds.Y ||
-            current.Width != selected.Width || current.Height != selected.Height)
+            current.Width != selected.Width || current.Height != selected.Height ||
+            ProjectionModeChanged(selected.PhysicalMode, current.PhysicalMode))
         {
             var index = DisplayComboBox.Items.IndexOf(selected);
             if (index >= 0) DisplayComboBox.Items[index] = current;

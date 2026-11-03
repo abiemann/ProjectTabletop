@@ -74,7 +74,7 @@ public sealed partial class MainWindow
             {
                 SetDuckHuntMicrophoneNotice("Could not list microphones. Reopen the microphone list to retry.");
                 ApplyClickLearningInputs(_duckHuntMicrophones, _duckHuntSelectedMicrophoneId, loading: false);
-                _clickLearningNotice = "Could not list microphones. Close click learning and reopen it to retry.";
+                _clickLearningNotice = "Could not list microphones. Close Gun-click Learning and reopen it to retry.";
             }
         }
     }

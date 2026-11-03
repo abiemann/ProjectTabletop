@@ -5,7 +5,7 @@ namespace ProjectTabletop.App;
 
 public sealed partial class MainWindow
 {
-    private bool _projectionPreviewEnabled = true;
+    private bool _projectionPreviewEnabled;
     private volatile bool _projectionPreviewDrawingEnabled;
     private volatile bool _boardGamePreviewDrawingEnabled;
 

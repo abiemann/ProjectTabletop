@@ -184,7 +184,7 @@ public sealed partial class SceneCompositor
             _duckHuntRenderedLiveDot = live;
             _duckHuntInputVisualRevision++;
         }
-        string hint = _duckHuntLearningActive ? "Click learning · round paused" :
+        string hint = _duckHuntLearningActive ? "Gun-click Learning · round paused" :
             context is null ? "Waiting for camera and board calibration" :
             !_duckHuntAudioReady ? _duckHuntAudioStatus :
             live.HasValue

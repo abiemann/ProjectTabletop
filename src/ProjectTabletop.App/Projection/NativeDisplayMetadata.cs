@@ -7,7 +7,7 @@ namespace ProjectTabletop.App.Projection;
 /// All calls are read-only. Missing driver metadata must not prevent output.
 /// </summary>
 internal sealed record NativeDisplayMetadata(string? FriendlyName, string? MonitorDevicePath,
-    int? PreferredPixelWidth, int? PreferredPixelHeight)
+    int? PreferredPixelWidth, int? PreferredPixelHeight, double? ActiveRefreshHertz)
 {
     private const uint OnlyActivePaths = 0x2;
     private const int InsufficientBuffer = 122;
@@ -57,9 +57,19 @@ internal sealed record NativeDisplayMetadata(string? FriendlyName, string? Monit
                 preferred.Width is > 0 and <= int.MaxValue && preferred.Height is > 0 and <= int.MaxValue;
             return new(hasName ? NonEmpty(name.FriendlyName) : null,
                 hasName ? NonEmpty(name.MonitorDevicePath) : null,
-                hasPreferred ? (int)preferred.Width : null, hasPreferred ? (int)preferred.Height : null);
+                hasPreferred ? (int)preferred.Width : null, hasPreferred ? (int)preferred.Height : null,
+                RefreshHertzFromRatio(target.RefreshRate.Numerator, target.RefreshRate.Denominator));
         }
         return null;
+    }
+
+    // Read the active connection, not the monitor's preferred mode. Preserve
+    // fractional rates such as 60000/1001 rather than rounding them to 60 Hz.
+    internal static double? RefreshHertzFromRatio(uint numerator, uint denominator)
+    {
+        if (denominator == 0) return null;
+        double hertz = (double)numerator / denominator;
+        return double.IsFinite(hertz) && hertz > 1 ? hertz : null;
     }
 
     private static string? NonEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

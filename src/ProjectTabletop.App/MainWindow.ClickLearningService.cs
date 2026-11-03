@@ -129,7 +129,7 @@ public sealed partial class MainWindow
             _clickSoundProfiles = ClickSoundProfileSettingsStore.Read(ClickSoundProfilesPath);
             _duckHuntMicrophone.SetProfiles(_clickSoundProfiles);
             _clickProfilesError = null;
-            FinishClickLearning("Click learning saved for this microphone. You can now use it in Duck Hunt.");
+            FinishClickLearning("Gun-click Learning saved for this microphone. You can now use it in Duck Hunt.");
         }
         catch (Exception error) when (error is IOException or InvalidDataException or
             UnauthorizedAccessException or System.Text.Json.JsonException or ArgumentException)
@@ -159,7 +159,7 @@ public sealed partial class MainWindow
                     : $"WAIT · TEST {snapshot.ValidationAttempt}/{snapshot.RequiredValidation}",
                 AudioClickLearningStage.QuietValidation => "STOP CLICKING · QUIET CHECK",
                 AudioClickLearningStage.Complete => "Checks passed",
-                _ => "Click learning"
+                _ => "Gun-click Learning"
             };
         string instruction = _clickLearningNotice ?? _clickLearningFailure ??
             (_clickLearningStarting ? "Keep the room quiet while the microphone starts." :

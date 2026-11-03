@@ -222,7 +222,8 @@ public sealed partial class MainWindow
                     bool engineReset = false;
                     var acquisitionHints = new HandAcquisitionQuery([], [], null);
                     IReadOnlyList<HandDetection> hands = [];
-                    _handEngine!.CaptureDiagnostics = requestedInTester || acquisitionContext is not null;
+                    _handEngine!.CaptureDiagnostics = _recordingDiagnosticsEnabled &&
+                        (requestedInTester || acquisitionContext is not null);
                     frameInterval = _lastHandEngineFrameTime is { } previousFrame
                         ? (frame.Timestamp - previousFrame).TotalMilliseconds : null;
                     engineReset = _handEngineGeneration != generation || frameInterval is <= 0 or > 350;

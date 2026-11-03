@@ -58,15 +58,10 @@ public sealed partial class MainWindow
                     diagnosticEnabled.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
                     throw new ArgumentException("Provide enabled as a JSON boolean.");
                 _boardHandDiagnosticLogging = diagnosticEnabled.GetBoolean();
-#if DEBUG
-                if (!_boardHandDiagnosticLogging)
-                {
-                    ClearHoldButtonSnapshot();
-                    ClearStrykersRunDiagnosticSnapshot();
-                }
-#endif
+                SetRecordingDiagnosticsEnabled(_boardHandDiagnosticLogging);
                 LogHandTrackingEvent("board_diagnostic_logging", new { enabled = _boardHandDiagnosticLogging }, force: true);
-                return new { enabled = _boardHandDiagnosticLogging, status = _handDetectionLog?.Status };
+                return new { enabled = _boardHandDiagnosticLogging, recordingDiagnosticsEnabled = _recordingDiagnosticsEnabled,
+                    status = _handDetectionLog?.Status };
             case "get_hold_diagnostics":
                 return new { board = _scene.CurrentBoardScreen.ToString(),
                     controlBrightness = _scene.HoldControlBrightness,
@@ -319,6 +314,7 @@ public sealed partial class MainWindow
                     handTestStatus = _scene.HandTrackingTestStatus,
                     lastHandDetection = _lastHandDetection,
                     handDetectionLog = _handDetectionLog?.Status,
+                    recordingDiagnosticsEnabled = _recordingDiagnosticsEnabled,
                     paint = _scene.GetPaintDiagnostics(),
                     paintDrawerOpen = _scene.PaintDrawerOpen,
                     waterGarden = _scene.GetWaterGardenDiagnostics(),

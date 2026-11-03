@@ -24,7 +24,7 @@ public sealed partial class MainWindow
     private bool _markerTrackingEnabled;
     private string? _markerTrackingCameraId;
     private string _markerTrackingReason = "tracking-off";
-    private string _markerTrackingStatus = "Off. Use Marker setup to train the double-bar marker.";
+    private string _markerTrackingStatus = "Off. Use Marker Learning to train the double-bar marker.";
     private long _markerTrackingGeneration;
     private long _markerTrackingSceneRevision = -1;
     private BoardScreen _markerTrackingSceneBoard;

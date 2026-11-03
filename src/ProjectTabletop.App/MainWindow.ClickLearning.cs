@@ -55,12 +55,12 @@ public sealed partial class MainWindow
             UpdateClickLearningUi();
             if (_clickLearningUiActive || _clickLearningUiCanSave) CancelClickLearning();
             ClickLearningPanel.Visibility = Visibility.Collapsed;
-            ClickLearningButton.Content = "Click learning";
+            ClickLearningButton.Content = "Gun-click Learning";
             _clickLearningUiTimer?.Stop();
             return;
         }
         ClickLearningPanel.Visibility = Visibility.Visible;
-        ClickLearningButton.Content = "Close click learning";
+        ClickLearningButton.Content = "Close Gun-click Learning";
         _clickLearningUiTimer?.Start();
         UpdateClickLearningUi();
         await RunClickLearningUiActionAsync(RefreshClickLearningInputsAsync);

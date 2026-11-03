@@ -191,10 +191,10 @@ public sealed partial class MainWindow
 
     private string WandMarkerStatusTextLocked()
     {
-        string message = !_markerTrackingEnabled ? "Off. Use Marker setup to train the double-bar marker before tracking." :
+        string message = !_markerTrackingEnabled ? "Off. Use Marker Learning to train the double-bar marker before tracking." :
             !_camera.IsRunning || !_cameraWanted || _camera.ActiveDeviceId != _markerTrackingCameraId ? "Start the selected webcam to track the double-bar marker." :
             _wandMarkerLearning ? "Click inside either black bar in the live preview. Keep both bars facing the webcam, close to the board." :
-            LearnedWandMarkerProfileLocked() is null ? "Use Marker setup to train this camera for the double-bar marker." :
+            LearnedWandMarkerProfileLocked() is null ? "Use Marker Learning to train this camera for the double-bar marker." :
             !WandMarkerBoardSelected ? "Double-bar marker saved. Tracking runs in Water Garden and Paint." :
             WandMarkerFreshLocked(MonotonicClock.UtcNow) ? _scene.CurrentBoardScreen == BoardScreen.Paint
                 ? "Double-bar marker tracked. Move it across the board to leave an ink trail."

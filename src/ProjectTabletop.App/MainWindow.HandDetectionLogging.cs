@@ -1,6 +1,8 @@
 using ProjectTabletop.App.Camera;
 using ProjectTabletop.Interaction;
 using ProjectTabletop.Vision;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 
 namespace ProjectTabletop.App;
 
@@ -14,8 +16,9 @@ public sealed partial class MainWindow
     private object? _lastHoldButtonActivation;
     private DateTimeOffset _lastHandLogStatusRefresh;
     private DateTimeOffset _handVideoNotBefore;
+    private volatile bool _recordingDiagnosticsEnabled;
     // Full frame logging outside the tester is opt-in through local control.
-    // Hold activations always retain the caption evidence that caused them.
+    // Both it and forced activation events obey the visible master switch.
     private volatile bool _boardHandDiagnosticLogging = false;
 
     private bool IsHandTrackingTester => _scene.CurrentBoardScreen == BoardScreen.HandTracking;
@@ -28,10 +31,49 @@ public sealed partial class MainWindow
         _handVideoRecorder = new(Path.Combine(_appDataDirectory, "HandTrackingRecordings"));
     }
 
+    private void RecordingDiagnosticsToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_initialized || _closing) return;
+        SetRecordingDiagnosticsEnabled(((ToggleSwitch)sender).IsOn);
+    }
+
+    private void SetRecordingDiagnosticsEnabled(bool enabled)
+    {
+        ApplyRecordingDiagnosticsPolicy(enabled);
+        if (RecordingDiagnosticsToggle.IsOn != enabled) RecordingDiagnosticsToggle.IsOn = enabled;
+        _lastHandLogStatusRefresh = DateTimeOffset.MinValue;
+        UpdateHandDetectionLogStatus();
+    }
+
+    private void ApplyRecordingDiagnosticsPolicy(bool enabled)
+    {
+        // Accepted hand completions also use this gate. Off wins over a late
+        // detection, and re-enabling requires a newly captured tester frame.
+        lock (_handGate)
+        {
+            if (_recordingDiagnosticsEnabled == enabled) return;
+            _recordingDiagnosticsEnabled = enabled;
+            _handVideoNotBefore = enabled && IsHandTrackingTester ? MonotonicClock.UtcNow : DateTimeOffset.MaxValue;
+            if (!enabled)
+            {
+                _boardHandDiagnosticLogging = false;
+                _handVideoRecorder?.Stop("diagnostics_disabled");
+            }
+        }
+#if DEBUG
+        if (!enabled)
+        {
+            ClearHoldButtonSnapshot();
+            ClearStrykersRunDiagnosticSnapshot();
+        }
+#endif
+    }
+
     // Camera delivery and inference completion share this gate with tracking resets.
     // Only frame references are queued here; encoding and file writes stay off these threads.
     private void QueueHandTrackingVideoFrame(CameraFrame frame)
     {
+        if (!_recordingDiagnosticsEnabled) return;
         lock (_handGate)
         {
             if (UpdateHandVideoEligibility() && frame.Timestamp >= _handVideoNotBefore)
@@ -41,7 +83,8 @@ public sealed partial class MainWindow
 
     private bool UpdateHandVideoEligibility()
     {
-        var reason = _closing ? "closing" : !IsHandTrackingTester ? "left_tester" :
+        var reason = _closing ? "closing" : !_recordingDiagnosticsEnabled ? "diagnostics_disabled" :
+            !IsHandTrackingTester ? "left_tester" :
             !_handTrackingEnabled ? "tracking_disabled" : _handTrackingError is not null ? "tracking_error" :
             !_cameraWanted || !_camera.IsRunning ? "camera_stopped" :
             _cameraOperation.CurrentCount == 0 ? "camera_changing" :
@@ -53,13 +96,14 @@ public sealed partial class MainWindow
 
     private void RecordHandDiagnostic(object entry)
     {
+        if (!_recordingDiagnosticsEnabled) return;
         _handDetectionLog?.Record(entry);
         _handVideoRecorder?.Record(entry);
     }
 
     private void LogHandTrackingEvent(string kind, object? details = null, bool force = false)
     {
-        if (!force && !IsHandTrackingTester && !_boardHandDiagnosticLogging) return;
+        if (!_recordingDiagnosticsEnabled || !force && !IsHandTrackingTester && !_boardHandDiagnosticLogging) return;
         RecordHandDiagnostic(new
         {
             schemaVersion = 1, type = kind, loggedAt = MonotonicClock.UtcNow,
@@ -74,7 +118,7 @@ public sealed partial class MainWindow
         IReadOnlyList<HandDetection> hands, IReadOnlyList<HandDetection> visibleHands,
         IReadOnlyList<HandCursor> cursors, string outcome)
     {
-        if (!requestedInTester && !IsHandTrackingTester && !_boardHandDiagnosticLogging) return;
+        if (!_recordingDiagnosticsEnabled || !requestedInTester && !IsHandTrackingTester && !_boardHandDiagnosticLogging) return;
         var now = MonotonicClock.UtcNow;
         // Do not let a menu inference that navigated into the tester start a clip,
         // or an obsolete/stale inference restart recording after a reset.
@@ -128,7 +172,7 @@ public sealed partial class MainWindow
         {
             if (changed)
             {
-                _handVideoNotBefore = board == BoardScreen.HandTracking
+                _handVideoNotBefore = _recordingDiagnosticsEnabled && board == BoardScreen.HandTracking
                     ? MonotonicClock.UtcNow : DateTimeOffset.MaxValue;
                 if (board == BoardScreen.HandTracking || _lastLoggedHandBoard == BoardScreen.HandTracking)
                     LogHandTrackingEvent("board_changed", new { from = _lastLoggedHandBoard?.ToString(), to = board.ToString() }, force: true);
@@ -140,23 +184,27 @@ public sealed partial class MainWindow
         if (!changed && now - _lastHandLogStatusRefresh < TimeSpan.FromSeconds(1)) return;
         _lastHandLogStatusRefresh = now;
         var status = _handDetectionLog?.Status;
-        HandDetectionLogStatusText.Text = status?.Error is { } error ? "Detection log error: " + error :
+        HandDetectionLogStatusText.Text = !_recordingDiagnosticsEnabled ? "Detection logging is off." :
+            status?.Error is { } error ? "Detection log error: " + error :
             board == BoardScreen.HandTracking || _boardHandDiagnosticLogging
                 ? $"Detection logging on: {status?.WrittenRecords ?? 0} records, {status?.DroppedRecords ?? 0} dropped.\n" +
                   (status?.CurrentPath ?? Path.Combine(_appDataDirectory, "HandTrackingLogs"))
-                : "Full detection logging starts automatically in the Hand-Tracking tester.";
+                : "Enabled. Full detection logging starts in the Hand-Tracking tester.";
         var video = _handVideoRecorder?.Status;
-        CameraPreviewTitleText.Text = video?.Error is not null ? "CAMERA  ·  recording error (see controls)" :
+        CameraPreviewTitleText.Text = !_recordingDiagnosticsEnabled
+            ? board == BoardScreen.HandTracking ? "CAMERA  ·  hand test" : "CAMERA  ·  live fingertip tracking" :
+            video?.Error is not null ? "CAMERA  ·  recording error (see controls)" :
             video is { IsRecording: true } ? "CAMERA  ·  RECORDING hand test · UTC timestamps" :
             board == BoardScreen.HandTracking ? "CAMERA  ·  hand test · waiting to record a hand" :
             "CAMERA  ·  live fingertip tracking";
-        HandVideoRecordingStatusText.Text = video?.Error is { } videoError ? "Hand video error: " + videoError :
+        HandVideoRecordingStatusText.Text = !_recordingDiagnosticsEnabled ? "Hand video recording is off." :
+            video?.Error is { } videoError ? "Hand video error: " + videoError :
             video is { IsRecording: true }
                 ? $"Recording hand video: {video.WrittenFrames} frames; dropped: {video.DroppedFrames} frames, " +
                   $"{video.DroppedRecords} log records.\n{video.VideoPath}"
                 : board == BoardScreen.HandTracking
                     ? "Video starts when a hand is detected; stops after 5 seconds without hands.\n" +
                       (video?.VideoPath ?? Path.Combine(_appDataDirectory, "HandTrackingRecordings"))
-                    : "Hand video records automatically in the Hand-Tracking tester only.";
+                    : "Enabled. Hand video records in the Hand-Tracking tester only.";
     }
 }

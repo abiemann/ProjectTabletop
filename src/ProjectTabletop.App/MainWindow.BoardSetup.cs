@@ -715,7 +715,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            ResetCameraLatency("Estimated camera latency: unavailable because board alignment failed. Scan again.");
+            ResetCameraLatency("Estimated Visual Latency: unavailable because board alignment failed. Scan again.");
             _scene.ShowBoardCalibrationSpot(-1);
             Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.Failed);
             _boardSetupDiagnostic = "Projector alignment was rejected: " + ex.Message +

@@ -11,7 +11,7 @@ public sealed record CameraLatencySample(int SpotIndex, DateTimeOffset ShownAt,
 
 /// <summary>
 /// Estimates camera delivery delay from the registration dots, after subtracting
-/// the configured projector delay. The caller supplies times from the same monotonic
+/// the supplied display-frame allowance. The caller supplies times from the same monotonic
 /// clock and validates that the detected dot belongs to the current presentation.
 /// </summary>
 public sealed class CameraLatencyMeasurement
@@ -27,9 +27,16 @@ public sealed class CameraLatencyMeasurement
     public CameraLatencyMeasurement() => _readOnlySamples = _samples.AsReadOnly();
 
     /// <summary>
-    /// Projector delay to subtract from each first observation. Changing the delay
-    /// recalculates the current scan; observations shorter than the delay remain
-    /// available if the setting is subsequently lowered, but are not camera samples.
+    /// One frame at the active display refresh rate, not a measurement of physical
+    /// projector processing latency. Windows uses zero or one for an unknown rate.
+    /// </summary>
+    public static double? ProjectorFrameMilliseconds(double refreshHertz) =>
+        double.IsFinite(refreshHertz) && refreshHertz > 1 ? 1000 / refreshHertz : null;
+
+    /// <summary>
+    /// Display allowance to subtract from each first observation. Changing it
+    /// recalculates the current scan; observations shorter than the allowance remain
+    /// available if it is subsequently lowered, but are not camera samples.
     /// </summary>
     public double ProjectorMilliseconds
     {

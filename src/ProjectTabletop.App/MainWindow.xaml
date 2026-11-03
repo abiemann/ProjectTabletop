@@ -54,13 +54,9 @@
                         <Button x:Name="CaptureCameraPictureDefaultButton" Content="Use current settings as Default"
                                 IsEnabled="False" Click="CaptureCameraPictureDefault_Click"
                                 ToolTipService.ToolTip="Turn automatic profiles off before saving your own camera picture settings." />
-                        <NumberBox x:Name="ProjectorLatencyNumberBox" Header="Projector latency (ms)" Value="17"
-                                   Minimum="0" Maximum="2000" SmallChange="1" SpinButtonPlacementMode="Compact"
-                                   ValueChanged="ProjectorLatency_ValueChanged"
-                                   ToolTipService.ToolTip="Subtracted from the setup-dot response time. Saved for the selected projector and display mode; changing it recalculates the current result." />
-                        <TextBlock x:Name="CameraLatencyText" Text="Estimated camera latency: measured during board setup."
+                        <TextBlock x:Name="CameraLatencyText" Text="Estimated Visual Latency: measured during board setup."
                                    TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}"
-                                   ToolTipService.ToolTip="First observed setup-dot frame minus its first projector draw minus the entered projector latency. Includes camera exposure, buffering and delivery; display scheduling and frame sampling affect this estimate." />
+                                   ToolTipService.ToolTip="First observed setup-dot frame minus its first projector draw, less one frame at the selected display's refresh rate. This automatic allowance estimates projector delay; it does not measure the projector's full processing time. Includes camera exposure, buffering and delivery." />
                     </StackPanel>
                 </Border>
 
@@ -120,7 +116,7 @@
                             <Button x:Name="RescanBoardButton" Content="Scan again" Click="RescanBoard_Click" IsEnabled="False" />
                         </StackPanel>
                         <TextBlock x:Name="BoardSetupStatusText" Text="Board setup first finds the cardboard under black output, then uses white projection and five alignment spots to fit its grid." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
-                        <Expander x:Name="MarkerSetupExpander" Header="Marker setup" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                        <Expander x:Name="MarkerSetupExpander" Header="Marker Learning" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <StackPanel Spacing="10">
                                 <TextBlock Text="Use two equal parallel black bars with a clear gap on a light backing. Follow the projected position targets, slide between the two rings and back, then lift the marker away. Save becomes available after all checks pass." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                                 <ComboBox x:Name="MarkerSetupTargetCombo" Header="Set up" SelectedIndex="0" HorizontalAlignment="Stretch">
@@ -141,7 +137,7 @@
                                 </StackPanel>
                             </StackPanel>
                         </Expander>
-                        <Button x:Name="ClickLearningButton" Content="Click learning" Click="ClickLearning_Click"
+                        <Button x:Name="ClickLearningButton" Content="Gun-click Learning" Click="ClickLearning_Click"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" />
                         <Border x:Name="ClickLearningPanel" Visibility="Collapsed" Background="{StaticResource TabletopInsetBrush}"
                                 BorderBrush="{StaticResource TabletopPanelBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
@@ -161,7 +157,7 @@
                                            Text="Choose your microphone, then press Start learning. Stay quiet until CLICK NOW appears, then make one click at a time."
                                            TextWrapping="Wrap" />
                                 <ProgressBar x:Name="ClickLearningProgress" Minimum="0" Maximum="100" Value="0"
-                                             AutomationProperties.Name="Click learning progress" />
+                                             AutomationProperties.Name="Gun-click Learning progress" />
                                 <TextBlock x:Name="ClickLearningErrorText" Visibility="Collapsed" TextWrapping="Wrap"
                                            AutomationProperties.LiveSetting="Polite" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -197,7 +193,7 @@
                         <Button Content="Blackjack" Click="Blackjack_Click" />
                         <TextBlock Text="Play the dealer with virtual chips. Aim with four fingers together, then move your index finger sideways to select, or click the laptop table. The laptop table works with the projector off." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Water Garden" Click="WaterGarden_Click" />
-                        <TextBlock Text="Use Marker setup above to train the double-bar marker, then move it across the water to make ripples. Open the bottom-left arrow to find EXIT, RESET, and DUCK+. Hold a projected control for one second, then uncover it before pressing again. Laptop clicks also work." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                        <TextBlock Text="Use Marker Learning above to train the double-bar marker, then move it across the water to make ripples. Open the bottom-left arrow to find EXIT, RESET, and DUCK+. Hold a projected control for one second, then uncover it before pressing again. Laptop clicks also work." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Button Content="Football" Click="OnOpenFootballBoard" />
                         <Button Content="Stryker's Run" Click="OnOpenStrykersRunBoard" />
                         <Grid ColumnSpacing="10">
@@ -209,7 +205,7 @@
                             <ComboBox x:Name="DuckHuntMicrophoneCombo" Grid.Column="1" HorizontalAlignment="Stretch"
                                       VerticalAlignment="Center" PlaceholderText="Choose microphone"
                                       AutomationProperties.Name="Duck Hunt microphone"
-                                      ToolTipService.ToolTip="Choose the microphone for Duck Hunt and click learning"
+                                      ToolTipService.ToolTip="Choose the microphone for Duck Hunt and Gun-click Learning"
                                       SelectionChanged="ClickLearningMicrophone_SelectionChanged"
                                       DropDownOpened="DuckHuntMicrophone_DropDownOpened" />
                         </Grid>
@@ -242,9 +238,9 @@
                                     <ComboBoxItem Content="Double-bar marker" />
                                     <ComboBoxItem Content="Index fingertip" />
                                 </ComboBox>
-                                <TextBlock x:Name="FootballInputStatusText" Text="Use Marker setup for each human player's marker, or choose Index fingertip." TextWrapping="Wrap" />
+                                <TextBlock x:Name="FootballInputStatusText" Text="Use Marker Learning for each human player's marker, or choose Index fingertip." TextWrapping="Wrap" />
                                 <Button Content="Reset football match" Click="OnResetFootball" />
-                                <TextBlock Text="Use Marker setup above to train each human player. Keep one marker in each half; player 1 uses the left and player 2 the right. Every kicker uses the same contact size." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <TextBlock Text="Use Marker Learning above to train each human player. Keep one marker in each half; player 1 uses the left and player 2 the right. Every kicker uses the same contact size." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                             </StackPanel>
                         </Expander>
                         <Button Content="Crown &amp; Deed" Click="CrownDeed_Click" />
@@ -270,9 +266,10 @@
                         <TextBlock Text="Open Hand-Tracking for the test grid. Extend and separate all fingers to show &quot;Spread out hand&quot;. Pinch thumb and index finger for a one-second red circle, then release. Photo Copy uses a grey surface with separate lights for the object and your hand." TextWrapping="Wrap" Foreground="{StaticResource TabletopMutedBrush}" />
                         <Border Background="{StaticResource TabletopInsetBrush}" BorderBrush="{StaticResource TabletopPanelBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
                             <StackPanel Spacing="9">
-                                <TextBlock Text="RECORDING &amp; DIAGNOSTICS" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TabletopSecondaryAccentBrush}" CharacterSpacing="60" />
-                                <TextBlock x:Name="HandDetectionLogStatusText" Text="Full detection logging starts automatically in the Hand-Tracking tester." TextWrapping="Wrap" IsTextSelectionEnabled="True" Foreground="{StaticResource TabletopMutedBrush}" />
-                                <TextBlock x:Name="HandVideoRecordingStatusText" Text="Hand video records automatically in the Hand-Tracking tester only." TextWrapping="Wrap" IsTextSelectionEnabled="True" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <ToggleSwitch x:Name="RecordingDiagnosticsToggle" Header="Recording &amp; diagnostics" IsOn="False"
+                                              Toggled="RecordingDiagnosticsToggle_Toggled" />
+                                <TextBlock x:Name="HandDetectionLogStatusText" Text="Detection logging is off." TextWrapping="Wrap" IsTextSelectionEnabled="True" Foreground="{StaticResource TabletopMutedBrush}" />
+                                <TextBlock x:Name="HandVideoRecordingStatusText" Text="Hand video recording is off." TextWrapping="Wrap" IsTextSelectionEnabled="True" Foreground="{StaticResource TabletopMutedBrush}" />
                             </StackPanel>
                         </Border>
                         <Button Content="Save raw camera PNG" Click="SaveRawSnapshot_Click" />
@@ -323,7 +320,7 @@
                             </Grid.ColumnDefinitions>
                             <Border Background="{StaticResource TabletopSecondaryAccentBrush}" CornerRadius="2" />
                             <TextBlock Grid.Column="1" Text="PROJECTION PREVIEW  ·  mapped board output" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TabletopAccentBrush}" CharacterSpacing="40" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                            <ToggleSwitch x:Name="ProjectionPreviewToggle" Grid.Column="2" IsOn="True" OnContent="" OffContent="" MinWidth="0" VerticalAlignment="Center"
+                            <ToggleSwitch x:Name="ProjectionPreviewToggle" Grid.Column="2" IsOn="False" OnContent="" OffContent="" MinWidth="0" VerticalAlignment="Center"
                                           AutomationProperties.Name="Projection preview" ToolTipService.ToolTip="Show the laptop board preview. Projector output and camera tracking stay active."
                                           Toggled="ProjectionPreviewToggle_Toggled" />
                         </Grid>
@@ -349,7 +346,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock x:Name="BoardGamePreviewTitle" Text="BLACKJACK  ·  click the table to play  ·  virtual chips" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TabletopAccentBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                            <ToggleSwitch x:Name="BoardGamePreviewToggle" Grid.Column="1" IsOn="True" OnContent="" OffContent="" MinWidth="0" VerticalAlignment="Center"
+                            <ToggleSwitch x:Name="BoardGamePreviewToggle" Grid.Column="1" IsOn="False" OnContent="" OffContent="" MinWidth="0" VerticalAlignment="Center"
                                           AutomationProperties.Name="Projection preview" ToolTipService.ToolTip="Show the laptop board preview. Projector output and camera tracking stay active."
                                           Toggled="ProjectionPreviewToggle_Toggled" />
                         </Grid>

@@ -6,6 +6,48 @@ public class CameraLatencyTests
 {
     private static readonly DateTimeOffset Start = new(2026, 10, 10, 12, 0, 0, TimeSpan.Zero);
 
+    [Theory]
+    [InlineData(30, 33.3333333333333)]
+    [InlineData(60, 16.6666666666667)]
+    [InlineData(120, 8.33333333333333)]
+    [InlineData(60000d / 1001, 16.6833333333333)]
+    public void ProjectorFrameAllowanceUsesActiveRefreshRateWithoutRounding(double hertz, double expected)
+    {
+        double actual = Assert.IsType<double>(CameraLatencyMeasurement.ProjectorFrameMilliseconds(hertz));
+        Assert.Equal(expected, actual, 10);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(-60)]
+    [InlineData(double.NaN)]
+    [InlineData(double.NegativeInfinity)]
+    [InlineData(double.PositiveInfinity)]
+    public void UnknownProjectorRefreshDoesNotInventAFrameAllowance(double hertz)
+    {
+        Assert.Null(CameraLatencyMeasurement.ProjectorFrameMilliseconds(hertz));
+    }
+
+    [Fact]
+    public void RefreshDerivedAllowanceDoesNotChangeMeasuredSceneTiming()
+    {
+        var measurement = new CameraLatencyMeasurement();
+        for (int i = 0; i < 3; i++)
+            Assert.True(measurement.Record(i, Start, Start.AddMilliseconds(100 + 10 * i)));
+        var minimumAge = measurement.ProjectionReferenceMinimumAge(60);
+        Assert.InRange(minimumAge.TotalMilliseconds, 66.6666, 66.6667);
+
+        foreach (double hertz in new[] { 30d, 60, 120, 60000d / 1001 })
+        {
+            measurement.ProjectorMilliseconds = CameraLatencyMeasurement.ProjectorFrameMilliseconds(hertz)!.Value;
+            Assert.Equal(110 - 1000 / hertz, measurement.MedianMilliseconds!.Value, 10);
+            Assert.Equal(110, measurement.TotalMedianMilliseconds);
+            Assert.Equal(minimumAge, measurement.ProjectionReferenceMinimumAge(60));
+            Assert.Equal([100d, 110d, 120d], measurement.Samples.Select(sample => sample.TotalMilliseconds));
+        }
+    }
+
     [Fact]
     public void SubtractsProjectorDelayFromFrameArrival()
     {
