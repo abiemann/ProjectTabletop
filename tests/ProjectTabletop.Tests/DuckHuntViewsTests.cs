@@ -59,11 +59,11 @@ public class DuckHuntViewsTests
         Assert.Equal(expected, board.CurrentDuckHuntView);
         Assert.Equal(epoch + 1, board.DuckHuntRoundRevision);
         Assert.True(board.Revision > revision);
-        bool practice = expected == DuckHuntView.TargetPractice;
-        Assert.Equal(practice, board.DuckHuntDrawerOpen);
-        string handle = practice ? "duck-hunt-drawer-close" : "duck-hunt-drawer-open";
+        bool startsWithPlay = expected is DuckHuntView.TargetPractice or DuckHuntView.Hunt;
+        Assert.Equal(startsWithPlay, board.DuckHuntDrawerOpen);
+        string handle = startsWithPlay ? "duck-hunt-drawer-close" : "duck-hunt-drawer-open";
         Assert.Contains(board.Buttons, button => button.Id == handle);
-        if (practice)
+        if (startsWithPlay)
             Assert.All(board.Buttons.Where(button => button.Id != handle), button => Assert.False(button.Enabled));
         else Assert.Single(board.Buttons);
         Assert.Empty(board.HoldProgress(At(2400)));
@@ -71,7 +71,7 @@ public class DuckHuntViewsTests
         Assert.Empty(board.ObserveHeldButtons([], At(2399), At(2450), [handle]));
         for (int ms = 2500; ms <= 3600; ms += 100)
             Assert.Empty(board.ObserveHeldButtons([handle], At(ms), At(ms), []));
-        Assert.Equal(practice, board.DuckHuntDrawerOpen);
+        Assert.Equal(startsWithPlay, board.DuckHuntDrawerOpen);
     }
 
     [Theory]
@@ -89,8 +89,8 @@ public class DuckHuntViewsTests
         Assert.False(board.TryDuckHuntShot(new(.5, .48), At(100200)));
         Assert.Equal(idle, board.GalleryState);
         Assert.Empty(board.GalleryPunctures);
-        Assert.False(board.DuckHuntDrawerOpen);
-        Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(100300)));
+        Assert.Equal(hunt, board.DuckHuntDrawerOpen);
+        if (!hunt) Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(100300)));
         board.TickDuckHunt(At(100600));
         Assert.DoesNotContain(board.Buttons, b => b.Id == "duck-hunt-replay");
         Assert.DoesNotContain(board.Buttons, b => b.Id == "duck-hunt-mic");
@@ -99,7 +99,7 @@ public class DuckHuntViewsTests
     }
 
     [Fact]
-    public void ViewChangesDiscardThePreviousRoundAndOnlyPracticeOpensItsDrawer()
+    public void ViewChangesDiscardThePreviousRoundAndOpenThePlayDrawer()
     {
         var board = new BoardSession();
         board.ShowDuckHuntTargetPractice(At(0));
@@ -117,7 +117,7 @@ public class DuckHuntViewsTests
         Assert.Equal(DuckHuntGalleryPhase.Ready, board.GalleryState.Phase);
         Assert.Equal(0, board.GalleryState.Shots);
         Assert.Empty(board.GalleryPunctures);
-        Assert.False(board.DuckHuntDrawerOpen);
+        Assert.True(board.DuckHuntDrawerOpen);
         board.ShowDuckHunt(At(12000));
         Assert.Equal(DuckHuntView.Menu, board.CurrentDuckHuntView);
         Assert.Equal(epoch + 2, board.DuckHuntRoundRevision);

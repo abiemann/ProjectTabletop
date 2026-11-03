@@ -53,14 +53,11 @@ public sealed partial class SceneCompositor
         }
         DrawCaption(_duckHuntFlightScoreText, new Rect(30, 25, 210, 52), caption);
         DrawCaption(_duckHuntFlightCountText, new Rect(710, 25, 260, 52), caption);
-        if (!state.StartVisible) return;
         if (state.Phase == DuckHuntFlightPhase.Finished)
         {
             DrawCaption("ROUND COMPLETE", new Rect(220, 270, 560, 66), heading);
             DrawCaption($"{state.Score} OF 10 BIRDS", new Rect(240, 342, 520, 45), caption);
         }
-        DrawDuckHuntStartTarget(drawing, aspect);
-        DrawCaption("AIM AT START AND CLICK", new Rect(160, 590, 680, 45), caption);
 
         void DrawCaption(string text, Rect rectangle, CanvasTextFormat format)
         {
@@ -69,21 +66,6 @@ public sealed partial class SceneCompositor
                 Color.FromArgb(230, 14, 35, 30), format);
             DrawBoardAspectText(drawing, text, rectangle, Color.FromArgb(255, 255, 248, 224), format);
         }
-    }
-
-    private static void DrawDuckHuntStartTarget(CanvasDrawingSession drawing, double aspect)
-    {
-        var bounds = DuckHuntFlightLayout.StartBounds;
-        var target = new Rect(bounds.X * BoardSurfaceSize, bounds.Y * BoardSurfaceSize,
-            bounds.Width * BoardSurfaceSize, bounds.Height * BoardSurfaceSize);
-        float radiusX = (float)(16 / aspect);
-        // A shot target needs colour headroom for added laser light. Keep this
-        // sage plate darker than the camera-lit hand controls in the drawer.
-        drawing.FillRoundedRectangle(target, radiusX, 16, Color.FromArgb(255, 164, 184, 144));
-        drawing.DrawRoundedRectangle(target, radiusX, 16, Color.FromArgb(255, 31, 76, 53), 3);
-        // A visual shot target, deliberately absent from BoardSession.Buttons:
-        // neither laptop clicks nor covering its lettering can start a round.
-        DrawHoldButtonCaption(drawing, "START", target, Color.FromArgb(255, 26, 59, 40), aspect);
     }
 
     internal void DrawDuckHuntFlyingMallard(CanvasDrawingSession drawing, DuckHuntFlightSnapshot bird, double aspect)
@@ -113,15 +95,19 @@ public sealed partial class SceneCompositor
 
         void DrawWing(DuckHuntFlightWingPose flap)
         {
-            // The photographed feather root is off-centre. Map that exact source
-            // point to the shoulder and preserve the feather's physical aspect.
-            float scale = (float)(flap.Length / (DuckHuntFlightLayout.WingRootV - DuckHuntFlightLayout.WingTopV));
-            drawing.Transform = Matrix3x2.CreateTranslation((float)-DuckHuntFlightLayout.WingRootU,
-                (float)-DuckHuntFlightLayout.WingRootV) *
-                Matrix3x2.CreateScale(scale) * Matrix3x2.CreateRotation((float)flap.Angle) *
-                Matrix3x2.CreateTranslation((float)flap.PivotU, (float)flap.PivotV) * pose;
-            drawing.DrawImage(wing, new Rect(0, 0, wing.Size.Width, wing.Size.Height),
-                new Rect(0, 0, wing.Size.Width, wing.Size.Height), 1, CanvasImageInterpolation.HighQualityCubic);
+            // The same two native-pixel transforms drive the visible feathers
+            // and hit silhouette. The wrist stays joined as the outer flight
+            // feathers lag the shoulder and fold during the recovery stroke.
+            DrawSection(flap.Inner, new Rect(0, DuckHuntFlightLayout.WingWristV,
+                wing.Size.Width, wing.Size.Height - DuckHuntFlightLayout.WingWristV));
+            DrawSection(flap.Outer, new Rect(0, 0, wing.Size.Width, DuckHuntFlightLayout.WingWristV));
+
+            void DrawSection(DuckHuntFlightWingTransform section, Rect source)
+            {
+                drawing.Transform = new Matrix3x2((float)section.M11, (float)section.M12,
+                    (float)section.M21, (float)section.M22, (float)section.M31, (float)section.M32) * pose;
+                drawing.DrawImage(wing, source, source, (float)flap.Opacity, CanvasImageInterpolation.HighQualityCubic);
+            }
         }
     }
 }

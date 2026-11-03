@@ -542,12 +542,15 @@ public class DuckHuntGalleryTests
         Assert.False(board.ActivateButton("duck-hunt-replay", At(7600)));
     }
 
-    [Fact]
-    public void PlayReadinessTransitionsDiscardPartialHoldAndDelayedClearEvidence()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PlayReadinessTransitionsDiscardPartialHoldAndDelayedClearEvidence(bool hunt)
     {
         const string play = "duck-hunt-play";
         var board = new BoardSession();
-        board.ShowDuckHuntTargetPractice(At(0));
+        if (hunt) board.ShowDuckHuntHunt(At(0));
+        else board.ShowDuckHuntTargetPractice(At(0));
         board.SetDuckHuntReady(true, At(100));
         board.TickDuckHunt(At(300));
         board.ObserveHeldButtons([], At(400), At(400), [play]);
@@ -565,22 +568,25 @@ public class DuckHuntGalleryTests
         Assert.Empty(board.ObserveHeldButtons([], At(1020), At(1040), [play]));
         for (int ms = 1100; ms <= 2200; ms += 100)
             Assert.Empty(board.ObserveHeldButtons([play], At(ms), At(ms), []));
-        Assert.Equal(0, board.GalleryState.Cycle);
+        Assert.True(hunt ? board.HuntFlightState.PlayVisible : board.GalleryState.Cycle == 0);
         board.ObserveHeldButtons([], At(2300), At(2300), [play]);
         for (int ms = 2400; ms < 3400; ms += 100)
             Assert.Empty(board.ObserveHeldButtons([play], At(ms), At(ms), []));
         Assert.Equal([play], board.ObserveHeldButtons([play], At(3400), At(3400), []));
-        Assert.Equal(1, board.GalleryState.Cycle);
+        Assert.True(hunt ? board.HuntFlightState.Phase == DuckHuntFlightPhase.Launching : board.GalleryState.Cycle == 1);
         Assert.False(board.DuckHuntDrawerOpen);
     }
 
     [Theory]
-    [InlineData("duck-hunt-exit", BoardScreen.Menu)]
-    [InlineData("duck-hunt-back", BoardScreen.DuckHunt)]
-    public void InputReadinessChangesPreserveNavigationCaptionHolds(string id, BoardScreen destination)
+    [InlineData("duck-hunt-exit", BoardScreen.Menu, false)]
+    [InlineData("duck-hunt-back", BoardScreen.DuckHunt, false)]
+    [InlineData("duck-hunt-exit", BoardScreen.Menu, true)]
+    [InlineData("duck-hunt-back", BoardScreen.DuckHunt, true)]
+    public void InputReadinessChangesPreserveNavigationCaptionHolds(string id, BoardScreen destination, bool hunt)
     {
         var board = new BoardSession();
-        board.ShowDuckHuntTargetPractice(At(0));
+        if (hunt) board.ShowDuckHuntHunt(At(0));
+        else board.ShowDuckHuntTargetPractice(At(0));
         board.SetDuckHuntReady(true, At(100));
         board.TickDuckHunt(At(300));
         board.ObserveHeldButtons([], At(400), At(400), [id]);

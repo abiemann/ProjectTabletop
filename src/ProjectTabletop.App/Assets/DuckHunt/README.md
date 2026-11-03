@@ -41,7 +41,12 @@ are original photorealistic female mallard layers generated with the built-in
 image tool on 2026-10-23. The horizontal body faces right, with tucked feet; the
 separate wing preserves individual feather tips and a blue speculum. Reusing the
 wing behind and in front of the body permits continuous wingbeat animation from
-two cached textures instead of a large animation sheet.
+two cached textures instead of a large animation sheet. Each wing is articulated
+at the wrist, with projected foreshortening, delayed feather-tip flex and a
+folded recovery stroke. Both wings beat together; the far wing is smaller and
+offset in perspective. The renderer and shot silhouette share the same native
+texture transforms. The complete bird is drawn at 85% of its original linear
+size, with no resampling or replacement of the source artwork.
 
 Both files are RGBA PNGs with verified alpha-zero exteriors. With the user's
 explicit approval, an alpha-only cleanup cleared 801 nearly invisible body

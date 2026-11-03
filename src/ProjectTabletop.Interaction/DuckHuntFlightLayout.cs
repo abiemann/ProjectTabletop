@@ -1,16 +1,12 @@
 namespace ProjectTabletop.Interaction;
 
-public readonly record struct DuckHuntFlightWingPose(
-    double PivotU, double PivotV, double Angle, double Length);
-
 /// <summary>One physically square flight rig shared by drawing and shot testing.
 /// Source artwork faces right; the complete rig is mirrored for leftward flight.</summary>
 public static class DuckHuntFlightLayout
 {
-    public static readonly BoardRect StartBounds = new(.37, .43, .26, .14);
     public static readonly BoardRect BodyArtworkBounds = new(.04, .5245, .92, .251);
     public static readonly BoardRect BodySourceBounds = new(58, 178, 1870, 510);
-    public const double WingRootU = 820, WingRootV = 1435, WingTopV = 27;
+    public const double WingRootU = 820, WingRootV = 1435, WingTopV = 27, WingWristV = 830;
     public const double BodyCenterU = .50, BodyCenterV = .65;
 
     // Follow the alpha silhouettes rather than accepting the empty rectangular
@@ -50,18 +46,17 @@ public static class DuckHuntFlightLayout
 
     public static BoardRect SpriteBounds(DuckHuntFlightSnapshot bird, double boardAspect)
     {
-        double width = Math.Min(.22, .25 / boardAspect) * bird.Scale;
+        double width = Math.Min(.22, .25 / boardAspect) * .85 * bird.Scale;
         double height = width * boardAspect;
         return new(bird.U - width / 2, bird.V - height / 2, width, height);
     }
 
-    // Angle zero points upward. A struck bird retains its exact flap phase.
+    // A struck bird retains its exact articulated flap phase.
     public static DuckHuntFlightWingPose NearWingPose(DuckHuntFlightSnapshot bird) =>
-        new(.50, .60, -.30 - 1.10 * (1 - Math.Sin(bird.FlapPhase)), .53);
+        DuckHuntFlightWingMotion.Pose(bird.FlapPhase, far: false);
 
     public static DuckHuntFlightWingPose FarWingPose(DuckHuntFlightSnapshot bird) =>
-        new(.54, .60, -.30 - 1.10 * (1 - Math.Sin(bird.FlapPhase + .38)),
-            .53 * .78);
+        DuckHuntFlightWingMotion.Pose(bird.FlapPhase, far: true);
 
     public static bool ContainsBird(BoardAim point, DuckHuntFlightSnapshot bird, double boardAspect = 1)
     {
@@ -82,10 +77,9 @@ public static class DuckHuntFlightLayout
 
     private static bool ContainsWing(double u, double v, DuckHuntFlightWingPose wing)
     {
-        double x = u - wing.PivotU, y = v - wing.PivotV;
-        double s = Math.Sin(wing.Angle), c = Math.Cos(wing.Angle);
-        double scale = wing.Length / (WingRootV - WingTopV);
-        return BoardPolygon.Contains(WingSilhouette, new(WingRootU + (x * c + y * s) / scale,
-            WingRootV + (-x * s + y * c) / scale));
+        return wing.Inner.TryInverse(u, v, out var inner) && inner.V >= WingWristV &&
+                BoardPolygon.Contains(WingSilhouette, inner) ||
+            wing.Outer.TryInverse(u, v, out var outer) && outer.V <= WingWristV &&
+                BoardPolygon.Contains(WingSilhouette, outer);
     }
 }

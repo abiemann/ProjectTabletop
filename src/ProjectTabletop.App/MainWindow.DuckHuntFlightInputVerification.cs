@@ -34,52 +34,62 @@ public sealed partial class MainWindow
         var game = (DuckHuntFlightGame)typeof(BoardSession).GetField("_huntFlight",
             BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(board)!;
         var context = Context();
-        var start = new BoardAim(.5, .5);
+        var formerStart = new BoardAim(.5, .5);
+        var playBounds = BoardSession.DuckHuntPlayBounds;
+        var play = new BoardAim(playBounds.X + playBounds.Width / 2, playBounds.Y + playBounds.Height / 2);
         Check(scene.DuckHuntBoardReady && scene.HuntFlightState is
-            { Phase: DuckHuntFlightPhase.Ready, Paused: false }, "HUNT cannot listen while awaiting START.");
-        scene.PublishDuckHuntDot(start, MonotonicClock.UtcNow, context.Epoch);
+            { Phase: DuckHuntFlightPhase.Ready, Paused: false }, "HUNT cannot listen while awaiting PLAY.");
+        scene.PublishDuckHuntDot(formerStart, MonotonicClock.UtcNow, context.Epoch);
         Draw();
-        Check(scene.HuntFlightState.StartVisible && scene.HuntFlightState.BirdsLaunched == 0,
-            "Aim alone activated START.");
-        Check(!scene.ActivateDuckHuntAt(start.U, start.V) &&
-            board.Buttons.All(button => !button.Bounds.Contains(start.U, start.V)),
-            "START is reachable by ordinary button activation.");
-        Check(!Snapshot(null, context.Epoch) && scene.HuntFlightState.StartVisible,
-            "A click without a red dot activated START.");
-        Check(Snapshot(new(.05, .20), context.Epoch) && scene.HuntFlightState.StartVisible,
-            "A valid off-target shot activated START.");
-        Check(!Snapshot(start, context.Epoch - 1), "An obsolete input epoch activated START.");
+        Check(scene.HuntFlightState.PlayVisible && scene.HuntFlightState.BirdsLaunched == 0,
+            "Aim alone activated PLAY.");
+        Check(!scene.ActivateDuckHuntAt(formerStart.U, formerStart.V) &&
+            board.Buttons.All(button => !button.Bounds.Contains(formerStart.U, formerStart.V)),
+            "The removed central START target is still a button.");
+        Check(board.DuckHuntDrawerOpen && board.Buttons.Any(button => button.Id == "duck-hunt-play" && button.Hold == BoardButtonHold.Once),
+            "HUNT did not open its standard long-press PLAY drawer.");
+        Check(!Snapshot(null, context.Epoch) && scene.HuntFlightState.PlayVisible,
+            "A click without a red dot activated PLAY.");
+        Check(Snapshot(new(.05, .20), context.Epoch) && scene.HuntFlightState.PlayVisible,
+            "A valid off-target shot activated PLAY.");
+        Check(!Snapshot(play, context.Epoch - 1), "An obsolete input epoch activated PLAY.");
         var stale = MonotonicClock.UtcNow.AddSeconds(-1);
-        Check(!scene.SubmitDuckHuntSnapshot(start, stale, stale, stale, context.Epoch),
-            "An expired camera image activated START.");
+        Check(!scene.SubmitDuckHuntSnapshot(play, stale, stale, stale, context.Epoch),
+            "An expired camera image activated PLAY.");
 
         scene.SetDuckHuntAudioStatus(false, "Microphone unavailable");
-        Check(!Snapshot(start, context.Epoch) && scene.HuntFlightState.StartVisible,
-            "START accepted a shot with no microphone.");
+        Check(!Snapshot(play, context.Epoch) && scene.HuntFlightState.PlayVisible &&
+            !board.Buttons.Single(button => button.Id == "duck-hunt-play").Enabled && !ActivateGalleryPlay(scene),
+            "PLAY was enabled without a microphone.");
         scene.SetDuckHuntAudioStatus(true, "Isolated microphone fixture");
         scene.SetDuckHuntLearningActive(true);
-        Check(scene.GetDuckHuntInputContext() is null && !Snapshot(start, context.Epoch),
+        Check(scene.GetDuckHuntInputContext() is null && !Snapshot(play, context.Epoch),
             "Click learning supplied a HUNT shot.");
         scene.SetDuckHuntLearningActive(false);
         Draw();
         var learned = Context();
-        Check(learned.Epoch != context.Epoch && !Snapshot(start, context.Epoch),
+        Check(learned.Epoch != context.Epoch && !Snapshot(play, context.Epoch),
             "Finishing learning reused old click work.");
         context = learned;
-        Check(Snapshot(start, context.Epoch) && scene.HuntFlightState is
+        Check(Snapshot(formerStart, context.Epoch) && scene.HuntFlightState.PlayVisible &&
+            Snapshot(play, context.Epoch) && scene.HuntFlightState.PlayVisible,
+            "A laser-and-click photo started HUNT through the removed START target or drawer PLAY.");
+        uiNow = MonotonicClock.UtcNow.AddMilliseconds(350);
+        using (var drawing = target.CreateDrawingSession()) scene.Draw(drawing, width, height, false, false);
+        Check(ActivateGalleryPlay(scene) && scene.HuntFlightState is
             { Phase: DuckHuntFlightPhase.Launching, Score: 0, BirdsLaunched: 0 },
-            "A fresh click photo on START did not begin HUNT.");
+            "The regular drawer PLAY button did not begin HUNT.");
         Check(!board.DuckHuntDrawerOpen, "Starting HUNT left the drawer open.");
         var roundContext = Context();
-        Check(roundContext.Epoch != context.Epoch && !Snapshot(start, context.Epoch),
-            "START did not invalidate earlier shot work.");
+        Check(roundContext.Epoch != context.Epoch && !Snapshot(play, context.Epoch),
+            "PLAY did not invalidate earlier shot work.");
 
         // Place a real flight in progress without waiting or changing the camera
         // gate's clock. Its current pose is then evaluated at the fresh frame time.
         var began = MonotonicClock.UtcNow.AddSeconds(-2);
         game.Reset(began);
         game.SetReady(true, began);
-        Check(game.Shoot(start, began, width / (double)height), "Could not prepare the moving-bird fixture.");
+        Check(game.Start(began, width / (double)height), "Could not prepare the moving-bird fixture.");
         Draw();
         context = Context();
         Check(!Snapshot(null, context.Epoch) && scene.HuntFlightState.Score == 0,
@@ -98,19 +108,20 @@ public sealed partial class MainWindow
         uiNow = MonotonicClock.UtcNow;
         scene.ShowDuckHunt();
         Check(!scene.DuckHuntBoardReady && scene.GetDuckHuntInputContext() is null &&
-            !Snapshot(start, context.Epoch), "Returning to the welcome screen retained shooting input.");
+            !Snapshot(play, context.Epoch), "Returning to the welcome screen retained shooting input.");
         uiNow = MonotonicClock.UtcNow;
         scene.ShowDuckHuntHunt();
         Draw();
         var reopened = Context();
-        Check(reopened.Epoch != context.Epoch && !Snapshot(start, context.Epoch) &&
+        Check(reopened.Epoch != context.Epoch && !Snapshot(play, context.Epoch) &&
             scene.HuntFlightState is { Phase: DuckHuntFlightPhase.Ready, Score: 0 },
             "Reopening HUNT reused a previous round or shot.");
         scene.SetBoardSetup(true);
-        Check(!scene.DuckHuntBoardReady && !Snapshot(start, reopened.Epoch),
+        Check(!scene.DuckHuntBoardReady && !Snapshot(play, reopened.Epoch),
             "Calibration allowed a HUNT shot.");
         return new { Ok = true, Assertions = assertions, RealClockSnapshotGate = true,
             AdjacentPhotoFallback = true, SelectedHistoricalPose = true, MissingDotNeverBorrowsAim = true,
+            StandardDrawerPlay = true, LaserCannotStartRound = true,
             Scope = "Production scene/tracker/game path; camera acquisition, audio callback and MainWindow reporting are not invoked." };
 
         async Task CheckConfirmationPhoto(bool ambiguous)
@@ -119,7 +130,7 @@ public sealed partial class MainWindow
             var began = MonotonicClock.UtcNow.AddSeconds(-2);
             game.Reset(began);
             game.SetReady(true, began);
-            Check(game.Shoot(start, began, width / (double)height),
+            Check(game.Start(began, width / (double)height),
                 "Could not prepare the adjacent-photo flight fixture.");
             Draw();
             var input = Context();

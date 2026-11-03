@@ -259,7 +259,7 @@ public sealed class DuckHuntProjectionTimingTests
     {
         var game = new DuckHuntFlightGame(new Random(1));
         game.Reset(At(0)); game.SetReady(true, At(0));
-        Assert.True(game.Shoot(new(.5, .5), At(100))); return game;
+        Assert.True(game.Start(At(100))); return game;
     }
 
     private static BoardAim BirdCentre(DuckHuntFlightSnapshot bird)

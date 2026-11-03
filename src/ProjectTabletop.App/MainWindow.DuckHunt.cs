@@ -262,7 +262,6 @@ public sealed partial class MainWindow
                 var clayAfter = _scene.ClayState;
                 string acceptedOutcome = _scene.CurrentDuckHuntView == DuckHuntView.Hunt
                     ? flightAfter.Score > flightBefore.Score ? "Bird hit" :
-                        flightBefore.StartVisible && !flightAfter.StartVisible ? "Hunt started" :
                         flightAfter.Shots > flightBefore.Shots ? "Shot missed" : "No active target hit"
                     : _scene.CurrentDuckHuntView == DuckHuntView.ClayPigeon
                     ? clayAfter.Score > clayBefore.Score ? "Clay hit" :

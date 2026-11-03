@@ -6,11 +6,11 @@ public readonly record struct DuckHuntFlightSnapshot(DuckHuntFlightPhase Phase, 
     int BirdsLaunched, int Shots, double U, double V, int Direction, double FlapPhase,
     double Scale, bool Visible, long Revision, bool Paused = false)
 {
-    public bool StartVisible => Phase is DuckHuntFlightPhase.Ready or DuckHuntFlightPhase.Finished;
+    public bool PlayVisible => Phase is DuckHuntFlightPhase.Ready or DuckHuntFlightPhase.Finished;
     public bool RoundFinished => Phase == DuckHuntFlightPhase.Finished;
 }
 
-/// <summary>Ten sequential flights, started only by a valid click photo on START.
+/// <summary>Ten sequential flights, started by the standard drawer PLAY control.
 /// Shots use the projected pose present in the photo, not the later render tick.
 /// The camera timestamp still governs fresh input and the hit animation clock.</summary>
 public sealed class DuckHuntFlightGame(Random? random = null)
@@ -104,8 +104,25 @@ public sealed class DuckHuntFlightGame(Random? random = null)
         Publish(_pausedAt ?? now);
     }
 
-    /// <summary>The existing trained-audio/camera gate is the caller. START is
-    /// deliberately absent from BoardButton, hand holds and ordinary tap routes.</summary>
+    public bool Start(DateTimeOffset now, double boardAspect = 1)
+    {
+        if (!_ready || now < _observedAt || !double.IsFinite(boardAspect) || boardAspect <= 0) return false;
+        Advance(now);
+        if (!_snapshot.PlayVisible) return false;
+        _score = _birdsLaunched = _shots = 0;
+        _lastShotAt = DateTimeOffset.MinValue;
+        _flightDuration = FlightDuration;
+        _exitMargin = DuckHuntFlightLayout.SpriteBounds(_snapshot with { Scale = 1 }, boardAspect).Width / 2 + .005;
+        _hasBird = false;
+        _hitAt = _hitPoseAt = null;
+        _phase = DuckHuntFlightPhase.Launching;
+        _phaseStartedAt = _inputNotBefore = now;
+        Advance(now);
+        return true;
+    }
+
+    /// <summary>The trained-audio/camera gate submits shots at flying birds.
+    /// A shot never starts or restarts a round.</summary>
     public bool Shoot(BoardAim? aim, DateTimeOffset shotTime, double boardAspect = 1,
         DateTimeOffset? sceneTime = null)
     {
@@ -139,19 +156,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
             return hit;
         }
 
-        if (_phase is not (DuckHuntFlightPhase.Ready or DuckHuntFlightPhase.Finished) ||
-            poseTime < _phaseStartedAt) return false;
-        _lastShotAt = shotTime;
-        if (!DuckHuntFlightLayout.StartBounds.Contains(point.U, point.V)) return false;
-        _score = _birdsLaunched = _shots = 0;
-        _flightDuration = FlightDuration;
-        _exitMargin = DuckHuntFlightLayout.SpriteBounds(_snapshot with { Scale = 1 }, boardAspect).Width / 2 + .005;
-        _hasBird = false;
-        _hitAt = _hitPoseAt = null;
-        _phase = DuckHuntFlightPhase.Launching;
-        _phaseStartedAt = _inputNotBefore = shotTime;
-        Advance(shotTime > _observedAt ? shotTime : _observedAt);
-        return true;
+        return false;
     }
 
     private void LaunchBird(DateTimeOffset now)
