@@ -35,6 +35,20 @@ Water Garden, Paint and Football share guided double-bar training in **SETUP →
 
 Profiles are separate for each camera and controller; Paint reuses Water Garden's profile. On first use without a saved marker, these boards open the trainer after camera and calibration are ready. Football skips finger-input players and trains the second marker only for two-human play. Cancelling dismisses setup for the current visit; saving stops subsequent automatic prompts. Water Garden's navigation arrow remains usable while its marker is present; pond actions stay protected. See [marker setup](https://github.com/abiemann/ProjectTabletop/blob/v1.4.1/README.md#marker-learning) for dimensions, lighting guidance and validation limits. The expanded Football trainer passed a self-guided physical-tabletop check; Water Garden's added movement step still needs its own physical acceptance.
 
+## Recommended Duck Hunt hardware
+
+Alongside the projector, webcam and matte white board, the recommended Duck Hunt setup uses a toy controller for the click sound, a continuous red aiming dot and a microphone:
+
+| Item | Recommendation | Purpose |
+| --- | --- | --- |
+| Toy controller | [SCIERLOL toy revolver](https://www.amazon.com/dp/B0G1RYJBQT) | Provides the trigger click for **Gun-click Learning**. The game uses the sound; no pellets are needed. |
+| Red laser | [EZshoot red laser boresighter](https://www.amazon.com/dp/B0CJ55BHFZ) | Provides the red dot the webcam tracks on the board. Keep the dot visible while aiming; the learned click triggers the shot check. |
+| Microphone | A Windows-compatible Bluetooth clip-on microphone | Clip it to your sleeve near the shooting hand, with the microphone clear of fabric rubbing, to keep the click close to the microphone as you aim. |
+
+Choose a Bluetooth microphone that appears as a selectable **recording input in Windows**. Pair it with the PC, then select it in the microphone dropdown beside **Duck Hunt** in the main app window. No particular Bluetooth clip-on model is specified here; check Windows microphone compatibility before buying.
+
+Run **SETUP → BOARD CONTROL → Gun-click Learning** with the microphone already clipped in the sleeve position you will use while playing. Use the intended toy controller and your normal playing position throughout the ten learning clicks, five test clicks and quiet check, then choose **Save learning**. Repeat learning if you change the microphone or its placement. A connected USB or laptop microphone can also be selected and trained.
+
 ## Duck Hunt quick start
 
 1. In the main window, choose the intended microphone beside **Duck Hunt**. Windows must allow microphone access for desktop apps. A missing saved microphone is shown as unavailable; select a connected input before continuing.
