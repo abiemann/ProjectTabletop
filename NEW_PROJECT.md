@@ -1,6 +1,6 @@
 # ProjectTabletop
 
-## Camera calibration in current development
+## Version 1.4.1
 
 Board setup and every rescan immediately project full white and check exposure before accepting physical edges,
 using supported controls already in manual mode, the driver's range and the negotiated frame period.
@@ -24,10 +24,12 @@ user confirmed that laser aiming and shots now work. Captured play records a
 Target Practice paper-target hit and a HUNT bird hit.
 The Facecam driver rejected the proposed 3700 K white balance; readback confirmed
 its original 3400 K and calibration continued. No white-balance correction is claimed.
-The current build pins stable .NET SDK
-10.0.403; the published 1.4.0 installation guide and earlier release evidence
-below describe their respective released builds. See the
-[camera calibration details](README.md#automatic-camera-calibration-during-board-setup).
+This release pins stable .NET SDK 10.0.403. The Windows release workflow will
+rerun the current suite and gate installer publication on package and installed-app
+checks; the local results above do not claim that workflow has passed. See the
+[camera calibration details](README.md#automatic-camera-calibration-during-board-setup),
+[installation guide](docs/INSTALL.md) and [1.4.1 release notes](docs/releases/1.4.1.md).
+Earlier release evidence below retains its original scope.
 
 ## Version 1.4.0
 
