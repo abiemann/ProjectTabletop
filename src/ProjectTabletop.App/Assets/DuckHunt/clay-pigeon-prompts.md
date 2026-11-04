@@ -2,6 +2,10 @@
 
 Generated with the built-in image_gen tool on 2026-10-29.
 
+The valley received a foreground-grass revision on 2026-11-03. The user chose
+the complete generated image as-is; see [clay-grass-prompts.txt](clay-grass-prompts.txt)
+for the edit prompt and native output dimensions.
+
 ## Valley
 
 Use case: photorealistic-natural. Asset type: premium landscape game background, 16:9 widescreen, request native 3840x2160 detail. Input image is STYLE reference only, existing Hunt field. Create a NEW scene from a much higher grassy overlook, looking out across a gorgeous lush green valley with layered conifer woodland, meadows, a distant winding stream, wooded ridges and blue mountains receding in atmospheric perspective. Viewpoint is at standing height on a hillside above the valley. Lower half contains richly detailed green landscape and a narrow foreground meadow lip at bottom. Upper half is spacious blue summer sky with beautifully lit natural cumulus clouds, open center to track flying targets. A few pine branches at outer edges only. Match the reference's realistic warm natural sunlight and mature high quality photographic texture. Wide cinematic depth, tack-sharp near trees and grasses with natural distance haze. No people, no birds, no clay discs, no targets, no UI, no text, no logos, no borders. This is a fresh elevated valley scene, not a recolor of the field. Preserve natural scale; avoid oversaturated fantasy, painterly smears, and large dark side areas.

@@ -1,0 +1,14 @@
+Clay Pigeon foreground grass revision — 2026-11-03
+
+Tool: built-in image_gen, precise-object-edit.
+Input: clay-valley-v1.png, original 1672 x 941 RGB valley background.
+Output: 1672 x 941 RGB. Native 3840 x 2160 was requested but not returned.
+The user chose the generated image as-is, after being told the tool also
+slightly redrew the distant scenery. No compositing, retouching or resizing.
+
+Final prompt:
+Use case: precise-object-edit.
+Asset type: high-quality photorealistic 4K projector game background for Clay Pigeon, landscape 16:9.
+Image 1 is the exact existing valley background to edit. Replace ONLY the foreground meadow grass along the lower edge: the sloping band that begins around the lower-left rocks and descends to the bottom-right. The existing grass looks like melted plastic tubes joined together. Replace it with botanically believable individual fine grass blades, slender round stems and delicate varied seed heads. Each blade has a separate silhouette, tapered pointed tip, subtle leaf fold and real fibrous texture; blades cross naturally without welding together. Use mixed fresh green blades and sunlit straw-gold seed stalks at the same natural scale and density. Capture fine natural detail like a premium landscape photograph with realistic sharp foreground detail, not harsh oversharpening or synthetic CGI sheen. Keep the original grassy slope boundary, existing rocks, warm sunlight and shadow direction. Integrate each blade naturally against the unchanged distant forest.
+CRITICAL INVARIANTS: preserve the entire sky and every cloud, pine branches at the outer edges, mountain horizon, distant valley, river, forest, rocks, camera position, framing, scene perspective, colour balance and lighting exactly as in Image 1. Do not reimagine the valley, relocate trees, replace clouds, move rocks, alter horizon height, crop or zoom. Only the foreground grass is to change.
+Render at native 3840x2160 or highest available landscape resolution with genuinely fine grass detail, not a stretched or blurred small image. No people, birds, clays, UI, text, logos or borders. No plastic straws, fused melted strands, tangled tubing, glossy thick noodles, painterly smudges, repetitive stamped tufts or artificial bokeh masking the grass. Return the complete edited background, with only its foreground grass replaced.

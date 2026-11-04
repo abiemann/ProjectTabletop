@@ -15,7 +15,12 @@ a winding stream and open sky. The target is a photographed-style ivory
 ceramic disc with concentric molded rings and a dark rim. Neither contains UI.
 
 The valley is native 1672 × 941 RGB; the requested 3840 × 2160 was not returned.
-It has not been artificially upscaled. The disc is 1254 × 1254 RGBA, with
+It has not been artificially upscaled. On 2026-11-03, a built-in image-tool
+edit replaced the fused-looking foreground grass with finer individual blades
+and seed heads. The user selected the complete generated image as-is after
+reviewing its slight changes to the distant scenery; no scripted compositing
+or resizing was applied. See [clay-grass-prompts.txt](clay-grass-prompts.txt).
+The disc is 1254 × 1254 RGBA, with
 visible alpha bounds `(56, 372)–(1199, 957)`. Authorized alpha-only cleanup
 removed 4,757 stray pixels with alpha at most 6, outside a two-pixel guard
 around the meaningful silhouette. Every RGB value and the antialiased edges
@@ -25,13 +30,13 @@ were preserved; exterior and corner alpha are zero. Prompts are in
 Both assets load only when Clay Pigeon is entered and are cached per graphics
 device. The scene uses the shared aspect-preserving scenery crop with a four
 percent inset to exclude tiny sunlight holes at the far-left tree that could
-resemble laser dots. The original asset pixels remain unchanged. Banking,
+resemble laser dots. No colour adjustment is applied at runtime. Banking,
 perspective shrink and eighteen textured ceramic fragments are animated by
 the renderer; the shared physical ellipse supplies shot geometry.
 
 SHA-256:
 
-- Valley: `ca49be1704dcb821da9c245085217d392ae40ad200c0ecd93cee4d6e808ae9c4`
+- Valley: `2509d499e1ee5e31c0831b5ef1973972e2025b24b6e7210ae433f7c242503393`
 - Disc: `c4a3d363939401641be3a686ef25d85d45282feebbd05a6160474e38d3440744`
 
 ## Flying mallard

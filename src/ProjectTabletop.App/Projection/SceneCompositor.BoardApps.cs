@@ -32,7 +32,7 @@ public sealed partial class SceneCompositor
         long RouletteRevision, double RouletteAspect, string? RouletteHover, long WaterRevision, long FootballRevision,
         long StrykersRunRevision, long DuckHuntRevision, long DuckHuntInputVisualRevision,
         long DuckHuntUiRevision, int DuckHuntDrawerFrame, int GalleryLampFrame, int GalleryEyeFrame, long GalleryScoreFrame,
-        long MarkerSetupVisualRevision);
+        long MarkerSetupVisualRevision, long ClayFlockFrame);
 
     public SceneCompositor(BlackjackGame? blackjack = null, Func<DateTimeOffset>? blackjackClock = null,
         Func<DateTimeOffset>? boardRevealClock = null, Func<DateTimeOffset>? paintClock = null,
@@ -247,7 +247,7 @@ public sealed partial class SceneCompositor
             GalleryLampVisualFrame(blackjackNow),
             GalleryEyeVisualFrame(blackjackNow),
             GalleryScoreVisualFrame(blackjackNow),
-            _markerSetupVisualRevision);
+            _markerSetupVisualRevision, ClayFlockVisualFrame(blackjackNow));
         // Cursor motion is drawn separately. Reuse the UI texture until its
         // screen, hovered button, or gesture status changes on either canvas.
         if (_renderedBoardState != state)

@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Geometry;
 using ProjectTabletop.App.Projection;
 using ProjectTabletop.Calibration;
 using ProjectTabletop.Interaction;
@@ -64,20 +65,46 @@ public sealed partial class MainWindow
                 scene.ClayState is { Phase: DuckHuntClayPhase.Ready, Shots: 0, PairsLaunched: 0 } &&
                 board.ClayTargets.All(clay => !clay.Visible),
                 "Waiting or shooting the scene started Clay Pigeon without PLAY.");
+            CheckMessages();
             await Save("ready");
             CheckClearOptics("ready");
+            byte[] idleFrame = target.GetPixelBytes();
+            var idleState = scene.ClayState;
+            long idleVisualFrame = scene.ClayFlockVisualFrame(now);
+            now += TimeSpan.FromMilliseconds(1070);
+            byte[] animatedIdle = Draw();
+            int footerOffset = (int)(dimensions.Height * .80) * dimensions.Width * 4;
+            Check(!idleFrame.AsSpan().SequenceEqual(animatedIdle) &&
+                idleFrame.AsSpan(footerOffset).SequenceEqual(animatedIdle.AsSpan(footerOffset)),
+                "Idle horizon animation froze, or changed the stationary footer captions.");
+            Check(scene.ClayState == idleState && scene.ClayState is
+                { Phase: DuckHuntClayPhase.Ready, PairsLaunched: 0, Shots: 0 } &&
+                board.ClayTargets.All(clay => !clay.Visible) && scene.ClayFlockVisualFrame(now) != idleVisualFrame,
+                "Decorative flock animation changed gameplay or failed to invalidate the idle raster.");
+            await Save("ready-motion");
+            CheckClearOptics("ready-motion");
+            await CheckHorizonFlocks();
             Check(ActivateGalleryPlay(scene) && !board.DuckHuntDrawerOpen,
                 "The regular drawer PLAY button did not begin Clay Pigeon and close its controls.");
             Draw();
             var roundStart = now;
             Check(scene.ClayState is { Phase: DuckHuntClayPhase.Playing, Paused: false, PairsLaunched: 0 },
                 "PLAY failed to start a fresh Clay Pigeon round.");
+            CheckMessages();
             double previousScale = double.PositiveInfinity;
             byte[]? previousFrame = null;
+            using var flightLayer = new CanvasRenderTarget(target.Device, dimensions.Width, dimensions.Height, 96);
             foreach (double age in new[] { .25, .49, .75, 1.2, 2.1, 3.3 })
             {
                 now = roundStart + DuckHuntClayGame.LaunchDelay + TimeSpan.FromSeconds(age);
-                byte[] frame = Draw();
+                Draw();
+                using (var drawing = flightLayer.CreateDrawingSession())
+                {
+                    drawing.Clear(Microsoft.UI.Colors.Transparent);
+                    drawing.Transform = Matrix3x2.CreateScale(dimensions.Width / 1000f, dimensions.Height / 1000f);
+                    foreach (var pose in board.ClayTargets) scene.DrawDuckHuntClayTarget(drawing, pose, aspect);
+                }
+                byte[] frame = flightLayer.GetPixelBytes();
                 var clay = board.ClayTargets[0];
                 Check(clay.Visible && clay.Scale < previousScale && clay.U < .5 && clay.V < 1.1,
                     "The first clay did not rise, move sideways, and shrink continuously.");
@@ -134,15 +161,22 @@ public sealed partial class MainWindow
             Check(board.DuckHuntDrawerOpen && board.Buttons.Select(button => button.Id).SequenceEqual(
                 ["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-back", "duck-hunt-play-again"]),
                 "The final clay drawer is missing its replay and navigation captions.");
+            CheckMessages();
             await Save("finished");
+            CheckClearOptics("finished");
             Check(board.ActivateButton("duck-hunt-play-again", now), "PLAY AGAIN did not restart Clay Pigeon.");
             Draw();
             Check(scene.ClayState is { Phase: DuckHuntClayPhase.Playing, Score: 0, PairsLaunched: 0 },
                 "The replay retained the previous score or launch count.");
             Check(board.ClayTargets.All(clay => clay.Impact is null), "Replay retained old floating score impacts.");
+            CheckMessages();
             await Save("replay");
             results.Add(new { dimensions.Name, dimensions.Width, dimensions.Height, Targets = 20,
-                PairDelaySeconds = .5, WaitsForPlay = true, ClearSceneCandidates = 0 });
+                PairDelaySeconds = .5, WaitsForPlay = true, IdleAndEndMessages = true,
+                DecorativeHorizonMotion = true, StationaryFooter = true, ClearSceneCandidates = 0 });
+            scene.ShowDuckHunt();
+            Check(scene.ClayFlockVisualFrame(now) == scene.ClayFlockVisualFrame(now.AddSeconds(1)),
+                "Clay flock animation kept invalidating a different board view.");
 
             byte[] Draw()
             {
@@ -155,6 +189,99 @@ public sealed partial class MainWindow
                 string path = Path.Combine(directory, dimensions.Name + "-" + name + ".png");
                 await target.SaveAsync(path, CanvasBitmapFileFormat.Png);
                 images.Add(path);
+            }
+            async Task CheckHorizonFlocks()
+            {
+                using var overlay = new CanvasRenderTarget(target.Device, dimensions.Width, dimensions.Height, 96);
+                var wings = (CanvasGeometry[])typeof(SceneCompositor).GetField("_clayBirdWings",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scene)!;
+                Check(wings.Length >= 4 && wings[0].ComputeBounds() != wings[wings.Length / 4].ComputeBounds() &&
+                    wings[wings.Length / 4].ComputeBounds() != wings[wings.Length * 3 / 4].ComputeBounds(),
+                    "The horizon birds have no distinct extended, raised and lowered wing silhouettes.");
+                byte[]? first = null;
+                double firstCenterX = 0, firstCenterY = 0;
+                foreach (int elapsed in new[] { 0, 110, 1070 })
+                {
+                    using (var drawing = overlay.CreateDrawingSession())
+                    {
+                        drawing.Clear(Microsoft.UI.Colors.Transparent);
+                        drawing.Transform = Matrix3x2.CreateScale(dimensions.Width / 1000f, dimensions.Height / 1000f);
+                        scene.DrawClayHorizonFlocks(drawing, now.AddMilliseconds(elapsed), aspect);
+                    }
+                    byte[] pixels = overlay.GetPixelBytes();
+                    int ink = 0, top = dimensions.Height, bottom = -1;
+                    long totalAlpha = 0;
+                    double sumX = 0, sumY = 0;
+                    for (int y = 0; y < dimensions.Height; y++)
+                    for (int x = 0; x < dimensions.Width; x++)
+                    {
+                        byte alpha = pixels[(y * dimensions.Width + x) * 4 + 3];
+                        if (alpha <= 8) continue;
+                        ink++; top = Math.Min(top, y); bottom = Math.Max(bottom, y);
+                        totalAlpha += alpha; sumX += (double)x * alpha; sumY += (double)y * alpha;
+                    }
+                    Check(ink > 10 && top >= dimensions.Height * .25 && bottom <= dimensions.Height * .55,
+                        $"Horizon flock ink left the distant sky or reached the footer: {dimensions.Name}, {top}–{bottom}, {ink} pixels.");
+                    if (first is null)
+                    {
+                        first = pixels;
+                        firstCenterX = sumX / totalAlpha; firstCenterY = sumY / totalAlpha;
+                    }
+                    else Check(!first.AsSpan().SequenceEqual(pixels), "Horizon birds retained a frozen silhouette frame.");
+                    if (elapsed == 1070)
+                        Check(Math.Abs(sumX / totalAlpha - firstCenterX) + Math.Abs(sumY / totalAlpha - firstCenterY) > .1,
+                            "Horizon flocks changed their wings but did not travel across the valley.");
+                    if (elapsed != 110)
+                    {
+                        string path = Path.Combine(directory, $"{dimensions.Name}-horizon-flocks-{elapsed}.png");
+                        await overlay.SaveAsync(path, CanvasBitmapFileFormat.Png);
+                        images.Add(path);
+                    }
+                }
+            }
+            void CheckMessages()
+            {
+                using var overlay = new CanvasRenderTarget(target.Device, dimensions.Width, dimensions.Height, 96);
+                var drawHud = (Action<CanvasDrawingSession, DuckHuntClaySnapshot, double>)typeof(SceneCompositor)
+                    .GetMethod("DrawDuckHuntClay", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .CreateDelegate(typeof(Action<CanvasDrawingSession, DuckHuntClaySnapshot, double>), scene);
+                using (var drawing = overlay.CreateDrawingSession())
+                {
+                    drawing.Clear(Microsoft.UI.Colors.Transparent);
+                    drawing.Transform = Matrix3x2.CreateScale(dimensions.Width / 1000f, dimensions.Height / 1000f);
+                    drawHud(drawing, scene.ClayState, aspect);
+                }
+                byte[] pixels = overlay.GetPixelBytes();
+                int prompt = CountInk(.42, .49), heading = CountInk(.29, .36), result = CountInk(.36, .41);
+                if (scene.ClayState.Phase == DuckHuntClayPhase.Playing)
+                {
+                    Check(prompt == 0 && heading == 0 && result == 0,
+                        "Clay Pigeon left idle or end messages visible after PLAY.");
+                    return;
+                }
+                Check(prompt > 50 && CaptionText("_clayPromptCaption") == "PRESS PLAY",
+                    "The idle/end view did not render its PRESS PLAY message.");
+                if (scene.ClayState.Phase == DuckHuntClayPhase.Finished)
+                    Check(heading > 50 && result > 50 && CaptionText("_clayCompleteCaption") == "GAME OVER" &&
+                        CaptionText("_clayResultCaption") == $"{scene.ClayState.Score} OF 20 CLAYS",
+                        "The finished round lost GAME OVER or its final clay count.");
+                else Check(heading == 0 && result == 0, "The initial view showed a completed-round result.");
+
+                int CountInk(double top, double bottom)
+                {
+                    int count = 0;
+                    for (int y = (int)(top * dimensions.Height); y < bottom * dimensions.Height; y++)
+                    for (int x = 0; x < dimensions.Width; x++)
+                        if (pixels[(y * dimensions.Width + x) * 4 + 3] > 16) count++;
+                    return count;
+                }
+                string? CaptionText(string field)
+                {
+                    object caption = typeof(SceneCompositor).GetField(field,
+                        BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(scene)!;
+                    return (string?)caption.GetType().GetField("_text",
+                        BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(caption);
+                }
             }
             void CheckScorePopup(DuckHuntClayTarget hit)
             {

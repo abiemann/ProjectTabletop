@@ -29,22 +29,30 @@ public sealed partial class SceneCompositor
             // the original photograph and the shared detector remain untouched.
             DrawDuckHuntScenery(drawing, image, PaintBoardAspect(), clay ? .04 : 0);
         if (menu) DrawDuckHuntWelcomeTitle(drawing, PaintBoardAspect());
-        else if (clay) DrawDuckHuntClay(drawing, _boardSession.ClayState, PaintBoardAspect());
+        else if (clay)
+        {
+            DrawClayHorizonFlocks(drawing, now, PaintBoardAspect());
+            DrawDuckHuntClay(drawing, _boardSession.ClayState, PaintBoardAspect());
+        }
         else DrawDuckHuntFlight(drawing, _boardSession.HuntFlightState, PaintBoardAspect());
         DrawDuckHuntControls(drawing, now);
     }
 
     private static void DrawDuckHuntScenery(CanvasDrawingSession drawing, CanvasBitmap image, double aspect, double inset = 0)
     {
+        drawing.DrawImage(image, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize), DuckHuntSceneryCrop(image, aspect, inset),
+            1, CanvasImageInterpolation.HighQualityCubic);
+    }
+
+    private static Rect DuckHuntSceneryCrop(CanvasBitmap image, double aspect, double inset)
+    {
         // Crop rather than stretch: trees, clouds and the distant field retain
         // their physical proportions on either orientation of the tabletop.
         double width = image.Size.Width * (1 - 2 * inset), height = image.Size.Height * (1 - 2 * inset);
         if (width / height > aspect) width = height * aspect;
         else height = width / aspect;
-        var source = new Rect((image.Size.Width - width) / 2, (image.Size.Height - height) / 2,
+        return new Rect((image.Size.Width - width) / 2, (image.Size.Height - height) / 2,
             width, height);
-        drawing.DrawImage(image, new Rect(0, 0, BoardSurfaceSize, BoardSurfaceSize), source,
-            1, CanvasImageInterpolation.HighQualityCubic);
     }
 
     private void PrepareDuckHuntWelcomeTitle(CanvasDevice device)

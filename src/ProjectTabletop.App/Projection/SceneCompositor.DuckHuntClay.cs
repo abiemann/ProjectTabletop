@@ -17,7 +17,7 @@ public sealed partial class SceneCompositor
     private CanvasRenderTarget? _clayShardAtlas, _clayDustSprite;
     private CanvasTextFormat? _clayHeading, _clayCaption;
     private OutlinedBoardText? _clayScoreCaption, _clayPairCaption, _clayCompleteCaption,
-        _clayResultCaption, _clayHitCaption;
+        _clayResultCaption, _clayHitCaption, _clayPromptCaption;
     private Rect _clayArtworkBounds;
     private int _clayDrawnScore = -1, _clayDrawnPairs = -1;
     private string _clayScoreText = string.Empty, _clayPairText = string.Empty, _clayResultText = string.Empty;
@@ -28,6 +28,7 @@ public sealed partial class SceneCompositor
     private void PrepareDuckHuntClayResources(CanvasDevice device)
     {
         if (_clayShardAtlas is not null || _duckHuntClayImages?.Image("clay-pigeon-v1.png") is not { } disc) return;
+        PrepareClayHorizonFlocks(device);
         _clayHeading = new CanvasTextFormat
         {
             FontFamily = "Segoe UI", FontWeight = FontWeights.SemiBold, FontSize = 40,
@@ -45,6 +46,7 @@ public sealed partial class SceneCompositor
         _clayCompleteCaption = new(_clayHeading, DuckHuntScoreColor);
         _clayResultCaption = new(_clayCaption, DuckHuntScoreColor);
         _clayHitCaption = new(_clayHeading, DuckHuntScoreColor);
+        _clayPromptCaption = new(_clayHeading, DuckHuntScoreColor);
         // Read alpha once at publication. Both the untouched native texture and
         // its ceramic fragments use this same tight silhouette, so transparent
         // image margins can never enlarge the target's visible hit footprint.
@@ -100,9 +102,11 @@ public sealed partial class SceneCompositor
 
     private void DisposeDuckHuntClayResources()
     {
+        DisposeClayHorizonFlocks();
         _clayScoreCaption?.Dispose(); _clayPairCaption?.Dispose(); _clayCompleteCaption?.Dispose();
-        _clayResultCaption?.Dispose(); _clayHitCaption?.Dispose();
-        _clayScoreCaption = _clayPairCaption = _clayCompleteCaption = _clayResultCaption = _clayHitCaption = null;
+        _clayResultCaption?.Dispose(); _clayHitCaption?.Dispose(); _clayPromptCaption?.Dispose();
+        _clayScoreCaption = _clayPairCaption = _clayCompleteCaption = _clayResultCaption = _clayHitCaption =
+            _clayPromptCaption = null;
         _clayShardAtlas?.Dispose(); _clayDustSprite?.Dispose();
         _clayHeading?.Dispose(); _clayCaption?.Dispose();
         _clayShardAtlas = _clayDustSprite = null;
@@ -136,9 +140,13 @@ public sealed partial class SceneCompositor
         }
         _clayScoreCaption?.Draw(drawing, _clayScoreText, new Rect(30, 25, 210, 52), aspect);
         _clayPairCaption?.Draw(drawing, _clayPairText, new Rect(710, 25, 260, 52), aspect);
-        if (state.Phase != DuckHuntClayPhase.Finished) return;
-        _clayCompleteCaption?.Draw(drawing, "ROUND COMPLETE", new Rect(200, 290, 600, 66), aspect);
-        _clayResultCaption?.Draw(drawing, _clayResultText, new Rect(240, 360, 520, 45), aspect);
+        if (state.Phase == DuckHuntClayPhase.Playing) return;
+        if (state.Phase == DuckHuntClayPhase.Finished)
+        {
+            _clayCompleteCaption?.Draw(drawing, "GAME OVER", new Rect(200, 290, 600, 66), aspect);
+            _clayResultCaption?.Draw(drawing, _clayResultText, new Rect(240, 360, 520, 45), aspect);
+        }
+        _clayPromptCaption?.Draw(drawing, "PRESS PLAY", new Rect(200, 420, 600, 66), aspect);
     }
 
     internal void DrawDuckHuntClayHitScore(CanvasDrawingSession drawing, DuckHuntClayTarget target, double aspect)
