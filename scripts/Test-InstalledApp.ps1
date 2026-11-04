@@ -65,12 +65,18 @@ try {
             show_blackjack = 'Blackjack'; show_crown_deed = 'CrownDeed'; show_globe = 'Globe';
             show_slots = 'Slots'; show_roulette = 'Roulette'; show_photo_copy = 'PhotoCopy';
             show_paint = 'Paint'; show_water_garden = 'WaterGarden'; show_football = 'Football';
-            show_strykers_run = "Stryker's Run"; show_duck_hunt = 'DuckHunt';
+            show_strykers_run = "Stryker's Run";
             show_settings = 'Settings'; show_board_menu = 'Menu'
         }.GetEnumerator()) {
         $result = Invoke-Control $route.Key
         if ($result.boardApp -ne $route.Value) { throw "Navigation failed: $($route.Key)" }
     }
+    $duckHunt = Invoke-Control 'show_duck_hunt'
+    $duckHuntStatus = Invoke-Control 'get_status'
+    if ($duckHuntStatus.boardApp -ne 'DuckHunt' -or $duckHunt.view -ne 'Menu') {
+        throw 'Installed Duck Hunt must open at its mode-selection welcome screen.'
+    }
+    $duckHunt | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath (Join-Path $work 'duck-hunt-welcome.json') -Encoding utf8
     $football = Invoke-Control 'show_football'
     $footballState = Invoke-Control 'get_football'
     if ($football.boardApp -ne 'Football' -or $footballState.state.phase -ne 'Ready' -or
