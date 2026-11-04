@@ -38,15 +38,26 @@ public class DuckHuntGalleryScoreTests
     {
         var game = Waiting();
         var paper = DuckHuntGalleryLayout.TargetQuad(2, game.Snapshot, aspect);
-        Assert.True(game.Shoot(paper.Map(Zone(points).U, Zone(points).V), At(4000), aspect));
+        var impact = paper.Map(Zone(points).U, Zone(points).V);
+        Assert.True(game.Shoot(impact, At(4000), aspect));
         Assert.Equal(points, game.Snapshot.Score);
         Assert.Equal(0, game.Snapshot.ScoreAnimationSeconds);
         Assert.Equal(1, game.Snapshot.HitTargets);
+        if (points == 0) Assert.Empty(game.ScorePopups);
+        else
+        {
+            var popup = Assert.Single(game.ScorePopups);
+            Assert.Equal(points, popup.Points);
+            Assert.Equal(impact, popup.Impact);
+            Assert.Equal(0, popup.Elapsed);
+        }
         var center = Zone(100);
         Assert.True(game.Shoot(paper.Map(center.U, center.V), At(4010), aspect));
         Assert.Equal(points, game.Snapshot.Score);
         Assert.Equal(2, game.Punctures.Count);
         Assert.Equal(1, game.Snapshot.HitTargets);
+        Assert.Equal(points == 0 ? 0 : 1, game.ScorePopups.Count);
+        if (points > 0) Assert.Equal(impact, game.ScorePopups[0].Impact);
     }
 
     [Theory]
@@ -60,13 +71,22 @@ public class DuckHuntGalleryScoreTests
         game.Advance(At(8800));
         var paper = DuckHuntGalleryLayout.MiddleTargetQuad(game.Snapshot, aspect);
         var local = Zone(points);
-        Assert.True(game.Shoot(paper.Map(local.U, local.V), At(8810), aspect));
+        var impact = paper.Map(local.U, local.V);
+        Assert.True(game.Shoot(impact, At(8810), aspect));
         Assert.Equal(points, game.Snapshot.Score);
+        if (points == 0) Assert.Empty(game.ScorePopups);
+        else
+        {
+            var popup = Assert.Single(game.ScorePopups);
+            Assert.Equal(points, popup.Points);
+            Assert.Equal(impact, popup.Impact);
+        }
         var center = Zone(100);
         Assert.True(game.Shoot(paper.Map(center.U, center.V), At(8820), aspect));
         Assert.Equal(points, game.Snapshot.Score);
         Assert.Equal(1, game.Snapshot.MiddleHitMask);
         Assert.Equal(2, game.Punctures.Count);
+        Assert.Equal(points == 0 ? 0 : 1, game.ScorePopups.Count);
         Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
         game.Advance(At(9309));
         Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
@@ -83,12 +103,16 @@ public class DuckHuntGalleryScoreTests
         Assert.False(game.Shoot(new(double.NaN, .5), At(4000)));
         Assert.False(game.Shoot(skull, At(3700)));
         Assert.Equal(0, game.Snapshot.Score);
+        Assert.Empty(game.ScorePopups);
         Assert.True(game.Shoot(skull, At(4000)));
         Assert.Equal(100, game.Snapshot.Score);
         Assert.False(game.Shoot(skull, At(4000)));
         Assert.False(game.Shoot(skull, At(4010)));
         Assert.Equal(100, game.Snapshot.Score);
         Assert.Equal(1, game.Snapshot.HitSkulls);
+        var popup = Assert.Single(game.ScorePopups);
+        Assert.Equal(100, popup.Points);
+        Assert.Equal(skull, popup.Impact);
     }
 
     [Fact]
@@ -102,6 +126,10 @@ public class DuckHuntGalleryScoreTests
         Assert.True(game.Shoot(point, At(11799)));
         Assert.Equal(50, game.Snapshot.Score);
         Assert.InRange(game.Snapshot.ScoreAnimationSeconds, .016, .017);
+        var popup = Assert.Single(game.ScorePopups);
+        Assert.Equal(50, popup.Points);
+        Assert.Equal(point, popup.Impact);
+        Assert.Equal(.021, popup.Elapsed, 10);
         Assert.False(game.Shoot(point, At(11800)));
         Assert.False(game.Shoot(point, At(11801)));
         Assert.Equal(50, game.Snapshot.Score);
@@ -109,6 +137,69 @@ public class DuckHuntGalleryScoreTests
         late.Advance(At(11820));
         Assert.False(late.Shoot(point, At(11800)));
         Assert.Equal(0, late.Snapshot.Score);
+    }
+
+    [Fact]
+    public void RapidAwardsKeepSeparateAmountsAndImpactPositionsUntilTheirOwnExpiry()
+    {
+        var game = Waiting();
+        var centre = Zone(100);
+        var ring = Zone(50);
+        var centreImpact = DuckHuntGalleryLayout.TargetQuad(0, game.Snapshot).Map(centre.U, centre.V);
+        var ringImpact = DuckHuntGalleryLayout.TargetQuad(1, game.Snapshot).Map(ring.U, ring.V);
+        Assert.True(game.Shoot(centreImpact, At(4000)));
+        Assert.True(game.Shoot(ringImpact, At(4100)));
+        Assert.True(game.Shoot(Skull(0), At(4200)));
+        Assert.Equal(3, game.ScorePopups.Count);
+        Assert.Equal(new[] { 100, 50, 100 }, game.ScorePopups.Select(popup => popup.Points));
+        Assert.Equal(new[] { centreImpact, ringImpact, Skull(0) }, game.ScorePopups.Select(popup => popup.Impact));
+        Assert.Equal(.2, game.ScorePopups[0].Elapsed, 10);
+        Assert.Equal(.1, game.ScorePopups[1].Elapsed, 10);
+        Assert.Equal(0, game.ScorePopups[2].Elapsed);
+        game.Advance(At(5350));
+        Assert.Equal(2, game.ScorePopups.Count);
+        Assert.Equal(ringImpact, game.ScorePopups[0].Impact);
+        game.Advance(At(5450));
+        Assert.Equal(Skull(0), Assert.Single(game.ScorePopups).Impact);
+        game.Advance(At(5550));
+        Assert.Empty(game.ScorePopups);
+        Assert.Equal(250, game.Snapshot.Score);
+        Assert.True(game.Shoot(DuckHuntGalleryLayout.TargetQuad(2, game.Snapshot).Map(centre.U, centre.V), At(5560)));
+        Assert.Single(game.ScorePopups);
+        game.Reset(At(5570));
+        Assert.Empty(game.ScorePopups);
+    }
+
+    [Fact]
+    public void PopupPausesAndKeepsRedrawingAfterScoreFlipEndsThenStopsWhenExpired()
+    {
+        var game = Waiting();
+        Assert.False(game.Shoot(DuckHuntGalleryLayout.ScenePoint(.5, .18, 1), At(4000)));
+        game.Advance(At(5300)); // Upper animation is settled; lower row remains available.
+        var local = Zone(50);
+        var impact = DuckHuntGalleryLayout.TargetQuad(0, game.Snapshot).Map(local.U, local.V);
+        Assert.True(game.Shoot(impact, At(5400)));
+        game.SetReady(false, At(5500));
+        var paused = game.Snapshot;
+        var popup = Assert.Single(game.ScorePopups);
+        game.Advance(At(10500));
+        Assert.Equal(paused, game.Snapshot);
+        Assert.Equal(popup, Assert.Single(game.ScorePopups));
+        game.SetReady(true, At(10500));
+        Assert.Equal(.1, Assert.Single(game.ScorePopups).Elapsed, 10);
+        game.Advance(At(11500));
+        Assert.Equal(1, game.Snapshot.ScoreAnimationSeconds);
+        var before = game.Snapshot;
+        Assert.Equal(1.1, Assert.Single(game.ScorePopups).Elapsed, 10);
+        game.Advance(At(11600));
+        Assert.Equal(before with { Revision = game.Snapshot.Revision }, game.Snapshot);
+        Assert.True(game.Snapshot.Revision > before.Revision);
+        Assert.Equal(1.2, Assert.Single(game.ScorePopups).Elapsed, 10);
+        game.Advance(At(11750));
+        Assert.Empty(game.ScorePopups);
+        var settled = game.Snapshot;
+        game.Advance(At(12750));
+        Assert.Equal(settled, game.Snapshot);
     }
 
     [Fact]
@@ -133,7 +224,18 @@ public class DuckHuntGalleryScoreTests
         Assert.Equal(1, game.Snapshot.ScoreAnimationSeconds);
         var settled = game.Snapshot;
         game.Advance(At(16200));
-        Assert.Equal(settled, game.Snapshot);
+        // The next target's countdown still moves, while the score clock stays settled.
+        Assert.Equal(settled with
+        {
+            MiddleMotionProgress = game.Snapshot.MiddleMotionProgress,
+            Revision = game.Snapshot.Revision
+        }, game.Snapshot);
+        Assert.True(game.Snapshot.MiddleMotionProgress > settled.MiddleMotionProgress);
+        game.Advance(At(50000));
+        Assert.True(game.Snapshot.RoundFinished);
+        var completed = game.Snapshot;
+        game.Advance(At(51000));
+        Assert.Equal(completed, game.Snapshot);
     }
 
     [Fact]
@@ -172,6 +274,7 @@ public class DuckHuntGalleryScoreTests
         Assert.True(game.Start(At(90001)));
         Assert.Equal(0, game.Snapshot.Score);
         Assert.Equal(0, game.Snapshot.ScoreAnimationSeconds);
+        Assert.Empty(game.ScorePopups);
     }
 
     [Fact]
@@ -186,16 +289,17 @@ public class DuckHuntGalleryScoreTests
         board.TickDuckHunt(At(3900));
         var local = Zone(100);
         Assert.True(board.TryDuckHuntShot(DuckHuntGalleryLayout.TargetQuad(2, board.GalleryState).Map(local.U, local.V), At(4000)));
+        Assert.Equal(100, Assert.Single(board.GalleryScorePopups).Points);
         Assert.False(board.TryDuckHuntShot(DuckHuntGalleryLayout.ScenePoint(.5, .78, 1), At(4010)));
         Assert.False(board.TryDuckHuntShot(DuckHuntGalleryLayout.ScenePoint(.5, .18, 1), At(4020)));
         board.TickDuckHunt(At(33000));
         Assert.True(board.GalleryState.PlayVisible);
         Assert.Equal(100, board.GalleryState.Score);
-        Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(33001)));
         Assert.True(board.DuckHuntDrawerOpen);
         Assert.True(board.ActivateButton("duck-hunt-play", At(33400)));
         Assert.False(board.DuckHuntDrawerOpen);
         Assert.Equal(0, board.GalleryState.Score);
+        Assert.Empty(board.GalleryScorePopups);
     }
 
     private static DuckHuntGalleryGame Waiting()

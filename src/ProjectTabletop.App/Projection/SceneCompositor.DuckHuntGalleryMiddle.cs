@@ -15,6 +15,10 @@ public sealed partial class SceneCompositor
     private CanvasGeometry? _galleryMiddleOpeningSource, _galleryMiddleOpening;
     private CanvasLinearGradientBrush? _galleryMiddleRecess;
     private double _galleryMiddleOpeningAspect;
+    private CanvasGeometry? _galleryMiddleCountdownCircle;
+    private CanvasStrokeStyle? _galleryMiddleCountdownStroke;
+    private float _galleryMiddleCountdownDashLength;
+    private const float GalleryMiddleCountdownWidth = 5.5f;
 
     private void PrepareGalleryMiddle(CanvasDevice device)
     {
@@ -74,6 +78,25 @@ public sealed partial class SceneCompositor
             draw.FillRoundedRectangle(new Rect(x - 9, 184, 18, 33), 3, 3, brass);
             draw.FillRoundedRectangle(new Rect(x - 7, 344, 14, 47), 3, 3, brass);
         }
+        using (var path = new CanvasPathBuilder(device))
+        {
+            var center = new Vector2((float)DuckHuntGalleryLayout.PaperCenterU * GalleryTargetWidth,
+                (float)DuckHuntGalleryLayout.PaperCenterV * GalleryTargetHeight);
+            float radius = (float)DuckHuntGalleryLayout.PaperRadiusU * GalleryTargetWidth * .93f;
+            path.BeginFigure(center - new Vector2(0, radius));
+            path.AddArc(center, radius, radius, -MathF.PI / 2, MathF.PI);
+            path.AddArc(center, radius, radius, MathF.PI / 2, MathF.PI);
+            path.EndFigure(CanvasFigureLoop.Closed);
+            _galleryMiddleCountdownCircle = CanvasGeometry.CreatePath(path);
+        }
+        // One full-circle dash followed by one equally long gap lets the GPU
+        // sweep the countdown without rebuilding a path or target texture.
+        _galleryMiddleCountdownDashLength = _galleryMiddleCountdownCircle.ComputePathLength() / GalleryMiddleCountdownWidth;
+        _galleryMiddleCountdownStroke = new CanvasStrokeStyle
+        {
+            CustomDashStyle = [_galleryMiddleCountdownDashLength, _galleryMiddleCountdownDashLength],
+            DashCap = CanvasCapStyle.Round
+        };
     }
 
     private void DisposeGalleryMiddle()
@@ -81,9 +104,11 @@ public sealed partial class SceneCompositor
         _galleryMiddleCurtain?.Dispose(); _galleryMiddleEdge?.Dispose();
         _galleryMiddleOpeningSource?.Dispose(); _galleryMiddleOpening?.Dispose();
         _galleryMiddleRecess?.Dispose();
+        _galleryMiddleCountdownCircle?.Dispose(); _galleryMiddleCountdownStroke?.Dispose();
         _galleryMiddleCurtain = _galleryMiddleEdge = null;
         _galleryMiddleOpeningSource = _galleryMiddleOpening = null;
         _galleryMiddleRecess = null;
+        _galleryMiddleCountdownCircle = null; _galleryMiddleCountdownStroke = null;
     }
 
     private void DrawGalleryMiddleStage(CanvasDrawingSession drawing, DuckHuntGallerySnapshot state, double aspect)
@@ -114,6 +139,7 @@ public sealed partial class SceneCompositor
             {
                 RefreshGalleryTargetTextures(state, aspect, _blackjackClock());
                 DrawGalleryMiddleTarget(drawing, pose, aspect);
+                DrawGalleryMiddleCountdown(drawing, state, pose.Quad);
             }
             double rise = Math.Clamp(state.MiddleOpenProgress, 0, 1) * (panel.Height + 2);
             var curtain = new Rect(panel.X, panel.Y - rise, panel.Width, panel.Height);
@@ -124,6 +150,34 @@ public sealed partial class SceneCompositor
                 drawing.DrawLine((float)panel.X, (float)curtain.Bottom, (float)panel.Right,
                     (float)curtain.Bottom, Color.FromArgb(200, 66, 45, 25), 2);
         }
+    }
+
+    internal void DrawGalleryMiddleCountdown(CanvasDrawingSession drawing, DuckHuntGallerySnapshot state,
+        DuckHuntGalleryQuad quad)
+    {
+        if (state.MiddlePhase != DuckHuntGalleryMiddlePhase.WaitingForHit ||
+            state.MiddleTargetIndex is < 0 or >= DuckHuntGalleryGame.MiddleTargetCount ||
+            (state.MiddleHitMask & (1 << state.MiddleTargetIndex)) != 0 ||
+            _galleryMiddleCountdownCircle is null || _galleryMiddleCountdownStroke is null || _galleryPaperClip is null)
+            return;
+        double progress = Math.Clamp(state.MiddleMotionProgress, 0, 1);
+        if (progress >= 1) return;
+        var face = GalleryRect(quad.Bounds);
+        var previousTransform = drawing.Transform;
+        drawing.Transform = Matrix3x2.CreateScale((float)face.Width / GalleryTargetWidth,
+            (float)face.Height / GalleryTargetHeight) *
+            Matrix3x2.CreateTranslation((float)face.X, (float)face.Y) * previousTransform;
+        try
+        {
+            // Use the same paper mask as punctures so the copper rim and its
+            // four retaining clips remain in front of this inset countdown.
+            using var paper = drawing.CreateLayer(1, _galleryPaperClip);
+            drawing.DrawGeometry(_galleryMiddleCountdownCircle, Color.FromArgb(255, 64, 43, 24), 9);
+            _galleryMiddleCountdownStroke.DashOffset = -(float)progress * _galleryMiddleCountdownDashLength;
+            drawing.DrawGeometry(_galleryMiddleCountdownCircle, DuckHuntScoreColor,
+                GalleryMiddleCountdownWidth, _galleryMiddleCountdownStroke);
+        }
+        finally { drawing.Transform = previousTransform; }
     }
 
     private void DrawGalleryMiddleTarget(CanvasDrawingSession drawing, DuckHuntGalleryMiddlePose pose, double aspect)

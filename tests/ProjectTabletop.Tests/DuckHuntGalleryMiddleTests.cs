@@ -96,8 +96,18 @@ public class DuckHuntGalleryMiddleTests
             game.Advance(At(entered + 900));
             Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
             Assert.Equal(0, DuckHuntGalleryLayout.MiddleTargetPose(game.Snapshot).YawDegrees);
+            Assert.Equal(0, game.Snapshot.MiddleMotionProgress);
+            var fixedPose = DuckHuntGalleryLayout.MiddleTargetPose(game.Snapshot);
+            foreach (double fraction in new[] { .25, .5, .75 })
+            {
+                game.Advance(At(entered + 900 + 3000 * fraction));
+                Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
+                Assert.Equal(fraction, game.Snapshot.MiddleMotionProgress, 10);
+                Assert.Equal(fixedPose, DuckHuntGalleryLayout.MiddleTargetPose(game.Snapshot));
+            }
             game.Advance(At(entered + 3899));
             Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
+            Assert.Equal(2999d / 3000, game.Snapshot.MiddleMotionProgress, 10);
             game.Advance(At(entered + 3900));
             Assert.Equal(DuckHuntGalleryMiddlePhase.TurningAway, game.Snapshot.MiddlePhase);
             game.Advance(At(entered + 4150));
@@ -124,6 +134,31 @@ public class DuckHuntGalleryMiddleTests
     }
 
     [Fact]
+    public void CountdownProgressFreezesDuringReadinessPauseAndResumesRemainingThreeSecondWindow()
+    {
+        var game = Middle();
+        game.Advance(At(9550));
+        Assert.Equal(.25, game.Snapshot.MiddleMotionProgress, 10);
+        game.SetReady(false, At(9550));
+        var paused = game.Snapshot;
+        game.Advance(At(14550));
+        Assert.Equal(paused, game.Snapshot);
+        game.SetReady(true, At(14550));
+        Assert.Equal(.25, game.Snapshot.MiddleMotionProgress, 10);
+        game.Advance(At(15300));
+        Assert.Equal(.5, game.Snapshot.MiddleMotionProgress, 10);
+        game.Advance(At(16799));
+        Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
+        Assert.Equal(2999d / 3000, game.Snapshot.MiddleMotionProgress, 10);
+        game.Advance(At(16800));
+        Assert.Equal(DuckHuntGalleryMiddlePhase.TurningAway, game.Snapshot.MiddlePhase);
+        game.Advance(At(18600));
+        Assert.Equal(1, game.Snapshot.MiddleTargetIndex);
+        Assert.Equal(DuckHuntGalleryMiddlePhase.WaitingForHit, game.Snapshot.MiddlePhase);
+        Assert.Equal(0, game.Snapshot.MiddleMotionProgress);
+    }
+
+    [Fact]
     public void FirstHitTurnsEachTargetAfterHalfASecondAndRepeatedHitsDoNotExtendIt()
     {
         var game = Middle();
@@ -132,8 +167,11 @@ public class DuckHuntGalleryMiddleTests
             double entered = 7900 + i * 2350;
             game.Advance(At(entered + 900));
             Assert.Equal(i, game.Snapshot.MiddleTargetIndex);
+            Assert.Equal(0, game.Snapshot.MiddleMotionProgress);
             var paper = MiddlePaper(game);
             Assert.True(game.Shoot(paper, At(entered + 950)));
+            Assert.NotEqual(0, game.Snapshot.MiddleHitMask & (1 << i));
+            Assert.Equal(50d / 3000, game.Snapshot.MiddleMotionProgress, 10);
             Assert.True(game.Shoot(paper, At(entered + 1300)));
             Assert.Equal(5 + i, game.Punctures[^1].TargetIndex);
             game.Advance(At(entered + 1449));

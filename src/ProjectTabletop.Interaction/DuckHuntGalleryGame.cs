@@ -20,6 +20,11 @@ public enum DuckHuntGalleryMiddlePhase
 public readonly record struct DuckHuntGalleryPuncture(
     int TargetIndex, double U, double V, DateTimeOffset ShotTime);
 
+public readonly record struct DuckHuntGalleryScorePopup(BoardAim Impact, int Points, double Elapsed)
+{
+    internal DateTimeOffset StartedAt { get; init; }
+}
+
 public readonly record struct DuckHuntGallerySnapshot(DuckHuntGalleryPhase Phase,
     double FlapAngleDegrees, double ConveyorPosition, double FallProgress,
     int HitMask, int Shots, int Cycle, long Revision, bool Paused = false,
@@ -32,6 +37,7 @@ public readonly record struct DuckHuntGallerySnapshot(DuckHuntGalleryPhase Phase
     double MiddleMotionProgress = 0, int MiddleHitMask = 0,
     int Score = 0, double ScoreAnimationSeconds = 0)
 {
+    public bool RoundFinished => MiddlePhase == DuckHuntGalleryMiddlePhase.Complete;
     public bool PlayVisible => Phase == DuckHuntGalleryPhase.Ready && UpperPhase == DuckHuntGalleryUpperPhase.Closed &&
         MiddlePhase is DuckHuntGalleryMiddlePhase.Closed or DuckHuntGalleryMiddlePhase.Complete;
     public bool TargetsVisible => Phase is not (DuckHuntGalleryPhase.Ready or DuckHuntGalleryPhase.Closing);
@@ -57,6 +63,7 @@ public sealed class DuckHuntGalleryGame
     public const int SkullScore = 100;
     public const int MaximumScore = (TargetCount + MiddleTargetCount + SkullCount) * 100;
     public const double ScoreAnimationDurationSeconds = 1;
+    public const double ScorePopupDurationSeconds = 1.35;
     public static readonly TimeSpan OpeningDuration = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan RevealWaitDuration = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan AdvanceDuration = TimeSpan.FromSeconds(1.8);
@@ -80,6 +87,8 @@ public sealed class DuckHuntGalleryGame
 
     private readonly List<DuckHuntGalleryPuncture> _punctures = new(32);
     private readonly IReadOnlyList<DuckHuntGalleryPuncture> _readOnlyPunctures;
+    private readonly List<DuckHuntGalleryScorePopup> _scorePopups = new(TargetCount + SkullCount + MiddleTargetCount);
+    private readonly IReadOnlyList<DuckHuntGalleryScorePopup> _readOnlyScorePopups;
     private DateTimeOffset _observedAt, _phaseStartedAt, _inputNotBefore;
     private DateTimeOffset _upperPhaseStartedAt, _playStartedAt;
     private DateTimeOffset _lastShotAt = DateTimeOffset.MinValue;
@@ -99,9 +108,14 @@ public sealed class DuckHuntGalleryGame
     private DuckHuntGallerySnapshot _snapshot = new(DuckHuntGalleryPhase.Ready,
         0, 0, 0, 0, 0, 0, 0, Paused: true);
 
-    public DuckHuntGalleryGame() => _readOnlyPunctures = _punctures.AsReadOnly();
+    public DuckHuntGalleryGame()
+    {
+        _readOnlyPunctures = _punctures.AsReadOnly();
+        _readOnlyScorePopups = _scorePopups.AsReadOnly();
+    }
     public DuckHuntGallerySnapshot Snapshot => _snapshot;
     public IReadOnlyList<DuckHuntGalleryPuncture> Punctures => _readOnlyPunctures;
+    public IReadOnlyList<DuckHuntGalleryScorePopup> ScorePopups => _readOnlyScorePopups;
 
     public void Reset(DateTimeOffset now)
     {
@@ -120,6 +134,7 @@ public sealed class DuckHuntGalleryGame
         _scoreChangedAt = null;
         ClearSkulls();
         _punctures.Clear();
+        _scorePopups.Clear();
         Publish(now);
     }
 
@@ -136,6 +151,8 @@ public sealed class DuckHuntGalleryGame
             _playStartedAt += pause;
             if (_middleStartedAt is { } middle) _middleStartedAt = middle + pause;
             if (_scoreChangedAt is { } scoreAt) _scoreChangedAt = scoreAt + pause;
+            for (int index = 0; index < _scorePopups.Count; index++)
+                _scorePopups[index] = _scorePopups[index] with { StartedAt = _scorePopups[index].StartedAt + pause };
             _pausedAt = null;
             _inputNotBefore = now;
         }
@@ -190,6 +207,7 @@ public sealed class DuckHuntGalleryGame
         Advance(now);
         if (!_snapshot.PlayVisible) return false;
         _punctures.Clear();
+        _scorePopups.Clear();
         _hitMask = _shots = 0;
         _cycle++;
         _middleStartedAt = null;
@@ -233,7 +251,7 @@ public sealed class DuckHuntGalleryGame
             overAssembly |= DuckHuntGalleryLayout.ContainsAssembly(local);
             if (!DuckHuntGalleryLayout.ContainsPaper(local)) continue;
             _punctures.Add(new(index, local.U, local.V, shotTime));
-            if ((_hitMask & (1 << index)) == 0) AddScore(DuckHuntGalleryLayout.PaperScore(local), shotTime);
+            if ((_hitMask & (1 << index)) == 0) AddScore(DuckHuntGalleryLayout.PaperScore(local), point, shotTime);
             _hitMask |= 1 << index;
             hit = true;
             if (_hitMask == (1 << TargetCount) - 1)
@@ -248,7 +266,7 @@ public sealed class DuckHuntGalleryGame
             if ((_skullHitMask & (1 << index)) != 0 ||
                 !DuckHuntGalleryLayout.ContainsSkull(index, point, boardAspect)) continue;
             _skullHitMask |= 1 << index;
-            AddScore(SkullScore, shotTime);
+            AddScore(SkullScore, point, shotTime);
             double seconds = (shotTime - _playStartedAt).TotalSeconds;
             switch (index)
             {
@@ -277,7 +295,7 @@ public sealed class DuckHuntGalleryGame
                 _punctures.Add(new(MiddlePunctureOffset + middleAtShot.Index, local.U, local.V, shotTime));
                 if ((_middleHitMask & (1 << middleAtShot.Index)) == 0)
                 {
-                    AddScore(DuckHuntGalleryLayout.PaperScore(local), shotTime);
+                    AddScore(DuckHuntGalleryLayout.PaperScore(local), point, shotTime);
                     // Store active-round time so readiness pauses also freeze
                     // the half-second puncture display before turning away.
                     _middleHitElapsed[middleAtShot.Index] = shotTime - _middleStartedAt!.Value;
@@ -326,15 +344,17 @@ public sealed class DuckHuntGalleryGame
         _skull0HitSeconds = _skull1HitSeconds = _skull2HitSeconds = _skull3HitSeconds = _skull4HitSeconds = -1;
     }
 
-    private void AddScore(int points, DateTimeOffset shotTime)
+    private void AddScore(int points, BoardAim impact, DateTimeOffset shotTime)
     {
         if (points <= 0) return;
         _score += points;
         _scoreChangedAt = shotTime;
+        _scorePopups.Add(new(impact, points, 0) { StartedAt = shotTime });
     }
 
     private void Publish(DateTimeOffset now)
     {
+        bool popupChanged = AdvanceScorePopups(now);
         double elapsed = Math.Max(0, (now - _phaseStartedAt).TotalSeconds);
         double progress = _phase is DuckHuntGalleryPhase.Ready or DuckHuntGalleryPhase.WaitingForHits
             ? 0 : Math.Clamp(elapsed / Duration(_phase).TotalSeconds, 0, 1);
@@ -373,7 +393,28 @@ public sealed class DuckHuntGalleryGame
             _hitMask, _shots, _cycle, _snapshot.Revision, !_ready, _upperPhase, upperOpen, _skullHitMask, animation,
             _skull0HitSeconds, _skull1HitSeconds, _skull2HitSeconds, _skull3HitSeconds, _skull4HitSeconds,
             middle.Phase, middle.Open, middle.Index, middle.Progress, _middleHitMask, _score, scoreAnimation);
-        if (next != _snapshot) _snapshot = next with { Revision = _snapshot.Revision + 1 };
+        if (next != _snapshot || popupChanged) _snapshot = next with { Revision = _snapshot.Revision + 1 };
+    }
+
+    private bool AdvanceScorePopups(DateTimeOffset now)
+    {
+        bool changed = false;
+        for (int index = _scorePopups.Count - 1; index >= 0; index--)
+        {
+            var popup = _scorePopups[index];
+            double elapsed = Math.Max(0, (now - popup.StartedAt).TotalSeconds);
+            if (elapsed >= ScorePopupDurationSeconds)
+            {
+                _scorePopups.RemoveAt(index);
+                changed = true;
+            }
+            else if (popup.Elapsed != elapsed)
+            {
+                _scorePopups[index] = popup with { Elapsed = elapsed };
+                changed = true;
+            }
+        }
+        return changed;
     }
 
     private static double Smooth(double value) => value * value * (3 - 2 * value);
@@ -409,7 +450,7 @@ public sealed class DuckHuntGalleryGame
                 return (DuckHuntGalleryMiddlePhase.TurningToFace, 1, index, elapsed / MiddleTurnDuration);
             elapsed -= MiddleTurnDuration;
             if (elapsed < faceDuration)
-                return (DuckHuntGalleryMiddlePhase.WaitingForHit, 1, index, 0);
+                return (DuckHuntGalleryMiddlePhase.WaitingForHit, 1, index, elapsed / MiddleFaceDuration);
             elapsed -= faceDuration;
             if (elapsed < MiddleTurnDuration)
                 return (DuckHuntGalleryMiddlePhase.TurningAway, 1, index, elapsed / MiddleTurnDuration);

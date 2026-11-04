@@ -16,6 +16,8 @@ public sealed partial class SceneCompositor
     private static readonly ClayShard[] ClayShards = CreateClayShards();
     private CanvasRenderTarget? _clayShardAtlas, _clayDustSprite;
     private CanvasTextFormat? _clayHeading, _clayCaption;
+    private OutlinedBoardText? _clayScoreCaption, _clayPairCaption, _clayCompleteCaption,
+        _clayResultCaption, _clayHitCaption;
     private Rect _clayArtworkBounds;
     private int _clayDrawnScore = -1, _clayDrawnPairs = -1;
     private string _clayScoreText = string.Empty, _clayPairText = string.Empty, _clayResultText = string.Empty;
@@ -38,6 +40,11 @@ public sealed partial class SceneCompositor
             HorizontalAlignment = CanvasHorizontalAlignment.Center,
             VerticalAlignment = CanvasVerticalAlignment.Center
         };
+        _clayScoreCaption = new(_clayCaption, DuckHuntScoreColor);
+        _clayPairCaption = new(_clayCaption, DuckHuntScoreColor);
+        _clayCompleteCaption = new(_clayHeading, DuckHuntScoreColor);
+        _clayResultCaption = new(_clayCaption, DuckHuntScoreColor);
+        _clayHitCaption = new(_clayHeading, DuckHuntScoreColor);
         // Read alpha once at publication. Both the untouched native texture and
         // its ceramic fragments use this same tight silhouette, so transparent
         // image margins can never enlarge the target's visible hit footprint.
@@ -93,6 +100,9 @@ public sealed partial class SceneCompositor
 
     private void DisposeDuckHuntClayResources()
     {
+        _clayScoreCaption?.Dispose(); _clayPairCaption?.Dispose(); _clayCompleteCaption?.Dispose();
+        _clayResultCaption?.Dispose(); _clayHitCaption?.Dispose();
+        _clayScoreCaption = _clayPairCaption = _clayCompleteCaption = _clayResultCaption = _clayHitCaption = null;
         _clayShardAtlas?.Dispose(); _clayDustSprite?.Dispose();
         _clayHeading?.Dispose(); _clayCaption?.Dispose();
         _clayShardAtlas = _clayDustSprite = null;
@@ -103,16 +113,20 @@ public sealed partial class SceneCompositor
 
     private void DrawDuckHuntClay(CanvasDrawingSession drawing, DuckHuntClaySnapshot state, double aspect)
     {
-        if (_clayHeading is not { } heading || _clayCaption is not { } caption) return;
+        if (_clayHeading is null || _clayCaption is null) return;
         var targets = _boardSession.ClayTargets;
         // The later target is nearer. Ordered drawing preserves natural depth
         // when the two launch paths cross, without sorting or allocating.
         for (int i = 0; i < targets.Count; i++)
             DrawDuckHuntClayTarget(drawing, targets[i], aspect);
+        // Points stay above the debris and rise from the measured impact,
+        // independent of the fragments' outward and downward motion.
+        for (int i = 0; i < targets.Count; i++)
+            DrawDuckHuntClayHitScore(drawing, targets[i], aspect);
         if (_clayDrawnScore != state.Score)
         {
             _clayDrawnScore = state.Score;
-            _clayScoreText = $"SCORE  {state.Score}";
+            _clayScoreText = $"SCORE  {state.Score * 100}";
             _clayResultText = $"{state.Score} OF 20 CLAYS";
         }
         if (_clayDrawnPairs != state.PairsLaunched)
@@ -120,18 +134,17 @@ public sealed partial class SceneCompositor
             _clayDrawnPairs = state.PairsLaunched;
             _clayPairText = $"PAIRS  {state.PairsLaunched} / 10";
         }
-        DrawClayCaption(drawing, _clayScoreText, new Rect(30, 25, 210, 52), caption);
-        DrawClayCaption(drawing, _clayPairText, new Rect(710, 25, 260, 52), caption);
+        _clayScoreCaption?.Draw(drawing, _clayScoreText, new Rect(30, 25, 210, 52), aspect);
+        _clayPairCaption?.Draw(drawing, _clayPairText, new Rect(710, 25, 260, 52), aspect);
         if (state.Phase != DuckHuntClayPhase.Finished) return;
-        DrawClayCaption(drawing, "ROUND COMPLETE", new Rect(200, 290, 600, 66), heading);
-        DrawClayCaption(drawing, _clayResultText, new Rect(240, 360, 520, 45), caption);
+        _clayCompleteCaption?.Draw(drawing, "ROUND COMPLETE", new Rect(200, 290, 600, 66), aspect);
+        _clayResultCaption?.Draw(drawing, _clayResultText, new Rect(240, 360, 520, 45), aspect);
     }
 
-    private void DrawClayCaption(CanvasDrawingSession drawing, string text, Rect bounds, CanvasTextFormat format)
+    internal void DrawDuckHuntClayHitScore(CanvasDrawingSession drawing, DuckHuntClayTarget target, double aspect)
     {
-        DrawBoardAspectText(drawing, text, new Rect(bounds.X, bounds.Y + 2, bounds.Width, bounds.Height),
-            Color.FromArgb(230, 14, 35, 30), format);
-        DrawBoardAspectText(drawing, text, bounds, Color.FromArgb(255, 255, 248, 224), format);
+        if (!target.Hit || !target.Visible || target.Impact is not { } impact) return;
+        DrawDuckHuntHitScore(drawing, _clayHitCaption, impact, target.HitElapsed, aspect);
     }
 
     internal void DrawDuckHuntClayTarget(CanvasDrawingSession drawing, DuckHuntClayTarget target, double aspect)

@@ -75,9 +75,12 @@ public class DuckHuntFlightTests
         Assert.Equal(photographed.U, hit.U);
         Assert.Equal(photographed.V, hit.V);
         Assert.Equal(photographed.FlapPhase, hit.FlapPhase);
+        Assert.Equal(aim, hit.Impact);
+        Assert.Equal(.12, hit.HitElapsed, 10);
         Assert.False(hit.Visible);
         Assert.False(game.Shoot(aim, At(2650)));
         Assert.False(game.Shoot(aim, At(2800)));
+        Assert.Equal(aim, game.Snapshot.Impact);
         game.Advance(At(2850));
         Assert.True(game.Snapshot.Visible);
         Assert.Equal(hit.U, game.Snapshot.U);
@@ -85,9 +88,81 @@ public class DuckHuntFlightTests
         game.Advance(At(3300));
         Assert.Equal(DuckHuntFlightPhase.BetweenBirds, game.Snapshot.Phase);
         Assert.False(game.Snapshot.Visible);
+        Assert.Equal(aim, game.Snapshot.Impact);
+        Assert.Equal(.65, game.Snapshot.HitElapsed, 10);
         game.Advance(At(4000));
         Assert.Equal(2, game.Snapshot.BirdsLaunched);
         Assert.Equal(1, game.Snapshot.Score);
+        Assert.Null(game.Snapshot.Impact);
+        Assert.Equal(0, game.Snapshot.HitElapsed);
+    }
+
+    [Fact]
+    public void ImpactKeepsMeasuredOffCentrePointAndAgesFromClickRatherThanProjectedPose()
+    {
+        var game = Started();
+        game.Advance(At(2650));
+        var photographed = game.Snapshot;
+        var centre = BodyCentre(photographed);
+        var aim = new BoardAim(centre.U + .006, centre.V + .003);
+        Assert.True(DuckHuntFlightLayout.ContainsBird(aim, photographed, 1));
+        game.Advance(At(2820));
+        Assert.True(game.Shoot(aim, At(2770), sceneTime: At(2650)));
+        Assert.Equal(aim, game.Snapshot.Impact);
+        Assert.NotEqual(new BoardAim(photographed.U, photographed.V), game.Snapshot.Impact);
+        Assert.Equal(.05, game.Snapshot.HitElapsed, 10);
+        Assert.Equal(photographed.U, game.Snapshot.U);
+        Assert.Equal(photographed.V, game.Snapshot.V);
+        Assert.False(game.Shoot(centre, At(2821)));
+        Assert.Equal(aim, game.Snapshot.Impact);
+        Assert.Equal(1, game.Snapshot.Score);
+    }
+
+    [Fact]
+    public void MissesDoNotCreateImpactAndResetClearsTheLastSuccessfulHit()
+    {
+        var game = Started();
+        game.Advance(At(2650));
+        Assert.False(game.Shoot(new(.01, .01), At(2650)));
+        Assert.Null(game.Snapshot.Impact);
+        Assert.Equal(0, game.Snapshot.HitElapsed);
+        game.Advance(At(2700));
+        Assert.True(game.Shoot(BodyCentre(game.Snapshot), At(2700)));
+        Assert.NotNull(game.Snapshot.Impact);
+        game.Reset(At(2800));
+        Assert.Null(game.Snapshot.Impact);
+        Assert.Equal(0, game.Snapshot.HitElapsed);
+        game.SetReady(true, At(2900));
+        Assert.True(game.Start(At(3000)));
+        Assert.Null(game.Snapshot.Impact);
+    }
+
+    [Fact]
+    public void LastHitPopupEndsBeforeCompletedRoundAndReplayStayClear()
+    {
+        var game = Started();
+        var launch = At(650);
+        for (int bird = 1; bird < 10; bird++)
+            launch += DurationForBird(bird) + DuckHuntFlightGame.BetweenBirdsDuration;
+        var shotTime = launch.AddMilliseconds(500);
+        game.Advance(shotTime);
+        Assert.True(game.Shoot(BodyCentre(game.Snapshot), shotTime));
+        var gap = shotTime + DuckHuntFlightGame.HitDuration;
+        game.Advance(gap.AddMilliseconds(699));
+        Assert.Equal(DuckHuntFlightPhase.BetweenBirds, game.Snapshot.Phase);
+        Assert.NotNull(game.Snapshot.Impact);
+        Assert.Equal(1.349, game.Snapshot.HitElapsed, 10);
+        var end = gap + DuckHuntFlightGame.BetweenBirdsDuration;
+        game.Advance(end);
+        Assert.True(game.Snapshot.RoundFinished);
+        Assert.Null(game.Snapshot.Impact);
+        var completed = game.Snapshot;
+        game.Advance(end.AddSeconds(10));
+        Assert.Equal(completed, game.Snapshot);
+        Assert.True(game.Start(end.AddSeconds(11)));
+        Assert.Null(game.Snapshot.Impact);
+        Assert.Equal(0, game.Snapshot.HitElapsed);
+        Assert.Equal(0, game.Snapshot.Score);
     }
 
     [Fact]
@@ -154,6 +229,10 @@ public class DuckHuntFlightTests
         game.SetReady(true, At(20000));
         Assert.Equal(blink.Visible, game.Snapshot.Visible);
         Assert.Equal(blink.FlapPhase, game.Snapshot.FlapPhase);
+        Assert.Equal(blink.Impact, game.Snapshot.Impact);
+        Assert.Equal(.1, game.Snapshot.HitElapsed, 10);
+        game.Advance(At(20100));
+        Assert.Equal(.2, game.Snapshot.HitElapsed, 10);
     }
 
     [Fact]

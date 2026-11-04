@@ -6,6 +6,8 @@ public readonly record struct DuckHuntFlightSnapshot(DuckHuntFlightPhase Phase, 
     int BirdsLaunched, int Shots, double U, double V, int Direction, double FlapPhase,
     double Scale, bool Visible, long Revision, bool Paused = false)
 {
+    public BoardAim? Impact { get; init; }
+    public double HitElapsed { get; init; }
     public bool PlayVisible => Phase is DuckHuntFlightPhase.Ready or DuckHuntFlightPhase.Finished;
     public bool RoundFinished => Phase == DuckHuntFlightPhase.Finished;
 }
@@ -24,6 +26,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
     private DateTimeOffset _observedAt, _inputNotBefore, _phaseStartedAt, _birdStartedAt;
     private DateTimeOffset _lastShotAt = DateTimeOffset.MinValue;
     private DateTimeOffset? _pausedAt = DateTimeOffset.MinValue, _hitAt, _hitPoseAt;
+    private BoardAim? _impact;
     private bool _ready, _hasBird;
     private int _score, _birdsLaunched, _shots, _direction = 1;
     private double _startU = .5, _exitMargin = .115;
@@ -40,6 +43,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
         _lastShotAt = DateTimeOffset.MinValue;
         _pausedAt = now;
         _hitAt = _hitPoseAt = null;
+        _impact = null;
         _ready = _hasBird = false;
         _score = _birdsLaunched = _shots = 0;
         _flightDuration = FlightDuration;
@@ -91,6 +95,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
                     {
                         _phase = DuckHuntFlightPhase.Finished;
                         _phaseStartedAt = boundary;
+                        _impact = null;
                     }
                     else LaunchBird(boundary);
                 }
@@ -115,6 +120,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
         _exitMargin = DuckHuntFlightLayout.SpriteBounds(_snapshot with { Scale = 1 }, boardAspect).Width / 2 + .005;
         _hasBird = false;
         _hitAt = _hitPoseAt = null;
+        _impact = null;
         _phase = DuckHuntFlightPhase.Launching;
         _phaseStartedAt = _inputNotBefore = now;
         Advance(now);
@@ -148,6 +154,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
             if (hit)
             {
                 _score++;
+                _impact = point;
                 _hitPoseAt = poseTime;
                 _hitAt = _phaseStartedAt = shotTime;
                 _phase = DuckHuntFlightPhase.Hit;
@@ -172,6 +179,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
         _birdStartedAt = _phaseStartedAt = now;
         _hasBird = true;
         _hitAt = _hitPoseAt = null;
+        _impact = null;
         _phase = DuckHuntFlightPhase.Flying;
     }
 
@@ -196,7 +204,8 @@ public sealed class DuckHuntFlightGame(Random? random = null)
         var next = pose with
         {
             Phase = _phase, Score = _score, BirdsLaunched = _birdsLaunched, Shots = _shots,
-            Visible = visible, Paused = !_ready
+            Visible = visible, Paused = !_ready, Impact = _impact,
+            HitElapsed = _impact.HasValue ? Math.Max(0, (now - _hitAt!.Value).TotalSeconds) : 0
         };
         if (next != _snapshot) _snapshot = next with { Revision = _snapshot.Revision + 1 };
     }

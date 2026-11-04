@@ -4,15 +4,17 @@ using Microsoft.Graphics.Canvas.Text;
 using Microsoft.UI.Text;
 using ProjectTabletop.Interaction;
 using Windows.Foundation;
-using Windows.UI;
 
 namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
     private CanvasTextFormat? _duckHuntFlightHeading, _duckHuntFlightCaption;
+    private OutlinedBoardText? _flightScoreCaption, _flightBirdCaption, _flightCompleteCaption,
+        _flightResultCaption, _flightHitCaption;
     private int _duckHuntFlightDrawnScore = -1, _duckHuntFlightDrawnCount = -1;
-    private string _duckHuntFlightScoreText = string.Empty, _duckHuntFlightCountText = string.Empty;
+    private string _duckHuntFlightScoreText = string.Empty, _duckHuntFlightCountText = string.Empty,
+        _duckHuntFlightResultText = string.Empty;
 
     private void PrepareDuckHuntFlightResources()
     {
@@ -28,44 +30,55 @@ public sealed partial class SceneCompositor
             HorizontalAlignment = CanvasHorizontalAlignment.Center,
             VerticalAlignment = CanvasVerticalAlignment.Center
         };
+        _flightScoreCaption ??= new(_duckHuntFlightCaption, DuckHuntScoreColor);
+        _flightBirdCaption ??= new(_duckHuntFlightCaption, DuckHuntScoreColor);
+        _flightCompleteCaption ??= new(_duckHuntFlightHeading, DuckHuntScoreColor);
+        _flightResultCaption ??= new(_duckHuntFlightCaption, DuckHuntScoreColor);
+        _flightHitCaption ??= new(_duckHuntFlightHeading, DuckHuntScoreColor);
     }
 
     private void DisposeDuckHuntFlightResources()
     {
+        _flightScoreCaption?.Dispose(); _flightBirdCaption?.Dispose(); _flightCompleteCaption?.Dispose();
+        _flightResultCaption?.Dispose(); _flightHitCaption?.Dispose();
+        _flightScoreCaption = _flightBirdCaption = _flightCompleteCaption = _flightResultCaption = _flightHitCaption = null;
         _duckHuntFlightHeading?.Dispose();
         _duckHuntFlightCaption?.Dispose();
         _duckHuntFlightHeading = _duckHuntFlightCaption = null;
+        _duckHuntFlightDrawnScore = _duckHuntFlightDrawnCount = -1;
     }
 
-    private void DrawDuckHuntFlight(CanvasDrawingSession drawing, DuckHuntFlightSnapshot state, double aspect)
+    internal void DrawDuckHuntFlight(CanvasDrawingSession drawing, DuckHuntFlightSnapshot state, double aspect)
     {
-        if (_duckHuntFlightHeading is not { } heading || _duckHuntFlightCaption is not { } caption) return;
+        if (_duckHuntFlightHeading is null || _duckHuntFlightCaption is null) return;
         DrawDuckHuntFlyingMallard(drawing, state, aspect);
+        DrawDuckHuntFlightHitScore(drawing, state, aspect);
         if (_duckHuntFlightDrawnScore != state.Score)
         {
             _duckHuntFlightDrawnScore = state.Score;
-            _duckHuntFlightScoreText = $"SCORE  {state.Score}";
+            _duckHuntFlightScoreText = $"SCORE  {state.Score * 100}";
+            _duckHuntFlightResultText = $"{state.Score} OF 10 BIRDS";
         }
         if (_duckHuntFlightDrawnCount != state.BirdsLaunched)
         {
             _duckHuntFlightDrawnCount = state.BirdsLaunched;
             _duckHuntFlightCountText = $"BIRDS  {state.BirdsLaunched} / 10";
         }
-        DrawCaption(_duckHuntFlightScoreText, new Rect(30, 25, 210, 52), caption);
-        DrawCaption(_duckHuntFlightCountText, new Rect(710, 25, 260, 52), caption);
+        _flightScoreCaption?.Draw(drawing, _duckHuntFlightScoreText, new Rect(30, 25, 210, 52), aspect);
+        _flightBirdCaption?.Draw(drawing, _duckHuntFlightCountText, new Rect(710, 25, 260, 52), aspect);
         if (state.Phase == DuckHuntFlightPhase.Finished)
         {
-            DrawCaption("ROUND COMPLETE", new Rect(220, 270, 560, 66), heading);
-            DrawCaption($"{state.Score} OF 10 BIRDS", new Rect(240, 342, 520, 45), caption);
+            _flightCompleteCaption?.Draw(drawing, "ROUND COMPLETE", new Rect(220, 270, 560, 66), aspect);
+            _flightResultCaption?.Draw(drawing, _duckHuntFlightResultText, new Rect(240, 342, 520, 45), aspect);
         }
+    }
 
-        void DrawCaption(string text, Rect rectangle, CanvasTextFormat format)
-        {
-            DrawBoardAspectText(drawing, text,
-                new Rect(rectangle.X, rectangle.Y + 2, rectangle.Width, rectangle.Height),
-                Color.FromArgb(230, 14, 35, 30), format);
-            DrawBoardAspectText(drawing, text, rectangle, Color.FromArgb(255, 255, 248, 224), format);
-        }
+    internal void DrawDuckHuntFlightHitScore(CanvasDrawingSession drawing, DuckHuntFlightSnapshot state, double aspect)
+    {
+        // The points remain visible through the bird's blink and the inter-bird
+        // gap, anchored to the measured hit rather than the animated body.
+        if (state.Impact is not { } impact) return;
+        DrawDuckHuntHitScore(drawing, _flightHitCaption, impact, state.HitElapsed, aspect);
     }
 
     internal void DrawDuckHuntFlyingMallard(CanvasDrawingSession drawing, DuckHuntFlightSnapshot bird, double aspect)

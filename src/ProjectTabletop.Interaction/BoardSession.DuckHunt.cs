@@ -15,6 +15,7 @@ public sealed partial class BoardSession
 
     public DuckHuntGallerySnapshot GalleryState => _gallery.Snapshot;
     public IReadOnlyList<DuckHuntGalleryPuncture> GalleryPunctures => _gallery.Punctures;
+    public IReadOnlyList<DuckHuntGalleryScorePopup> GalleryScorePopups => _gallery.ScorePopups;
     public DuckHuntFlightSnapshot HuntFlightState => _huntFlight.Snapshot;
     public DuckHuntClaySnapshot ClayState => _clay.Snapshot;
     public IReadOnlyList<DuckHuntClayTarget> ClayTargets => _clay.Targets;
@@ -65,7 +66,9 @@ public sealed partial class BoardSession
             return;
         }
         if (Screen != BoardScreen.DuckHunt || CurrentDuckHuntView != DuckHuntView.TargetPractice) return;
+        bool galleryWasFinished = _gallery.Snapshot.RoundFinished;
         _gallery.Advance(now);
+        FinishDuckHuntGallery(galleryWasFinished, now);
     }
     public void SetDuckHuntReady(bool ready, DateTimeOffset now, double boardAspect = 1)
     {
@@ -91,8 +94,10 @@ public sealed partial class BoardSession
             return;
         }
         if (Screen != BoardScreen.DuckHunt || CurrentDuckHuntView != DuckHuntView.TargetPractice) return;
+        bool galleryWasFinished = _gallery.Snapshot.RoundFinished;
         bool wasPaused = _gallery.Snapshot.Paused;
         _gallery.SetReady(ready && double.IsFinite(boardAspect) && boardAspect > 0, now);
+        FinishDuckHuntGallery(galleryWasFinished, now);
         if (wasPaused != _gallery.Snapshot.Paused)
             ResetHoldCaptionEvidence(["duck-hunt-play"], now);
     }
@@ -117,7 +122,10 @@ public sealed partial class BoardSession
             return hit;
         }
         if (Screen != BoardScreen.DuckHunt || CurrentDuckHuntView != DuckHuntView.TargetPractice) return false;
-        return _gallery.Shoot(aim, shotTime, boardAspect, sceneTime);
+        bool galleryWasFinished = _gallery.Snapshot.RoundFinished;
+        bool galleryHit = _gallery.Shoot(aim, shotTime, boardAspect, sceneTime);
+        FinishDuckHuntGallery(galleryWasFinished, Later(shotTime, _duckHuntDrawer.ObservedAt));
+        return galleryHit;
     }
 
     private void InitializeDuckHunt(DateTimeOffset now)
@@ -138,6 +146,12 @@ public sealed partial class BoardSession
     private void FinishDuckHuntFlight(bool wasFinished, DateTimeOffset now)
     {
         if (wasFinished || !_huntFlight.Snapshot.RoundFinished) return;
+        OpenDuckHuntReplayDrawer(now);
+    }
+
+    private void FinishDuckHuntGallery(bool wasFinished, DateTimeOffset now)
+    {
+        if (wasFinished || !_gallery.Snapshot.RoundFinished) return;
         OpenDuckHuntReplayDrawer(now);
     }
 

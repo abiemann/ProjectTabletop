@@ -79,9 +79,16 @@ public sealed partial class MainWindow
             // shatter captures after the first pair's full trajectory sequence.
             now = roundStart + DuckHuntClayGame.PairInterval + DuckHuntClayGame.LaunchDelay + TimeSpan.FromSeconds(1.1);
             Draw();
+            Check(!scene.SubmitDuckHuntShot(new(.99, .1), now), "A clear-sky miss incorrectly hit a clay.");
+            Draw();
+            Check(board.ClayTargets.All(clay => clay.Impact is null), "A missed shot created score feedback.");
+            await Save("miss");
+            now += TimeSpan.FromMilliseconds(20);
+            Draw();
             var hitTarget = board.ClayTargets[2];
             Check(scene.SubmitDuckHuntShot(new(hitTarget.U, hitTarget.V), now), "The clay's visible centre was not hittable.");
             Check(scene.ClayState.Score == 1 && board.ClayTargets[2].Hit, "The hit did not shatter exactly one clay.");
+            CheckScorePopup(board.ClayTargets[2]);
             var hitAt = now;
             foreach (double elapsed in new[] { 0, .07, .2, .45, .8, 1.22 })
             {
@@ -116,6 +123,8 @@ public sealed partial class MainWindow
             Draw();
             Check(scene.ClayState is { Phase: DuckHuntClayPhase.Playing, Score: 0, PairsLaunched: 0 },
                 "The replay retained the previous score or launch count.");
+            Check(board.ClayTargets.All(clay => clay.Impact is null), "Replay retained old floating score impacts.");
+            await Save("replay");
             results.Add(new { dimensions.Name, dimensions.Width, dimensions.Height, Targets = 20,
                 PairDelaySeconds = .5, AutomaticStart = true, ClearSceneCandidates = 0 });
 
@@ -130,6 +139,44 @@ public sealed partial class MainWindow
                 string path = Path.Combine(directory, dimensions.Name + "-" + name + ".png");
                 await target.SaveAsync(path, CanvasBitmapFileFormat.Png);
                 images.Add(path);
+            }
+            void CheckScorePopup(DuckHuntClayTarget hit)
+            {
+                using var overlay = new CanvasRenderTarget(target.Device, dimensions.Width, dimensions.Height, 96);
+                var initial = Render(hit with { HitElapsed = 0 });
+                var rising = Render(hit with { HitElapsed = .45 });
+                Check(initial.Gold > 20 && initial.Black > 10,
+                    "The floating score lacks its golden-hour yellow face or black outline.");
+                Check(Math.Abs(initial.CenterX / dimensions.Width - hit.Impact!.Value.U) < .012,
+                    "The floating score is not centred on the shot impact.");
+                Check(rising.CenterY < initial.CenterY - dimensions.Height * .01,
+                    "The floating score did not rise from the impact.");
+                Check(Render(hit with { Hit = false, Impact = null }).Ink == 0 &&
+                    Render(hit with { HitElapsed = DuckHuntClayGame.HitDuration.TotalSeconds }).Ink == 0,
+                    "The floating score was drawn without a hit or after its lifetime.");
+
+                (int Ink, int Gold, int Black, double CenterX, double CenterY) Render(DuckHuntClayTarget pose)
+                {
+                    using (var drawing = overlay.CreateDrawingSession())
+                    {
+                        drawing.Clear(Microsoft.UI.Colors.Transparent);
+                        drawing.Transform = Matrix3x2.CreateScale(dimensions.Width / 1000f, dimensions.Height / 1000f);
+                        scene.DrawDuckHuntClayHitScore(drawing, pose, aspect);
+                    }
+                    var pixels = overlay.GetPixelBytes();
+                    int ink = 0, gold = 0, black = 0;
+                    double sumX = 0, sumY = 0;
+                    for (int y = 0; y < dimensions.Height; y++)
+                    for (int x = 0; x < dimensions.Width; x++)
+                    {
+                        int p = (y * dimensions.Width + x) * 4;
+                        if (pixels[p + 3] < 200) continue;
+                        ink++; sumX += x; sumY += y;
+                        if (pixels[p] is >= 100 and <= 120 && pixels[p + 1] is >= 200 and <= 220 && pixels[p + 2] > 245) gold++;
+                        if (pixels[p] < 30 && pixels[p + 1] < 30 && pixels[p + 2] < 30) black++;
+                    }
+                    return (ink, gold, black, ink == 0 ? 0 : sumX / ink, ink == 0 ? 0 : sumY / ink);
+                }
             }
             void CheckClearOptics(string stage)
             {

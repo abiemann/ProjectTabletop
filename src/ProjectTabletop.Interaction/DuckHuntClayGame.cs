@@ -10,7 +10,10 @@ public readonly record struct DuckHuntClaySnapshot(DuckHuntClayPhase Phase, int 
 
 public readonly record struct DuckHuntClayTarget(int Id, int PairIndex, double U, double V,
     double Scale, double BankAngle, double FaceRatio, double FlightSeconds,
-    bool Visible, bool Hit, double HitElapsed);
+    bool Visible, bool Hit, double HitElapsed)
+{
+    public BoardAim? Impact { get; init; }
+}
 
 /// <summary>Twenty timestamped clays, in ten staggered pairs. The complete bounded
 /// round history remains available to test a fresh, delayed camera photograph.</summary>
@@ -30,6 +33,7 @@ public sealed class DuckHuntClayGame
     private readonly DuckHuntClayTarget[] _targets = new DuckHuntClayTarget[TargetsPerRound];
     private readonly double[] _hitSeconds = new double[TargetsPerRound];
     private readonly double[] _hitPoseSeconds = new double[TargetsPerRound];
+    private readonly BoardAim?[] _hitPoints = new BoardAim?[TargetsPerRound];
     private readonly IReadOnlyList<DuckHuntClayTarget> _readOnlyTargets;
     private DateTimeOffset _observedAt, _inputNotBefore, _roundStartedAt;
     private DateTimeOffset _lastShotAt = DateTimeOffset.MinValue;
@@ -57,6 +61,7 @@ public sealed class DuckHuntClayGame
         _score = _shots = 0;
         _phase = DuckHuntClayPhase.Ready;
         Array.Fill(_hitSeconds, double.NaN);
+        Array.Clear(_hitPoints);
         Publish(now);
     }
 
@@ -122,6 +127,7 @@ public sealed class DuckHuntClayGame
             if (!DuckHuntClayLayout.ContainsClay(point, target, boardAspect)) continue;
             _hitPoseSeconds[id] = seconds;
             _hitSeconds[id] = (shotTime - _roundStartedAt).TotalSeconds;
+            _hitPoints[id] = point;
             _score++;
             hit = true;
             break;
@@ -165,7 +171,8 @@ public sealed class DuckHuntClayGame
             if (hit)
             {
                 double elapsed = Math.Clamp(seconds - _hitSeconds[id], 0, HitDuration.TotalSeconds);
-                target = target with { Hit = true, HitElapsed = elapsed, Visible = elapsed < HitDuration.TotalSeconds };
+                target = target with { Hit = true, HitElapsed = elapsed, Impact = _hitPoints[id],
+                    Visible = elapsed < HitDuration.TotalSeconds };
                 finishAt = Math.Max(finishAt, _hitSeconds[id] + HitDuration.TotalSeconds);
             }
             if (_phase == DuckHuntClayPhase.Ready) target = target with { Visible = false };

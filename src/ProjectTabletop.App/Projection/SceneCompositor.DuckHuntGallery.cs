@@ -132,6 +132,7 @@ public sealed partial class SceneCompositor
         PrepareGallerySkulls(device);
         PrepareGalleryMiddle(device);
         PrepareGalleryScore(device);
+        PrepareGalleryHitScores();
         PrepareGalleryMessages(device);
     }
 
@@ -141,6 +142,7 @@ public sealed partial class SceneCompositor
         DisposeGallerySkulls();
         DisposeGalleryMiddle();
         DisposeGalleryScore();
+        DisposeGalleryHitScores();
         DisposeGalleryMessages();
         _galleryFlapEffect?.Dispose();
         if (_galleryTargetEffects is not null) foreach (var effect in _galleryTargetEffects) effect?.Dispose();
@@ -214,6 +216,7 @@ public sealed partial class SceneCompositor
         }
         DrawGalleryFlap(drawing, state.FlapAngleDegrees, aspect);
         DrawGalleryScore(drawing, state, aspect);
+        DrawDuckHuntGalleryHitScores(drawing, aspect);
     }
 
     private static void DrawGalleryCabinet(CanvasDrawingSession drawing, CanvasBitmap scene, double aspect)

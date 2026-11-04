@@ -624,8 +624,11 @@ public class DuckHuntGalleryTests
         Assert.False(board.TryDuckHuntShot(Play, At(2500)));
     }
 
-    [Fact]
-    public void AutomaticCycleCompletionLeavesDrawerClosedAndReplayButtonChangesInputEpoch()
+    [Theory]
+    [InlineData("tick")]
+    [InlineData("readiness")]
+    [InlineData("shot")]
+    public void AutomaticCycleCompletionOpensDrawerOnceAndReplayClosesIt(string completionSource)
     {
         var board = new BoardSession();
         board.ShowDuckHuntTargetPractice(At(-500));
@@ -648,15 +651,33 @@ public class DuckHuntGalleryTests
         Assert.True(board.TryDuckHuntShot(Play, At(10010)));
         Assert.Equal(epoch, board.DuckHuntRoundRevision);
         Assert.Equal(1, board.GalleryState.Cycle);
-        board.TickDuckHunt(At(35000));
+        if (completionSource == "readiness") board.SetDuckHuntReady(false, At(35000));
+        else if (completionSource == "shot") Assert.False(board.TryDuckHuntShot(Play, At(35000)));
+        else board.TickDuckHunt(At(35000));
         Assert.True(board.GalleryState.PlayVisible);
+        Assert.True(board.GalleryState.RoundFinished);
+        Assert.True(board.DuckHuntDrawerOpen);
+        Assert.Equal(["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-back", "duck-hunt-play"],
+            board.Buttons.Select(b => b.Id));
+        Assert.All(board.Buttons.Where(b => b.Id != "duck-hunt-drawer-close"), b => Assert.False(b.Enabled));
+        board.SetDuckHuntReady(true, At(35005));
         Assert.False(board.TryDuckHuntShot(Play, At(35010)));
         Assert.False(board.ActivateButton("duck-hunt-play", At(35020)));
-        Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(35030)));
-        Assert.False(board.ActivateButton("duck-hunt-play", At(35329)));
-        Assert.True(board.ActivateButton("duck-hunt-play", At(35331)));
+        board.TickDuckHunt(At(35301));
+        Assert.All(board.Buttons, b => Assert.True(b.Enabled));
+        // Completion is a transition, not a latch that reopens a dismissed drawer.
+        Assert.True(board.ActivateButton("duck-hunt-drawer-close", At(35310)));
+        board.TickDuckHunt(At(36000));
+        Assert.False(board.TryDuckHuntShot(Play, At(36010)));
+        board.SetDuckHuntReady(false, At(36020));
+        board.SetDuckHuntReady(true, At(36030));
+        Assert.False(board.DuckHuntDrawerOpen);
+        Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(36100)));
+        Assert.False(board.ActivateButton("duck-hunt-play", At(36399)));
+        Assert.True(board.ActivateButton("duck-hunt-play", At(36401)));
         Assert.Equal(epoch + 1, board.DuckHuntRoundRevision);
         Assert.False(board.DuckHuntDrawerOpen);
+        Assert.False(board.GalleryState.RoundFinished);
         Assert.Empty(board.GalleryPunctures);
         Assert.False(board.TryDuckHuntShot(Play, At(4000)));
     }

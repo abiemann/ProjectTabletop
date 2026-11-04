@@ -86,6 +86,16 @@ public sealed partial class MainWindow
                 Check(flight is { Phase: DuckHuntFlightPhase.Flying, Visible: true } && flight.BirdsLaunched == birdIndex,
                     "The next bird was not launched exactly once.");
                 CheckClearOptics("flight " + birdIndex);
+                if (birdIndex == 1)
+                {
+                    Check(!scene.SubmitDuckHuntShot(new(.99, .1), now), "A clear-sky miss hit the bird.");
+                    Draw();
+                    Check(scene.HuntFlightState.Impact is null, "A missed shot created floating points.");
+                    await Save("miss");
+                    now += TimeSpan.FromMilliseconds(20);
+                    Draw();
+                    flight = scene.HuntFlightState;
+                }
                 var bounds = DuckHuntFlightLayout.SpriteBounds(flight, aspect);
                 var aim = new BoardAim(bounds.X + bounds.Width * DuckHuntFlightLayout.BodyCenterU,
                     bounds.Y + bounds.Height * DuckHuntFlightLayout.BodyCenterV);
@@ -100,9 +110,16 @@ public sealed partial class MainWindow
                 Check(scene.SubmitDuckHuntShot(aim, now), "A calibrated shot on the flying bird did not score.");
                 byte[] hitVisible = Draw();
                 var frozen = scene.HuntFlightState;
+                var hitAt = now;
+                byte[] frozenBird = RenderBird(frozen);
                 Check(frozen.Phase == DuckHuntFlightPhase.Hit && frozen.Score == birdIndex && frozen.Visible,
-                    "The hit frame did not freeze visibly and award one point.");
-                if (birdIndex == 1) await Save("hit-visible");
+                    "The hit frame did not freeze visibly and count one successful bird.");
+                Check(frozen.Impact == aim, "Floating points lost the measured shot position.");
+                if (birdIndex == 1)
+                {
+                    await Save("hit-visible");
+                    await CheckScorePopup(frozen);
+                }
                 now += TimeSpan.FromMilliseconds(100);
                 byte[] blink = Draw();
                 Check(scene.HuntFlightState is { Phase: DuckHuntFlightPhase.Hit, Visible: false } &&
@@ -111,11 +128,20 @@ public sealed partial class MainWindow
                     "The struck bird moved or failed to blink off.");
                 if (birdIndex == 1) await Save("hit-hidden");
                 now += TimeSpan.FromMilliseconds(100);
-                byte[] relit = Draw();
-                Check(scene.HuntFlightState.Visible && hitVisible.AsSpan().SequenceEqual(relit),
+                Draw();
+                Check(scene.HuntFlightState.Visible && frozenBird.AsSpan().SequenceEqual(RenderBird(scene.HuntFlightState)),
                     "The blink did not return to the exact frozen frame.");
-                now += DuckHuntFlightGame.HitDuration + DuckHuntFlightGame.BetweenBirdsDuration -
-                    TimeSpan.FromMilliseconds(200) + TimeSpan.FromMilliseconds(300);
+                if (birdIndex == 1)
+                {
+                    now = hitAt + TimeSpan.FromMilliseconds(800);
+                    Draw();
+                    Check(scene.HuntFlightState is { Phase: DuckHuntFlightPhase.BetweenBirds, Visible: false } &&
+                        scene.HuntFlightState.Impact == aim, "The rising score ended with the bird's blink.");
+                    await Save("points-rising");
+                    CheckClearOptics("points-rising");
+                }
+                now = hitAt + DuckHuntFlightGame.HitDuration + DuckHuntFlightGame.BetweenBirdsDuration +
+                    TimeSpan.FromMilliseconds(300);
                 Draw();
             }
             Check(scene.HuntFlightState is { Phase: DuckHuntFlightPhase.Finished, Score: 10, BirdsLaunched: 10, PlayVisible: true } &&
@@ -123,12 +149,15 @@ public sealed partial class MainWindow
                 "The ten-bird round did not finish with its score and replay drawer.");
             CheckClearOptics("finished");
             await Save("finished");
+            CheckOutlinedHud(scene.HuntFlightState);
             now += TimeSpan.FromMilliseconds(300);
             Draw();
             Check(ActivateGalleryPlay(scene), "The final drawer PLAY button cannot begin the next round.");
             Draw();
             Check(scene.HuntFlightState is { Phase: DuckHuntFlightPhase.Launching, Score: 0, BirdsLaunched: 0 },
                 "The new round retained the previous score or bird count.");
+            Check(scene.HuntFlightState.Impact is null, "Replay retained the previous floating score.");
+            await Save("replay");
             now += TimeSpan.FromSeconds(90);
             Draw();
             Check(scene.HuntFlightState is { Phase: DuckHuntFlightPhase.Finished, Score: 0, BirdsLaunched: 10 },
@@ -163,6 +192,103 @@ public sealed partial class MainWindow
                 await target.SaveAsync(path, CanvasBitmapFileFormat.Png);
                 images.Add(path);
             }
+            byte[] RenderBird(DuckHuntFlightSnapshot pose)
+            {
+                using var sprite = new CanvasRenderTarget(target.Device, dimensions.Width, dimensions.Height, 96);
+                using (var drawing = sprite.CreateDrawingSession())
+                {
+                    drawing.Clear(Microsoft.UI.Colors.Transparent);
+                    drawing.Transform = Matrix3x2.CreateScale(dimensions.Width / 1000f, dimensions.Height / 1000f);
+                    scene.DrawDuckHuntFlyingMallard(drawing, pose, aspect);
+                }
+                return sprite.GetPixelBytes();
+            }
+            async Task CheckScorePopup(DuckHuntFlightSnapshot hit)
+            {
+                using var overlay = new CanvasRenderTarget(target.Device, dimensions.Width, dimensions.Height, 96);
+                var initial = Render(hit with { HitElapsed = 0 });
+                var rising = Render(hit with { HitElapsed = .45 });
+                var fading = Render(hit with { HitElapsed = 1.2 });
+                Check(initial.Gold > 20 && initial.Black > 10,
+                    "The floating score lacks its golden-hour yellow face or black outline.");
+                Check(Math.Abs(initial.CenterX / dimensions.Width - hit.Impact!.Value.U) < .012 &&
+                    Math.Abs(initial.CenterY / dimensions.Height - hit.Impact.Value.V) < .02,
+                    "The floating score did not start centred on the shot impact.");
+                Check(rising.CenterY < initial.CenterY - dimensions.Height * .01,
+                    "The floating score did not rise from the impact.");
+                Check(fading.Alpha > 0 && fading.Alpha < rising.Alpha * .65,
+                    "The floating score did not fade near the end of its lifetime.");
+                Check(Render(hit with { Visible = false, HitElapsed = .45 }).Alpha == rising.Alpha,
+                    "The floating score blinked off with the bird.");
+                Check(Render(hit with { Impact = null }).Alpha == 0 &&
+                    Render(hit with { HitElapsed = 1.35 }).Alpha == 0,
+                    "The floating score was drawn without a hit or after its lifetime.");
+                foreach (double elapsed in new[] { 0, .45, 1.2 })
+                {
+                    Render(hit with { HitElapsed = elapsed });
+                    string path = Path.Combine(directory, $"{dimensions.Name}-isolated-score-{(int)(elapsed * 1000)}.png");
+                    await overlay.SaveAsync(path, CanvasBitmapFileFormat.Png);
+                    images.Add(path);
+                }
+
+                (int Ink, int Gold, int Black, long Alpha, double CenterX, double CenterY) Render(DuckHuntFlightSnapshot pose)
+                {
+                    using (var drawing = overlay.CreateDrawingSession())
+                    {
+                        drawing.Clear(Microsoft.UI.Colors.Transparent);
+                        drawing.Transform = Matrix3x2.CreateScale(dimensions.Width / 1000f, dimensions.Height / 1000f);
+                        scene.DrawDuckHuntFlightHitScore(drawing, pose, aspect);
+                    }
+                    var pixels = overlay.GetPixelBytes();
+                    int ink = 0, gold = 0, black = 0;
+                    long alpha = 0;
+                    double sumX = 0, sumY = 0;
+                    for (int y = 0; y < dimensions.Height; y++)
+                    for (int x = 0; x < dimensions.Width; x++)
+                    {
+                        int p = (y * dimensions.Width + x) * 4;
+                        alpha += pixels[p + 3];
+                        if (pixels[p + 3] < 200) continue;
+                        ink++; sumX += x; sumY += y;
+                        if (IsGold(pixels, p)) gold++;
+                        if (IsBlack(pixels, p)) black++;
+                    }
+                    return (ink, gold, black, alpha, ink == 0 ? 0 : sumX / ink, ink == 0 ? 0 : sumY / ink);
+                }
+            }
+            void CheckOutlinedHud(DuckHuntFlightSnapshot finished)
+            {
+                using var overlay = new CanvasRenderTarget(target.Device, dimensions.Width, dimensions.Height, 96);
+                using (var drawing = overlay.CreateDrawingSession())
+                {
+                    drawing.Clear(Microsoft.UI.Colors.Transparent);
+                    drawing.Transform = Matrix3x2.CreateScale(dimensions.Width / 1000f, dimensions.Height / 1000f);
+                    scene.DrawDuckHuntFlight(drawing, finished with { Impact = null, Visible = false }, aspect);
+                }
+                var pixels = overlay.GetPixelBytes();
+                foreach (var caption in new[]
+                {
+                    (Name: "SCORE", Bounds: new BoardRect(.03, .025, .21, .052)),
+                    (Name: "BIRDS", Bounds: new BoardRect(.71, .025, .26, .052)),
+                    (Name: "ROUND COMPLETE", Bounds: new BoardRect(.22, .27, .56, .066)),
+                    (Name: "BIRD COUNT", Bounds: new BoardRect(.24, .342, .52, .045))
+                })
+                {
+                    int gold = 0, black = 0;
+                    for (int y = (int)(caption.Bounds.Y * dimensions.Height); y < (caption.Bounds.Y + caption.Bounds.Height) * dimensions.Height; y++)
+                    for (int x = (int)(caption.Bounds.X * dimensions.Width); x < (caption.Bounds.X + caption.Bounds.Width) * dimensions.Width; x++)
+                    {
+                        int p = (y * dimensions.Width + x) * 4;
+                        if (pixels[p + 3] < 200) continue;
+                        if (IsGold(pixels, p)) gold++;
+                        if (IsBlack(pixels, p)) black++;
+                    }
+                    Check(gold > 20 && black > 10, $"{caption.Name} lacks its golden face or black outline.");
+                }
+            }
+            static bool IsGold(byte[] pixels, int p) => pixels[p] is >= 100 and <= 120 &&
+                pixels[p + 1] is >= 200 and <= 220 && pixels[p + 2] > 245;
+            static bool IsBlack(byte[] pixels, int p) => pixels[p] < 30 && pixels[p + 1] < 30 && pixels[p + 2] < 30;
             void CheckClearOptics(string stage)
             {
                 var camera = CameraFrame();

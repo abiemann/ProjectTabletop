@@ -1,4 +1,5 @@
 #if DEBUG
+using System.Numerics;
 using System.Reflection;
 using Microsoft.Graphics.Canvas;
 using ProjectTabletop.App.Projection;
@@ -96,6 +97,17 @@ public sealed partial class MainWindow
                 if (frame == 100) HitPaper(0, centre, 250);
                 if (frame == 160) HitSkull(1, 350);
                 byte[] pixels = Draw();
+                if (frame is 20 or 80) await CheckPopupAppearance(board.GalleryScorePopups[^1]);
+                if (frame == 100)
+                {
+                    Check(board.GalleryScorePopups.Any(popup => popup.Points == 50) &&
+                        board.GalleryScorePopups.Any(popup => popup.Points == 100),
+                        "Rapid mixed-value awards replaced one another before fading.");
+                    long largestSingle = board.GalleryScorePopups.Max(popup => PopupPixels(popup).Alpha);
+                    Check(PopupPixels().Alpha > largestSingle * 1.2,
+                        "Only one of the simultaneous score awards was drawn.");
+                    await Save("mixed-awards");
+                }
                 for (int digit = 0; digit < 4; digit++)
                 {
                     var flip = scene.GalleryScoreDigit(digit);
@@ -194,11 +206,15 @@ public sealed partial class MainWindow
                 Draw();
                 var quad = DuckHuntGalleryLayout.MiddleTargetQuad(scene.GalleryState, aspect);
                 var local = middlePoints[index];
-                Check(scene.SubmitDuckHuntShot(quad.Map(local.U, local.V), now) && scene.GalleryState.Score == middleScores[index],
+                var impact = quad.Map(local.U, local.V);
+                int previousScore = scene.GalleryState.Score;
+                Check(scene.SubmitDuckHuntShot(impact, now) && scene.GalleryState.Score == middleScores[index],
                     "A middle paper did not use the same first-hit printed-ring scoring as the lower row.");
+                CheckAward(previousScore, impact);
                 now += TimeSpan.FromMilliseconds(1);
                 Check(scene.SubmitDuckHuntShot(quad.Map(centre.U, centre.V), now) && scene.GalleryState.Score == middleScores[index],
                     "A repeated middle target hit awarded points twice.");
+                CheckAward(middleScores[index], quad.Map(centre.U, centre.V));
                 if (index == 1)
                 {
                     now += TimeSpan.FromMilliseconds(140);
@@ -206,6 +222,10 @@ public sealed partial class MainWindow
                     scene.SetDuckHuntAudioStatus(false, "Isolated score pause");
                     byte[] paused = Draw();
                     var frozen = scene.GalleryState;
+                    // Resume shifts each internal start timestamp by the pause;
+                    // its visible position, award and animation age must stay fixed.
+                    var frozenPopups = board.GalleryScorePopups.Select(popup =>
+                        (popup.Impact, popup.Points, popup.Elapsed)).ToArray();
                     var frozenDigits = Enumerable.Range(0, 4).Select(scene.GalleryScoreDigit).ToArray();
                     await Save("pause-start");
                     now += TimeSpan.FromSeconds(2);
@@ -238,6 +258,8 @@ public sealed partial class MainWindow
                         await File.WriteAllTextAsync(Path.Combine(directory, dimensions.Name + "-pause-failure.json"), evidence);
                     }
                     Check(heldState.Paused && heldState == frozen, "The gallery state advanced while input was paused.");
+                    Check(frozenPopups.SequenceEqual(board.GalleryScorePopups.Select(popup =>
+                        (popup.Impact, popup.Points, popup.Elapsed))), "Floating awards advanced while input was paused.");
                     Check(frozenDigits.SequenceEqual(heldDigits), "The rendered score reels advanced while input was paused.");
                     Check(ScoreVisualEqual(paused, held, score), "The paused score pixels changed despite a frozen game and reel state.");
                     scene.SetDuckHuntAudioStatus(true, "Isolated score resume");
@@ -245,6 +267,8 @@ public sealed partial class MainWindow
                     facingAt += TimeSpan.FromSeconds(2);
                     Check(scene.GalleryState.ScoreAnimationSeconds == frozen.ScoreAnimationSeconds,
                         "Resuming skipped part of the score flip.");
+                    Check(frozenPopups.SequenceEqual(board.GalleryScorePopups.Select(popup =>
+                        (popup.Impact, popup.Points, popup.Elapsed))), "Resuming skipped part of a floating award.");
                 }
                 now = facingAt + TimeSpan.FromSeconds(1.2);
                 Draw();
@@ -253,12 +277,31 @@ public sealed partial class MainWindow
                     DuckHuntGalleryGame.MiddleTurnDuration + DuckHuntGalleryGame.MiddleLeaveDuration;
             }
             now = enteredAt + DuckHuntGalleryGame.MiddleLowerDuration + TimeSpan.FromSeconds(1);
+            Draw();
+            Check(scene.GalleryState.PlayVisible && board.DuckHuntDrawerOpen,
+                "Completing the middle challenge did not open the replay drawer automatically.");
+            CheckScore(1100);
+            now += TimeSpan.FromMilliseconds(350);
+            byte[] completeControls = Draw();
+            Check(board.Buttons.Select(button => button.Id).SequenceEqual(
+                    ["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-back", "duck-hunt-play"]) &&
+                scene.GalleryScoreVisualFrame(now) == 0,
+                "The completed gallery did not show EXIT/BACK/PLAY with the score hidden beneath its drawer.");
+            await Save("1100-complete-drawer");
+            now += TimeSpan.FromSeconds(2);
+            Check(ScoreVisualEqual(completeControls, Draw(), score) && scene.GalleryState.Score == 1100,
+                "The completed drawer changed or lost the retained final score.");
+            now += TimeSpan.FromMilliseconds(1);
+            Check(scene.ActivateDuckHuntAt(.1, .93), "The completed gallery could not close its automatic replay drawer.");
+            now += TimeSpan.FromMilliseconds(350);
             byte[] complete = Draw();
-            Check(scene.GalleryState.PlayVisible, "The score fixture did not finish the middle challenge.");
+            Check(!board.DuckHuntDrawerOpen && scene.GalleryScoreVisualFrame(now) != 0,
+                "Closing the replay drawer did not reveal the final score.");
             CheckScore(1100);
             now += TimeSpan.FromSeconds(2);
-            Check(ScoreVisualEqual(complete, Draw(), score) && scene.GalleryState.Score == 1100,
-                "The final score disappeared or continued flipping after the round.");
+            byte[] retained = Draw();
+            Check(!board.DuckHuntDrawerOpen && ScoreVisualEqual(complete, retained, score) && scene.GalleryState.Score == 1100,
+                "The completed round reopened its drawer repeatedly or changed its final score.");
             CheckOptics(target.GetPixelBytes(), "final1100");
             await Save("1100-complete");
             now += TimeSpan.FromMilliseconds(1);
@@ -270,20 +313,94 @@ public sealed partial class MainWindow
             byte[] replayed = Draw();
             CheckScore(0);
             Check(ScoreVisualEqual(zero, replayed, score), "Replay did not restore the same clean 0000 display.");
+            Check(board.GalleryScorePopups.Count == 0 && PopupPixels().Alpha == 0,
+                "Replay retained a previous floating award.");
             results.Add(new { dimensions.Name, dimensions.Width, dimensions.Height, FinalScore = 1100,
                 FirstHitOnly = true, OuterPaperConsumesEligibility = true, PrintedRingBoundaries = true });
 
             void HitSkull(int index, int expected)
             {
                 var bounds = DuckHuntGalleryLayout.SkullBounds(index, aspect);
-                Check(scene.SubmitDuckHuntShot(new(bounds.X + bounds.Width * .5, bounds.Y + bounds.Height * .4), now) &&
+                var impact = new BoardAim(bounds.X + bounds.Width * .5, bounds.Y + bounds.Height * .4);
+                int previousScore = scene.GalleryState.Score;
+                Check(scene.SubmitDuckHuntShot(impact, now) &&
                     scene.GalleryState.Score == expected, "A crystal skull did not award exactly 100 points.");
+                CheckAward(previousScore, impact);
             }
             void HitPaper(int index, BoardAim local, int expected)
             {
                 var quad = DuckHuntGalleryLayout.TargetQuad(index, scene.GalleryState, aspect);
-                Check(scene.SubmitDuckHuntShot(quad.Map(local.U, local.V), now) && scene.GalleryState.Score == expected,
+                var impact = quad.Map(local.U, local.V);
+                int previousScore = scene.GalleryState.Score;
+                Check(scene.SubmitDuckHuntShot(impact, now) && scene.GalleryState.Score == expected,
                     "A lower target awarded the wrong first-hit ring value.");
+                CheckAward(previousScore, impact);
+            }
+            void CheckAward(int previousScore, BoardAim impact)
+            {
+                int awarded = scene.GalleryState.Score - previousScore;
+                if (awarded > 0)
+                    Check(board.GalleryScorePopups.Count > 0 && board.GalleryScorePopups[^1] is var popup &&
+                        popup.Impact == impact && popup.Points == awarded && popup.Elapsed == 0,
+                        "Floating points do not match the actual award and measured hit position.");
+                else
+                    Check(board.GalleryScorePopups.All(popup => popup.Elapsed > 0),
+                        "A zero-value or repeated hit created a new floating award.");
+            }
+            async Task CheckPopupAppearance(DuckHuntGalleryScorePopup popup)
+            {
+                var initial = PopupPixels(popup with { Elapsed = 0 });
+                var risen = PopupPixels(popup with { Elapsed = .45 });
+                var fading = PopupPixels(popup with { Elapsed = 1.2 });
+                Check(initial.Gold > 20 && initial.Black > 10,
+                    "The awarded points lack the golden face or black outline.");
+                Check(Math.Abs(initial.X / dimensions.Width - popup.Impact.U) < .012 &&
+                    Math.Abs(initial.Y / dimensions.Height - popup.Impact.V) < .02,
+                    "The floating award did not start at the hit point.");
+                Check(risen.Y < initial.Y - dimensions.Height * .01 &&
+                    fading.Alpha > 0 && fading.Alpha < risen.Alpha * .65,
+                    "The awarded points did not rise and fade.");
+                Check(PopupPixels(popup with { Points = 0 }).Alpha == 0 &&
+                    PopupPixels(popup with { Elapsed = 1.35 }).Alpha == 0,
+                    "A zero award or expired score remained visible.");
+                var other = PopupPixels(popup with { Points = popup.Points == 50 ? 100 : 50, Elapsed = 0 });
+                Check(initial.Alpha != other.Alpha, "The 50 and 100 awards use the same drawn numeral.");
+                using var overlay = new CanvasRenderTarget(target.Device, dimensions.Width, dimensions.Height, 96);
+                using (var drawing = overlay.CreateDrawingSession())
+                {
+                    drawing.Clear(Microsoft.UI.Colors.Transparent);
+                    drawing.Transform = Matrix3x2.CreateScale(dimensions.Width / 1000f, dimensions.Height / 1000f);
+                    scene.DrawDuckHuntGalleryHitScore(drawing, popup, aspect);
+                }
+                string path = Path.Combine(directory, $"{dimensions.Name}-isolated-award-{popup.Points}.png");
+                await overlay.SaveAsync(path, CanvasBitmapFileFormat.Png);
+                images.Add(path);
+            }
+            (int Gold, int Black, long Alpha, double X, double Y) PopupPixels(DuckHuntGalleryScorePopup? popup = null)
+            {
+                using var overlay = new CanvasRenderTarget(target.Device, dimensions.Width, dimensions.Height, 96);
+                using (var drawing = overlay.CreateDrawingSession())
+                {
+                    drawing.Clear(Microsoft.UI.Colors.Transparent);
+                    drawing.Transform = Matrix3x2.CreateScale(dimensions.Width / 1000f, dimensions.Height / 1000f);
+                    if (popup is { } single) scene.DrawDuckHuntGalleryHitScore(drawing, single, aspect);
+                    else scene.DrawDuckHuntGalleryHitScores(drawing, aspect);
+                }
+                var pixels = overlay.GetPixelBytes();
+                int ink = 0, gold = 0, black = 0;
+                long alpha = 0;
+                double sumX = 0, sumY = 0;
+                for (int y = 0; y < dimensions.Height; y++)
+                for (int x = 0; x < dimensions.Width; x++)
+                {
+                    int p = (y * dimensions.Width + x) * 4;
+                    alpha += pixels[p + 3];
+                    if (pixels[p + 3] < 200) continue;
+                    ink++; sumX += x; sumY += y;
+                    if (pixels[p] is >= 100 and <= 120 && pixels[p + 1] is >= 200 and <= 220 && pixels[p + 2] > 245) gold++;
+                    if (pixels[p] < 30 && pixels[p + 1] < 30 && pixels[p + 2] < 30) black++;
+                }
+                return (gold, black, alpha, ink == 0 ? 0 : sumX / ink, ink == 0 ? 0 : sumY / ink);
             }
             void CheckScore(int expected)
             {

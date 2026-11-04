@@ -89,8 +89,9 @@ public class DuckHuntClayTests
         double photoAt = Launch(0) + 1.8;
         game.Advance(At(photoAt));
         var photo = game.Targets[0];
+        var impact = new BoardAim(photo.U + .005, photo.V + .002);
         game.Advance(At(photoAt + .12));
-        Assert.True(game.Shoot(new(photo.U, photo.V), At(photoAt)));
+        Assert.True(game.Shoot(impact, At(photoAt)));
         var hit = game.Targets[0];
         Assert.True(hit.Hit);
         Assert.True(hit.Visible);
@@ -100,15 +101,42 @@ public class DuckHuntClayTests
         Assert.Equal(photo.BankAngle, hit.BankAngle);
         Assert.Equal(photo.FlightSeconds, hit.FlightSeconds);
         Assert.Equal(.12, hit.HitElapsed, 10);
+        Assert.Equal(impact, hit.Impact);
         Assert.Equal(1, game.Snapshot.Score);
         Assert.False(game.Targets[1].Hit);
+        Assert.Null(game.Targets[1].Impact);
         Assert.False(game.Shoot(new(photo.U, photo.V), At(photoAt)));
         Assert.False(game.Shoot(new(photo.U, photo.V), At(photoAt + .13)));
         Assert.Equal(1, game.Snapshot.Score);
         Assert.Equal(2, game.Snapshot.Shots);
+        Assert.Equal(impact, game.Targets[0].Impact);
         game.Advance(At(photoAt + DuckHuntClayGame.HitDuration.TotalSeconds));
         Assert.True(game.Targets[0].Hit);
         Assert.False(game.Targets[0].Visible);
+    }
+
+    [Fact]
+    public void MissesDoNotCreateImpactFeedbackAndRestartClearsPreviousHits()
+    {
+        var game = Started();
+        game.Advance(At(2));
+        Assert.False(game.Shoot(new(.99, .01), At(2)));
+        Assert.All(game.Targets, target => Assert.Null(target.Impact));
+        game.Advance(At(2.1));
+        var clay = game.Targets[0];
+        var impact = new BoardAim(clay.U, clay.V);
+        Assert.True(game.Shoot(impact, At(2.1)));
+        game.Advance(At(2.5));
+        Assert.Equal(impact, game.Targets[0].Impact);
+        Assert.Equal(.4, game.Targets[0].HitElapsed, 10);
+        game.Advance(At(100));
+        Assert.True(game.Restart(At(101)));
+        Assert.Equal(0, game.Snapshot.Score);
+        Assert.All(game.Targets, target =>
+        {
+            Assert.Null(target.Impact);
+            Assert.False(target.Hit);
+        });
     }
 
     [Fact]
