@@ -146,20 +146,65 @@ public class RedDotDetectorTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void ThinWhiteLaserCoreStillQualifiesThroughCoherentColour(bool vertical)
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void ThinWhiteLaserCoreStillQualifiesThroughCoherentColour(int orientation)
     {
         var frame = new Frame(110, 115, 120);
         frame.Disc(320, 240, 4, 241, 180, 210);
         for (int offset = -2; offset <= 2; offset++)
-            frame.Pixel(320 + (vertical ? 0 : offset), 240 + (vertical ? offset : 0), 255, 244, 255);
+            frame.Pixel(320 + (orientation == 1 ? 0 : offset),
+                240 + (orientation == 0 ? 0 : orientation == 3 ? -offset : offset), 255, 244, 255);
 
         var result = frame.Detect(new());
         Assert.True(result.Detected);
         Assert.Equal(1, result.CandidateCount);
         Assert.Equal(320, result.CameraPosition!.Value.X, 5);
         Assert.Equal(240, result.CameraPosition.Value.Y, 5);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void DiagonalWhiteTrimCannotBorrowAWeakMagentaFringe(bool reverse, bool ragged)
+    {
+        var frame = new Frame(110, 115, 120);
+        frame.Disc(320, 240, 6, 170, 122, 150);
+        for (int offset = -2; offset <= 2; offset++)
+            frame.Pixel(320 + offset, 240 + (reverse ? -offset : offset), 255, 244, 255);
+        if (ragged) frame.Pixel(317, 240 + (reverse ? 2 : -2), 255, 244, 255);
+
+        Assert.Equal(0, frame.Detect(new()).CandidateCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SmallResolvedWhiteCoresKeepTheirCentroidsAndTwoDotsStayAmbiguous(bool secondDot)
+    {
+        var frame = new Frame(110, 115, 120);
+        foreach (int centre in secondDot ? new[] { 160, 460 } : new[] { 160 })
+        {
+            // The dim fringe cannot qualify by itself: the smallest accepted
+            // two-dimensional four-pixel core must remain sufficient evidence.
+            frame.Disc(centre, 240, 4, 170, 122, 150);
+            for (int y = 240; y <= 241; y++)
+            for (int x = centre; x <= centre + 1; x++)
+                frame.Pixel(x, y, 255, 244, 255);
+        }
+        var result = frame.Detect(new());
+        Assert.Equal(secondDot ? 2 : 1, result.CandidateCount);
+        Assert.Equal(secondDot, result.Ambiguous);
+        if (secondDot) Assert.Null(result.CameraPosition);
+        else
+        {
+            Assert.Equal(160.5, result.CameraPosition!.Value.X, 5);
+            Assert.Equal(240.5, result.CameraPosition.Value.Y, 5);
+        }
     }
 
     [Fact]

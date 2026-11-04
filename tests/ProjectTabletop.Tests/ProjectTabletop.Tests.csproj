@@ -31,6 +31,7 @@
     <None Update="Fixtures/gallery-score-fringe.json;Fixtures/duck-faint-magenta-laser.json;Fixtures/duck-faint-magenta-laser.bgra.gz" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/gallery-pink-highlight.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/gallery-thin-trim.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures/gallery-diagonal-rim.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/hunt-red-dot.json;Fixtures/hunt-*.bgra.gz" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/click-precursor.json;Fixtures/click-precursor-*.f32.gz" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="..\..\src\ProjectTabletop.App\ExclusiveProcessLease.cs" Link="App\ExclusiveProcessLease.cs" />

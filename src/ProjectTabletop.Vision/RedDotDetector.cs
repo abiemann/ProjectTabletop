@@ -250,7 +250,7 @@ public sealed class RedDotDetector
         {
             if ((_mask[y * _width + x] & ClippedCore) == 0) continue;
             int head = 0, tail = 1, minX = x, maxX = x, minY = y, maxY = y;
-            double sumX = 0, sumY = 0;
+            double sumX = 0, sumY = 0, sumXX = 0, sumYY = 0, sumXY = 0;
             int neutralCorePixels = 0;
             bool touchesBoundary = false;
             _queue[0] = y * _width + x;
@@ -259,6 +259,7 @@ public sealed class RedDotDetector
             {
                 int pixel = _queue[head++], py = pixel / _width, px = pixel - py * _width;
                 sumX += px; sumY += py;
+                sumXX += px * (double)px; sumYY += py * (double)py; sumXY += px * (double)py;
                 int source = py * stride + px * 4;
                 if (Math.Min(bgra[source + 2], bgra[source]) - bgra[source + 1] < 16)
                     neutralCorePixels++;
@@ -288,6 +289,16 @@ public sealed class RedDotDetector
                 tail > Math.Max(16, _boardArea * .0007) || fill < .1 ||
                 boxWidth > _coreProbeDistance * 2.5 || boxHeight > _coreProbeDistance * 2.5 ||
                 Math.Min(boxWidth, boxHeight) > _coreProbeDistance) continue;
+            // A one-pixel diagonal trim glint has a wide bounding box but no
+            // resolved thickness. Apply the thin-core rule in its own orientation:
+            // a filled two-pixel width has variance .25; a quarter allows ragged
+            // edges. A real thin laser can still pass the coherent colour path.
+            double varianceX = sumXX / tail - sumX * sumX / (tail * (double)tail);
+            double varianceY = sumYY / tail - sumY * sumY / (tail * (double)tail);
+            double covariance = sumXY / tail - sumX * sumY / (tail * (double)tail);
+            double minorVariance = (varianceX + varianceY - Math.Sqrt(
+                (varianceX - varianceY) * (varianceX - varianceY) + 4 * covariance * covariance)) * .5;
+            if (minorVariance < .0625) continue;
             int colourSupport = 0;
             for (int py = Math.Max(_top, minY - 3); py <= Math.Min(_bottom - 1, maxY + 3); py++)
             for (int px = Math.Max(_first[py], minX - 3); px <= Math.Min(_last[py] - 1, maxX + 3); px++)

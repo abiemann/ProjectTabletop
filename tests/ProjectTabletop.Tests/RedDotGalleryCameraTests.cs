@@ -32,6 +32,13 @@ public sealed class RedDotGalleryCameraTests
         VerifyCapture(file, "gallery-thin-trim.json");
 
     [Theory]
+    [InlineData("gallery-diagonal-rim-with-laser.bgra.gz")]
+    [InlineData("gallery-two-diagonal-rims-with-laser.bgra.gz")]
+    [InlineData("gallery-ragged-diagonal-rim-clear.bgra.gz")]
+    public void RecordedDiagonalCopperRimDoesNotCreateAnIndependentLaser(string file) =>
+        VerifyCapture(file, "gallery-diagonal-rim.json");
+
+    [Theory]
     [InlineData("hunt-clear-clouds.bgra.gz")]
     [InlineData("hunt-clear-start-lettering.bgra.gz")]
     [InlineData("hunt-start-laser.bgra.gz")]

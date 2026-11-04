@@ -1,0 +1,39 @@
+{
+  "source": "Captured middle-row paper target, 2026-11-03: narrow diagonal copper-rim glints with and without the physical red dot. Exact unscaled camera crop x800,y400,width480,height320; homography translated to preserve the original board coordinates.",
+  "width": 480,
+  "height": 320,
+  "stride": 1920,
+  "map": [
+    0.001032610001909125,
+    -1.7140971899271612e-05,
+    0.2462243700338771,
+    -1.647270218806284e-07,
+    0.0012718946519396964,
+    0.2452028952095316,
+    1.6256716364108348e-05,
+    -6.30692294276378e-05,
+    0.9877776813202316
+  ],
+  "fixtures": [
+    {
+      "file": "gallery-diagonal-rim-with-laser.bgra.gz",
+      "expectedCandidateCount": 1,
+      "expectedCameraPosition": {
+        "x": 242.66666666666674,
+        "y": 166.41666666666663
+      }
+    },
+    {
+      "file": "gallery-two-diagonal-rims-with-laser.bgra.gz",
+      "expectedCandidateCount": 1,
+      "expectedCameraPosition": {
+        "x": 243.30303030303025,
+        "y": 168.78787878787875
+      }
+    },
+    {
+      "file": "gallery-ragged-diagonal-rim-clear.bgra.gz",
+      "expectedCandidateCount": 0
+    }
+  ]
+}
