@@ -1,0 +1,24 @@
+HUNT foreground grass revision — 2026-11-03
+
+Tool: built-in image_gen, precise-object-edit.
+Input: hunt-field-v1.png, original 1672 x 941 RGB field background.
+Generated donor: 1671 x 941 RGB. Final asset: 1672 x 941 RGB.
+The requested 3840 x 2160 resolution was not returned.
+The first complete generated image softened the trees. The user authorized
+a scripted merge that restores the original scenery pixel-for-pixel and
+uses only the new foreground grass. The original image is not resampled.
+The grass donor is aligned by one column, from 1671 to 1672 pixels wide.
+A 20-pixel smooth blend follows the meadow slope below the trees and horizon;
+original distant grass and crossing stalks at the meadow edge are retained.
+Verification: all 1,293,128 protected pixels are unchanged, including all
+728 top rows. Modified pixels lie within (0,733)-(1672,941).
+No artificial 4K upscaling or runtime compositing is used.
+SHA-256: 77adbd0140999f9c518b3a55830e82bda087f819edacca90e2a92cfac65fe03d
+
+Final prompt:
+Use case: precise-object-edit.
+Asset type: photographic game background for HUNT mode.
+Image 1 is the exact edit target, not a loose reference. This is a strictly localized foreground-grass repair. Treat ALL pixels belonging to sky, clouds, pine trees and trunks, distant woodland, hills and horizon as a locked, uneditable background plate. Do not redraw, restyle, relight, sharpen or alter that plate; retain it exactly.
+Regenerate only the close meadow grass occupying the lower foreground band. Remove the fused, plastic-straw appearance. Create naturally distinct narrow grass blades that taper to fine tips, with subtle folded leaves, slender stems, fine veins and delicate airy seed heads. Mixed fresh green leaves and warm straw-gold seed stalks, softly backlit by the existing warm afternoon sunlight. Real botanical variation in length, spacing and bending; separate strands with clean silhouettes and natural overlapping intersections, never welded or melted together. Grass should look like a carefully photographed real meadow, with high-quality fine strand detail, natural depth and coherent shadows. Retain the same meadow height, grassy ground plane and low camera viewpoint. Do not make a lawn, add flowers, change grass colour palette, or add big new plants.
+CRITICAL: replace ONLY the foreground grass, while keeping everything else identical, including the exact tree silhouettes and branches, cloud shapes, blue sky, distant hill line, sunlight, perspective and full frame crop. No global color or contrast adjustment. No zoom, no reframe, no change to composition. No people, animals, birds, targets, lettering, interface, borders or watermark.
+Request highest native landscape detail, ideally 3840x2160, without simulated upscaling or a glossy CGI finish. Return the complete edited image at the same 16:9 composition, with only the grass foreground regenerated.

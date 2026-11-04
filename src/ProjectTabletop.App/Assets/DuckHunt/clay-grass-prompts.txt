@@ -3,8 +3,26 @@ Clay Pigeon foreground grass revision — 2026-11-03
 Tool: built-in image_gen, precise-object-edit.
 Input: clay-valley-v1.png, original 1672 x 941 RGB valley background.
 Output: 1672 x 941 RGB. Native 3840 x 2160 was requested but not returned.
-The user chose the generated image as-is, after being told the tool also
-slightly redrew the distant scenery. No compositing, retouching or resizing.
+The user initially chose the generated image as-is, then requested restoration
+of the original crisp scenery while retaining the improved foreground grass.
+The final asset uses a precise grass-only composite, following the same method
+approved for HUNT. The original sky, forest, rocks and distant valley remain
+pixel-for-pixel unchanged. Neither source image was resized.
+
+Final merge — 2026-11-03:
+- Original RGB valley SHA-256: ca49be1704dcb821da9c245085217d392ae40ad200c0ecd93cee4d6e808ae9c4
+- Generated grass donor SHA-256: 2509d499e1ee5e31c0831b5ef1973972e2025b24b6e7210ae433f7c242503393
+- Final RGB asset SHA-256: 02267ae9b75c628b1374d1a4e43e38374443072e20ba9850efc02e3c93ba4b0a
+- Original and donor are both 1672 x 941; no resizing, sharpening or colour adjustment.
+- Foreground-only mask follows the meadow slope, with a 16-pixel smooth transition inside grass.
+- Boundary source-pixel coordinates: (0,681), (100,700), (200,722), (300,744),
+  (400,758), (550,779), (700,799), (850,813), (1000,829), (1150,846),
+  (1300,863), (1450,879), (1570,887), (1671,892).
+- Boundary variation: 2*sin(x*0.081) + sin(x*0.217), in pixels.
+- 1,348,845 protected pixels verified unchanged; changed bounding box (0,682)-(1672,941).
+- Taller original foreground seed heads above the transition are preserved.
+- Local reproduction and validation: artifacts/clay-scenery-restore-20261103/merge-grass.py
+  and grass-merge-validation.json.
 
 Final prompt:
 Use case: precise-object-edit.

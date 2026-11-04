@@ -4,7 +4,7 @@
 
 `arcade-welcome-v1.png` and `hunt-field-v1.png` are original opaque RGB images generated with the built-in image tool on 2026-10-22. The welcome image supplies a colorful wetland, pond and ducks around an open center for the native title and buttons. The field image uses a low grass-level viewpoint, pines on both sides and open sky, inspired by the user's reference. No lettering or controls are baked into either image.
 
-Both files are 1672 × 941 pixels. The prompts requested native 3840 × 2160, but the tool returned these smaller images; they are not native 4K and have not been artificially upscaled. The renderer crops to the physical board aspect instead of stretching the scene and caches each decoded image per graphics device. The field is loaded when Hunt is first opened. Full generation prompts and tool provenance are in [background-prompts.txt](background-prompts.txt).
+Both backgrounds are 1672 × 941 pixels. HUNT's field was revised with the built-in image tool on 2026-11-03 to replace fused-looking foreground grass with separate tapered blades and finer seed heads. After the complete generated image softened the trees, the user authorized merging only its grass into the original meadow. The final RGB asset retains the original sky, trees and distant scenery pixel-for-pixel; a narrow transition follows the meadow slope. Its prompt, merge details and hash are in [hunt-grass-prompts.txt](hunt-grass-prompts.txt). The prompts requested native 3840 × 2160, but the tool returned smaller images; these assets are not native 4K and have not been artificially enlarged to 4K. The renderer crops to the physical board aspect instead of stretching the scene and caches each decoded image per graphics device. The field is loaded when Hunt is first opened. Original generation prompts and tool provenance are in [background-prompts.txt](background-prompts.txt).
 
 ## Clay Pigeon valley and target
 
@@ -17,9 +17,10 @@ ceramic disc with concentric molded rings and a dark rim. Neither contains UI.
 The valley is native 1672 × 941 RGB; the requested 3840 × 2160 was not returned.
 It has not been artificially upscaled. On 2026-11-03, a built-in image-tool
 edit replaced the fused-looking foreground grass with finer individual blades
-and seed heads. The user selected the complete generated image as-is after
-reviewing its slight changes to the distant scenery; no scripted compositing
-or resizing was applied. See [clay-grass-prompts.txt](clay-grass-prompts.txt).
+and seed heads. After the complete generated edit softened the trees, a precise
+grass-only composite restored the original sky, forest, rocks and distant valley
+pixel-for-pixel. A narrow transition follows the foreground meadow slope; neither
+source image was resized. See [clay-grass-prompts.txt](clay-grass-prompts.txt).
 The disc is 1254 × 1254 RGBA, with
 visible alpha bounds `(56, 372)–(1199, 957)`. Authorized alpha-only cleanup
 removed 4,757 stray pixels with alpha at most 6, outside a two-pixel guard
@@ -36,7 +37,7 @@ the renderer; the shared physical ellipse supplies shot geometry.
 
 SHA-256:
 
-- Valley: `2509d499e1ee5e31c0831b5ef1973972e2025b24b6e7210ae433f7c242503393`
+- Valley: `02267ae9b75c628b1374d1a4e43e38374443072e20ba9850efc02e3c93ba4b0a`
 - Disc: `c4a3d363939401641be3a686ef25d85d45282feebbd05a6160474e38d3440744`
 
 ## Flying mallard

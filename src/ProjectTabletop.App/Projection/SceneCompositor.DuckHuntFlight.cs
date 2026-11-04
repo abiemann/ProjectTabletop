@@ -66,7 +66,9 @@ public sealed partial class SceneCompositor
         }
         _flightScoreCaption?.Draw(drawing, _duckHuntFlightScoreText, new Rect(30, 25, 210, 52), aspect);
         _flightBirdCaption?.Draw(drawing, _duckHuntFlightCountText, new Rect(710, 25, 260, 52), aspect);
-        if (state.Phase == DuckHuntFlightPhase.Finished)
+        if (state.Phase == DuckHuntFlightPhase.Ready)
+            _flightCompleteCaption?.Draw(drawing, "PRESS PLAY", new Rect(200, 467, 600, 66), aspect);
+        else if (state.Phase == DuckHuntFlightPhase.Finished)
         {
             _flightCompleteCaption?.Draw(drawing, "ROUND COMPLETE", new Rect(220, 270, 560, 66), aspect);
             _flightResultCaption?.Draw(drawing, _duckHuntFlightResultText, new Rect(240, 342, 520, 45), aspect);

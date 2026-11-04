@@ -2,6 +2,10 @@ DUCK HUNT NORMAL MODE BACKGROUNDS — 2026-10-22
 Tool: built-in image_gen.imagegen. Intent: original generated images, not edits.
 No image upscaling, external network asset retrieval, or scripted image editing performed.
 
+HUNT field update: the foreground grass was revised with built-in image_gen on
+2026-11-03. See hunt-grass-prompts.txt for the edit prompt, actual dimensions
+and hash. The records below describe the original 2026-10-22 images.
+
 Asset: src/ProjectTabletop.App/Assets/DuckHunt/arcade-welcome-v1.png
 Native dimensions: 1672 x 941, RGB, 3329529 bytes.
 Prompt:
