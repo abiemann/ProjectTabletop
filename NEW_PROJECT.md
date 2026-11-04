@@ -1,6 +1,12 @@
 # ProjectTabletop
 
-## Unreleased: Duck Hunt
+## Version 1.4.0
+
+The release adds Duck Hunt with three playable modes: the saloon Target Practice gallery, ten-bird HUNT rounds, and ten automatically staggered Clay Pigeon pairs. All three start from their drawer PLAY control and use the selected microphone's learned click plus a fresh red-dot camera observation. HUNT and Clay Pigeon show PRESS PLAY before the round; score feedback, replay controls and input-loss pauses are implemented. The outdoor scenes retain their original sharp sky, trees and distant landscape, with improved grass composited only into the foreground meadow. Gun-click Learning, automatic visual-latency estimation and opt-in Recording & diagnostics are described in the current [README](README.md#duck-hunt), [installation guide](docs/INSTALL.md#duck-hunt-quick-start) and [1.4.0 release notes](docs/releases/1.4.0.md).
+
+Latest focused native validation passed 740 HUNT and 329 Clay Pigeon assertions on the final artwork and rendering behavior. The original scenery outside each grass mask was verified pixel-for-pixel. Earlier development milestones below document their own builds, test counts and live observations; they are historical evidence, and descriptions of walking targets or shot-to-start controls have been superseded by the current modes. Sustained camera reliability and broader physical acceptance across hardware remain outstanding. The Windows release workflow separately gates packaging and publication; native drawing checks do not establish a universal shot-success rate or live frame rate.
+
+## Duck Hunt development history before 1.4.0
 
 The menu-thumbnail framing correction removes Duck Hunt's horizontal streaks by using a proportional crop instead of extending a single image column. Native wide-card and narrow-card comparisons exactly match independent uniform-scale references. Portrait, 1080p and 4K menu captures, paging, stationary camera references, retained artwork caches and Windows DPI checks pass. Debug, Release and the offline thumbnail-generator builds have zero warnings or errors. These checks opened no app session or capture hardware; live tabletop acceptance remains pending.
 

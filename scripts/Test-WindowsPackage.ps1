@@ -39,9 +39,11 @@ foreach ($model in $modelHashes.Keys) {
 foreach ($assetDirectory in 'Assets/MenuPreviews', 'Assets/Roulette', 'Assets/CrownDeed',
         'Assets/CrownDeed/Pieces', 'Assets/WaterGarden', 'Assets/WaterGarden/Audio',
         'Assets/Football', 'Assets/Football/Audio', 'Assets/StrykersRun',
+        'Assets/DuckHunt', 'Assets/Fonts',
         'SlotsRendering/Assets', 'GlobeRendering/Assets') {
     $source = Join-Path $repo "src/ProjectTabletop.App/$assetDirectory"
     $extensions = if ($assetDirectory -in @('Assets/Football/Audio', 'Assets/WaterGarden/Audio')) { '.mp3', '.wav', '.txt', '.md' }
+        elseif ($assetDirectory -eq 'Assets/Fonts') { '.ttf', '.otf', '.txt', '.md' }
         elseif ($assetDirectory -eq 'GlobeRendering/Assets') { '.png', '.jpg', '.jpeg', '.md' }
         else { '.png', '.jpg', '.jpeg' }
     foreach ($asset in Get-ChildItem -LiteralPath $source -File | Where-Object { $_.Extension -in $extensions }) {
