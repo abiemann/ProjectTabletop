@@ -284,8 +284,9 @@ train again after changing settings that affect feature extraction.
 
 ## Board setup detection
 
-For a new scan, first display a **full-frame uniform white image** on the
-projector. Call `BoardDetector.DetectProjectedField(...)` for the outer light
+The app starts every setup and rescan with a **full-frame uniform white image**
+on the projector and accepts three stable board/field observations before initialization.
+Call `BoardDetector.DetectProjectedField(...)` for the outer light
 field and `BoardDetector.DetectUniformIllumination(...)` for a separate physical
 cardboard contour within it. Both return camera-pixel corners in top-left,
 top-right, bottom-right, bottom-left order, or `null` when all four edges are
@@ -300,15 +301,13 @@ the full camera resolution and fitted as a line. The intersections give
 fractional-pixel corner coordinates. The projector field remains a coarse
 camera-space outline because it is used only to check scan geometry.
 
-`BoardDetector.DetectAmbientBoard(...)` offers a separate check while the
-projector output is solid black. In the current room lighting, it finds the
-cardboard edge by ambient reflection. Its four corners should agree with the
-full-white scan. It will return `null` if the cardboard is not brighter than
-the surrounding floor or its edges are obscured. When the cardboard is only
-a few pixels from the projector field edge, prefer the black-output result
-for exact board corners and use the white result as an independent check.
+`BoardDetector.DetectAmbientBoard(...)` remains available for offline regression
+and explicit diagnostic captures under solid-black projection. It finds a
+cardboard edge by ambient reflection and returns `null` if the cardboard is not
+brighter than the surrounding floor or its edges are obscured. The app's current
+setup sequence does not call this ambient detector.
 
-If the black-output scan loses one edge after a small move, call
+For those separate diagnostic captures, a black-output scan with one lost edge can use
 `BoardDetector.RecoverAmbientBoardWithPrior(...)` with the last trusted
 four-corner detection. It measures the three remaining ambient-light lines
 near their previous locations and fits a fixed-size cardboard pose on the
@@ -318,8 +317,8 @@ previous pose is essential; a recovered corner is less certain than a fresh
 four-edge measurement. Do not use this on a white or patterned projection.
 
 `ProjectedCornerDetector.Detect(...)` measures the orange L brackets after the
-grid appears. Supply the four physical board corners from the black-output
-scan as a search prior and a fresh BGRA camera frame. Its four nullable results
+grid appears. Supply the four detected physical board corners as a search prior
+and a fresh BGRA camera frame. Its four nullable results
 give the intersections of the two projected arm centerlines, arm-fit RMS, and
 a relative confidence. It inspects only red/orange pixels in small regions
 around the expected corners, requires two long arms, and returns `null` for a
@@ -339,6 +338,50 @@ limit, before the app reveals the selected board app or media within the safe
 board corners. The five-disk sequence omits the former four-disk edge refinement;
 edge accuracy with camera lens distortion may be lower. The detector compensates for a global camera exposure shift, but
 movement between baseline and spot frames can still invalidate a measurement.
+
+The app now runs that five-disk sequence twice: the first establishes placement
+for the colour strips, and the second uses a fresh reference after camera tuning
+to establish final geometry and visual latency. Keep the board still throughout.
+
+`CameraWhiteScanExposure.Evaluate(...)` supplies the initial full-white exposure
+recommendation before edge acceptance. The app samples up to 768 pixels in the
+central camera field, ignores levels below 32, and requires a substantial
+illuminated region. The helper also accepts an optional trusted quadrilateral for
+standalone diagnostics. Its
+90th-percentile maximum channel level requests a brighter setting below 180,
+or a darker setting above 235 or with at least 8% clipping. The suggested legacy
+log2-second value respects driver steps/range and the negotiated frame period.
+The app makes at most one initial adjustment, waits for settled frames and repeats
+the white scan so edge evidence comes from the retained settings.
+
+`BoardCalibrationTestCard` defines the renderer's exact edge-strip geometry and
+RGB references. `BoardColorCalibration.Analyze(...)` samples 5 by 5 interior
+points per colour/grey patch through a board-normalized-to-camera mapping,
+requiring recognizable colour ordering and grey steps on at least three edges.
+It reports clipping, neutral red/blue and green errors, colour separation and
+reference error. Lower exposure and white-balance scores are better; directions
+are recommendations, not camera writes. The brightest grey step reserves
+headroom below full projected white, and subtracting the dark step compensates
+the chart's existing blue offset. White-balance recommendations require usable,
+unclipped neutral steps; they do not guess a Kelvin correction for a green cast.
+
+The app trials supported controls already in manual mode, waits for fresh settled
+frames, retains measured improvements, and restores rejected trials. Both helpers
+are pure image/policy calculations and leave detector thresholds unchanged.
+The 34 focused `BoardColorCalibrationTests` and `CameraWhiteScanExposureTests`
+pass, including the captured dim-scan brightness of 165 requesting -7 to -6 at
+60 fps. The final build has zero warnings/errors and all 1,288 offline tests pass.
+Live white-first setup and exposure writes completed on the Facecam without a
+false camera-freeze warning. At exposure -7, only one edge was usable and
+white-balance tuning was skipped. A rescan raised exposure to -6; the final build
+reported four usable edges, white level 235, clipped fraction 0 and center-check
+error 0.0012. The driver rejected the proposed 3700 K white balance;
+original-value readback confirmed 3400 K and allowed calibration to continue.
+The user confirmed that laser aiming and shots now work. Captured play records a
+Target Practice paper-target hit and a HUNT bird hit, including a HUNT observation
+with one unambiguous laser candidate.
+White balance remains unchanged; these results do not establish an accepted
+white-balance correction or a statistical shot-success rate.
 
 The older `BoardDetector.Detect(...)` is kept for the projected-grid regression
 and compatibility. It requires a separately visible board contour outside a

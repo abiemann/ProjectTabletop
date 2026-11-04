@@ -36,6 +36,14 @@ Check `MatchesHardware` before reusing a saved session, and recalibrate after ei
 the board, projector image fitting, or the piece height changes. The software cannot detect
 physical mount movement from saved identifiers alone.
 
+The app starts setup and every rescan with full-white board/field detection.
+It then uses an initial five-spot registration to place known
+colour strips, then checks compatible manual camera exposure and white balance.
+It captures a new white reference and repeats the five spots at the retained
+settings before accepting final geometry and visual-latency measurements.
+The shared image measurements live in [ProjectTabletop.Vision](../ProjectTabletop.Vision/README.md#board-setup-detection);
+this library continues to handle geometric mappings only.
+
 Run `dotnet run --project src/ProjectTabletop.Calibration/Verification/ProjectTabletop.Calibration.Verification.csproj`
 from the repository root to check affine and perspective mappings, reverse transforms, invalid
 corners, and saved-session roundtrips.

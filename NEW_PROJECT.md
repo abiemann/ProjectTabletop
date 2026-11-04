@@ -1,5 +1,34 @@
 # ProjectTabletop
 
+## Camera calibration in current development
+
+Board setup and every rescan immediately project full white and check exposure before accepting physical edges,
+using supported controls already in manual mode, the driver's range and the negotiated frame period.
+A setting write waits for settled frames and repeats the white edge scan. The board
+must have four visible edges inside the projector field across three stable observations.
+After the first five spots,
+the projected colour bars and grey steps become measured references: bounded
+exposure and white-balance trials retain improvements, then a fresh reference and
+second five-spot pass establish final geometry and visual latency. This uses the
+existing camera session and does not change ISO, gain or detector thresholds.
+The brightness/contrast picture-profile setting remains a separate feature.
+
+The final build has zero warnings or errors, all 1,288 offline tests pass, and
+the 34 focused camera checks also pass. The saved dim Facecam scan has a
+90th-percentile channel level of 165 and requests exposure -7 to -6 at 60 fps.
+Live white-first setup completed without a false camera-freeze warning. Exposure
+writes worked from -8 to -7 on the first scan and -7 to -6 on rescan. The final
+build calibrated with center-check error 0.0012. At -6, all four strips were
+readable, with brightest-grey channel level 235 and no sampled clipping. The
+user confirmed that laser aiming and shots now work. Captured play records a
+Target Practice paper-target hit and a HUNT bird hit.
+The Facecam driver rejected the proposed 3700 K white balance; readback confirmed
+its original 3400 K and calibration continued. No white-balance correction is claimed.
+The current build pins stable .NET SDK
+10.0.403; the published 1.4.0 installation guide and earlier release evidence
+below describe their respective released builds. See the
+[camera calibration details](README.md#automatic-camera-calibration-during-board-setup).
+
 ## Version 1.4.0
 
 The release adds Duck Hunt with three playable modes: the saloon Target Practice gallery, ten-bird HUNT rounds, and ten automatically staggered Clay Pigeon pairs. All three start from their drawer PLAY control and use the selected microphone's learned click plus a fresh red-dot camera observation. HUNT and Clay Pigeon show PRESS PLAY before the round; score feedback, replay controls and input-loss pauses are implemented. The outdoor scenes retain their original sharp sky, trees and distant landscape, with improved grass composited only into the foreground meadow. Gun-click Learning, automatic visual-latency estimation and opt-in Recording & diagnostics are described in the current [README](README.md#duck-hunt), [installation guide](docs/INSTALL.md#duck-hunt-quick-start) and [1.4.0 release notes](docs/releases/1.4.0.md).

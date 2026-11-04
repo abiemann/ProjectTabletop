@@ -238,6 +238,8 @@ public sealed partial class MainWindow
 #endif
             case "get_camera_controls":
                 return await _camera.GetControlsAsync();
+            case "set_camera_color_controls":
+                return await SetCameraColorControlsForControlAsync(parameters);
             case "get_status":
                 var frame = Volatile.Read(ref _latestCameraFrame);
                 return new
@@ -299,6 +301,8 @@ public sealed partial class MainWindow
                     boardClipReady = _scene.HasBoardMediaClip,
                     boardSetupStatus = BoardSetupControlStatus,
                     cameraLatency = CameraLatencyStatus,
+                    cameraColorCalibration = GetCameraColorCalibrationStatus(),
+                    cameraScanExposure = _whiteScanExposureStatus,
                     boardReveal = _scene.GetBoardRevealDiagnostics(),
             boardResolution = _scene.GetBoardResolutionDiagnostics(),
             outputRendering = _output?.RenderResolution,

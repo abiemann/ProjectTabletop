@@ -58,6 +58,11 @@ public sealed class CameraCaptureService : IAsyncDisposable
     public sealed record CameraImageControlResult(string Status, long Epoch, bool Changed,
         CameraImageValues Before, CameraImageValues After, bool RollbackAttempted = false,
         bool RollbackSucceeded = false, string? Error = null);
+    public sealed record CameraManualValues(double? Brightness, double? Contrast,
+        double? ExposureLog2Seconds, double? WhiteBalanceKelvin);
+    public sealed record CameraManualControlResult(string Status, long Epoch, bool Changed,
+        CameraManualValues Before, CameraManualValues After, bool RollbackAttempted = false,
+        bool RollbackSucceeded = false, string? Error = null);
     private sealed record ImageControlWrite(string Name, MediaDeviceControl Control,
         double Before, double Target, double Step);
 
@@ -66,15 +71,32 @@ public sealed class CameraCaptureService : IAsyncDisposable
     /// Changed is conservative: any setter attempt requires fresh input baselines, even after rollback.
     /// The caller coalesces board requests; this operation never opens or restarts the camera.
     /// </summary>
-    public Task<CameraImageControlResult> SetImageControlsAsync(string expectedDeviceId, long expectedEpoch,
-        double? brightness = null, double? contrast = null, CancellationToken cancellationToken = default) => Task.Run(async () =>
+    public async Task<CameraImageControlResult> SetImageControlsAsync(string expectedDeviceId, long expectedEpoch,
+        double? brightness = null, double? contrast = null, CancellationToken cancellationToken = default)
     {
-        var writes = new List<ImageControlWrite>(2);
-        var attempted = new List<ImageControlWrite>(2);
-        var before = new CameraImageValues(null, null);
+        var result = await SetManualControlsAsync(expectedDeviceId, expectedEpoch, brightness, contrast,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        return new(result.Status, result.Epoch, result.Changed,
+            new(result.Before.Brightness, result.Before.Contrast),
+            new(result.After.Brightness, result.After.Contrast),
+            result.RollbackAttempted, result.RollbackSucceeded, result.Error);
+    }
+
+    /// <summary>
+    /// Writes only the supplied legacy controls on the owned capture, without opening or restarting it.
+    /// Exposure uses the driver's log2-second steps; white balance uses Kelvin. Controls with automatic
+    /// adjustment must already be in a known manual mode. Every value is preflighted before any write.
+    /// </summary>
+    public Task<CameraManualControlResult> SetManualControlsAsync(string expectedDeviceId, long expectedEpoch,
+        double? brightness = null, double? contrast = null, double? exposureLog2Seconds = null,
+        double? whiteBalanceKelvin = null, CancellationToken cancellationToken = default) => Task.Run(async () =>
+    {
+        var writes = new List<ImageControlWrite>(4);
+        var attempted = new List<ImageControlWrite>(4);
+        var before = new CameraManualValues(null, null, null, null);
         var after = before;
         MediaCapture? capture = null;
-        CameraImageControlResult Result(string status, string? error = null, bool rollbackAttempted = false,
+        CameraManualControlResult Result(string status, string? error = null, bool rollbackAttempted = false,
             bool rollbackSucceeded = false) => new(status, Interlocked.Read(ref _epoch), attempted.Count > 0,
                 before, after, rollbackAttempted, rollbackSucceeded, error);
         bool SameSession() => _running && ReferenceEquals(capture, _capture) &&
@@ -94,10 +116,12 @@ public sealed class CameraCaptureService : IAsyncDisposable
             var requested = new (string Name, double? Value, Func<MediaDeviceControl> Resolve)[]
             {
                 ("brightness", brightness, () => controller.Brightness),
-                ("contrast", contrast, () => controller.Contrast)
+                ("contrast", contrast, () => controller.Contrast),
+                ("exposureLog2Seconds", exposureLog2Seconds, () => controller.Exposure),
+                ("whiteBalanceKelvin", whiteBalanceKelvin, () => controller.WhiteBalance)
             };
             // Validate and capture every original value before the first setter, so a partial
-            // failure can restore the same session without touching exposure or white balance.
+            // failure can restore only the requested controls on the same capture session.
             foreach (var request in requested)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -116,7 +140,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
                 if (!control.TryGetValue(out double original) || !ImageControlValueAllowed(original, min, max, step))
                     return Result("unavailable", $"{request.Name} has no safely restorable current value.");
                 writes.Add(new(request.Name, control, original, target, step));
-                before = request.Name == "brightness" ? before with { Brightness = original } : before with { Contrast = original };
+                before = WithValue(before, request.Name, original);
                 after = before;
             }
             foreach (var write in writes)
@@ -134,7 +158,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
             after = ReadBack();
             foreach (var write in writes)
             {
-                double? actual = write.Name == "brightness" ? after.Brightness : after.Contrast;
+                double? actual = ValueOf(after, write.Name);
                 if (actual is null || !ImageControlValuesMatch(actual.Value, write.Target, write.Step))
                     throw new InvalidOperationException($"The driver could not verify the final {write.Name} value.");
             }
@@ -154,14 +178,18 @@ public sealed class CameraCaptureService : IAsyncDisposable
                     var write = attempted[i];
                     try
                     {
-                        if (!SameSession() || !write.Control.TrySetValue(write.Before) ||
-                            !write.Control.TryGetValue(out double actual) ||
+                        if (!SameSession()) { restored = false; continue; }
+                        // Some drivers advertise a read-only control and reject
+                        // even writing its unchanged value. Confirm the actual
+                        // original value instead of treating that as a failed restore.
+                        write.Control.TrySetValue(write.Before);
+                        if (!write.Control.TryGetValue(out double actual) ||
                             !ImageControlValuesMatch(actual, write.Before, write.Step)) restored = false;
                     }
                     catch { restored = false; }
                 }
             }
-            after = SameSession() ? ReadBack() : new(null, null);
+            after = SameSession() ? ReadBack() : new(null, null, null, null);
             bool cancelled = ex is OperationCanceledException && cancellationToken.IsCancellationRequested;
             string error = cancelled ? "The image-control request was superseded." :
                 ex is InvalidOperationException ? ex.Message : $"Image controls failed (0x{ex.HResult:X8}).";
@@ -170,9 +198,9 @@ public sealed class CameraCaptureService : IAsyncDisposable
         }
         finally { _lifecycle.Release(); }
 
-        CameraImageValues ReadBack()
+        CameraManualValues ReadBack()
         {
-            var values = new CameraImageValues(null, null);
+            var values = new CameraManualValues(null, null, null, null);
             foreach (var write in writes)
             {
                 double? value = null;
@@ -181,10 +209,28 @@ public sealed class CameraCaptureService : IAsyncDisposable
                     if (write.Control.TryGetValue(out double actual) && double.IsFinite(actual)) value = actual;
                 }
                 catch { /* Unknown is reported as null, never as the requested value. */ }
-                values = write.Name == "brightness" ? values with { Brightness = value } : values with { Contrast = value };
+                values = WithValue(values, write.Name, value);
             }
             return values;
         }
+
+        static CameraManualValues WithValue(CameraManualValues values, string name, double? value) => name switch
+        {
+            "brightness" => values with { Brightness = value },
+            "contrast" => values with { Contrast = value },
+            "exposureLog2Seconds" => values with { ExposureLog2Seconds = value },
+            "whiteBalanceKelvin" => values with { WhiteBalanceKelvin = value },
+            _ => throw new InvalidOperationException("Unknown camera control.")
+        };
+
+        static double? ValueOf(CameraManualValues values, string name) => name switch
+        {
+            "brightness" => values.Brightness,
+            "contrast" => values.Contrast,
+            "exposureLog2Seconds" => values.ExposureLog2Seconds,
+            "whiteBalanceKelvin" => values.WhiteBalanceKelvin,
+            _ => throw new InvalidOperationException("Unknown camera control.")
+        };
     });
 
     private static bool ImageControlValuesMatch(double first, double second, double step) =>
@@ -355,6 +401,7 @@ public sealed class CameraCaptureService : IAsyncDisposable
     public CameraFrameLease? AcquireLatestFrame() => _latestFrame.Acquire();
     public string? ActiveDeviceId { get; private set; }
     public bool IsRunning => _running;
+    public long CaptureEpoch => Interlocked.Read(ref _epoch);
     public (int Width, int Height, double FramesPerSecond)? NegotiatedFormat { get; private set; }
     public int RequestedFramesPerSecond { get; private set; } = 30;
     public string? NegotiatedSubtype { get; private set; }

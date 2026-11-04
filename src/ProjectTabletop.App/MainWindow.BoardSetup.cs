@@ -35,26 +35,14 @@ public sealed partial class MainWindow
     private readonly Queue<CalibrationSpotCheck> _pendingSpotChecks = new();
     private bool _spotCheckRunning;
     private BoardDetection? _physicalBoard;
-    private BoardDetection? _ambientBoard;
     private BoardDetection? _projectorField;
-    private BoardDetection? _candidateAmbientBoard;
-    private readonly List<BoardDetection> _ambientObservations = [];
-    private readonly List<bool> _ambientRecoveredObservations = [];
-    private bool _ambientRecoveredFromPrior;
-    private TrustedBoardPrior? _trustedBoardPrior;
     private BoardDetection? _candidateBoard;
     private BoardDetection? _candidateField;
-    private int _stableAmbientObservations;
     private int _stableWhiteObservations;
-    private bool _whiteOnlyFallback;
-    private bool _whiteEdgeUnavailable;
-    private bool _candidateWhiteBoardPresent;
     private int _spotIndex;
     private readonly List<PixelPoint> _spotCameraPoints = [];
     private string? _boardSetupDiagnostic;
     private double? _boardRegistrationError;
-    private double? _boardCrossCheckErrorPixels;
-    private int _boardCornersAtLightEdge;
     private float? _boardGridInset;
     private string? _boardProjectionWarning;
 
@@ -64,7 +52,7 @@ public sealed partial class MainWindow
     // field is already settled; each next dot still needs a real observation.
     private static readonly TimeSpan RegistrationSpotSettle = TimeSpan.FromSeconds(1) / BoardSetupSpotCount;
 
-    private enum BoardSetupPhase { Inactive, Switching, ScanAmbient, ScanWhite, ShowCorners, MeasureSpots, GridReady, Failed }
+    private enum BoardSetupPhase { Inactive, Switching, ScanWhite, ShowCorners, MeasureSpots, ColorCalibration, GridReady, Failed }
 
     private sealed record CalibrationSpotCheck(CameraFrameLease FrameLease, CameraFrameLease WhiteLease, int SpotIndex,
         long Generation, SceneCompositor.BoardSpotPresentation Presentation) : IDisposable
@@ -77,9 +65,6 @@ public sealed partial class MainWindow
 
     private sealed record BoardPreviewState(BoardDetection Detection, int Width, int Height,
                                             DateTimeOffset Timestamp);
-
-    private sealed record TrustedBoardPrior(BoardDetection Detection, int Width, int Height,
-                                            string CameraDeviceId, string DisplayId);
 
     private async void BoardSetup_Click(object sender, RoutedEventArgs e)
     {
@@ -112,8 +97,10 @@ public sealed partial class MainWindow
         BoardSetupButton.Content = "Cancel board setup";
         try
         {
+            await FinishCameraColorCalibrationAsync();
+            if (request != _boardSetupRequestVersion || _closing) return;
             // Await the verified native fullscreen presenter before collecting
-            // any camera/projector correspondence, including the ambient frame.
+            // any camera/projector correspondence from the illuminated board.
             if (!await OpenProjectionOutputAsync())
             {
                 if (request == _boardSetupRequestVersion && !_closing)
@@ -140,9 +127,9 @@ public sealed partial class MainWindow
                 await StartSelectedCameraAsync();
             if (request != _boardSetupRequestVersion || !Volatile.Read(ref _boardSetupActive) || _closing) return;
             BoardSetupStatusText.Text = _camera.IsRunning
-                ? "Projector is black. Finding the cardboard by ambient light before the white scan."
-                : "Projector is black. Select and start a webcam to find the cardboard.";
-            SetStatus("Board scan is active. Keep the cardboard still while black and white views are checked.");
+                ? "Board light is on. Finding the cardboard and projector field."
+                : "Board light is on. Select and start a webcam to find the cardboard.";
+            SetStatus("Board scan is active. Keep the cardboard still while the camera finds its illuminated edges.");
         }
         catch (Exception ex)
         {
@@ -166,7 +153,6 @@ public sealed partial class MainWindow
     {
         Interlocked.Increment(ref _boardSetupRequestVersion);
         Volatile.Write(ref _boardSetupActive, false);
-        Volatile.Write(ref _trustedBoardPrior, null);
         ClearBoardPreview();
         _scene.SetBoardSetup(false);
         FinishCameraPictureCalibration();
@@ -206,6 +192,8 @@ public sealed partial class MainWindow
         var request = _boardSetupRequestVersion;
         try
         {
+            await FinishCameraColorCalibrationAsync();
+            if (request != _boardSetupRequestVersion || !Volatile.Read(ref _boardSetupActive) || _closing) return;
             if (!await OpenProjectionOutputAsync() || request != _boardSetupRequestVersion ||
                 !Volatile.Read(ref _boardSetupActive) || _closing) return;
             RequireProjectionOutput();
@@ -220,7 +208,7 @@ public sealed partial class MainWindow
             return;
         }
         ClearBoardPreview();
-        BoardSetupStatusText.Text = "Projector is black. Finding the physical cardboard again.";
+        BoardSetupStatusText.Text = "Board light is on. Finding the physical cardboard again.";
     }
 
     internal string BoardSetupControlStatus => BoardSetupStatusText.Text;
@@ -236,12 +224,10 @@ public sealed partial class MainWindow
 
     private void ClearBoardPreview()
     {
+        _whiteScanExposureChecked = false;
+        ResetCameraColorCalibration();
         ResetCameraLatency();
         ClearHandTracking();
-        if (_trustedBoardPrior is { } trusted &&
-            (SelectedCamera?.Device.Id != trusted.CameraDeviceId ||
-             SelectedDisplay?.Id != trusted.DisplayId))
-            Volatile.Write(ref _trustedBoardPrior, null);
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.Switching);
         Interlocked.Increment(ref _boardSetupGeneration);
         Volatile.Write(ref _latestBoardPreview, null);
@@ -250,34 +236,21 @@ public sealed partial class MainWindow
         _boardAnimationUpdated = 0;
         ClearBoardFrameReferences();
         _physicalBoard = null;
-        _ambientBoard = null;
         _projectorField = null;
-        _candidateAmbientBoard = null;
-        _ambientObservations.Clear();
-        _ambientRecoveredObservations.Clear();
-        _ambientRecoveredFromPrior = false;
         _candidateBoard = null;
         _candidateField = null;
-        _stableAmbientObservations = 0;
         _stableWhiteObservations = 0;
-        _whiteOnlyFallback = false;
-        _whiteEdgeUnavailable = false;
-        _candidateWhiteBoardPresent = false;
         _spotIndex = 0;
         _spotCameraPoints.Clear();
         _boardSetupDiagnostic = null;
         _boardRegistrationError = null;
-        _boardCrossCheckErrorPixels = null;
-        _boardCornersAtLightEdge = 0;
         _boardGridInset = null;
         _boardProjectionWarning = null;
         Interlocked.Exchange(ref _lastBoardDetectTick, 0);
         if (Volatile.Read(ref _boardSetupActive))
         {
             _scene.SetBoardSetup(true);
-            _scene.SetBlackOutput(true);
-            Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.ScanAmbient);
-            Interlocked.Exchange(ref _boardPhaseStartedTick, Stopwatch.GetTimestamp());
+            BeginWhiteScan();
         }
         else
             Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.Inactive);
@@ -288,7 +261,7 @@ public sealed partial class MainWindow
     {
         if (_outputOperation.CurrentCount == 0) return;
         var phase = (BoardSetupPhase)Volatile.Read(ref _boardSetupPhase);
-        if (phase is not (BoardSetupPhase.ScanAmbient or BoardSetupPhase.ScanWhite or
+        if (phase is not (BoardSetupPhase.ScanWhite or
                           BoardSetupPhase.ShowCorners or BoardSetupPhase.MeasureSpots)) return;
         var phaseStarted = Interlocked.Read(ref _boardPhaseStartedTick);
         // Full-field exposure changes need longer settling than a small dark
@@ -329,20 +302,7 @@ public sealed partial class MainWindow
         {
             try
             {
-                if (phase == BoardSetupPhase.ScanAmbient)
-                {
-                    var board = BoardDetector.DetectAmbientBoard(frame.Width, frame.Height, frame.Stride,
-                        frame.Bgra);
-                    bool recovered = false;
-                    if (board is null && CompatibleTrustedBoardPrior(frame) is { } trusted)
-                    {
-                        board = BoardDetector.RecoverAmbientBoardWithPrior(frame.Width, frame.Height,
-                            frame.Stride, frame.Bgra, trusted.Detection);
-                        recovered = board is not null;
-                    }
-                    TryPostCameraFrame(frame, () => ProcessAmbientScan(frame, board, recovered, generation));
-                }
-                else if (phase == BoardSetupPhase.ScanWhite)
+                if (phase == BoardSetupPhase.ScanWhite)
                 {
                     var field = BoardDetector.DetectProjectedField(frame.Width, frame.Height, frame.Stride,
                         frame.Bgra);
@@ -430,82 +390,19 @@ public sealed partial class MainWindow
         _visionError = null;
     }
 
-    private TrustedBoardPrior? CompatibleTrustedBoardPrior(CameraFrame frame)
-    {
-        var trusted = Volatile.Read(ref _trustedBoardPrior);
-        if (trusted is null) return null;
-        if (trusted.Width == frame.Width && trusted.Height == frame.Height &&
-            trusted.CameraDeviceId == _camera.ActiveDeviceId &&
-            trusted.DisplayId == _outputDisplayId)
-            return trusted;
-        Interlocked.CompareExchange(ref _trustedBoardPrior, null, trusted);
-        return null;
-    }
-
-    private void ProcessAmbientScan(CameraFrame frame, BoardDetection? board,
-                                    bool recovered, long generation)
-    {
-        if (_closing || generation != Interlocked.Read(ref _boardSetupGeneration) ||
-            (BoardSetupPhase)Volatile.Read(ref _boardSetupPhase) != BoardSetupPhase.ScanAmbient) return;
-        if (board is null)
-        {
-            _candidateAmbientBoard = null;
-            _ambientObservations.Clear();
-            _ambientRecoveredObservations.Clear();
-            _stableAmbientObservations = 0;
-            _boardSetupDiagnostic = "Projector is black. Looking for the cardboard by room light.";
-            return;
-        }
-
-        if (_candidateAmbientBoard is null ||
-            !PhysicalCornersClose(_candidateAmbientBoard, board, frame.Width, frame.Height))
-        {
-            _ambientObservations.Clear();
-            _ambientRecoveredObservations.Clear();
-        }
-        _ambientObservations.Add(board);
-        _ambientRecoveredObservations.Add(recovered);
-        _candidateAmbientBoard = board;
-        _stableAmbientObservations = _ambientObservations.Count;
-        Volatile.Write(ref _latestBoardPreview,
-            new BoardPreviewState(board, frame.Width, frame.Height, frame.Timestamp));
-        _boardSetupDiagnostic = (recovered
-            ? "Three ambient cardboard edges recovered with the last trusted scan. "
-            : "Four ambient cardboard edges found. ") + "Checking stability " +
-            $"({_stableAmbientObservations}/3).";
-        if (_frozenFrame is null) CameraCanvas.Invalidate();
-        if (_stableAmbientObservations < 3) return;
-
-        var corners = Enumerable.Range(0, 4).Select(index => new PixelPoint(
-            _ambientObservations.Average(observation => observation.Corners[index].X),
-            _ambientObservations.Average(observation => observation.Corners[index].Y))).ToArray();
-        _ambientBoard = new BoardDetection(corners,
-            _ambientObservations.Average(observation => observation.Confidence));
-        _ambientRecoveredFromPrior = _ambientRecoveredObservations.Any(value => value);
-        BeginWhiteScan(whiteOnlyFallback: false);
-    }
-
-    private void BeginWhiteScan(bool whiteOnlyFallback)
+    private void BeginWhiteScan()
     {
         if (!Volatile.Read(ref _boardSetupActive)) return;
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.Switching);
-        _whiteOnlyFallback = whiteOnlyFallback;
         _scene.SetBlackOutput(false);
         _candidateBoard = null;
         _candidateField = null;
         _stableWhiteObservations = 0;
-        _whiteEdgeUnavailable = false;
-        _candidateWhiteBoardPresent = false;
         Interlocked.Exchange(ref _lastBoardDetectTick, 0);
         _lastAnalyzedBoardFrames.Clear();
         Interlocked.Exchange(ref _boardPhaseStartedTick, Stopwatch.GetTimestamp());
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.ScanWhite);
-        _boardSetupDiagnostic = whiteOnlyFallback
-            ? "Ambient cardboard edges were not found. Continuing with the white-only scan."
-            : (_ambientRecoveredFromPrior
-                ? "Three ambient edges inferred the fourth from the last trusted scan. "
-                : "Four ambient cardboard edges saved. ") +
-              "White light is checking the same edges and projector field.";
+        _boardSetupDiagnostic = "Board light is on. Finding the cardboard and projector field.";
         BoardSetupStatusText.Text = _boardSetupDiagnostic;
     }
 
@@ -514,20 +411,20 @@ public sealed partial class MainWindow
     {
         if (_closing || generation != Interlocked.Read(ref _boardSetupGeneration) ||
             (BoardSetupPhase)Volatile.Read(ref _boardSetupPhase) != BoardSetupPhase.ScanWhite) return;
+        if (TryPrepareWhiteScanExposure(frame, generation)) return;
         if (field is null)
         {
             _stableWhiteObservations = 0;
             _boardSetupDiagnostic = "Looking for the full white projector field. Keep it inside the camera view.";
             return;
         }
-        if (board is null && _ambientBoard is null)
+        if (board is null)
         {
             _stableWhiteObservations = 0;
             _boardSetupDiagnostic = "Projector field found. Looking for four separate cardboard edges.";
             return;
         }
-        var candidateBoard = board ?? _ambientBoard!;
-        if (!BoardInsideField(candidateBoard, field))
+        if (!BoardInsideField(board, field))
         {
             _stableWhiteObservations = 0;
             _boardSetupDiagnostic = "Cardboard extends beyond the white projector field. Move it inside the light.";
@@ -535,61 +432,23 @@ public sealed partial class MainWindow
         }
 
         Volatile.Write(ref _latestBoardPreview,
-            new BoardPreviewState(candidateBoard, frame.Width, frame.Height, frame.Timestamp));
+            new BoardPreviewState(board, frame.Width, frame.Height, frame.Timestamp));
         if (_candidateBoard is not null && _candidateField is not null &&
-            _candidateWhiteBoardPresent == (board is not null) &&
-            CornersClose(_candidateBoard, candidateBoard, frame.Width, frame.Height) &&
+            CornersClose(_candidateBoard, board, frame.Width, frame.Height) &&
             CornersClose(_candidateField, field, frame.Width, frame.Height))
             _stableWhiteObservations++;
         else
             _stableWhiteObservations = 1;
-        _candidateBoard = candidateBoard;
+        _candidateBoard = board;
         _candidateField = field;
-        _candidateWhiteBoardPresent = board is not null;
-        _boardSetupDiagnostic = board is null
-            ? $"White board edge unavailable; using trusted ambient corners. " +
-              $"Checking field stability ({_stableWhiteObservations}/3)."
-            : $"Cardboard edges found. Checking stability ({_stableWhiteObservations}/3).";
+        _boardSetupDiagnostic = $"Cardboard edges found. Checking stability ({_stableWhiteObservations}/3).";
         if (_stableWhiteObservations < 3)
         {
             if (_frozenFrame is null) CameraCanvas.Invalidate();
             return;
         }
 
-        if (_ambientBoard is not null)
-        {
-            if (board is not null)
-            {
-                // The physical corners come from the ambient scan. Where the
-                // cardboard nearly fills the light, its white-lit edge merges
-                // with the light's edge, so those corners are compared only
-                // along that edge (movement there is still caught).
-                double tolerance = PhysicalCornerTolerance(frame.Width, frame.Height);
-                _boardCrossCheckErrorPixels = BoardDetector.CrossCheckError(_ambientBoard, board, field,
-                    tolerance * 2, out _boardCornersAtLightEdge);
-                if (_boardCrossCheckErrorPixels > tolerance)
-                {
-                    Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.Failed);
-                    _boardSetupDiagnostic = $"Black and white cardboard edges differ by " +
-                        $"{_boardCrossCheckErrorPixels:F1} camera pixels. The board or camera may have moved. " +
-                        "Press Scan again.";
-                    BoardSetupStatusText.Text = _boardSetupDiagnostic;
-                    return;
-                }
-            }
-            else _whiteEdgeUnavailable = true;
-            if (!BoardInsideField(_ambientBoard, field))
-            {
-                Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.Failed);
-                _boardSetupDiagnostic = "The ambient cardboard edges extend beyond the white projector field. " +
-                    "Move the cardboard inside the light and press Scan again.";
-                BoardSetupStatusText.Text = _boardSetupDiagnostic;
-                return;
-            }
-        }
-
-        _physicalBoard = _ambientBoard ?? board ??
-            throw new InvalidOperationException("The cardboard edges were lost.");
+        _physicalBoard = board;
         _projectorField = field;
         Volatile.Write(ref _latestBoardPreview,
             new BoardPreviewState(_physicalBoard, frame.Width, frame.Height, frame.Timestamp));
@@ -601,7 +460,9 @@ public sealed partial class MainWindow
     private void BeginRegistrationSpots(CameraFrame frame)
     {
         BeginCameraLatency();
+        _spotCameraPoints.Clear();
         _whiteBoardFrames.Set(frame);
+        Volatile.Write(ref _whiteSpotReference, null);
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.Switching);
         _scene.ShowBoardCalibrationSpot(0);
         Interlocked.Exchange(ref _boardPhaseStartedTick, Stopwatch.GetTimestamp());
@@ -610,18 +471,7 @@ public sealed partial class MainWindow
         Volatile.Write(ref _spotIndex, 0);
         Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.MeasureSpots);
         _boardSetupDiagnostic = null;
-        BoardSetupStatusText.Text = _whiteOnlyFallback
-            ? "White-only board scan complete. Aligning projector, spot 1 of 5. Keep the cardboard still."
-            : _whiteEdgeUnavailable
-            ? "White edge unavailable; using trusted ambient cardboard corners. " +
-              "Aligning projector, spot 1 of 5. Keep the cardboard still."
-            : $"{(_ambientRecoveredFromPrior ? "Three-edge recovery" : "Four-edge ambient scan")} " +
-              $"and white board edges agree within {_boardCrossCheckErrorPixels:F1} px" +
-              (_boardCornersAtLightEdge > 0
-                  ? $" ({_boardCornersAtLightEdge} corner{(_boardCornersAtLightEdge == 1 ? "" : "s")} at the light's edge " +
-                    "checked from the black scan). "
-                  : ". ") +
-              "Aligning projector, spot 1 of 5. Keep the cardboard still.";
+        BoardSetupStatusText.Text = "Cardboard found. Aligning projector, spot 1 of 5. Keep the cardboard still.";
         if (_frozenFrame is null) CameraCanvas.Invalidate();
     }
 
@@ -680,25 +530,15 @@ public sealed partial class MainWindow
                 var projected = map.Transform(new Point2(point.X, point.Y));
                 return new Vector2((float)projected.X, (float)projected.Y);
             }).ToArray();
+            if (TryBeginCameraColorCalibration(frame, board, corners)) return;
             _boardProjectionWarning = ProjectionBoundaryWarning(corners);
             _boardGridInset = _scene.CompleteBoardSetup(corners, map);
             RememberBoardFacing();
             SaveCameraAlignment(frame, map);
             Volatile.Write(ref _boardSetupPhase, (int)BoardSetupPhase.GridReady);
-            if (_ambientBoard is not null && !_ambientRecoveredFromPrior &&
-                _camera.ActiveDeviceId is { } cameraId && _outputDisplayId is { } displayId)
-                Volatile.Write(ref _trustedBoardPrior,
-                    new TrustedBoardPrior(_ambientBoard, frame.Width, frame.Height,
-                                          cameraId, displayId));
             _boardSetupDiagnostic = null;
             CompleteCameraLatency();
-            BoardSetupStatusText.Text = (_whiteOnlyFallback
-                ? "Physical cardboard found with white-only fallback. "
-                : _whiteEdgeUnavailable
-                ? "White edge unavailable; using trusted ambient cardboard corners. "
-                : $"{(_ambientRecoveredFromPrior ? "Three-edge inferred" : "Four-edge ambient")} " +
-                  $"and white cardboard edges agreed within {_boardCrossCheckErrorPixels:F1} px. ") +
-                "Five-spot registration complete. Content is projected inside " +
+            BoardSetupStatusText.Text = "Five-spot registration complete. Content is projected inside " +
                 $"its detected edges (center check error {error:F4} normalized; " +
                 $"grid inset {_boardGridInset:P1}). " +
                 (_boardProjectionWarning ?? "Press Scan again if the cardboard moves.");
@@ -803,18 +643,6 @@ public sealed partial class MainWindow
             Distance(first.Corners[index], second.Corners[index]) <= limit);
     }
 
-    private static double PhysicalCornerTolerance(int width, int height) =>
-        Math.Max(5, Math.Min(width, height) * 0.0075);
-
-    private static bool PhysicalCornersClose(BoardDetection first, BoardDetection second,
-                                             int width, int height)
-    {
-        if (first.Corners.Length != 4 || second.Corners.Length != 4) return false;
-        var limit = PhysicalCornerTolerance(width, height);
-        return Enumerable.Range(0, 4).All(index =>
-            Distance(first.Corners[index], second.Corners[index]) <= limit);
-    }
-
     private static double Distance(PixelPoint first, PixelPoint second) =>
         Math.Sqrt(Math.Pow(first.X - second.X, 2) + Math.Pow(first.Y - second.Y, 2));
 
@@ -852,43 +680,22 @@ public sealed partial class MainWindow
         }
         if (!_camera.IsRunning)
         {
-            BoardSetupStatusText.Text = "Projector is black. Press Start camera to resume the board scan.";
+            BoardSetupStatusText.Text = "Board light is on. Press Start camera to resume the board scan.";
             return;
         }
         var phase = (BoardSetupPhase)Volatile.Read(ref _boardSetupPhase);
-        if (phase == BoardSetupPhase.ScanAmbient &&
-            Volatile.Read(ref _latestCameraFrame) is { } freshFrame &&
-            MonotonicClock.UtcNow - freshFrame.Timestamp < TimeSpan.FromSeconds(1) &&
-            MonotonicClock.UtcNow - _cameraImageChangedAtUtc < TimeSpan.FromSeconds(2) &&
-            Stopwatch.GetElapsedTime(Interlocked.Read(ref _boardPhaseStartedTick)) >= TimeSpan.FromSeconds(6))
-        {
-            BeginWhiteScan(whiteOnlyFallback: true);
-            phase = BoardSetupPhase.ScanWhite;
-        }
         BoardSetupStatusText.Text = phase switch
         {
-            BoardSetupPhase.ScanAmbient => _boardSetupDiagnostic ??
-                "Projector is black. Looking for four physical cardboard edges by room light.",
             BoardSetupPhase.ScanWhite => _boardSetupDiagnostic ??
-                (_whiteOnlyFallback
-                    ? "Ambient edges unavailable; white-only scan is finding the cardboard and projector field."
-                    : $"White light is cross-checking {(_ambientRecoveredFromPrior ? "three inferred" : "four")} " +
-                      "ambient cardboard edges and projector field."),
+                "Board light is on. Finding the cardboard and projector field.",
             BoardSetupPhase.ShowCorners => "Cardboard corners found. Marking them before alignment. Keep the cardboard still.",
+            BoardSetupPhase.ColorCalibration => _cameraColorCalibrationStatus,
             BoardSetupPhase.MeasureSpots => _boardSetupDiagnostic ??
-                $"{(_whiteOnlyFallback ? "White-only scan" : _whiteEdgeUnavailable
-                    ? "White edge unavailable; using trusted ambient corners"
-                    : $"Black/white edges agree within {_boardCrossCheckErrorPixels:F1} px")}. " +
+                "Cardboard found. " +
                 $"{RegistrationStage(Volatile.Read(ref _spotIndex))} spot " +
                 $"{Volatile.Read(ref _spotIndex) + 1} of 5. " +
                 "Keep the cardboard still.",
-            BoardSetupPhase.GridReady => (_whiteOnlyFallback
-                ? "White-only board scan complete. "
-                : _whiteEdgeUnavailable
-                ? "White edge unavailable; using trusted ambient cardboard corners. "
-                : $"{(_ambientRecoveredFromPrior ? "Three-edge inferred" : "Four-edge ambient")} " +
-                  $"and white board edges agree within {_boardCrossCheckErrorPixels:F1} px. ") +
-                "Five-spot registration complete. Grid is projected inside " +
+            BoardSetupPhase.GridReady => "Five-spot registration complete. Grid is projected inside " +
                 $"its detected edges (center check error {_boardRegistrationError:F4} normalized; " +
                 $"grid inset {_boardGridInset:P1}). " +
                 (_boardProjectionWarning ?? "Press Scan again if the cardboard moves."),
@@ -903,7 +710,7 @@ public sealed partial class MainWindow
         var state = Volatile.Read(ref _latestBoardPreview);
         var phase = (BoardSetupPhase)Volatile.Read(ref _boardSetupPhase);
         if (state is null || state.Width != frame.Width || state.Height != frame.Height ||
-            (phase is BoardSetupPhase.ScanAmbient or BoardSetupPhase.ScanWhite &&
+            (phase == BoardSetupPhase.ScanWhite &&
                 MonotonicClock.UtcNow - state.Timestamp > TimeSpan.FromMilliseconds(700)))
         {
             _animatedBoardCorners = null;

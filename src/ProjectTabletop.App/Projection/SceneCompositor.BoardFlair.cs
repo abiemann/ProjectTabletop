@@ -2,6 +2,7 @@ using System.Numerics;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Geometry;
 using ProjectTabletop.Calibration;
+using ProjectTabletop.Vision;
 using Windows.Foundation;
 using Windows.UI;
 
@@ -9,7 +10,7 @@ namespace ProjectTabletop.App.Projection;
 
 public sealed partial class SceneCompositor
 {
-    // Decoration only. As soon as the white scan knows the cardboard corners,
+    // As soon as the white scan knows the cardboard corners,
     // four orange arrow tips fly from the board's centre and land flush in them as
     // brackets, and test-card strips run along the edges; they stay through the
     // registration dots. Without a previous alignment to place them before the
@@ -57,8 +58,6 @@ public sealed partial class SceneCompositor
     private static readonly Color FlairOrange = Color.FromArgb(255, 255, 131, 31);
     private const double ArrowFlightMilliseconds = 650, ArrowStaggerMilliseconds = 60;
     private const double StripStartMilliseconds = 450, StripSweepMilliseconds = 550;
-    // Strips stay clear of the corner brackets and inside the board's safety inset.
-    private const double StripEnd = .14, StripDepth = .045, StripMargin = .012;
 
     private void DrawBoardFlair(CanvasDrawingSession ds, Rect output, double milliseconds, float opacity)
     {
@@ -108,42 +107,6 @@ public sealed partial class SceneCompositor
         }
     }
 
-    private readonly record struct StripSegment(double Start, double End, double Near, double Far, Color Color);
-
-    // A television test card, reduced to one strip: colour bars, a fine
-    // grating, grey steps, a checker and a coarse grating.
-    private static readonly StripSegment[] TestStrip = CreateTestStrip();
-
-    private static StripSegment[] CreateTestStrip()
-    {
-        var segments = new List<StripSegment>();
-        Color[] bars =
-        [
-            Color.FromArgb(255, 250, 230, 60), Color.FromArgb(255, 70, 200, 235), Color.FromArgb(255, 90, 215, 90),
-            Color.FromArgb(255, 225, 80, 200), Color.FromArgb(255, 230, 70, 50), Color.FromArgb(255, 50, 80, 225)
-        ];
-        Color black = Color.FromArgb(255, 18, 18, 22), white = Color.FromArgb(255, 245, 245, 245);
-        void Run(double from, double to, int count, Func<int, Color> color, bool twoRows = false)
-        {
-            for (int index = 0; index < count; index++)
-            {
-                double start = from + (to - from) * index / count, end = from + (to - from) * (index + 1) / count;
-                if (!twoRows) segments.Add(new(start, end, 0, 1, color(index)));
-                else
-                {
-                    segments.Add(new(start, end, 0, .5, color(index)));
-                    segments.Add(new(start, end, .5, 1, color(index + 1)));
-                }
-            }
-        }
-        Run(0, .30, bars.Length, index => bars[index]);
-        Run(.30, .42, 14, index => index % 2 == 0 ? black : white);
-        Run(.42, .66, 5, index => Color.FromArgb(255, (byte)(20 + index * 56), (byte)(20 + index * 56), (byte)(24 + index * 56)));
-        Run(.66, .84, 6, index => index % 2 == 0 ? black : white, twoRows: true);
-        Run(.84, 1, 6, index => index % 2 == 0 ? black : white);
-        return segments.ToArray();
-    }
-
     private static void DrawTestStrips(CanvasDrawingSession ds, Func<Point2, Vector2> board, double milliseconds)
     {
         for (int edge = 0; edge < 4; edge++)
@@ -151,7 +114,7 @@ public sealed partial class SceneCompositor
             double sweep = Math.Clamp((milliseconds - StripStartMilliseconds - edge * 50) / StripSweepMilliseconds, 0, 1);
             if (sweep <= 0) continue;
             sweep = 1 - Math.Pow(1 - sweep, 3);
-            foreach (var segment in TestStrip)
+            foreach (var segment in BoardCalibrationTestCard.Segments)
             {
                 if (segment.Start >= sweep) continue;
                 double end = Math.Min(segment.End, sweep);
@@ -161,21 +124,14 @@ public sealed partial class SceneCompositor
                     board(StripPoint(edge, end, segment.Far)), board(StripPoint(edge, segment.Start, segment.Far))
                 ];
                 using var shape = CanvasGeometry.CreatePolygon(ds.Device, quad);
-                ds.FillGeometry(shape, segment.Color);
+                ds.FillGeometry(shape, Color.FromArgb(255, segment.Red, segment.Green, segment.Blue));
             }
         }
     }
 
-    // Edges run clockwise from each board corner: top, right, bottom, left.
     private static Point2 StripPoint(int edge, double along, double across)
     {
-        double s = StripEnd + (1 - 2 * StripEnd) * along, depth = StripMargin + StripDepth * across;
-        return edge switch
-        {
-            0 => new(s, depth),
-            1 => new(1 - depth, s),
-            2 => new(1 - s, 1 - depth),
-            _ => new(depth, 1 - s)
-        };
+        var point = BoardCalibrationTestCard.Point(edge, along, across);
+        return new(point.X, point.Y);
     }
 }
