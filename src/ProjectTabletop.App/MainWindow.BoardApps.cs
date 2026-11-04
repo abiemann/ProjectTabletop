@@ -96,7 +96,7 @@ public sealed partial class MainWindow
              {
                  DuckHuntView.TargetPractice => _duckHuntMicrophone.Status + " Hold PLAY beside BACK for one second to start the saloon gallery. Wait for the targets to stop, then hit every paper target. Open the arrow for EXIT, BACK or the next round's PLAY.",
                  DuckHuntView.Hunt => _duckHuntMicrophone.Status + " Aim the red dot at START and click. Hit the ten flying birds for one point each. Open the arrow for EXIT or BACK.",
-                 DuckHuntView.ClayPigeon => _duckHuntMicrophone.Status + " Ten pairs launch automatically, half a second apart within each pair. Aim the red dot and click to shatter a clay. Open the arrow for EXIT or BACK; PLAY AGAIN appears after the final pair.",
+                 DuckHuntView.ClayPigeon => _duckHuntMicrophone.Status + " Hold PLAY beside BACK for one second to begin ten pairs, half a second apart within each pair. Aim the red dot and click to shatter a clay. Open the arrow for EXIT or BACK; PLAY AGAIN appears after the final pair.",
                  _ => "Hold TARGET PRACTICE for the saloon gallery, HUNT for flying birds, or CLAY PIGEON for ten automatic pairs. Laptop clicks also select these modes."
              } :
              !_scene.HasBoardMediaClip ? "Complete board setup to project it." :

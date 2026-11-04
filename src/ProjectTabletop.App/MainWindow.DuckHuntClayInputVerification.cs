@@ -37,12 +37,27 @@ public sealed partial class MainWindow
         Check(scene.DuckHuntBoardReady && scene.ClayState is { Phase: DuckHuntClayPhase.Ready, Paused: true },
             "Clay Pigeon launched before its trained microphone was available.");
         Check(!Snapshot(new(.5, .5), context.Epoch), "Clay Pigeon accepted a shot without microphone readiness.");
+        await Task.Delay(350);
+        Draw();
+        Check(board.DuckHuntDrawerOpen && !board.Buttons.Single(button => button.Id == "duck-hunt-play").Enabled &&
+            !ActivateGalleryPlay(scene), "Clay Pigeon enabled PLAY before its microphone was ready.");
         scene.SetDuckHuntAudioStatus(true, "Isolated microphone fixture");
         Draw();
-        Check(scene.ClayState is { Phase: DuckHuntClayPhase.Playing, Paused: false, Score: 0 },
-            "Clay Pigeon did not start automatically when its existing input became ready.");
-        Check(!board.DuckHuntDrawerOpen && board.Buttons.All(button => !button.Bounds.Contains(.5, .5)),
-            "Clay Pigeon added a start control or opened its drawer before the round.");
+        context = Context();
+        Check(scene.ClayState is { Phase: DuckHuntClayPhase.Ready, Paused: false, Score: 0 } &&
+            board.DuckHuntDrawerOpen && board.Buttons.Single(button => button.Id == "duck-hunt-play").Enabled,
+            "Clay Pigeon did not wait for PLAY after its input became ready.");
+        var playBounds = BoardSession.DuckHuntPlayBounds;
+        Check(Snapshot(new(.5, .5), context.Epoch) &&
+            Snapshot(new(playBounds.X + playBounds.Width / 2, playBounds.Y + playBounds.Height / 2), context.Epoch) &&
+            scene.ClayState is { Phase: DuckHuntClayPhase.Ready, Shots: 0, PairsLaunched: 0 },
+            "A laser-and-click photo started Clay Pigeon through the valley or drawer PLAY.");
+        Check(ActivateGalleryPlay(scene) && !board.DuckHuntDrawerOpen &&
+            scene.ClayState is { Phase: DuckHuntClayPhase.Playing, Paused: false, Score: 0 },
+            "Clay Pigeon's ready PLAY control failed to start the round and close its drawer.");
+        var started = Context();
+        Check(started.Epoch != context.Epoch && !Snapshot(new(.5, .5), context.Epoch),
+            "PLAY reused shot work from before the Clay Pigeon round.");
 
         PrepareMovingPair();
         context = Context();
@@ -90,6 +105,7 @@ public sealed partial class MainWindow
         var began = MonotonicClock.UtcNow - DuckHuntClayGame.RoundDuration - TimeSpan.FromSeconds(1);
         game.Reset(began);
         game.SetReady(true, began);
+        Check(game.Start(began), "The completed-round fixture could not start Clay Pigeon.");
         Draw();
         Check(scene.ClayState.RoundFinished && board.DuckHuntDrawerOpen,
             "The completed clay round failed to open its replay drawer.");
@@ -112,8 +128,9 @@ public sealed partial class MainWindow
         scene.ShowDuckHuntClayPigeon();
         Draw();
         var reopened = Context();
-        Check(reopened.Epoch != replay.Epoch && !Snapshot(new(.5, .5), replay.Epoch),
-            "Reopening Clay Pigeon reused a previous view's photo.");
+        Check(reopened.Epoch != replay.Epoch && !Snapshot(new(.5, .5), replay.Epoch) &&
+            scene.ClayState.Phase == DuckHuntClayPhase.Ready && board.DuckHuntDrawerOpen,
+            "Reopening Clay Pigeon reused an old photo or failed to return to the ready drawer.");
         scene.SetCameraCheckRequired(true);
         Check(scene.ClayState.Paused && !scene.DuckHuntBoardReady &&
             scene.GetDuckHuntInputContext() is null && !Snapshot(new(.5, .5), reopened.Epoch),
@@ -121,15 +138,16 @@ public sealed partial class MainWindow
         scene.SetCameraCheckRequired(false);
         Draw();
         var recovered = Context();
-        Check(!scene.ClayState.Paused && recovered.Epoch != reopened.Epoch,
-            "Camera recovery failed to resume with a fresh input epoch.");
+        Check(scene.ClayState is { Phase: DuckHuntClayPhase.Ready, Paused: false } &&
+            recovered.Epoch != reopened.Epoch,
+            "Camera recovery failed to restore readiness without starting a round.");
         scene.SetBoardSetup(true);
         Draw();
         Check(!scene.DuckHuntBoardReady && scene.ClayState.Paused &&
             scene.GetDuckHuntInputContext() is null && !Snapshot(new(.5, .5), recovered.Epoch),
             "Board calibration allowed a clay shot or continued the round.");
         return new { Ok = true, Assertions = assertions, RealClockSnapshotGate = true,
-            AutomaticStart = true, PhotoTimeMovingHits = 2, ReplayInvalidatesEpoch = true,
+            WaitsForPlay = true, PhotoTimeMovingHits = 2, ReplayInvalidatesEpoch = true,
             MeasuredProjectionDelay = true, DelayedAdjacentPhoto = true };
 
         async Task CheckProjectionTiming(bool ambiguous)
@@ -138,6 +156,7 @@ public sealed partial class MainWindow
             var began = MonotonicClock.UtcNow.AddSeconds(-1);
             game.Reset(began);
             game.SetReady(true, began);
+            Check(game.Start(began), "The projection-timing fixture could not start Clay Pigeon.");
             Draw();
             var input = Context();
             await Task.Delay(250);
@@ -149,6 +168,7 @@ public sealed partial class MainWindow
             var photographed = new DuckHuntClayGame();
             photographed.Reset(began);
             photographed.SetReady(true, began);
+            Check(photographed.Start(began), "The photographed clay fixture could not start.");
             photographed.Advance(photo - delay);
             var targetPose = photographed.Targets[0];
             var aim = new BoardAim(targetPose.U, targetPose.V);
@@ -175,6 +195,7 @@ public sealed partial class MainWindow
             var began = MonotonicClock.UtcNow.AddSeconds(-2);
             game.Reset(began);
             game.SetReady(true, began);
+            Check(game.Start(began), "The moving-pair fixture could not start Clay Pigeon.");
             Draw();
         }
         SceneCompositor.DuckHuntInputContext Context() => scene.GetDuckHuntInputContext() ??

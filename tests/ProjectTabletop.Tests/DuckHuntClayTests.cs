@@ -16,9 +16,10 @@ public class DuckHuntClayTests
     {
         var game = new DuckHuntClayGame();
         game.SetReady(true, At(0));
-        Assert.Equal(DuckHuntClayPhase.Playing, game.Snapshot.Phase);
+        Assert.Equal(DuckHuntClayPhase.Ready, game.Snapshot.Phase);
         Assert.False(game.Snapshot.Paused);
         Assert.Equal(0, game.Snapshot.PairsLaunched);
+        Assert.True(game.Start(At(0)));
         game.Advance(At(Launch(0)));
         Assert.Equal(1, game.Snapshot.PairsLaunched);
         Assert.True(game.Targets[0].Visible);
@@ -26,25 +27,41 @@ public class DuckHuntClayTests
     }
 
     [Fact]
-    public void EntryWaitsForReadinessThenAutomaticallyLaunchesStaggeredPairs()
+    public void ReadinessAndClicksWaitForPlayThenLaunchStaggeredPairsFromThePress()
     {
         var game = new DuckHuntClayGame();
         game.Reset(At(0));
         game.Advance(At(10));
         Assert.Equal(DuckHuntClayPhase.Ready, game.Snapshot.Phase);
         Assert.True(game.Snapshot.Paused);
+        Assert.False(game.Start(At(10)));
         Assert.All(game.Targets, target => Assert.False(target.Visible));
         game.SetReady(true, At(10));
+        var waiting = game.Snapshot;
+        var waitingTargets = game.Targets.ToArray();
+        game.Advance(At(12));
+        Assert.Equal(waiting, game.Snapshot);
+        Assert.Equal(waitingTargets, game.Targets);
+        game.Advance(At(100));
+        Assert.Equal(waiting, game.Snapshot);
+        Assert.Equal(waitingTargets, game.Targets);
+        Assert.Equal(DuckHuntClayPhase.Ready, game.Snapshot.Phase);
+        Assert.Equal(0, game.Snapshot.PairsLaunched);
+        Assert.All(game.Targets, target => Assert.False(target.Visible));
+        Assert.False(game.Shoot(new(.5, .5), At(100)));
+        Assert.False(game.Start(At(99)));
+        Assert.True(game.Start(At(100)));
+        Assert.False(game.Start(At(100.1)));
         Assert.Equal(DuckHuntClayPhase.Playing, game.Snapshot.Phase);
         Assert.Equal(0, game.Snapshot.Shots);
-        game.Advance(At(10 + Launch(0)));
+        game.Advance(At(100 + Launch(0)));
         Assert.Equal(1, game.Snapshot.PairsLaunched);
         Assert.True(game.Targets[0].Visible);
         Assert.True(game.Targets[0].V > 1);
         Assert.False(game.Targets[1].Visible);
-        game.Advance(At(10 + Launch(1) - .001));
+        game.Advance(At(100 + Launch(1) - .001));
         Assert.False(game.Targets[1].Visible);
-        game.Advance(At(10 + Launch(1)));
+        game.Advance(At(100 + Launch(1)));
         Assert.Equal(2, game.Targets.Count(target => target.Visible));
         Assert.Equal(0, game.Targets[1].FlightSeconds);
         Assert.Equal(.5, game.Targets[0].FlightSeconds, 10);
@@ -130,7 +147,7 @@ public class DuckHuntClayTests
         Assert.Equal(impact, game.Targets[0].Impact);
         Assert.Equal(.4, game.Targets[0].HitElapsed, 10);
         game.Advance(At(100));
-        Assert.True(game.Restart(At(101)));
+        Assert.True(game.Start(At(101)));
         Assert.Equal(0, game.Snapshot.Score);
         Assert.All(game.Targets, target =>
         {
@@ -282,15 +299,26 @@ public class DuckHuntClayTests
     }
 
     [Fact]
-    public void FinishOpensDrawerAndPlayAgainClosesItWithFreshAutomaticRound()
+    public void EntryOpensPlayDrawerAndReplayClosesItWithFreshRound()
     {
         var board = new BoardSession();
         board.ShowDuckHuntClayPigeon(At(0));
         Assert.Equal(DuckHuntView.ClayPigeon, board.CurrentDuckHuntView);
-        Assert.False(board.DuckHuntDrawerOpen);
+        Assert.True(board.DuckHuntDrawerOpen);
+        Assert.Equal(["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-back", "duck-hunt-play"],
+            board.Buttons.Select(button => button.Id));
         Assert.DoesNotContain(board.Buttons, button => button.Label is "START" or "PLAY AGAIN");
         Assert.False(board.ActivateButton("duck-hunt-start", At(.1)));
+        Assert.False(board.ActivateButton("duck-hunt-play", At(.1)));
         board.SetDuckHuntReady(true, At(.2));
+        board.TickDuckHunt(At(.3));
+        Assert.Equal(DuckHuntClayPhase.Ready, board.ClayState.Phase);
+        var play = Assert.Single(board.Buttons, button => button.Id == "duck-hunt-play");
+        Assert.Equal("PLAY", play.Label);
+        Assert.Equal(BoardButtonHold.Once, play.Hold);
+        Assert.Equal(BoardSession.DuckHuntPlayBounds, play.Bounds);
+        Assert.True(board.ActivateButton(play.Id, At(.4)));
+        Assert.False(board.DuckHuntDrawerOpen);
         Assert.Equal(DuckHuntClayPhase.Playing, board.ClayState.Phase);
         Assert.Equal(DuckHuntFlightPhase.Ready, board.HuntFlightState.Phase);
         Assert.Equal(DuckHuntGalleryPhase.Ready, board.GalleryState.Phase);
@@ -315,11 +343,64 @@ public class DuckHuntClayTests
     }
 
     [Fact]
+    public void InitialPlayNeedsReadyInputAndFreshLetteringAfterReadinessChanges()
+    {
+        const string play = "duck-hunt-play";
+        var board = new BoardSession();
+        board.ShowDuckHuntClayPigeon(At(0));
+        board.TickDuckHunt(At(.3));
+        Assert.False(board.Buttons.Single(button => button.Id == play).Enabled);
+        Assert.False(board.ActivateButton(play, At(.35)));
+        board.SetDuckHuntReady(true, At(.4));
+        for (int step = 5; step <= 16; step++)
+            Assert.Empty(board.ObserveHeldButtons([play], At(step / 10d), At(step / 10d), []));
+        board.ObserveHeldButtons([], At(1.7), At(1.7), [play]);
+        for (int step = 18; step <= 23; step++)
+            Assert.Empty(board.ObserveHeldButtons([play], At(step / 10d), At(step / 10d), []));
+        board.SetDuckHuntReady(false, At(2.35));
+        Assert.False(board.ActivateButton(play, At(2.36)));
+        board.SetDuckHuntReady(true, At(2.4));
+        for (int step = 25; step <= 37; step++)
+            Assert.Empty(board.ObserveHeldButtons([play], At(step / 10d), At(step / 10d), []));
+        Assert.Equal(DuckHuntClayPhase.Ready, board.ClayState.Phase);
+        Assert.Equal(0, board.ClayState.PairsLaunched);
+        board.ObserveHeldButtons([], At(3.8), At(3.8), [play]);
+        for (int step = 39; step < 49; step++)
+            Assert.Empty(board.ObserveHeldButtons([play], At(step / 10d), At(step / 10d), []));
+        Assert.Equal([play], board.ObserveHeldButtons([play], At(4.9), At(4.9), []));
+        Assert.False(board.DuckHuntDrawerOpen);
+        Assert.Equal(DuckHuntClayPhase.Playing, board.ClayState.Phase);
+    }
+
+    [Fact]
+    public void BackAndReentryRequireAnotherPlayInsteadOfResumingTheOldRound()
+    {
+        var board = new BoardSession();
+        board.ShowDuckHuntClayPigeon(At(0));
+        board.SetDuckHuntReady(true, At(0));
+        Assert.True(board.ActivateButton("duck-hunt-play", At(.4)));
+        board.TickDuckHunt(At(2));
+        Assert.Contains(board.ClayTargets, target => target.Visible);
+        Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(2.1)));
+        Assert.True(board.ActivateButton("duck-hunt-back", At(2.5)));
+        Assert.Equal(DuckHuntView.Menu, board.CurrentDuckHuntView);
+        Assert.True(board.ActivateButton("duck-hunt-clay-pigeon", At(2.8)));
+        board.SetDuckHuntReady(true, At(3));
+        board.TickDuckHunt(At(100));
+        Assert.True(board.DuckHuntDrawerOpen);
+        Assert.Equal(DuckHuntClayPhase.Ready, board.ClayState.Phase);
+        Assert.Equal(0, board.ClayState.PairsLaunched);
+        Assert.All(board.ClayTargets, target => Assert.False(target.Visible));
+    }
+
+    [Fact]
     public void FinishedReplayRequiresClearLetteringAndFullHoldAfterDrawerSettles()
     {
         var board = new BoardSession();
         board.ShowDuckHuntClayPigeon(At(0));
         board.SetDuckHuntReady(true, At(0));
+        board.TickDuckHunt(At(.3));
+        Assert.True(board.ActivateButton("duck-hunt-play", At(.4)));
         board.TickDuckHunt(At(100));
         board.TickDuckHunt(At(100.3));
         const string replay = "duck-hunt-play-again";
@@ -339,6 +420,7 @@ public class DuckHuntClayTests
         var game = new DuckHuntClayGame();
         game.Reset(At(0));
         game.SetReady(true, At(0));
+        Assert.True(game.Start(At(0)));
         return game;
     }
 }

@@ -59,19 +59,16 @@ public class DuckHuntViewsTests
         Assert.Equal(expected, board.CurrentDuckHuntView);
         Assert.Equal(epoch + 1, board.DuckHuntRoundRevision);
         Assert.True(board.Revision > revision);
-        bool startsWithPlay = expected is DuckHuntView.TargetPractice or DuckHuntView.Hunt;
-        Assert.Equal(startsWithPlay, board.DuckHuntDrawerOpen);
-        string handle = startsWithPlay ? "duck-hunt-drawer-close" : "duck-hunt-drawer-open";
+        Assert.True(board.DuckHuntDrawerOpen);
+        const string handle = "duck-hunt-drawer-close";
         Assert.Contains(board.Buttons, button => button.Id == handle);
-        if (startsWithPlay)
-            Assert.All(board.Buttons.Where(button => button.Id != handle), button => Assert.False(button.Enabled));
-        else Assert.Single(board.Buttons);
+        Assert.All(board.Buttons.Where(button => button.Id != handle), button => Assert.False(button.Enabled));
         Assert.Empty(board.HoldProgress(At(2400)));
         // Frames from the old menu cannot prime the new view's controls.
         Assert.Empty(board.ObserveHeldButtons([], At(2399), At(2450), [handle]));
         for (int ms = 2500; ms <= 3600; ms += 100)
             Assert.Empty(board.ObserveHeldButtons([handle], At(ms), At(ms), []));
-        Assert.Equal(startsWithPlay, board.DuckHuntDrawerOpen);
+        Assert.True(board.DuckHuntDrawerOpen);
     }
 
     [Theory]

@@ -178,11 +178,29 @@ public sealed partial class MainWindow
                     ["duck-hunt-target-practice", "duck-hunt-hunt", "duck-hunt-clay-pigeon", "duck-hunt-drawer-open"]),
                 "HUNT BACK did not restore the welcome choices with its drawer closed.");
             await HoldControl("duck-hunt-clay-pigeon", DuckHuntView.ClayPigeon);
+            now += TimeSpan.FromMilliseconds(300);
+            Draw();
             Check(scene.DuckHuntBoardReady && scene.DuckHuntInputReady && scene.GetDuckHuntInputContext() is not null &&
-                board.ClayState.Phase == DuckHuntClayPhase.Playing && !board.ClayState.Paused,
-                "CLAY PIGEON did not automatically start with calibrated camera and microphone input.");
-            Check(board.Buttons.Select(button => button.Id).SequenceEqual(["duck-hunt-drawer-open"]),
-                "CLAY PIGEON exposes a START control or an early replay button.");
+                board.ClayState is { Phase: DuckHuntClayPhase.Ready, Paused: false } && board.DuckHuntDrawerOpen,
+                "CLAY PIGEON did not wait for PLAY in its expanded drawer.");
+            Check(board.Buttons.Select(button => button.Id).SequenceEqual(
+                ["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-back", "duck-hunt-play"]) &&
+                board.Buttons.All(button => button.Enabled), "CLAY PIGEON's initial drawer is missing EXIT, BACK or PLAY.");
+            CheckBackLayout();
+            var clayPlay = board.Buttons.Single(button => button.Id == "duck-hunt-play");
+            var clayBack = board.Buttons.Single(button => button.Id == "duck-hunt-back");
+            Check(clayPlay.Bounds == BoardSession.DuckHuntPlayBounds && clayPlay.Hold == BoardButtonHold.Once &&
+                Math.Abs(clayPlay.Bounds.X - clayBack.Bounds.X - clayBack.Bounds.Width - .01) < .000001,
+                "CLAY PIGEON PLAY does not use the standard hold button and gap beside BACK.");
+            now += TimeSpan.FromSeconds(30);
+            Draw();
+            Check(!scene.SubmitDuckHuntShot(new(.5, .5), now) &&
+                board.ClayState is { Phase: DuckHuntClayPhase.Ready, Shots: 0, PairsLaunched: 0 } &&
+                board.ClayTargets.All(clay => !clay.Visible),
+                "Waiting or shooting the valley started clays without a PLAY hold.");
+            await HoldControl("duck-hunt-play", DuckHuntView.ClayPigeon, "clay-pigeon-started", checkReadinessReset: true);
+            Check(board.ClayState.Phase == DuckHuntClayPhase.Playing && !board.DuckHuntDrawerOpen,
+                "CLAY PIGEON PLAY did not start the round and close its drawer.");
             now += DuckHuntClayGame.LaunchDelay + DuckHuntClayGame.SecondClayDelay + TimeSpan.FromSeconds(.5);
             byte[] valley = Draw();
             Check(!field.AsSpan().SequenceEqual(valley) && board.ClayTargets.Count(clay => clay.Visible) == 2,
@@ -208,7 +226,7 @@ public sealed partial class MainWindow
             Check(board.ActivateButton("duck-hunt-exit", now) && board.Screen == BoardScreen.Menu && board.MenuScrolled,
                 "EXIT did not return to the main menu's preserved second page.");
             results.Add(new { dimensions.Name, Width = dimensions.Width, Height = dimensions.Height,
-                CaptionHolds = 8, PracticeWaitsForCaptionHold = true, HuntWaitsForCaptionHold = true, ClayStartsAutomatically = true,
+                CaptionHolds = 9, PracticeWaitsForCaptionHold = true, HuntWaitsForCaptionHold = true, ClayWaitsForCaptionHold = true,
                 BackReturnsToWelcome = true, ExitReturnsToPageTwo = true });
 
             void CheckBackLayout()
@@ -265,7 +283,7 @@ public sealed partial class MainWindow
                 {
                     for (int i = 0; i < 5; i++) Check(Feed(true).Count == 0, "PLAY activated before a full hold.");
                     scene.SetDuckHuntAudioStatus(false, "Isolated readiness loss");
-                    Check(!ActivateGalleryPlay(scene) && scene.GalleryState.PlayVisible,
+                    Check(!ActivateGalleryPlay(scene) && !board.Buttons.Single(button => button.Id == id).Enabled,
                         "PLAY started without a microphone before the next render.");
                     scene.SetDuckHuntAudioStatus(true, "Isolated microphone fixture");
                     for (int i = 0; i < 12; i++) Check(Feed(true).Count == 0,

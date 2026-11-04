@@ -43,7 +43,7 @@ public sealed partial class BoardSession
         ClearBottomDrawerUi(_duckHuntDrawer);
         _duckHuntDrawer.ObservedAt = Later(_duckHuntDrawer.ObservedAt, now);
         // No old caption, click snapshot or hand selection may cross a view change.
-        if (view is DuckHuntView.TargetPractice or DuckHuntView.Hunt)
+        if (view != DuckHuntView.Menu)
             SelectBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, open: true, now);
         else BottomDrawerInputBarrier(_duckHuntDrawer, now);
     }
@@ -79,7 +79,7 @@ public sealed partial class BoardSession
             _clay.SetReady(ready && double.IsFinite(boardAspect) && boardAspect > 0, now);
             FinishDuckHuntClay(wasFinished, now);
             if (clayWasPaused != _clay.Snapshot.Paused)
-                ResetHoldCaptionEvidence(["duck-hunt-play-again"], now);
+                ResetHoldCaptionEvidence(["duck-hunt-play", "duck-hunt-play-again"], now);
             return;
         }
         if (Screen == BoardScreen.DuckHunt && CurrentDuckHuntView == DuckHuntView.Hunt)
@@ -190,8 +190,14 @@ public sealed partial class BoardSession
             buttons.Add(new("duck-hunt-back", "BACK", DuckHuntBackBounds, BoardScreen.DuckHunt,
                 Enabled: _duckHuntDrawer.OpeningReady, Hold: BoardButtonHold.Once));
         bool playVisible = CurrentDuckHuntView == DuckHuntView.TargetPractice && _gallery.Snapshot.PlayVisible ||
-            CurrentDuckHuntView == DuckHuntView.Hunt && _huntFlight.Snapshot.PlayVisible;
-        bool playPaused = CurrentDuckHuntView == DuckHuntView.Hunt ? _huntFlight.Snapshot.Paused : _gallery.Snapshot.Paused;
+            CurrentDuckHuntView == DuckHuntView.Hunt && _huntFlight.Snapshot.PlayVisible ||
+            CurrentDuckHuntView == DuckHuntView.ClayPigeon && _clay.Snapshot.Phase == DuckHuntClayPhase.Ready;
+        bool playPaused = CurrentDuckHuntView switch
+        {
+            DuckHuntView.Hunt => _huntFlight.Snapshot.Paused,
+            DuckHuntView.ClayPigeon => _clay.Snapshot.Paused,
+            _ => _gallery.Snapshot.Paused
+        };
         if (playVisible)
             buttons.Add(new("duck-hunt-play", "PLAY", DuckHuntPlayBounds, BoardScreen.DuckHunt,
                 Enabled: _duckHuntDrawer.OpeningReady && !playPaused, Hold: BoardButtonHold.Once));
@@ -222,15 +228,19 @@ public sealed partial class BoardSession
         if (!DuckHuntDrawerOpen || !_duckHuntDrawer.OpeningReady) return false;
         if (button.Id == "duck-hunt-play-again" && CurrentDuckHuntView == DuckHuntView.ClayPigeon)
         {
-            if (!_clay.Restart(now)) return false;
+            if (!_clay.Start(now)) return false;
             DuckHuntRoundRevision++;
             SelectBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, open: false, now);
             return true;
         }
-        if (button.Id == "duck-hunt-play" && CurrentDuckHuntView is DuckHuntView.TargetPractice or DuckHuntView.Hunt)
+        if (button.Id == "duck-hunt-play" && CurrentDuckHuntView != DuckHuntView.Menu)
         {
-            bool started = CurrentDuckHuntView == DuckHuntView.Hunt
-                ? _huntFlight.Start(now, _huntFlightBoardAspect) : _gallery.Start(now);
+            bool started = CurrentDuckHuntView switch
+            {
+                DuckHuntView.Hunt => _huntFlight.Start(now, _huntFlightBoardAspect),
+                DuckHuntView.ClayPigeon => _clay.Start(now),
+                _ => _gallery.Start(now)
+            };
             if (!started) return false;
             DuckHuntRoundRevision++;
             SelectBottomDrawer(_duckHuntDrawer, BoardScreen.DuckHunt, open: false, now);

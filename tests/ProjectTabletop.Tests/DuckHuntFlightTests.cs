@@ -191,16 +191,18 @@ public class DuckHuntFlightTests
     public void ConfirmationJustAfterEscapeStillTestsTheVisibleHistoricalBird(int side, double aspect)
     {
         var game = Started(new SequenceRandom(side), aspect);
-        game.Advance(At(6530));
+        var escape = At(650) + DurationForBird(1);
+        var photoTime = escape.AddMilliseconds(-120);
+        game.Advance(photoTime);
         var photographed = game.Snapshot;
         var bounds = DuckHuntFlightLayout.SpriteBounds(photographed, aspect);
         var aim = new BoardAim(side == 0 ? .998 : .002,
             bounds.Y + bounds.Height * (DuckHuntFlightLayout.BodyArtworkBounds.Y +
                 DuckHuntFlightLayout.BodyArtworkBounds.Height * .61));
         Assert.True(DuckHuntFlightLayout.ContainsBird(aim, photographed, aspect));
-        game.Advance(At(6660));
+        game.Advance(escape.AddMilliseconds(10));
         Assert.Equal(DuckHuntFlightPhase.BetweenBirds, game.Snapshot.Phase);
-        Assert.True(game.Shoot(aim, At(6530), aspect));
+        Assert.True(game.Shoot(aim, photoTime, aspect));
         Assert.Equal(DuckHuntFlightPhase.Hit, game.Snapshot.Phase);
         Assert.Equal(1, game.Snapshot.Score);
         Assert.Equal(1, game.Snapshot.BirdsLaunched);
@@ -239,30 +241,29 @@ public class DuckHuntFlightTests
     public void TenMixedBirdsFinishAndOnlyAFreshPlayActionBeginsAnotherRound()
     {
         var game = Started();
-        double launch = 650;
+        var launch = At(650);
         for (int bird = 1; bird <= 10; bird++)
         {
-            game.Advance(At(launch));
+            game.Advance(launch);
             Assert.Equal(bird, game.Snapshot.BirdsLaunched);
             if (bird % 2 == 1)
             {
-                game.Advance(At(launch + 2000));
-                Assert.True(game.Shoot(BodyCentre(game.Snapshot), At(launch + 2000)));
-                launch += 2000 + DuckHuntFlightGame.HitDuration.TotalMilliseconds +
-                    DuckHuntFlightGame.BetweenBirdsDuration.TotalMilliseconds;
+                game.Advance(launch.AddSeconds(2));
+                Assert.True(game.Shoot(BodyCentre(game.Snapshot), launch.AddSeconds(2)));
+                launch += TimeSpan.FromSeconds(2) + DuckHuntFlightGame.HitDuration +
+                    DuckHuntFlightGame.BetweenBirdsDuration;
             }
-            else launch += DurationForBird(bird).TotalMilliseconds +
-                DuckHuntFlightGame.BetweenBirdsDuration.TotalMilliseconds;
+            else launch += DurationForBird(bird) + DuckHuntFlightGame.BetweenBirdsDuration;
         }
-        game.Advance(At(launch));
+        game.Advance(launch);
         Assert.Equal(DuckHuntFlightPhase.Finished, game.Snapshot.Phase);
         Assert.Equal(10, game.Snapshot.BirdsLaunched);
         Assert.Equal(5, game.Snapshot.Score);
         Assert.True(game.Snapshot.PlayVisible);
-        Assert.False(game.Shoot(new(.5, .5), At(launch - 1)));
-        Assert.False(game.Shoot(new(.5, .5), At(launch + 1)));
-        Assert.False(game.Start(At(launch)));
-        Assert.True(game.Start(At(launch + 1)));
+        Assert.False(game.Shoot(new(.5, .5), launch.AddMilliseconds(-1)));
+        Assert.False(game.Shoot(new(.5, .5), launch.AddMilliseconds(1)));
+        Assert.False(game.Start(launch));
+        Assert.True(game.Start(launch.AddMilliseconds(1)));
         Assert.Equal(0, game.Snapshot.Score);
         Assert.Equal(0, game.Snapshot.BirdsLaunched);
         Assert.Equal(DuckHuntFlightPhase.Launching, game.Snapshot.Phase);
@@ -282,7 +283,8 @@ public class DuckHuntFlightTests
             var start = game.Snapshot;
             game.Advance(launch.AddMilliseconds(200));
             double speed = (start.V - game.Snapshot.V) / .2;
-            if (bird > 1) Assert.Equal(1.1, speed / previousSpeed, 6);
+            if (bird == 1) Assert.Equal(1.1, speed / (.53 / 6), 6);
+            else Assert.Equal(1.1, speed / previousSpeed, 6);
             previousSpeed = speed;
             game.Advance(launch + duration - TimeSpan.FromTicks(1));
             Assert.Equal(DuckHuntFlightPhase.Flying, game.Snapshot.Phase);
@@ -295,13 +297,14 @@ public class DuckHuntFlightTests
         Assert.Equal(0, game.Snapshot.Score);
         Assert.True(game.Start(launch.AddTicks(1)));
         launch += TimeSpan.FromTicks(1) + DuckHuntFlightGame.LaunchDelay;
-        game.Advance(launch.AddSeconds(3));
+        var halfFlight = DurationForBird(1) / 2;
+        game.Advance(launch + halfFlight);
         Assert.Equal(1, game.Snapshot.BirdsLaunched);
         Assert.Equal(.455, game.Snapshot.V, 10);
         game.Reset(launch.AddSeconds(4));
         game.SetReady(true, launch.AddSeconds(4));
         Assert.True(game.Start(launch.AddSeconds(4).AddTicks(1)));
-        game.Advance(launch.AddSeconds(7).AddTicks(1) + DuckHuntFlightGame.LaunchDelay);
+        game.Advance(launch.AddSeconds(4).AddTicks(1) + DuckHuntFlightGame.LaunchDelay + halfFlight);
         Assert.Equal(1, game.Snapshot.BirdsLaunched);
         Assert.Equal(.455, game.Snapshot.V, 10);
     }
@@ -332,7 +335,7 @@ public class DuckHuntFlightTests
     }
 
     private static TimeSpan DurationForBird(int number) =>
-        TimeSpan.FromTicks((long)Math.Round(TimeSpan.FromSeconds(6).Ticks / Math.Pow(1.1, number - 1)));
+        TimeSpan.FromTicks((long)Math.Round(TimeSpan.FromSeconds(6 / 1.1).Ticks / Math.Pow(1.1, number - 1)));
 
     [Fact]
     public void SparseTicksStopAfterExactlyTenEscapesAndStaleAimCannotScoreOrRestart()
@@ -472,14 +475,15 @@ public class DuckHuntFlightTests
         Assert.Equal([play], board.ObserveHeldButtons([play], At(2800), At(2800), []));
         Assert.False(board.DuckHuntDrawerOpen);
         Assert.Equal(epoch + 1, board.DuckHuntRoundRevision);
-        board.TickDuckHunt(At(9349)); // One millisecond before the first bird escapes.
+        var escape = At(2800) + DuckHuntFlightGame.LaunchDelay + DurationForBird(1);
+        board.TickDuckHunt(escape.AddMilliseconds(-1));
         var bird = board.HuntFlightState;
         var bounds = DuckHuntFlightLayout.SpriteBounds(bird, aspect);
         Assert.True(bird.Direction > 0 ? bounds.X > 1 : bounds.X + bounds.Width < 0);
-        Assert.True(board.ActivateButton("duck-hunt-drawer-open", At(9350)));
-        board.TickDuckHunt(At(9700));
+        Assert.True(board.ActivateButton("duck-hunt-drawer-open", escape));
+        board.TickDuckHunt(escape.AddMilliseconds(350));
         Assert.DoesNotContain(board.Buttons, button => button.Id == play);
-        Assert.False(board.ActivateButton(play, At(9710)));
+        Assert.False(board.ActivateButton(play, escape.AddMilliseconds(360)));
     }
 
     [Fact]

@@ -75,6 +75,7 @@ public sealed class DuckHuntProjectionTimingTests
         Assert.Equal(0, game.Snapshot.Shots);
         game.Reset(At(2100));
         game.SetReady(true, At(2100));
+        Assert.True(game.Start(At(2100)));
         Assert.False(game.Shoot(aim, At(2180), 1, At(2095)));
         Assert.Equal(0, game.Snapshot.Shots);
     }
@@ -132,11 +133,12 @@ public sealed class DuckHuntProjectionTimingTests
         var aim = BirdCentre(game.Snapshot);
         Assert.False(game.Shoot(aim, At(700), 1, At(615)));
         Assert.Equal(0, game.Snapshot.Shots);
-        game.Advance(At(7350));
+        var secondLaunch = At(650) + DuckHuntFlightGame.FlightDuration + DuckHuntFlightGame.BetweenBirdsDuration;
+        game.Advance(secondLaunch);
         Assert.Equal(2, game.Snapshot.BirdsLaunched);
-        Assert.False(game.Shoot(BirdCentre(game.Snapshot), At(7350), 1, At(7265)));
+        Assert.False(game.Shoot(BirdCentre(game.Snapshot), secondLaunch, 1, secondLaunch.AddMilliseconds(-85)));
         Assert.Equal(0, game.Snapshot.Score);
-        game.SetReady(false, At(7400));
+        game.SetReady(false, secondLaunch.AddMilliseconds(50));
         game.SetReady(true, At(10000));
         Assert.False(game.Shoot(BirdCentre(game.Snapshot), At(10000), 1, At(9915)));
         Assert.Equal(0, game.Snapshot.Score);
@@ -238,6 +240,8 @@ public sealed class DuckHuntProjectionTimingTests
         var board = new BoardSession();
         board.ShowDuckHuntClayPigeon(At(0));
         board.SetDuckHuntReady(true, At(0));
+        board.TickDuckHunt(At(300));
+        Assert.True(board.ActivateButton("duck-hunt-play", At(400)));
         board.TickDuckHunt(At(1350));
         var target = board.ClayTargets[0];
         board.TickDuckHunt(At(1435));
@@ -252,7 +256,8 @@ public sealed class DuckHuntProjectionTimingTests
 
     private static DuckHuntClayGame Clay()
     {
-        var game = new DuckHuntClayGame(); game.Reset(At(0)); game.SetReady(true, At(0)); return game;
+        var game = new DuckHuntClayGame(); game.Reset(At(0)); game.SetReady(true, At(0));
+        Assert.True(game.Start(At(0))); return game;
     }
 
     private static DuckHuntFlightGame Flight()

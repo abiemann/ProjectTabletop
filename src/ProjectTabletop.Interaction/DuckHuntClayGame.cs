@@ -75,17 +75,18 @@ public sealed class DuckHuntClayGame
             _roundStartedAt += now - _pausedAt!.Value;
             _pausedAt = null;
             _inputNotBefore = now;
-            if (_phase == DuckHuntClayPhase.Ready) _phase = DuckHuntClayPhase.Playing;
         }
         _ready = ready;
         Publish(now);
     }
 
-    public bool Restart(DateTimeOffset now)
+    public bool Start(DateTimeOffset now)
     {
-        if (!_ready || !_snapshot.RoundFinished || now < _observedAt) return false;
+        if (!_ready || _phase == DuckHuntClayPhase.Playing || now < _observedAt) return false;
         Reset(now);
         SetReady(true, now);
+        _phase = DuckHuntClayPhase.Playing;
+        Publish(now);
         return true;
     }
 
@@ -161,7 +162,7 @@ public sealed class DuckHuntClayGame
 
     private void Publish(DateTimeOffset now)
     {
-        double seconds = Math.Max(0, (now - _roundStartedAt).TotalSeconds);
+        double seconds = _phase == DuckHuntClayPhase.Ready ? 0 : Math.Max(0, (now - _roundStartedAt).TotalSeconds);
         bool changed = false;
         double finishAt = RoundDuration.TotalSeconds;
         for (int id = 0; id < TargetsPerRound; id++)

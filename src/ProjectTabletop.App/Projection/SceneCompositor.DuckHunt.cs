@@ -250,7 +250,7 @@ public sealed partial class SceneCompositor
         {
             if (_boardSession.Screen != BoardScreen.DuckHunt) return false;
             var now = _blackjackClock();
-            if (_boardSession.CurrentDuckHuntView is DuckHuntView.TargetPractice or DuckHuntView.Hunt)
+            if (_boardSession.CurrentDuckHuntView != DuckHuntView.Menu)
                 UpdateDuckHuntRound(now);
             var button = _boardSession.Buttons.FirstOrDefault(button => button.Enabled && button.Bounds.Contains(u, v));
             return button is not null && _boardSession.ActivateButton(button.Id, now);

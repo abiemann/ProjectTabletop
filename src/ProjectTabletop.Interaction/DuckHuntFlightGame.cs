@@ -19,7 +19,7 @@ public sealed class DuckHuntFlightGame(Random? random = null)
 {
     public const int BirdsPerRound = 10;
     public static readonly TimeSpan LaunchDelay = TimeSpan.FromSeconds(.55);
-    public static readonly TimeSpan FlightDuration = TimeSpan.FromSeconds(6);
+    public static readonly TimeSpan FlightDuration = TimeSpan.FromSeconds(6 / 1.1);
     public static readonly TimeSpan HitDuration = TimeSpan.FromSeconds(.65);
     public static readonly TimeSpan BetweenBirdsDuration = TimeSpan.FromSeconds(.70);
     private readonly Random _random = random ?? Random.Shared;

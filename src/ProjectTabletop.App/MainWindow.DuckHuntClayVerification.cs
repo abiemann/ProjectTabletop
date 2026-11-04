@@ -42,20 +42,36 @@ public sealed partial class MainWindow
                 Homography.FromFourPoints([new(0, 0), new(dimensions.Width, 0), new(dimensions.Width, dimensions.Height), new(0, dimensions.Height)],
                     [new(0, 0), new(1, 0), new(1, 1), new(0, 1)]));
             scene.SetBoardSetup(false);
+            // Calibration resets input with the host clock. Start the simulated
+            // view afterward so its drawer request is not an obsolete event.
+            now = MonotonicClock.UtcNow;
             scene.ShowDuckHuntClayPigeon();
             await scene.EnsureBoardArtworkResourcesAsync(target.Device, BoardScreen.DuckHunt);
             now = MonotonicClock.UtcNow.AddSeconds(1);
             scene.SetDuckHuntAudioStatus(true, "Isolated clay fixture");
             Draw();
-            var roundStart = now;
             Check(scene.DuckHuntArtworkReady && scene.DuckHuntBoardReady && scene.DuckHuntInputReady,
                 "Clay Pigeon did not publish its artwork and calibrated input.");
-            Check(scene.ClayState is { Phase: DuckHuntClayPhase.Playing, Paused: false, PairsLaunched: 0 },
-                "Clay Pigeon did not automatically begin once ready.");
-            Check(board.Buttons.Select(button => button.Id).SequenceEqual(["duck-hunt-drawer-open"]),
-                "Clay Pigeon exposed controls before the drawer was opened.");
+            Check(scene.ClayState is { Phase: DuckHuntClayPhase.Ready, Paused: false, PairsLaunched: 0 } &&
+                board.DuckHuntDrawerOpen && board.Buttons.Select(button => button.Id).SequenceEqual(
+                    ["duck-hunt-drawer-close", "duck-hunt-exit", "duck-hunt-back", "duck-hunt-play"]),
+                $"Clay Pigeon did not wait with EXIT, BACK and PLAY in its expanded drawer: " +
+                $"state={scene.ClayState}, open={board.DuckHuntDrawerOpen}, " +
+                $"buttons={string.Join(',', board.Buttons.Select(button => button.Id))}.");
+            now += TimeSpan.FromSeconds(30);
+            Draw();
+            Check(!scene.SubmitDuckHuntShot(new(.5, .5), now) &&
+                scene.ClayState is { Phase: DuckHuntClayPhase.Ready, Shots: 0, PairsLaunched: 0 } &&
+                board.ClayTargets.All(clay => !clay.Visible),
+                "Waiting or shooting the scene started Clay Pigeon without PLAY.");
             await Save("ready");
             CheckClearOptics("ready");
+            Check(ActivateGalleryPlay(scene) && !board.DuckHuntDrawerOpen,
+                "The regular drawer PLAY button did not begin Clay Pigeon and close its controls.");
+            Draw();
+            var roundStart = now;
+            Check(scene.ClayState is { Phase: DuckHuntClayPhase.Playing, Paused: false, PairsLaunched: 0 },
+                "PLAY failed to start a fresh Clay Pigeon round.");
             double previousScale = double.PositiveInfinity;
             byte[]? previousFrame = null;
             foreach (double age in new[] { .25, .49, .75, 1.2, 2.1, 3.3 })
@@ -126,7 +142,7 @@ public sealed partial class MainWindow
             Check(board.ClayTargets.All(clay => clay.Impact is null), "Replay retained old floating score impacts.");
             await Save("replay");
             results.Add(new { dimensions.Name, dimensions.Width, dimensions.Height, Targets = 20,
-                PairDelaySeconds = .5, AutomaticStart = true, ClearSceneCandidates = 0 });
+                PairDelaySeconds = .5, WaitsForPlay = true, ClearSceneCandidates = 0 });
 
             byte[] Draw()
             {
